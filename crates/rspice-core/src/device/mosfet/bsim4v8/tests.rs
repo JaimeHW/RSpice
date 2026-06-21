@@ -2512,22 +2512,32 @@ fn live_ngspice_oracle_dc_and_charge() {
 
 // ===================== Verilog-A cross-check =====================
 //
-// The in-tree Verilog-A BSIM4.8 (models/veriloga/bsim4.va, the
-// Xyce-adapted variant) is a sibling implementation, not the transcription
-// oracle: it documents default deviations from the C model (igc-family
-// defaults, junction trap model, TNOM=25), so agreement is percent-level
-// by design — see tests/veriloga_bsim4_oracle.rs. This cross-check reports
-// native-vs-VA deltas at the same fixture biases without forcing
-// agreement; the hard bound only guards against gross divergence.
+// An optional Verilog-A BSIM4.8 source, when supplied locally, is a sibling
+// implementation rather than the transcription source for this native port.
+// This cross-check reports native-vs-VA deltas at the same fixture biases
+// without forcing agreement; the hard bound only guards against gross
+// divergence.
 
 #[cfg(feature = "veriloga")]
 mod veriloga_cross_check {
     use super::*;
     use std::path::{Path, PathBuf};
 
+    const BSIM4_VA_ENV: &str = "RSPICE_BSIM4_VA";
+
     fn bsim4_va_path() -> Option<PathBuf> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/veriloga/bsim4.va");
-        path.exists().then_some(path)
+        if let Some(raw) = std::env::var_os(BSIM4_VA_ENV) {
+            let path = PathBuf::from(raw);
+            assert!(
+                path.is_file(),
+                "{BSIM4_VA_ENV} must point at an externally supplied BSIM4 Verilog-A source file: {}",
+                path.display()
+            );
+            return Some(path);
+        }
+
+        let fallback = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/veriloga/bsim4.va");
+        fallback.is_file().then_some(fallback)
     }
 
     /// Terminal drain current -i(vd) of the VA model at a bias point, the
@@ -2588,7 +2598,7 @@ mod veriloga_cross_check {
     /// Run with `cargo test -p rspice-core --lib bsim4v8 --features veriloga
     /// -- --ignored --nocapture` to see the delta table.
     #[test]
-    #[ignore = "requires models/veriloga/bsim4.va and the veriloga engine"]
+    #[ignore = "requires an externally supplied models/veriloga/bsim4.va and the veriloga engine"]
     fn native_vs_veriloga_bias_points() {
         let Some(model) = bsim4_va_path() else {
             eprintln!("bsim4.va not present; skipping VA cross-check");

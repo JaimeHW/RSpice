@@ -44,6 +44,8 @@
 //! anchor (t=0, ~0.0917 V) and tracks the transient (the fast-edge body
 //! amplitude is still being calibrated against ngspice's body LTE).
 
+#![allow(clippy::too_many_arguments)]
+
 pub use super::common;
 pub use params::B3SoiDdModel;
 

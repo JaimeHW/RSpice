@@ -273,8 +273,10 @@ mod tests {
 
     #[test]
     fn deck_trtol_updates_transient_tolerance_factor() {
-        let mut base = SimulationConfig::default();
-        base.transient_trtol = 5.0;
+        let base = SimulationConfig {
+            transient_trtol: 5.0,
+            ..Default::default()
+        };
         let options = NetlistSimulationOptions {
             trtol: Some(2.25),
             ..Default::default()

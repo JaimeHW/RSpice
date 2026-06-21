@@ -1,3 +1,5 @@
+#![allow(clippy::excessive_precision, clippy::needless_range_loop)]
+
 use super::*;
 
 const TXL_SETUP_EPSI: Value = 1.0e-10;

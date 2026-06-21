@@ -4,6 +4,8 @@
 //! This is critical for circuits with many transistors like differential
 //! amplifiers and current mirrors.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::Value;
 use crate::circuit::NodeId;
 use crate::device::semiconductor::BjtType;

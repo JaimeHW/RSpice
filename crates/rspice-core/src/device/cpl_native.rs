@@ -5,6 +5,8 @@
 //! runtime (cplload.c: right_consts/update_cnv/update_delayed_cnv/get_pvs_vi).
 //! The runtime is driven by [`crate::device::CoupledTransmissionLine`].
 
+#![allow(clippy::excessive_precision, clippy::needless_range_loop)]
+
 use std::{collections::VecDeque, fmt};
 
 use dd::Dd;
@@ -1072,13 +1074,13 @@ impl NativeCplViHistory {
         validate_history_vector("v_o", &sample.v_o, self.no_l)?;
         validate_history_vector("i_i", &sample.i_i, self.no_l)?;
         validate_history_vector("i_o", &sample.i_o, self.no_l)?;
-        if let Some(previous) = self.samples.back() {
-            if sample.time_ps <= previous.time_ps {
-                return Err(NativeCplError::NonMonotonicHistory {
-                    previous_ps: previous.time_ps,
-                    next_ps: sample.time_ps,
-                });
-            }
+        if let Some(previous) = self.samples.back()
+            && sample.time_ps <= previous.time_ps
+        {
+            return Err(NativeCplError::NonMonotonicHistory {
+                previous_ps: previous.time_ps,
+                next_ps: sample.time_ps,
+            });
         }
         self.samples.push_back(sample);
         Ok(())
@@ -1924,9 +1926,7 @@ impl NativeCplSetup {
         let si = Dd::from_f64(mu_sign).mul(ld).div(ve.mul_f64(2.0).mul(co));
 
         let mut t = vec![Dd::ZERO; self.dim];
-        for col in p + 1..self.dim {
-            t[col] = self.zy[p][col];
-        }
+        t[(p + 1)..self.dim].copy_from_slice(&self.zy[p][(p + 1)..self.dim]);
         for col in 0..p {
             t[col] = self.zy[col][p];
         }
@@ -2020,9 +2020,7 @@ fn rotate_f64(zy: &mut [Vec<f64>], p: usize, q: usize, mu_sign: f64, dim: usize)
     let si = mu_sign * ld / (2.0 * ve * co);
 
     let mut t = vec![0.0f64; dim];
-    for col in p + 1..dim {
-        t[col] = zy[p][col];
-    }
+    t[(p + 1)..dim].copy_from_slice(&zy[p][(p + 1)..dim]);
     for col in 0..p {
         t[col] = zy[col][p];
     }
@@ -2340,10 +2338,8 @@ fn polint(xa_zero: &[Dd], ya_zero: &[Dd], x: Dd) -> Result<Dd, NativeCplError> {
     let n = xa_zero.len();
     let mut xa = vec![Dd::ZERO; n + 1];
     let mut ya = vec![Dd::ZERO; n + 1];
-    for idx in 0..n {
-        xa[idx + 1] = xa_zero[idx];
-        ya[idx + 1] = ya_zero[idx];
-    }
+    xa[1..=n].copy_from_slice(xa_zero);
+    ya[1..=n].copy_from_slice(ya_zero);
 
     let mut ns = 1usize;
     let mut dif = x.sub(xa[1]).abs();

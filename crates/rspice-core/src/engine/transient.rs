@@ -31,7 +31,7 @@ fn newton_merit_debug_enabled() -> bool {
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
-pub(self) use companion_stamps::TwoTerminalStampSlots;
+use companion_stamps::TwoTerminalStampSlots;
 mod globalization;
 mod noise;
 mod rescue;
@@ -500,6 +500,7 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
+        validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
         // TRNOISE sources expand into seeded, deterministic PWL sample
         // trains covering [0, tstop] before circuit construction; decks
@@ -521,6 +522,7 @@ impl Engine {
         tstop: Value,
         max_step: Value,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => {
@@ -553,7 +555,7 @@ impl Engine {
         checkpoint
             .validate_for(netlist)
             .map_err(SimulationError::Circuit)?;
-        if !(tstop > checkpoint.time) {
+        if !tstop.is_finite() || tstop <= checkpoint.time {
             return Err(SimulationError::Circuit(format!(
                 "resume stop time {tstop:e} must exceed the checkpoint time {:e}",
                 checkpoint.time
@@ -683,6 +685,11 @@ impl Engine {
         } else {
             self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?
         };
+        if let Some(message) = circuit.take_xspice_evaluation_error() {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE evaluation failed: {message}"
+            )));
+        }
 
         // Resume: the standard initial-solution machinery above still ran
         // (its device-state priming is wanted), but time, solution, and the
@@ -1870,8 +1877,7 @@ impl Engine {
                 // into the normal LTE acceptance machinery below.
                 if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
                     && circuit.has_nonlinear_devices()
-                {
-                    if let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
+                    && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
                         &mut circuit,
                         &mut matrix,
                         &mut rhs,
@@ -1898,24 +1904,24 @@ impl Engine {
                             coupled_tline_refs: &coupled_tline_refs,
                         },
                         &mut vbic_snapshot_cache,
-                    ) {
-                        static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                            std::sync::atomic::AtomicUsize::new(0);
-                        let log_count = GMIN_RESCUE_LOG_COUNT
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if log_count < 20 {
-                            log::warn!(
-                                "Transient gmin-continuation rescue converged at t={:.6e}, dt={:.3e} (retry {})",
-                                t,
-                                dt,
-                                retry_count,
-                            );
-                        }
-                        new_solution = rescued;
-                        nonlinear_state_matches_new_solution = true;
-                        had_solver_candidate = true;
-                        converged = true;
+                    )
+                {
+                    static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
+                        std::sync::atomic::AtomicUsize::new(0);
+                    let log_count =
+                        GMIN_RESCUE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if log_count < 20 {
+                        log::warn!(
+                            "Transient gmin-continuation rescue converged at t={:.6e}, dt={:.3e} (retry {})",
+                            t,
+                            dt,
+                            retry_count,
+                        );
                     }
+                    new_solution = rescued;
+                    nonlinear_state_matches_new_solution = true;
+                    had_solver_candidate = true;
+                    converged = true;
                 }
             }
 
@@ -2748,38 +2754,17 @@ impl Engine {
                     mosfet_truncation_limit,
                     vdmos_truncation_limit,
                 );
-            let (lte, accept) = if locked_grid.is_some() {
-                // The grid is given: a converged Newton solution at the
-                // imposed dt is the acceptance criterion, full stop.
-                (0.0, true)
-            } else if first_accepted_transient_step {
-                (0.0, true)
-            } else if linearized_startup_recovery_points {
-                (0.0, true)
-            } else if defer_voltage_lte_to_bjt_truncation {
-                // Classic SPICE drives BJT timesteps from device charge
-                // truncation (BJTtrunc/VBICtrunc -> CKTterr). For BJT-only
-                // reactive decks, the generic node-voltage predictor is a
-                // supplemental guard, not the authoritative LTE controller.
-                (0.0, true)
-            } else if defer_voltage_lte_to_jfet_truncation {
-                // ngspice drives JFET/MESFET/HFET dynamic gate charge control
-                // through device truncation (JFETtrunc/HFETtrunc -> CKTterr).
-                // For JFET-only reactive decks, keep that charge controller
-                // authoritative instead of letting generic node-voltage LTE
-                // collapse the timestep around sharp nonlinear gate edges.
-                (0.0, true)
-            } else if defer_voltage_lte_to_mosfet_truncation {
-                // MOS transient gate-charge control is the device-local
-                // MOStrunc/MOS6trunc CKTterr path in ngspice. In MOS-only
-                // reactive decks it is the authoritative timestep controller.
-                (0.0, true)
-            } else if defer_voltage_lte_to_ngspice_device_truncation {
-                // Classic ngspice uses device-local CKTterr truncation drivers
-                // (CAPtrunc, MOStrunc, BJTtrunc, etc.) rather than an additional
-                // global node-voltage predictor. Transmission-line decks rely on
-                // their model max-step/breakpoint controls plus those connected
-                // dynamic devices.
+            let device_or_startup_controls_lte = first_accepted_transient_step
+                || linearized_startup_recovery_points
+                || defer_voltage_lte_to_bjt_truncation
+                || defer_voltage_lte_to_jfet_truncation
+                || defer_voltage_lte_to_mosfet_truncation
+                || defer_voltage_lte_to_ngspice_device_truncation;
+            let (lte, accept) = if locked_grid.is_some() || device_or_startup_controls_lte {
+                // For locked grids, first/startup recovery points, and decks
+                // covered by ngspice device-local truncation (CAPtrunc,
+                // MOStrunc, BJTtrunc, VBICtrunc, etc.), a converged Newton
+                // solution at the imposed dt is the acceptance criterion.
                 (0.0, true)
             } else {
                 Self::estimate_transient_lte(
@@ -3484,6 +3469,11 @@ impl Engine {
             "Transient complete: {} time points computed",
             result.time.len()
         );
+        if let Some(message) = circuit.take_xspice_evaluation_error() {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE evaluation failed: {message}"
+            )));
+        }
         let transient_wall = transient_wall_start.elapsed();
         log::info!(
             "Transient Newton phases: {} iterations, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
@@ -3592,7 +3582,8 @@ impl Engine {
             result.time[0],
             &initial_values,
             compression,
-        );
+        )
+        .map_err(SimulationError::Circuit)?;
 
         for point_idx in 1..result.time.len() {
             let values: Vec<Value> = result
@@ -3600,7 +3591,9 @@ impl Engine {
                 .iter()
                 .map(|wave| wave.get(point_idx).copied().unwrap_or(0.0))
                 .collect();
-            recorder.record(result.time[point_idx], &values);
+            recorder
+                .record(result.time[point_idx], &values)
+                .map_err(SimulationError::Circuit)?;
         }
 
         let final_values: Vec<Value> = result
@@ -3608,7 +3601,9 @@ impl Engine {
             .iter()
             .map(|wave| wave.last().copied().unwrap_or(0.0))
             .collect();
-        recorder.finalize(*result.time.last().unwrap_or(&tstop), &final_values);
+        recorder
+            .finalize(*result.time.last().unwrap_or(&tstop), &final_values)
+            .map_err(SimulationError::Circuit)?;
 
         let mut compressed = recorder.to_transient_result();
         compressed.node_names = result.node_names.clone();
@@ -3616,9 +3611,37 @@ impl Engine {
     }
 }
 
+fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), SimulationError> {
+    if !tstop.is_finite() || tstop <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Transient stop time must be a positive finite number of seconds, got {tstop}"
+        )));
+    }
+    if !max_step.is_finite() || max_step <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Transient max_step must be a positive finite number of seconds, got {max_step}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn missing_pwl_path(name: &str) -> String {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!(
+                "rspice-missing-{name}-{}-{unique}.csv",
+                std::process::id()
+            ))
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
 
     fn scalar_line(name: &str) -> crate::device::TransmissionLine {
         crate::device::TransmissionLine::new(name.to_string(), 1, 0, 2, 0, 50.0, 1.0e-9)
@@ -3671,6 +3694,59 @@ mod tests {
         assert_eq!(Engine::transient_newton_iteration_budget(250, true), 128);
     }
 
+    #[test]
+    fn transient_rejects_invalid_time_window() {
+        let deck = "RC step\n\
+                    V1 1 0 DC 1\n\
+                    R1 1 2 1k\n\
+                    C1 2 0 1u\n\
+                    .end\n";
+        let netlist = crate::Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default();
+
+        for stop in [0.0, -1.0e-6, f64::NAN] {
+            let err = engine
+                .run_tran(&netlist, stop, 1.0e-6)
+                .expect_err("invalid transient stop time must raise");
+            assert!(
+                err.to_string().contains("positive finite"),
+                "unexpected error for stop={stop:?}: {err}"
+            );
+        }
+
+        for max_step in [0.0, -1.0e-6, f64::INFINITY] {
+            let err = engine
+                .run_tran(&netlist, 1.0e-6, max_step)
+                .expect_err("invalid transient max_step must raise");
+            assert!(
+                err.to_string().contains("positive finite"),
+                "unexpected error for max_step={max_step:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn transient_rejects_missing_pwl_file_source() {
+        let path = missing_pwl_path("tran");
+        let deck = format!(
+            "missing PWL file\n\
+             V1 in 0 PWL FILE=\"{path}\"\n\
+             R1 in 0 1k\n\
+             .tran 1n 10n\n\
+             .end\n"
+        );
+        let netlist = crate::Netlist::parse(&deck).expect("deck parses");
+        let err = Engine::default()
+            .run_tran(&netlist, 10.0e-9, 1.0e-9)
+            .expect_err("missing PWL file must fail before transient solve");
+
+        assert!(
+            err.to_string().contains("failed to load PWL file"),
+            "unexpected error: {err}"
+        );
+        assert!(err.to_string().contains(&path));
+    }
+
     /// An explicitly configured `max_timestep` must cap the accepted step
     /// even when the caller passes a coarser per-run maximum (the CLI
     /// --max-step path resolves into the config, not the argument).
@@ -3683,8 +3759,10 @@ mod tests {
                     .end\n";
         let netlist = crate::Netlist::parse(deck).expect("deck parses");
 
-        let mut config = crate::SimulationConfig::default();
-        config.max_timestep = 2.0e-6;
+        let config = crate::SimulationConfig {
+            max_timestep: 2.0e-6,
+            ..Default::default()
+        };
         let engine = Engine::new(config);
         let result = engine
             .run_tran(&netlist, 100.0e-6, 20.0e-6)

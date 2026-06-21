@@ -24,6 +24,8 @@
 //! whose corner sits at f_c = pi f0^2 c (the paper's Section 10 example) and
 //! whose integral preserves the carrier power exactly.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::{Engine, SimulationError};
 use crate::analysis::transient::CompanionCoefficients;
 use crate::analysis::{IntegrationMethod, PssConfig};
@@ -184,7 +186,7 @@ impl Engine {
             }
             let next = self.pss_solve_linear_system(&shifted, &v1_0)?;
             let norm: Value = next.iter().map(|v| v * v).sum::<Value>().sqrt();
-            if !(norm > 0.0) {
+            if !norm.is_finite() || norm <= 0.0 {
                 break;
             }
             v1_0 = next.iter().map(|v| v / norm).collect();
@@ -267,7 +269,7 @@ impl Engine {
             let mut integrand = 0.0;
             for source in &sources {
                 let intensity = source.intensity(&circuit, &solution, temperature);
-                if !(intensity > 0.0) {
+                if !intensity.is_finite() || intensity <= 0.0 {
                     continue;
                 }
                 let mut inj = vec![0.0; size];

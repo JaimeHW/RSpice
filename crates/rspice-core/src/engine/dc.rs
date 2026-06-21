@@ -4,6 +4,8 @@
 //! - Operating point (DC OP) calculation
 //! - DC sweep for I-V curve generation
 
+#![allow(clippy::too_many_arguments)]
+
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::solver::{SimulationResult, StaticMatrix};
@@ -125,6 +127,11 @@ impl Engine {
         let mut matrix = matrix;
 
         let solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        if let Some(message) = circuit.take_xspice_evaluation_error() {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE evaluation failed: {message}"
+            )));
+        }
 
         // Build result
         let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
@@ -411,6 +418,11 @@ impl Engine {
                     }
                     engine.solve_linear(&circuit, &mut matrix)?
                 };
+                if let Some(message) = circuit.take_xspice_evaluation_error() {
+                    return Err(SimulationError::Circuit(format!(
+                        "XSPICE evaluation failed: {message}"
+                    )));
+                }
 
                 // Build result
                 let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
@@ -438,5 +450,74 @@ impl Engine {
         circuit.voltage_sources.source_specs[vsrc_idx] = original_source_spec;
 
         sweep_result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Netlist;
+
+    fn missing_pwl_path(name: &str) -> String {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!(
+                "rspice-missing-{name}-{}-{unique}.csv",
+                std::process::id()
+            ))
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+
+    #[test]
+    fn dc_op_rejects_missing_pwl_file_source() {
+        let path = missing_pwl_path("dc");
+        let deck = format!(
+            "missing PWL file\n\
+             V1 in 0 PWL FILE=\"{path}\"\n\
+             R1 in 0 1k\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let err = Engine::default()
+            .run_dc_op(&netlist)
+            .expect_err("missing PWL file must fail before DC solve");
+
+        assert!(
+            err.to_string().contains("failed to load PWL file"),
+            "unexpected error: {err}"
+        );
+        assert!(err.to_string().contains(&path));
+    }
+
+    #[test]
+    fn xspice_integrator_initial_condition_is_initialized_before_dc_op() {
+        let deck = r#"
+* xspice integrator initial condition
+V1 in 0 0
+A1 in out integrator out_ic=5
+Rload out 0 1k
+.op
+.end
+"#;
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("dc operating point should solve");
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap_or_else(|| panic!("out node present in {:?}", result.node_names));
+
+        assert!(
+            (result.node_voltages[out_idx] - 5.0).abs() < 1e-9,
+            "expected integrator out_ic=5 to drive V(out), got {}",
+            result.node_voltages[out_idx]
+        );
     }
 }

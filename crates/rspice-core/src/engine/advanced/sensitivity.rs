@@ -88,6 +88,11 @@ impl Engine {
 
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
+        Self::validate_sensitivity_node("output", output_pos, circuit.num_nodes())?;
+        if let Some(output_neg) = output_neg {
+            Self::validate_sensitivity_node("reference", output_neg, circuit.num_nodes())?;
+        }
+
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -117,6 +122,19 @@ impl Engine {
             .ok_or(SimulationError::Solver(
                 crate::solver::SolverError::SingularMatrix,
             ))
+    }
+
+    fn validate_sensitivity_node(
+        role: &str,
+        node: usize,
+        num_nodes: usize,
+    ) -> Result<(), SimulationError> {
+        if node > num_nodes {
+            return Err(SimulationError::Circuit(format!(
+                "Sensitivity {role} node {node} is outside circuit node range 0..={num_nodes}"
+            )));
+        }
+        Ok(())
     }
 
     pub(in crate::engine::advanced) fn create_perturbed_netlist(
@@ -344,6 +362,46 @@ impl Engine {
         out
     }
 
+    fn sensitivity_step(
+        param_value: Value,
+        delta: Option<Value>,
+    ) -> Result<Value, SimulationError> {
+        if !param_value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Sensitivity param_value must be finite, got {param_value}"
+            )));
+        }
+        if let Some(delta) = delta {
+            if !delta.is_finite() || delta <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Sensitivity delta must be a positive finite number, got {delta}"
+                )));
+            }
+            return Ok(delta);
+        }
+        Ok((param_value.abs() * 0.01).max(1e-12))
+    }
+
+    fn sensitivity_ac_voltage_magnitude(
+        result: &crate::analysis::AcResult,
+        output_node: usize,
+    ) -> Result<Value, SimulationError> {
+        if output_node == 0 {
+            return Ok(0.0);
+        }
+
+        result
+            .voltages
+            .get(output_node - 1)
+            .map(|voltage| voltage.norm())
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Sensitivity output node {output_node} is outside circuit node range 0..={}",
+                    result.voltages.len()
+                ))
+            })
+    }
+
     /// Run sensitivity analysis
     ///
     /// Computes dVout/dparam using finite differences.
@@ -356,7 +414,7 @@ impl Engine {
         param_value: Value,
         delta: Option<Value>,
     ) -> Result<Value, SimulationError> {
-        let h = delta.unwrap_or(param_value.abs() * 0.01).max(1e-12);
+        let h = Self::sensitivity_step(param_value, delta)?;
 
         let (netlist_plus, rebuilt_plus) =
             Self::create_perturbed_netlist(netlist, param_name, param_value + h)?;
@@ -373,8 +431,18 @@ impl Engine {
         let result_plus = self.run_dc_op(&netlist_plus)?;
         let result_minus = self.run_dc_op(&netlist_minus)?;
 
-        let v_plus = result_plus.voltage(output_node);
-        let v_minus = result_minus.voltage(output_node);
+        let v_plus = result_plus.try_voltage(output_node).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "Sensitivity output node {output_node} is outside circuit node range 0..={}",
+                result_plus.node_voltages.len().saturating_sub(1)
+            ))
+        })?;
+        let v_minus = result_minus.try_voltage(output_node).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "Sensitivity output node {output_node} is outside circuit node range 0..={}",
+                result_minus.node_voltages.len().saturating_sub(1)
+            ))
+        })?;
 
         Ok((v_plus - v_minus) / (2.0 * h))
     }
@@ -392,7 +460,7 @@ impl Engine {
         frequencies: &[Value],
         delta: Option<Value>,
     ) -> Result<Vec<Value>, SimulationError> {
-        let h = delta.unwrap_or(param_value.abs() * 0.01).max(1e-12);
+        let h = Self::sensitivity_step(param_value, delta)?;
 
         let (netlist_plus, rebuilt_plus) =
             Self::create_perturbed_netlist(netlist, param_name, param_value + h)?;
@@ -414,13 +482,14 @@ impl Engine {
             ));
         }
 
-        Ok(plus
-            .iter()
+        plus.iter()
             .zip(minus.iter())
             .map(|(p, m)| {
-                (p.voltage_magnitude(output_node) - m.voltage_magnitude(output_node)) / (2.0 * h)
+                let p_mag = Self::sensitivity_ac_voltage_magnitude(p, output_node)?;
+                let m_mag = Self::sensitivity_ac_voltage_magnitude(m, output_node)?;
+                Ok((p_mag - m_mag) / (2.0 * h))
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -428,6 +497,7 @@ impl Engine {
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+    use crate::netlist::{StepCommand, StepSweep, StepTarget};
 
     const PARAMETRIC_DIVIDER: &str = "\
 Parametric divider
@@ -435,6 +505,15 @@ Parametric divider
 V1 1 0 10
 R1 1 2 {rval}
 R2 2 0 1k
+.end
+";
+
+    const MODEL_STEP_DECK: &str = "\
+Model step deck
+V1 1 0 10
+R1 1 2 RMOD L=10u W=1u
+R2 2 0 1k
+.model RMOD R RSH=100
 .end
 ";
 
@@ -518,6 +597,85 @@ R2 2 0 1k
     }
 
     #[test]
+    fn sensitivity_rejects_invalid_output_node_without_panicking() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_sensitivity(&netlist, 999, "rval", 1000.0, None)
+            .expect_err("out-of-range sensitivity output node must raise");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Sensitivity output node") && msg.contains("999"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn linearized_sensitivity_rejects_invalid_output_node_without_panicking() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_sensitivity_linearized(&netlist, 999, None)
+            .expect_err("out-of-range linearized sensitivity output node must raise");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Sensitivity output node") && msg.contains("999"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn ac_sensitivity_rejects_invalid_output_node_without_silent_zero() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_sensitivity_ac(&netlist, 999, "rval", 1000.0, &[1e3], None)
+            .expect_err("out-of-range AC sensitivity output node must raise");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Sensitivity output node") && msg.contains("999"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn sensitivity_rejects_invalid_numeric_inputs() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let engine = Engine::default();
+
+        let err = engine
+            .run_sensitivity(&netlist, 2, "rval", f64::NAN, None)
+            .expect_err("non-finite sensitivity parameter values must be rejected");
+        assert!(
+            err.to_string().contains("param_value must be finite"),
+            "unexpected error: {err}"
+        );
+
+        let err = engine
+            .run_sensitivity(&netlist, 2, "rval", 1000.0, Some(0.0))
+            .expect_err("zero sensitivity delta must be rejected");
+        assert!(
+            err.to_string()
+                .contains("delta must be a positive finite number"),
+            "unexpected error: {err}"
+        );
+
+        let err = engine
+            .run_sensitivity_ac(&netlist, 2, "rval", f64::INFINITY, &[1e3], None)
+            .expect_err("non-finite AC sensitivity parameter values must be rejected");
+        assert!(
+            err.to_string().contains("param_value must be finite"),
+            "unexpected error: {err}"
+        );
+
+        let err = engine
+            .run_sensitivity_ac(&netlist, 2, "rval", 1000.0, &[1e3], Some(-1.0))
+            .expect_err("negative AC sensitivity delta must be rejected");
+        assert!(
+            err.to_string()
+                .contains("delta must be a positive finite number"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn ac_sensitivity_rejects_element_name_lookalike() {
         let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
         let err = Engine::default()
@@ -539,6 +697,60 @@ R2 2 0 1k
         assert!(
             err.to_string()
                 .contains("is not bound to any netlist expression"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn step_rejects_empty_value_list() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_step(&netlist, "rval", &[])
+            .expect_err("empty step sweep must not report success");
+        assert!(
+            err.to_string().contains("no sweep values"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn step_rejects_non_finite_value_list() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_step(&netlist, "rval", &[1000.0, f64::NAN])
+            .expect_err("non-finite step sweep values must not enter the solver");
+        assert!(
+            err.to_string().contains("finite"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn model_step_rejects_empty_value_list() {
+        let netlist = Netlist::parse(MODEL_STEP_DECK).expect("deck parses");
+        let command = StepCommand {
+            target: StepTarget::Model,
+            name: "RMOD".to_string(),
+            param_name: Some("RSH".to_string()),
+            sweep: StepSweep::List(Vec::new()),
+        };
+        let err = Engine::default()
+            .run_step_command(&netlist, &command, &[])
+            .expect_err("empty model step sweep must not report success");
+        assert!(
+            err.to_string().contains("no sweep values"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn step_rejects_any_failed_requested_point() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_step(&netlist, "rval", &[1000.0, 0.0])
+            .expect_err("failed step point must fail the sweep");
+        assert!(
+            err.to_string().contains(".STEP PARAM rval = 0"),
             "unexpected error: {err}"
         );
     }

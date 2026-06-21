@@ -484,9 +484,11 @@ impl Bjt {
         Value,
     ) {
         // The branch builder reads only the bias voltages from the reduction.
-        let mut bias = BjtDynamicReduction::default();
-        bias.external_voltages = external;
-        bias.internal_voltages = internal;
+        let bias = BjtDynamicReduction {
+            external_voltages: external,
+            internal_voltages: internal,
+            ..Default::default()
+        };
         let vrth = internal[IDX_VRTH];
 
         if !self.self_heating_enabled() {

@@ -36,4 +36,5 @@ pub const DELTA_4: Value = 0.02;
 /// truncated Berkeley ones above.
 pub const CONST_VT0: Value = 1.38064852e-23 * 300.15 / 1.6021766208e-19;
 /// `CONSTroot2` (ngspice `CONSTsqrt2`).
+#[allow(clippy::approx_constant)]
 pub const CONST_ROOT2: Value = 1.4142135623730950488016887242097;

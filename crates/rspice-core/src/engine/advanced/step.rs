@@ -11,9 +11,7 @@ impl Engine {
         param_name: &str,
         values: &[Value],
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
-        if values.is_empty() {
-            return Ok(Vec::new());
-        }
+        validate_step_values(values)?;
 
         let mut results = Vec::with_capacity(values.len());
         let mut any_binding = false;
@@ -25,9 +23,7 @@ impl Engine {
 
             match self.run_dc_op(&modified_netlist) {
                 Ok(result) => results.push((value, result)),
-                Err(e) => {
-                    log::warn!("Step {} = {} failed: {}", param_name, value, e);
-                }
+                Err(e) => return Err(step_point_error("PARAM", param_name, value, e)),
             }
         }
 
@@ -76,9 +72,7 @@ impl Engine {
         param_name: Option<&str>,
         values: &[Value],
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
-        if values.is_empty() {
-            return Ok(Vec::new());
-        }
+        validate_step_values(values)?;
 
         let device_idx = netlist
             .elements
@@ -102,13 +96,12 @@ impl Engine {
             match self.run_dc_op(&stepped) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => {
-                    log::warn!(
-                        "Step DEVICE {}{} = {} failed: {}",
+                    let target = format!(
+                        "{}{}",
                         device_name,
-                        param_name.map(|p| format!(".{}", p)).unwrap_or_default(),
-                        value,
-                        e
+                        param_name.map(|p| format!(".{}", p)).unwrap_or_default()
                     );
+                    return Err(step_point_error("DEVICE", &target, value, e));
                 }
             }
         }
@@ -123,9 +116,7 @@ impl Engine {
         param_name: Option<&str>,
         values: &[Value],
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
-        if values.is_empty() {
-            return Ok(Vec::new());
-        }
+        validate_step_values(values)?;
 
         let param_name = param_name.ok_or_else(|| {
             SimulationError::Circuit(format!(
@@ -166,13 +157,8 @@ impl Engine {
             match self.run_dc_op(&stepped) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => {
-                    log::warn!(
-                        "Step MODEL {}.{} = {} failed: {}",
-                        model_name,
-                        param_upper,
-                        value,
-                        e
-                    );
+                    let target = format!("{}.{}", model_name, param_upper);
+                    return Err(step_point_error("MODEL", &target, value, e));
                 }
             }
         }
@@ -336,4 +322,35 @@ impl Engine {
             )),
         }
     }
+}
+
+fn step_point_error(
+    target_kind: &str,
+    target_name: &str,
+    value: Value,
+    error: SimulationError,
+) -> SimulationError {
+    SimulationError::Circuit(format!(
+        ".STEP {target_kind} {target_name} = {value} failed: {error}"
+    ))
+}
+
+fn validate_step_values(values: &[Value]) -> Result<(), SimulationError> {
+    if values.is_empty() {
+        return Err(SimulationError::Circuit(
+            ".STEP produced no sweep values".to_string(),
+        ));
+    }
+
+    if let Some((index, value)) = values
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(SimulationError::Circuit(format!(
+            ".STEP value at index {index} must be finite, got {value}"
+        )));
+    }
+
+    Ok(())
 }

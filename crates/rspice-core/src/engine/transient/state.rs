@@ -1,5 +1,7 @@
 //! Reactive companion state and transient recovery helpers.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::*;
 
 impl Engine {
@@ -2691,10 +2693,10 @@ impl Engine {
             // transient stamp instead of the modal Norton path below, but we
             // still populate the modal reference state to keep the per-line
             // bookkeeping uniform and harmless for native lines.
-            if tl.uses_native_runtime() {
-                if let Err(err) = tl.native_seed_dc(&near_physical, &far_physical) {
-                    log::warn!("{err}");
-                }
+            if tl.uses_native_runtime()
+                && let Err(err) = tl.native_seed_dc(&near_physical, &far_physical)
+            {
+                log::warn!("{err}");
             }
 
             let near_modal = tl.modalize_port_voltage(&near_physical);
@@ -2930,7 +2932,7 @@ impl Engine {
         };
 
         for &branch_ordinal in &circuit.voltage_sources.branch_indices {
-            restore_branch(branch_ordinal as usize);
+            restore_branch(branch_ordinal);
         }
         // Keep dependent-source algebraic currents from the latest solver
         // candidate. Their output-branch currents directly close KCL at the

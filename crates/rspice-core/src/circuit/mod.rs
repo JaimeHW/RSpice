@@ -353,6 +353,8 @@ pub struct CircuitData {
     pub(crate) xspice_event_queue: EventQueue,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
+    /// First XSPICE evaluation failure seen during the current analysis.
+    pub(crate) xspice_evaluation_error: Option<String>,
 
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]

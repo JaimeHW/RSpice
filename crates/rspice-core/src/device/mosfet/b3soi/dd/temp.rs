@@ -520,11 +520,7 @@ impl B3SoiDdSized {
         if p.k2 < 0.0 {
             let t0 = 0.5 * p.k1 / p.k2;
             p.vbsc = 0.9 * (p.phi - t0 * t0);
-            if p.vbsc > -3.0 {
-                p.vbsc = -3.0;
-            } else if p.vbsc < -30.0 {
-                p.vbsc = -30.0;
-            }
+            p.vbsc = p.vbsc.clamp(-30.0, -3.0);
         } else {
             p.vbsc = -30.0;
         }

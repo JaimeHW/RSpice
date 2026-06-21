@@ -1,5 +1,7 @@
 //! VBIC dynamic snapshot solve paths and homotopy fallbacks.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::*;
 use std::cell::Cell;
 
@@ -771,8 +773,8 @@ impl Engine {
                 seeded_snapshot.reduction.internal_voltages,
             )
             .unwrap_or((
-                seeded_snapshot.clone(),
-                transient_linearization.clone(),
+                seeded_snapshot,
+                transient_linearization,
                 base_static_g,
                 Self::vbic_internal_equation_residual(
                     &transient_linearization,
@@ -988,7 +990,7 @@ impl Engine {
                 {
                     let candidate_objective =
                         Self::vbic_dynamic_state_evaluation_residual_objective(&candidate_state);
-                    if next_state.as_ref().map_or(true, |best_state| {
+                    if next_state.as_ref().is_none_or(|best_state| {
                         candidate_objective + 1e-15
                             < Self::vbic_dynamic_state_evaluation_residual_objective(best_state)
                     }) {
@@ -1091,7 +1093,7 @@ impl Engine {
                             Self::vbic_dynamic_state_evaluation_residual_objective(
                                 &candidate_state,
                             );
-                        if next_state.as_ref().map_or(true, |best_state| {
+                        if next_state.as_ref().is_none_or(|best_state| {
                             candidate_objective + 1e-15
                                 < Self::vbic_dynamic_state_evaluation_residual_objective(best_state)
                         }) {

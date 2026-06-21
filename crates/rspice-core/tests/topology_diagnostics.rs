@@ -17,23 +17,20 @@ r1 a 0 1k
 ";
     let netlist = Netlist::parse(deck).expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    match engine.run_dc_op(&netlist) {
-        Err(err) => {
-            let message = err.to_string().to_lowercase();
-            assert!(
-                message.contains("singular"),
-                "error should describe the singularity: {message}"
-            );
-            assert!(
-                message.contains("voltage source") || message.contains("constrain"),
-                "error should point at the cause or the unconstrained unknown: {message}"
-            );
-        }
-        // Some continuation ladders regularize conflicting sources into a
-        // solvable compromise; that is a solver-policy outcome, not a
-        // diagnostics regression, so only the error path is asserted.
-        Ok(_) => {}
+    if let Err(err) = engine.run_dc_op(&netlist) {
+        let message = err.to_string().to_lowercase();
+        assert!(
+            message.contains("singular"),
+            "error should describe the singularity: {message}"
+        );
+        assert!(
+            message.contains("voltage source") || message.contains("constrain"),
+            "error should point at the cause or the unconstrained unknown: {message}"
+        );
     }
+    // Some continuation ladders regularize conflicting sources into a
+    // solvable compromise; that is a solver-policy outcome, not a diagnostics
+    // regression, so only the error path is asserted.
 }
 
 #[test]

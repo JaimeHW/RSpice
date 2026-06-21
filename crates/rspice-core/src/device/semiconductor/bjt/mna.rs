@@ -17,6 +17,8 @@
 //! rows are negated when stamped while the thermal and excess-phase rows
 //! already match the MNA orientation.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::*;
 
 /// Operating-point noise description of a promoted VBIC instance,
@@ -388,11 +390,13 @@ impl Bjt {
         self.mna_charge_cache_valid.set(true);
 
         if self.td > 0.0 {
-            let mut reduction = BjtDynamicReduction::default();
-            reduction.internal_voltages = internal;
-            reduction.external_voltages = external;
-            reduction.vbic_transport = inputs.transport;
-            reduction.vbic_d_itzf_d_vrth = d_itzf_d_vrth;
+            let reduction = BjtDynamicReduction {
+                internal_voltages: internal,
+                external_voltages: external,
+                vbic_transport: inputs.transport,
+                vbic_d_itzf_d_vrth: d_itzf_d_vrth,
+                ..Default::default()
+            };
             self.mna_delay_branches = self.vbic_delay_static_branches(&reduction);
             self.mna_delay_thermal = self.vbic_delay_static_thermal_branch(&reduction);
         } else {

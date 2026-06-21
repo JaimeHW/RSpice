@@ -44,6 +44,8 @@
 //! amplitude is still being calibrated against ngspice's body LTE). `ring51`
 //! (51-stage SOI ring oscillator) does not yet reach a DC operating point.
 
+#![allow(clippy::too_many_arguments)]
+
 pub use super::common;
 pub use params::B3SoiPdModel;
 

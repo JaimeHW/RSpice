@@ -1230,7 +1230,7 @@ impl Engine {
             if let Some(result) = bounded_best_effort.as_ref()
                 && let Some(snapshot) = bounded_snapshot_if_acceptable(result)
             {
-                return Some(snapshot.clone());
+                return Some(snapshot);
             }
             if let Some(snapshot) = Self::continue_vbic_snapshot_to_external_bias_from_snapshot(
                 bjt,
@@ -1251,7 +1251,7 @@ impl Engine {
             if let Some(result) = bounded_best_effort.as_ref()
                 && let Some(snapshot) = bounded_snapshot_if_acceptable(result)
             {
-                return Some(snapshot.clone());
+                return Some(snapshot);
             }
             let previous_external = Self::vbic_external_from_linear_history(
                 bjt,
@@ -1406,7 +1406,7 @@ impl Engine {
             .iter()
             .take(BJT_THERMAL_STATE_INDEX)
             .all(|value| value.is_finite())
-            .then(|| seed_internal)
+            .then_some(seed_internal)
     }
 
     #[inline]

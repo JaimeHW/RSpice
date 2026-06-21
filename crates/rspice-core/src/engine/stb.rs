@@ -59,6 +59,10 @@ impl Engine {
         netlist: &Netlist,
         config: StbConfig,
     ) -> Result<StbAnalysisResult, SimulationError> {
+        config
+            .validate()
+            .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
+
         let probe_name = config
             .probe_node
             .clone()

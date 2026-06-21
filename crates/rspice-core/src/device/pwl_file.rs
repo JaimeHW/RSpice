@@ -15,7 +15,7 @@
 
 use crate::Value;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 //=============================================================================
@@ -248,25 +248,35 @@ pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
             .filter(|s| !s.is_empty())
             .collect();
 
-        if parts.len() >= 2 {
-            match (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
-                (Ok(time), Ok(value)) => {
-                    if !time.is_finite() || !value.is_finite() {
-                        return Err(PwlFileError::NonFiniteData);
-                    }
-                    points.push((time, value));
+        if parts.len() < 2 {
+            if points.is_empty() {
+                continue;
+            }
+            return Err(PwlFileError::ParseError(format!(
+                "Invalid data at line {}: expected 2 columns, got {}: '{}'",
+                line_num + 1,
+                parts.len(),
+                trimmed
+            )));
+        }
+
+        match (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
+            (Ok(time), Ok(value)) => {
+                if !time.is_finite() || !value.is_finite() {
+                    return Err(PwlFileError::NonFiniteData);
                 }
-                _ => {
-                    // Skip non-numeric lines (headers)
-                    if points.is_empty() {
-                        continue;
-                    }
-                    return Err(PwlFileError::ParseError(format!(
-                        "Invalid data at line {}: '{}'",
-                        line_num + 1,
-                        trimmed
-                    )));
+                points.push((time, value));
+            }
+            _ => {
+                // Skip non-numeric lines (headers)
+                if points.is_empty() {
+                    continue;
                 }
+                return Err(PwlFileError::ParseError(format!(
+                    "Invalid data at line {}: '{}'",
+                    line_num + 1,
+                    trimmed
+                )));
             }
         }
     }
@@ -292,76 +302,92 @@ pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
 /// - Values are normalized to -1.0 to +1.0 range
 pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileError> {
     let mut file = File::open(path)?;
-    let mut header = [0u8; 44];
+    let mut riff_header = [0u8; 12];
 
-    file.read_exact(&mut header)
+    file.read_exact(&mut riff_header)
         .map_err(|_| PwlFileError::WavError("File too small for WAV header".to_string()))?;
 
     // Validate RIFF header
-    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+    if &riff_header[0..4] != b"RIFF" || &riff_header[8..12] != b"WAVE" {
         return Err(PwlFileError::WavError("Not a valid WAV file".to_string()));
     }
 
-    // Parse format chunk
-    if &header[12..16] != b"fmt " {
-        return Err(PwlFileError::WavError("Missing fmt chunk".to_string()));
-    }
-
-    let audio_format = u16::from_le_bytes([header[20], header[21]]);
-    if audio_format != 1 {
-        return Err(PwlFileError::WavError(
-            "Only PCM format supported".to_string(),
-        ));
-    }
-
-    let num_channels = u16::from_le_bytes([header[22], header[23]]) as usize;
-    let sample_rate = u32::from_le_bytes([header[24], header[25], header[26], header[27]]) as f64;
-    let bits_per_sample = u16::from_le_bytes([header[34], header[35]]) as usize;
-
-    // Find data chunk (may not be at offset 36)
-    let data_size;
-    let mut search_buf = [0u8; 8];
-
-    // Read remaining header to find data chunk
-    file.read_exact(&mut search_buf[0..8])
-        .map_err(|_| PwlFileError::WavError("Cannot find data chunk".to_string()))?;
-
-    if &search_buf[0..4] == b"data" {
-        data_size =
-            u32::from_le_bytes([search_buf[4], search_buf[5], search_buf[6], search_buf[7]]);
-    } else {
-        // Skip extra format bytes and find data chunk
-        let extra_size =
-            u32::from_le_bytes([search_buf[4], search_buf[5], search_buf[6], search_buf[7]]);
-        let mut skip = vec![0u8; extra_size as usize];
-        file.read_exact(&mut skip)?;
-
-        file.read_exact(&mut search_buf[0..8])?;
-        if &search_buf[0..4] == b"data" {
-            data_size =
-                u32::from_le_bytes([search_buf[4], search_buf[5], search_buf[6], search_buf[7]]);
-        } else {
-            return Err(PwlFileError::WavError("Cannot find data chunk".to_string()));
+    let mut format = None;
+    let audio_data = loop {
+        let mut chunk_header = [0u8; 8];
+        match file.read_exact(&mut chunk_header) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                return Err(PwlFileError::WavError("Cannot find data chunk".to_string()));
+            }
+            Err(e) => return Err(PwlFileError::IoError(e)),
         }
+
+        let chunk_id = &chunk_header[0..4];
+        let chunk_size = u32::from_le_bytes([
+            chunk_header[4],
+            chunk_header[5],
+            chunk_header[6],
+            chunk_header[7],
+        ]) as u64;
+
+        match chunk_id {
+            b"fmt " => {
+                if chunk_size < 16 {
+                    return Err(PwlFileError::WavError("fmt chunk is too small".to_string()));
+                }
+                let mut fmt = vec![0u8; chunk_size as usize];
+                file.read_exact(&mut fmt)?;
+                if !chunk_size.is_multiple_of(2) {
+                    file.seek(SeekFrom::Current(1))?;
+                }
+                format = Some(WavPcmFormat::parse(&fmt)?);
+            }
+            b"data" => {
+                let format = format.ok_or_else(|| {
+                    PwlFileError::WavError("data chunk appeared before fmt chunk".to_string())
+                })?;
+                break read_wav_data_chunk(&mut file, chunk_size, format)?;
+            }
+            _ => {
+                let skip = chunk_size + (chunk_size % 2);
+                file.seek(SeekFrom::Current(skip as i64))?;
+            }
+        }
+    };
+
+    let WavAudioData {
+        data: audio_data,
+        data_size,
+        format,
+    } = audio_data;
+
+    let frame_bytes = format.frame_bytes;
+    if data_size == 0 {
+        return Err(PwlFileError::EmptyData);
+    }
+    if data_size % frame_bytes != 0 {
+        return Err(PwlFileError::WavError(format!(
+            "data chunk size {data_size} is not aligned to {frame_bytes}-byte sample frames"
+        )));
     }
 
-    let bytes_per_sample = bits_per_sample / 8;
-    let num_samples = data_size as usize / (num_channels * bytes_per_sample);
+    let num_samples = (data_size / frame_bytes) as usize;
+    if num_samples == 0 {
+        return Err(PwlFileError::EmptyData);
+    }
 
-    // Read audio data
-    let mut audio_data = vec![0u8; data_size as usize];
-    file.read_exact(&mut audio_data)?;
+    let max_val = format.normalization_scale;
 
     // Convert to time-value pairs (use first channel only)
     let mut points = Vec::with_capacity(num_samples);
-    let sample_period = 1.0 / sample_rate;
-    let max_val = (1 << (bits_per_sample - 1)) as f64;
+    let sample_period = 1.0 / format.sample_rate as f64;
 
     for i in 0..num_samples {
         let time = i as f64 * sample_period;
-        let offset = i * num_channels * bytes_per_sample;
+        let offset = i * frame_bytes as usize;
 
-        let sample_value = match bits_per_sample {
+        let sample_value = match format.bits_per_sample {
             8 => {
                 // 8-bit is unsigned
                 (audio_data[offset] as f64 - 128.0) / 128.0
@@ -391,7 +417,7 @@ pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
             _ => {
                 return Err(PwlFileError::WavError(format!(
                     "Unsupported bits per sample: {}",
-                    bits_per_sample
+                    format.bits_per_sample
                 )));
             }
         };
@@ -406,6 +432,105 @@ pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
     }
 
     Ok(points)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WavPcmFormat {
+    sample_rate: u32,
+    bits_per_sample: usize,
+    frame_bytes: u64,
+    normalization_scale: f64,
+}
+
+impl WavPcmFormat {
+    fn parse(fmt: &[u8]) -> Result<Self, PwlFileError> {
+        let audio_format = u16::from_le_bytes([fmt[0], fmt[1]]);
+        if audio_format != 1 {
+            return Err(PwlFileError::WavError(
+                "Only PCM format supported".to_string(),
+            ));
+        }
+
+        let num_channels = u16::from_le_bytes([fmt[2], fmt[3]]);
+        if num_channels == 0 {
+            return Err(PwlFileError::WavError(
+                "WAV channel count must be greater than zero".to_string(),
+            ));
+        }
+
+        let sample_rate = u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]);
+        if sample_rate == 0 {
+            return Err(PwlFileError::WavError(
+                "WAV sample rate must be greater than zero".to_string(),
+            ));
+        }
+
+        let block_align = u16::from_le_bytes([fmt[12], fmt[13]]) as u64;
+        let bits_per_sample = u16::from_le_bytes([fmt[14], fmt[15]]) as usize;
+        let bytes_per_sample = match bits_per_sample {
+            8 | 16 | 24 | 32 => (bits_per_sample / 8) as u64,
+            other => {
+                return Err(PwlFileError::WavError(format!(
+                    "Unsupported bits per sample: {other}"
+                )));
+            }
+        };
+
+        let frame_bytes = u64::from(num_channels) * bytes_per_sample;
+        if block_align == 0 || block_align != frame_bytes {
+            return Err(PwlFileError::WavError(format!(
+                "WAV block alignment {block_align} does not match {frame_bytes}-byte sample frames"
+            )));
+        }
+
+        let normalization_scale = match bits_per_sample {
+            8 => 128.0,
+            16 => 32768.0,
+            24 => 8_388_608.0,
+            32 => 2_147_483_648.0,
+            _ => unreachable!("bits_per_sample was validated above"),
+        };
+
+        Ok(Self {
+            sample_rate,
+            bits_per_sample,
+            frame_bytes,
+            normalization_scale,
+        })
+    }
+}
+
+struct WavAudioData {
+    data: Vec<u8>,
+    data_size: u64,
+    format: WavPcmFormat,
+}
+
+fn read_wav_data_chunk(
+    file: &mut File,
+    data_size: u64,
+    format: WavPcmFormat,
+) -> Result<WavAudioData, PwlFileError> {
+    let data_start = file.stream_position()?;
+    let file_len = file.metadata()?.len();
+    if data_size > file_len.saturating_sub(data_start) {
+        return Err(PwlFileError::WavError(format!(
+            "data chunk declares {data_size} bytes but file has only {} bytes remaining",
+            file_len.saturating_sub(data_start)
+        )));
+    }
+
+    let mut data = vec![0u8; data_size as usize];
+    file.read_exact(&mut data)?;
+    if !data_size.is_multiple_of(2) {
+        file.seek(SeekFrom::Current(1))?;
+    }
+
+    Ok(WavAudioData {
+        data,
+        data_size,
+        format,
+    })
 }
 
 /// Load PWL waveform from file (auto-detect format by extension)
@@ -427,3 +552,119 @@ pub fn load_pwl_file<P: AsRef<Path>>(path: P) -> Result<PwlWaveform, PwlFileErro
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is available")
+            .as_nanos();
+        path.push(format!("rspice-pwl-file-{name}-{nonce}.wav"));
+        path
+    }
+
+    fn write_temp_wav(name: &str, bytes: &[u8]) -> PathBuf {
+        let path = temp_path(name);
+        fs::write(&path, bytes).expect("write temporary WAV fixture");
+        path
+    }
+
+    fn write_temp_csv(name: &str, contents: &str) -> PathBuf {
+        let path = temp_path(name).with_extension("csv");
+        fs::write(&path, contents).expect("write temporary CSV fixture");
+        path
+    }
+
+    fn pcm_wav_bytes(
+        num_channels: u16,
+        sample_rate: u32,
+        bits_per_sample: u16,
+        sample_bytes: &[u8],
+    ) -> Vec<u8> {
+        let bytes_per_sample = u32::from(bits_per_sample).div_ceil(8);
+        let block_align = u32::from(num_channels).saturating_mul(bytes_per_sample) as u16;
+        let byte_rate = sample_rate.saturating_mul(u32::from(block_align));
+        let data_size = sample_bytes.len() as u32;
+        let riff_size = 4 + (8 + 16) + (8 + data_size);
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&riff_size.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&num_channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_size.to_le_bytes());
+        bytes.extend_from_slice(sample_bytes);
+        bytes
+    }
+
+    fn assert_wav_error_contains(bytes: Vec<u8>, needle: &str) {
+        let path = write_temp_wav("bad-metadata", &bytes);
+        let err = load_wav(&path).expect_err("malformed WAV metadata must be rejected");
+        let _ = fs::remove_file(&path);
+        match err {
+            PwlFileError::WavError(message) => {
+                assert!(
+                    message.contains(needle),
+                    "expected WAV error containing `{needle}`, got `{message}`"
+                );
+            }
+            other => panic!("expected WAV metadata error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn standard_pcm_wav_loads_samples() {
+        let path = write_temp_wav("standard", &pcm_wav_bytes(1, 8_000, 8, &[0, 128, 255]));
+
+        let points = load_wav(&path).expect("standard PCM WAV should load");
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(points.len(), 3);
+        assert_eq!(points[0], (0.0, -1.0));
+        assert!((points[1].0 - 1.0 / 8_000.0).abs() < 1e-15);
+        assert_eq!(points[1].1, 0.0);
+        assert!((points[2].0 - 2.0 / 8_000.0).abs() < 1e-15);
+        assert!((points[2].1 - 127.0 / 128.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn wav_loader_rejects_invalid_pcm_metadata_before_sample_math() {
+        assert_wav_error_contains(pcm_wav_bytes(0, 8_000, 8, &[128]), "channel");
+        assert_wav_error_contains(pcm_wav_bytes(1, 0, 8, &[128]), "sample rate");
+        assert_wav_error_contains(pcm_wav_bytes(1, 8_000, 7, &[128]), "bits per sample");
+        assert_wav_error_contains(pcm_wav_bytes(1, 8_000, 16, &[0]), "data chunk size");
+    }
+
+    #[test]
+    fn csv_loader_rejects_short_rows_after_data_starts() {
+        let path = write_temp_csv("short-row", "time,value\n0,0\n1e-6\n2e-6,1\n");
+
+        let err = load_csv(&path).expect_err("short CSV rows after data starts must reject");
+        let _ = fs::remove_file(&path);
+
+        match err {
+            PwlFileError::ParseError(message) => {
+                assert!(
+                    message.contains("line 3") && message.contains("expected 2 columns"),
+                    "unexpected parse message: {message}"
+                );
+            }
+            other => panic!("expected CSV parse error, got {other:?}"),
+        }
+    }
+}

@@ -60,7 +60,6 @@ impl Engine {
         branch_ordinals
             .iter()
             .filter_map(|branch_ordinal| {
-                let branch_ordinal = usize::try_from(*branch_ordinal).ok()?;
                 let idx = num_nodes.checked_add(branch_ordinal.checked_sub(1)?)?;
                 let x = *a.get(idx)?;
                 let y = *b.get(idx)?;

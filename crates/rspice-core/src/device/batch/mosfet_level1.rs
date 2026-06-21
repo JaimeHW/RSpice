@@ -3,6 +3,8 @@
 //! SoA storage for MOSFETs to enable SIMD batch evaluation.
 //! Handles Level 1 (Shichman-Hodges) models for maximum vectorization.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::Value;
 use crate::circuit::NodeId;
 use crate::device::mosfet::{MosRegion, MosType};

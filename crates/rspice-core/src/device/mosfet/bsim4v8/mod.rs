@@ -66,13 +66,13 @@
 //!
 //! # Integration seams
 //!
-//! The [`Bsim4v8`] core owns `Arc<Bsim4v8Model>` + `Arc<Bsim4v8SizeDep>`
-//! + [`Bsim4v8InstTemp`] and exposes [`Bsim4v8::eval_polarity`] (raw node
-//! voltages in, `mtype`-folded internally) plus the ngspice limiting
-//! sequence [`Bsim4v8::limit_voltages`]. The op struct carries every
-//! `here->BSIM4*` quantity the b4ld.c stamp consumes; the multiplier `m`,
-//! the mode swap of the matrix load, and the gmin policy live in the
-//! engine-facing wrapper ([`Bsim4v8Device`]).
+//! The [`Bsim4v8`] core owns `Arc<Bsim4v8Model>`, `Arc<Bsim4v8SizeDep>`,
+//! and [`Bsim4v8InstTemp`]. It exposes [`Bsim4v8::eval_polarity`] (raw node
+//! voltages in, `mtype`-folded internally) plus the ngspice limiting sequence
+//! [`Bsim4v8::limit_voltages`]. The op struct carries every `here->BSIM4*`
+//! quantity the b4ld.c stamp consumes; the multiplier `m`, the mode swap of
+//! the matrix load, and the gmin policy live in the engine-facing wrapper
+//! ([`Bsim4v8Device`]).
 
 pub mod common;
 pub mod device;

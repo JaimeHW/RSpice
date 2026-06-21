@@ -3,10 +3,10 @@ use super::*;
 impl CircuitData {
     #[inline]
     pub(in crate::circuit) fn mark_force_accept_protected_node(mask: &mut [bool], node: NodeId) {
-        if node > 0 {
-            if let Some(slot) = mask.get_mut(node - 1) {
-                *slot = true;
-            }
+        if node > 0
+            && let Some(slot) = mask.get_mut(node - 1)
+        {
+            *slot = true;
         }
     }
 

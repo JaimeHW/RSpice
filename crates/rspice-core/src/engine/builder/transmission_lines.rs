@@ -36,14 +36,14 @@ pub(in crate::engine::builder) fn build_scalar_rlgc_line(
     node_far_ref: usize,
     params: TransmissionLineModelParams,
 ) -> Result<(), SimulationError> {
-    let r = params.r.unwrap_or(0.0).max(0.0);
+    let r = params.r.unwrap_or(0.0);
     let l = params.l.ok_or_else(|| {
         SimulationError::Circuit(format!(
             "Transmission line '{}' requires finite positive L/L0 for distributed RLGC synthesis",
             instance_name
         ))
     })?;
-    let g = params.g.unwrap_or(0.0).max(0.0);
+    let g = params.g.unwrap_or(0.0);
     let c = params.c.ok_or_else(|| {
         SimulationError::Circuit(format!(
             "Transmission line '{}' requires finite positive C/C0 for distributed RLGC synthesis",
@@ -57,6 +57,18 @@ pub(in crate::engine::builder) fn build_scalar_rlgc_line(
         ))
     })?;
 
+    if !r.is_finite() || r < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Transmission line '{}' resolved invalid R={} for distributed RLGC synthesis",
+            instance_name, r
+        )));
+    }
+    if !g.is_finite() || g < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Transmission line '{}' resolved invalid G={} for distributed RLGC synthesis",
+            instance_name, g
+        )));
+    }
     if !l.is_finite() || l <= 0.0 || !c.is_finite() || c <= 0.0 || !len.is_finite() || len <= 0.0 {
         return Err(SimulationError::Circuit(format!(
             "Transmission line '{}' resolved invalid RLGC parameters (L={}, C={}, LEN={})",
@@ -356,6 +368,87 @@ pub(in crate::engine::builder) fn allocate_grounded_cpl_native_branch_currents(
         .map_err(SimulationError::Circuit)
 }
 
+pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
+    circuit: &mut CircuitData,
+    netlist: &Netlist,
+    element: &crate::netlist::Element,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    if element.nodes.len() < 6 || !element.nodes.len().is_multiple_of(2) {
+        return Err(SimulationError::Circuit(format!(
+            "CPL transmission line '{}' requires 2*N+2 nodes (N conductors plus shared reference)",
+            element.name
+        )));
+    }
+
+    let conductors = element.nodes.len() / 2 - 1;
+    if conductors < 2 {
+        return Err(SimulationError::Circuit(format!(
+            "CPL transmission line '{}' requires at least two signal conductors",
+            element.name
+        )));
+    }
+
+    let params = resolve_cpl_model_params(netlist, model_name, conductors)?.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Transmission line '{}' references unknown model '{}'",
+            element.name, model_name
+        ))
+    })?;
+    validate_cpl_model_params(model_name, &params)?;
+
+    let near_ref = circuit.get_or_create_node(&element.nodes[conductors]);
+    let far_ref = circuit.get_or_create_node(&element.nodes[element.nodes.len() - 1]);
+    let near_nodes: Vec<usize> = (0..conductors)
+        .map(|idx| circuit.get_or_create_node(&element.nodes[idx]))
+        .collect();
+    let far_nodes: Vec<usize> = (0..conductors)
+        .map(|idx| circuit.get_or_create_node(&element.nodes[conductors + 1 + idx]))
+        .collect();
+
+    let coupled_tline = crate::device::CoupledTransmissionLine::new(
+        element.name.clone(),
+        near_nodes,
+        near_ref,
+        far_nodes,
+        far_ref,
+        &params.r,
+        &params.l,
+        &params.c,
+        &params.g,
+        params.length,
+    )
+    .map_err(SimulationError::Circuit)?;
+    let native_available = coupled_tline.native_runtime_available();
+    if let Some(min_taul) = coupled_tline.native_min_taul_seconds() {
+        // ngspice caps CKTmaxStep to 0.9*min(taul) for CPL so every mode's
+        // propagation delay is resolved by the convolution recurrence. Match
+        // that cap so the trapezoidal convolution tracks the reference instead
+        // of drifting when the solver would otherwise take larger steps.
+        if min_taul.is_finite() && min_taul > 0.0 {
+            circuit.tighten_transient_max_step_hint(0.9 * min_taul);
+        }
+    } else {
+        let min_mode_delay = coupled_tline.min_mode_delay();
+        if min_mode_delay.is_finite() && min_mode_delay > 0.0 {
+            circuit.tighten_transient_max_step_hint(0.25 * min_mode_delay);
+        }
+    }
+    let coupled_index = circuit.coupled_tlines.len();
+    circuit.coupled_tlines.push(coupled_tline);
+
+    // Activate the ngspice-faithful native convolution runtime: allocate the
+    // per-conductor branch-current unknowns at both ends so the transient
+    // solver stamps the cplload.c branch equations. Lines without grounded
+    // references (or where the native setup math could not be realized) keep the
+    // modal Norton transient fallback and allocate no branch rows.
+    if native_available {
+        allocate_grounded_cpl_native_branch_currents(circuit, coupled_index)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,6 +486,31 @@ P1 n1 n2 0 f1 f2 0 m
             c: vec![vec![1.0e-12, -1.0e-13], vec![-1.0e-13, 1.0e-12]],
             g: vec![vec![0.0, 0.0], vec![0.0, 0.0]],
             length: 1.0,
+        }
+    }
+
+    fn scalar_rlgc_params(r: f64, g: f64) -> TransmissionLineModelParams {
+        TransmissionLineModelParams {
+            r: Some(r),
+            l: Some(1.0e-9),
+            g: Some(g),
+            c: Some(1.0e-12),
+            len: Some(1.0),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn scalar_rlgc_synthesis_rejects_invalid_series_and_shunt_terms() {
+        for (params, expected) in [
+            (scalar_rlgc_params(-1.0, 0.0), "invalid R=-1"),
+            (scalar_rlgc_params(f64::NAN, 0.0), "invalid R=NaN"),
+            (scalar_rlgc_params(1.0, -1.0e-9), "invalid G=-0.000000001"),
+            (scalar_rlgc_params(1.0, f64::INFINITY), "invalid G=inf"),
+        ] {
+            let err = build_scalar_rlgc_line(&mut CircuitData::new(), "Tbad", 1, 0, 2, 0, params)
+                .expect_err("invalid RLGC terms must be rejected");
+            assert!(err.to_string().contains(expected), "{err}");
         }
     }
 
@@ -555,85 +673,4 @@ P1 n1 n2 0 f1 f2 0 m
 
         assert!(rhs.iter().all(|value| *value == 0.0));
     }
-}
-
-pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
-    circuit: &mut CircuitData,
-    netlist: &Netlist,
-    element: &crate::netlist::Element,
-    model_name: &str,
-) -> Result<(), SimulationError> {
-    if element.nodes.len() < 6 || !element.nodes.len().is_multiple_of(2) {
-        return Err(SimulationError::Circuit(format!(
-            "CPL transmission line '{}' requires 2*N+2 nodes (N conductors plus shared reference)",
-            element.name
-        )));
-    }
-
-    let conductors = element.nodes.len() / 2 - 1;
-    if conductors < 2 {
-        return Err(SimulationError::Circuit(format!(
-            "CPL transmission line '{}' requires at least two signal conductors",
-            element.name
-        )));
-    }
-
-    let params = resolve_cpl_model_params(netlist, model_name, conductors)?.ok_or_else(|| {
-        SimulationError::Circuit(format!(
-            "Transmission line '{}' references unknown model '{}'",
-            element.name, model_name
-        ))
-    })?;
-    validate_cpl_model_params(model_name, &params)?;
-
-    let near_ref = circuit.get_or_create_node(&element.nodes[conductors]);
-    let far_ref = circuit.get_or_create_node(&element.nodes[element.nodes.len() - 1]);
-    let near_nodes: Vec<usize> = (0..conductors)
-        .map(|idx| circuit.get_or_create_node(&element.nodes[idx]))
-        .collect();
-    let far_nodes: Vec<usize> = (0..conductors)
-        .map(|idx| circuit.get_or_create_node(&element.nodes[conductors + 1 + idx]))
-        .collect();
-
-    let coupled_tline = crate::device::CoupledTransmissionLine::new(
-        element.name.clone(),
-        near_nodes,
-        near_ref,
-        far_nodes,
-        far_ref,
-        &params.r,
-        &params.l,
-        &params.c,
-        &params.g,
-        params.length,
-    )
-    .map_err(SimulationError::Circuit)?;
-    let native_available = coupled_tline.native_runtime_available();
-    if let Some(min_taul) = coupled_tline.native_min_taul_seconds() {
-        // ngspice caps CKTmaxStep to 0.9*min(taul) for CPL so every mode's
-        // propagation delay is resolved by the convolution recurrence. Match
-        // that cap so the trapezoidal convolution tracks the reference instead
-        // of drifting when the solver would otherwise take larger steps.
-        if min_taul.is_finite() && min_taul > 0.0 {
-            circuit.tighten_transient_max_step_hint(0.9 * min_taul);
-        }
-    } else {
-        let min_mode_delay = coupled_tline.min_mode_delay();
-        if min_mode_delay.is_finite() && min_mode_delay > 0.0 {
-            circuit.tighten_transient_max_step_hint(0.25 * min_mode_delay);
-        }
-    }
-    let coupled_index = circuit.coupled_tlines.len();
-    circuit.coupled_tlines.push(coupled_tline);
-
-    // Activate the ngspice-faithful native convolution runtime: allocate the
-    // per-conductor branch-current unknowns at both ends so the transient
-    // solver stamps the cplload.c branch equations. Lines without grounded
-    // references (or where the native setup math could not be realized) keep the
-    // modal Norton transient fallback and allocate no branch rows.
-    if native_available {
-        allocate_grounded_cpl_native_branch_currents(circuit, coupled_index)?;
-    }
-
-    Ok(())
 }

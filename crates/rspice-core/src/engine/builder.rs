@@ -456,6 +456,35 @@ fn mos_level_descriptor(level: i32) -> String {
     }
 }
 
+fn validate_source_file_inputs(
+    source_name: &str,
+    spec: &crate::netlist::SourceSpec,
+) -> Result<(), SimulationError> {
+    use crate::netlist::SourceSpec;
+
+    match spec {
+        SourceSpec::PwlFile {
+            path,
+            time_scale,
+            value_scale,
+            time_offset,
+            value_offset,
+        } => crate::circuit::VoltageSources::load_pwl_waveform_cached(
+            path,
+            *time_scale,
+            *value_scale,
+            *time_offset,
+            *value_offset,
+        )
+        .map(|_| ())
+        .map_err(|error| SimulationError::Circuit(format!("source '{source_name}': {error}"))),
+        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+            validate_source_file_inputs(source_name, transient)
+        }
+        _ => Ok(()),
+    }
+}
+
 impl Engine {
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
@@ -711,6 +740,7 @@ impl Engine {
                     )?;
                 }
                 ElementKind::VoltageSource(spec) => {
+                    validate_source_file_inputs(&element.name, spec)?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
@@ -749,6 +779,7 @@ impl Engine {
                     );
                 }
                 ElementKind::CurrentSource(spec) => {
+                    validate_source_file_inputs(&element.name, spec)?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let dc_value = extract_dc_value(spec);
@@ -1626,7 +1657,7 @@ impl Engine {
 
                     // Look up model and apply parameters
                     if let Some(params_map) = params_map.as_ref() {
-                        jfet = jfet.with_model_params(&params_map);
+                        jfet = jfet.with_model_params(params_map);
                     }
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_analysis_temperature(self.config.temperature);

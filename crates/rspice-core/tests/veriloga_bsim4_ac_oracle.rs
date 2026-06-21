@@ -1,4 +1,4 @@
-//! AC small-signal oracle pins for the Verilog-A BSIM4.8.
+//! AC small-signal oracle pins for an optional Verilog-A BSIM4.8 source.
 //!
 //! Same measurement in both simulators: vg carries AC 1 at the
 //! (vgs=1.0, vds=1.2) operating point, .ac at 1 MHz, compare the complex
@@ -13,23 +13,18 @@
 //! BSIM4 charge model (capmod) in one shot.
 #![cfg(feature = "veriloga")]
 
-use rspice_core::{Engine, Netlist};
-use std::path::{Path, PathBuf};
+mod common;
 
-fn bsim4_path() -> Option<PathBuf> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga")
-        .join("bsim4.va");
-    path.exists().then_some(path)
+use rspice_core::{Engine, Netlist};
+
+fn bsim4_path() -> Option<std::path::PathBuf> {
+    common::optional_bsim4_va_path(env!("CARGO_MANIFEST_DIR"))
 }
 
 #[test]
 fn bsim4_ac_currents_track_ngspice_oracle() {
     let Some(model) = bsim4_path() else {
-        eprintln!("bsim4.va not present; skipping AC oracle pins");
+        eprintln!("bsim4.va not present; skipping optional AC oracle pins");
         return;
     };
 
@@ -61,9 +56,9 @@ fn bsim4_ac_currents_track_ngspice_oracle() {
     let i_vg = branch("vg");
     let i_vd = branch("vd");
 
-    // Oracle values from ngspice-46 native BSIM4. The VA model is the
-    // Xyce-adapted 4.8 variant, so tolerances mirror the DC pins:
-    // percent-level on the dominant terms.
+    // Oracle values from ngspice-46 native BSIM4. Percent-level tolerances
+    // are used on the dominant terms because externally supplied Verilog-A
+    // sources can differ slightly in defaults and simulator conditionals.
     let rel = |got: f64, oracle: f64| ((got - oracle) / oracle).abs();
 
     // Capacitive gate current: Im{i(vg)} = -w * Cgg

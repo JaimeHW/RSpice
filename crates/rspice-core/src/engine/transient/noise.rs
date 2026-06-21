@@ -16,6 +16,8 @@
 //! bit-identical; and every analysis that consumes the netlist sees one
 //! consistent waveform.
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::Value;
 use crate::netlist::{Element, ElementKind, Netlist, SourceSpec};
 

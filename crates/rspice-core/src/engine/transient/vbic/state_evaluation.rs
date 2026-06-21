@@ -309,12 +309,12 @@ impl Engine {
             let candidate_objective =
                 Self::vbic_dynamic_state_evaluation_residual_objective(&candidate_state);
             if candidate_state.4.is_finite()
-                && best_state.as_ref().map_or(true, |best_state| {
+                && best_state.as_ref().is_none_or(|best_state| {
                     candidate_objective + 1e-15
                         < Self::vbic_dynamic_state_evaluation_residual_objective(best_state)
                 })
             {
-                best_state = Some(candidate_state.clone());
+                best_state = Some(candidate_state);
             }
             if candidate_state.4.is_finite()
                 && candidate_objective + 1e-15 < current_residual_objective

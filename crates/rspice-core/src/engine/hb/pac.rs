@@ -7,6 +7,8 @@
 //! `offset + k*f0`. See `harmonic_balance::solver::periodic_ac` for the
 //! conversion-matrix formulation.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::*;
 use crate::analysis::advanced::harmonic_balance::PeriodicAcExcitation;
 use crate::analysis::advanced::pac::{PacConfig, PacResult};
@@ -112,7 +114,9 @@ impl Engine {
 
         let mut sweep_config = config.clone();
         sweep_config.fundamental_freq = config.fundamental_freq;
-        let frequencies = sweep_config.frequency_points();
+        let frequencies = sweep_config.try_frequency_points().map_err(|err| {
+            SimulationError::Circuit(format!("Invalid PAC frequency sweep: {err}"))
+        })?;
         if frequencies.is_empty() {
             return Err(SimulationError::Circuit(
                 "PAC frequency sweep produced no points".to_string(),

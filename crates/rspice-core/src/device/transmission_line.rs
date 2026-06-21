@@ -215,13 +215,15 @@ VS 168  0  PULSE (0 5 15.9NS 0.2NS 0.2NS 15.8NS 32NS )
 .end
 "#;
         let netlist = crate::Netlist::parse(deck).expect("deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
-        config.temperature = 300.15;
-        config.min_timestep = 1e-12;
-        config.locked_time_grid = Some(std::sync::Arc::new(
-            acc.iter().map(|a| a.0).filter(|&t| t > 0.0).collect(),
-        ));
+        let config = crate::engine::SimulationConfig {
+            integration_method: crate::analysis::IntegrationMethod::Trapezoidal,
+            temperature: 300.15,
+            min_timestep: 1e-12,
+            locked_time_grid: Some(std::sync::Arc::new(
+                acc.iter().map(|a| a.0).filter(|&t| t > 0.0).collect(),
+            )),
+            ..Default::default()
+        };
         let engine = crate::engine::Engine::new(config);
         let result = engine
             .run_tran_with_abort(&netlist, 47e-9, 0.1e-9, &crate::abort_signal::NoAbort)

@@ -1,32 +1,23 @@
 use super::*;
 
 const TXL_MIN_INDUCTANCE: f64 = 1.0e-12;
+const LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS: f64 = 1.0e-18;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::engine::builder) enum TransmissionLineModelKind {
+    #[default]
     Ltra,
     Txl,
 }
 
-impl Default for TransmissionLineModelKind {
-    fn default() -> Self {
-        Self::Ltra
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::engine::builder) enum LtraInterpolationMode {
     Linear,
+    // Ngspice's no-flag setup uses quadratic unless global LTRA history
+    // compaction is enabled; RSpice does not implement that compaction yet.
+    #[default]
     Quadratic,
     Mixed,
-}
-
-impl Default for LtraInterpolationMode {
-    fn default() -> Self {
-        // Ngspice's no-flag setup uses quadratic unless global LTRA history
-        // compaction is enabled; RSpice does not implement that compaction yet.
-        Self::Quadratic
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -141,6 +132,8 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
 
     if params.kind == TransmissionLineModelKind::Txl {
         params = finalize_txl_model_params(model_name, params)?;
+    } else {
+        params = finalize_ltra_model_params(model_name, params)?;
     }
 
     let l = params.l;
@@ -192,6 +185,81 @@ fn require_txl_param(
         )));
     }
     Ok(value)
+}
+
+fn validate_optional_ltra_non_negative(
+    model_name: &str,
+    param_name: &str,
+    value: Option<f64>,
+) -> Result<(), SimulationError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if !value.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' has non-finite {}={}",
+            model_name, param_name, value
+        )));
+    }
+    if value < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' has invalid {}={} (must be >= 0)",
+            model_name, param_name, value
+        )));
+    }
+    Ok(())
+}
+
+fn validate_optional_ltra_positive(
+    model_name: &str,
+    param_name: &str,
+    value: Option<f64>,
+) -> Result<(), SimulationError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if !value.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' has non-finite {}={}",
+            model_name, param_name, value
+        )));
+    }
+    if value <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' has invalid {}={} (must be > 0)",
+            model_name, param_name, value
+        )));
+    }
+    Ok(())
+}
+
+fn finalize_ltra_model_params(
+    model_name: &str,
+    params: TransmissionLineModelParams,
+) -> Result<TransmissionLineModelParams, SimulationError> {
+    validate_optional_ltra_non_negative(model_name, "R", params.r)?;
+    if let Some(g) = params.g {
+        if !g.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "LTRA model '{}' has non-finite G={}",
+                model_name, g
+            )));
+        }
+        if g.abs() > LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS {
+            return Err(SimulationError::Circuit(format!(
+                "LTRA model '{}' uses unsupported G={}; use G=0 for the native LTRA runtime",
+                model_name, g
+            )));
+        }
+    }
+    validate_optional_ltra_positive(model_name, "L", params.l)?;
+    validate_optional_ltra_positive(model_name, "C", params.c)?;
+    validate_optional_ltra_positive(model_name, "LENGTH", params.len)?;
+    validate_optional_ltra_non_negative(model_name, "REL", params.rel)?;
+    validate_optional_ltra_non_negative(model_name, "ABS", params.abs)?;
+    validate_optional_ltra_non_negative(model_name, "COMPACTREL", params.compactrel)?;
+    validate_optional_ltra_non_negative(model_name, "COMPACTABS", params.compactabs)?;
+    Ok(params)
 }
 
 fn finalize_txl_model_params(
@@ -545,6 +613,11 @@ mod tests {
             .expect("transmission-line model exists")
     }
 
+    fn resolve_test_tline_err(source: &str) -> SimulationError {
+        let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
+        resolve_tline_model_params(&netlist, "y").expect_err("LTRA model should be rejected")
+    }
+
     fn resolve_test_txl(source: &str) -> TransmissionLineModelParams {
         let params = resolve_test_tline(source);
         assert_eq!(params.kind, TransmissionLineModelKind::Txl);
@@ -582,6 +655,54 @@ mod tests {
         assert_eq!(lin.ltra_interpolation, LtraInterpolationMode::Linear);
         assert_eq!(quad.ltra_interpolation, LtraInterpolationMode::Quadratic);
         assert_eq!(mixed.ltra_interpolation, LtraInterpolationMode::Mixed);
+    }
+
+    #[test]
+    fn ltra_rejects_negative_series_resistance() {
+        let err = resolve_test_tline_err(
+            r#"title
+.model y ltra r=-1 l=1n g=0 c=1p length=1
+.end
+"#,
+        );
+
+        assert!(
+            err.to_string()
+                .contains("LTRA model 'y' has invalid R=-1 (must be >= 0)"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn ltra_rejects_unsupported_shunt_conductance() {
+        let err = resolve_test_tline_err(
+            r#"title
+.model y ltra r=1 l=1n g=1u c=1p length=1
+.end
+"#,
+        );
+
+        assert!(err.to_string().contains("unsupported G"), "{err}");
+        assert!(err.to_string().contains("use G=0"), "{err}");
+    }
+
+    #[test]
+    fn ltra_rejects_invalid_primary_rlc_values() {
+        for (line, expected) in [
+            (".model y ltra r=1 l=0 g=0 c=1p length=1", "invalid L=0"),
+            (
+                ".model y ltra r=1 l=1n g=0 c=-1p length=1",
+                "invalid C=-0.000000000001",
+            ),
+            (
+                ".model y ltra r=1 l=1n g=0 c=1p length=0",
+                "invalid LENGTH=0",
+            ),
+        ] {
+            let source = format!("title\n{line}\n.end\n");
+            let err = resolve_test_tline_err(&source);
+            assert!(err.to_string().contains(expected), "{err}");
+        }
     }
 
     #[test]

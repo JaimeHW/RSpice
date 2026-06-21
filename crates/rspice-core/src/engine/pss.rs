@@ -19,7 +19,7 @@
 //!    - Solve for Newton step and update `x0`
 //! 4. Build final `PssResult` with periodic waveform and harmonics
 
-#![allow(clippy::needless_range_loop)]
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::{Engine, SimulationError, TransientResult};
 use crate::analysis::transient::{
     BreakpointManager, CompanionCoefficients, LteEstimator, TimestepController, TrapGearController,
@@ -30,6 +30,8 @@ use crate::analysis::{
 use crate::circuit::Circuit;
 use crate::solver::StaticMatrix;
 use crate::{Netlist, Value};
+
+type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
 
 /// Recover the monodromy matrix from a converged shooting Jacobian:
 /// the shooting residual is F(x0) = x(T) - x0, so J = dF/dx0 = M - I and
@@ -153,6 +155,8 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
     ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
+        config.validate().map_err(PssError::InvalidConfig)?;
+
         // Build and prepare circuit
         let mut circuit = self.build_circuit(netlist)?;
         let mut matrix = self.build_matrix(&circuit)?;
@@ -198,6 +202,7 @@ impl Engine {
         const FD_STEP: Value = 1e-8;
 
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
+            .with_abstol(config.abstol)
             .with_damping(config.damping_factor)
             .with_fd_step(FD_STEP);
 
@@ -695,7 +700,7 @@ impl Engine {
         period: Value,
         config: &PssConfig,
         fd_step: Value,
-    ) -> Result<(Vec<Value>, Value, Vec<Vec<Value>>), SimulationError> {
+    ) -> Result<AutonomousNewtonStep, SimulationError> {
         let n = state.dimension();
         let columns =
             self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true)?;

@@ -74,12 +74,24 @@ impl CircuitData {
     /// * `time` - Current simulation time
     /// * `voltages` - Current node voltage solution
     pub fn evaluate_xspice(&mut self, time: Value, voltages: &[Value]) {
-        self.evaluate_xspice_with_analysis(
+        if let Err(e) = self.try_evaluate_xspice(time, voltages) {
+            log::warn!("XSPICE evaluation error: {e}");
+        }
+    }
+
+    /// Fallible XSPICE evaluation for callers that must not report success
+    /// after a model fails.
+    pub fn try_evaluate_xspice(
+        &mut self,
+        time: Value,
+        voltages: &[Value],
+    ) -> crate::xspice::CmResult<()> {
+        self.try_evaluate_xspice_with_analysis(
             time,
             0.0,
             voltages,
             crate::xspice::AnalysisType::Transient,
-        );
+        )
     }
 
     /// Evaluate all XSPICE code model instances for transient with explicit timestep.
@@ -89,12 +101,24 @@ impl CircuitData {
         timestep: Value,
         voltages: &[Value],
     ) {
-        self.evaluate_xspice_with_analysis(
+        if let Err(e) = self.try_evaluate_xspice_with_timestep(time, timestep, voltages) {
+            log::warn!("XSPICE evaluation error: {e}");
+        }
+    }
+
+    /// Fallible XSPICE evaluation for transient with explicit timestep.
+    pub fn try_evaluate_xspice_with_timestep(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        voltages: &[Value],
+    ) -> crate::xspice::CmResult<()> {
+        self.try_evaluate_xspice_with_analysis(
             time,
             timestep,
             voltages,
             crate::xspice::AnalysisType::Transient,
-        );
+        )
     }
 
     /// Evaluate all XSPICE code model instances for the requested analysis type.
@@ -105,6 +129,19 @@ impl CircuitData {
         voltages: &[Value],
         analysis: crate::xspice::AnalysisType,
     ) {
+        if let Err(e) = self.try_evaluate_xspice_with_analysis(time, timestep, voltages, analysis) {
+            log::warn!("XSPICE evaluation error: {e}");
+        }
+    }
+
+    /// Fallible XSPICE evaluation for the requested analysis type.
+    pub fn try_evaluate_xspice_with_analysis(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        voltages: &[Value],
+        analysis: crate::xspice::AnalysisType,
+    ) -> crate::xspice::CmResult<()> {
         let max_event_passes = if self.has_xspice_event_driven_devices() {
             self.xspice_instances.len().saturating_add(1).max(1)
         } else {
@@ -126,7 +163,11 @@ impl CircuitData {
                 instance.update_inputs(voltages, digital_values, digital_event_times);
 
                 if let Err(e) = instance.evaluate(time, timestep, analysis) {
-                    log::warn!("XSPICE evaluation error for {}: {}", instance.name, e);
+                    let message = format!("{}: {}", instance.name, e);
+                    if self.xspice_evaluation_error.is_none() {
+                        self.xspice_evaluation_error = Some(message.clone());
+                    }
+                    return Err(crate::xspice::CmError::EvaluationError(message));
                 }
 
                 instance.schedule_events(event_queue, time);
@@ -142,6 +183,13 @@ impl CircuitData {
                 break;
             }
         }
+        Ok(())
+    }
+
+    /// Return and clear the first XSPICE evaluation error recorded during
+    /// this analysis, if any.
+    pub(crate) fn take_xspice_evaluation_error(&mut self) -> Option<String> {
+        self.xspice_evaluation_error.take()
     }
 
     /// Evaluate and stamp XSPICE for a transient solver trial without committing
@@ -181,6 +229,28 @@ impl CircuitData {
         let num_nodes = self.num_nodes;
 
         #[inline]
+        fn add_matrix_if_present(matrix: &mut StaticMatrix, row: usize, col: usize, value: Value) {
+            if matrix.get_index(row, col).is_some() {
+                matrix.add(row, col, value);
+            } else {
+                log::debug!(
+                    "XSPICE stamp ({}, {}) missing from matrix topology",
+                    row,
+                    col
+                );
+            }
+        }
+
+        #[inline]
+        fn add_rhs_if_present(rhs: &mut [Value], index: usize, value: Value) {
+            if let Some(entry) = rhs.get_mut(index) {
+                *entry += value;
+            } else {
+                log::debug!("XSPICE RHS stamp {} outside RHS size {}", index, rhs.len());
+            }
+        }
+
+        #[inline]
         fn stamp_nodal_current_output(
             matrix: &mut StaticMatrix,
             rhs: &mut [Value],
@@ -191,24 +261,27 @@ impl CircuitData {
             match connection {
                 crate::xspice::PortConnection::Analog(node) => {
                     if *node > 0 {
-                        matrix.add(*node - 1, *node - 1, conductance);
-                        rhs[*node - 1] += current;
+                        let row = *node - 1;
+                        add_matrix_if_present(matrix, row, row, conductance);
+                        add_rhs_if_present(rhs, row, current);
                     }
                 }
                 crate::xspice::PortConnection::Differential(pos, neg) => {
                     if *pos > 0 {
-                        matrix.add(*pos - 1, *pos - 1, conductance);
+                        let pos_row = *pos - 1;
+                        add_matrix_if_present(matrix, pos_row, pos_row, conductance);
                         if *neg > 0 {
-                            matrix.add(*pos - 1, *neg - 1, -conductance);
+                            add_matrix_if_present(matrix, pos_row, *neg - 1, -conductance);
                         }
-                        rhs[*pos - 1] += current;
+                        add_rhs_if_present(rhs, pos_row, current);
                     }
                     if *neg > 0 {
+                        let neg_row = *neg - 1;
                         if *pos > 0 {
-                            matrix.add(*neg - 1, *pos - 1, -conductance);
+                            add_matrix_if_present(matrix, neg_row, *pos - 1, -conductance);
                         }
-                        matrix.add(*neg - 1, *neg - 1, conductance);
-                        rhs[*neg - 1] -= current;
+                        add_matrix_if_present(matrix, neg_row, neg_row, conductance);
+                        add_rhs_if_present(rhs, neg_row, -current);
                     }
                 }
                 _ => {}
@@ -229,24 +302,35 @@ impl CircuitData {
                             if let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) {
                                 let br_mna = num_nodes + branch_ordinal;
                                 let br = br_mna - 1;
+                                if br >= rhs.len() {
+                                    log::debug!(
+                                        "XSPICE branch row {} outside RHS size {}",
+                                        br,
+                                        rhs.len()
+                                    );
+                                    continue;
+                                }
                                 match connection {
                                     crate::xspice::PortConnection::Analog(node) => {
                                         if *node > 0 {
-                                            matrix.add(br, *node - 1, 1.0);
-                                            matrix.add(*node - 1, br, 1.0);
+                                            let node_row = *node - 1;
+                                            add_matrix_if_present(matrix, br, node_row, 1.0);
+                                            add_matrix_if_present(matrix, node_row, br, 1.0);
                                         }
-                                        rhs[br] += current;
+                                        add_rhs_if_present(rhs, br, current);
                                     }
                                     crate::xspice::PortConnection::Differential(pos, neg) => {
                                         if *pos > 0 {
-                                            matrix.add(br, *pos - 1, 1.0);
-                                            matrix.add(*pos - 1, br, 1.0);
+                                            let pos_row = *pos - 1;
+                                            add_matrix_if_present(matrix, br, pos_row, 1.0);
+                                            add_matrix_if_present(matrix, pos_row, br, 1.0);
                                         }
                                         if *neg > 0 {
-                                            matrix.add(br, *neg - 1, -1.0);
-                                            matrix.add(*neg - 1, br, -1.0);
+                                            let neg_row = *neg - 1;
+                                            add_matrix_if_present(matrix, br, neg_row, -1.0);
+                                            add_matrix_if_present(matrix, neg_row, br, -1.0);
                                         }
-                                        rhs[br] += current;
+                                        add_rhs_if_present(rhs, br, current);
                                     }
                                     _ => {
                                         stamp_nodal_current_output(
@@ -285,22 +369,10 @@ impl CircuitData {
 
             // Drain any explicit matrix/RHS stamps queued by the code model.
             for (row, col, value) in instance.take_deferred_stamps() {
-                if row < rhs.len() && col < rhs.len() {
-                    if matrix.get_index(row, col).is_some() {
-                        matrix.add(row, col, value);
-                    } else {
-                        log::debug!(
-                            "XSPICE deferred stamp ({}, {}) missing from matrix topology",
-                            row,
-                            col
-                        );
-                    }
-                }
+                add_matrix_if_present(matrix, row, col, value);
             }
             for (node, value) in instance.take_deferred_rhs() {
-                if node < rhs.len() {
-                    rhs[node] += value;
-                }
+                add_rhs_if_present(rhs, node, value);
             }
         }
     }
@@ -367,5 +439,189 @@ impl CircuitData {
         self.xspice_instances
             .iter()
             .all(|inst| inst.is_converged(tolerance))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::StaticMatrix;
+    use crate::xspice::{
+        AnalysisType, CmContext, CmError, CmResult, CodeModel, ParamSpec, PortConnection,
+        PortDirection, PortSpec, PortType, XspiceInstance,
+    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::Arc;
+
+    struct OutputModel {
+        ports: Vec<PortSpec>,
+        params: Vec<ParamSpec>,
+    }
+
+    impl OutputModel {
+        fn new(port_type: PortType) -> Self {
+            Self {
+                ports: vec![PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: port_type,
+                    allowed_types: vec![port_type],
+                    is_vector: false,
+                    null_allowed: false,
+                    description: String::new(),
+                }],
+                params: Vec::new(),
+            }
+        }
+    }
+
+    impl CodeModel for OutputModel {
+        fn name(&self) -> &str {
+            "output_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            &self.ports
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &self.params
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            ctx.set_output("out", 1.0);
+            Ok(())
+        }
+    }
+
+    struct FailingModel {
+        ports: Vec<PortSpec>,
+        params: Vec<ParamSpec>,
+    }
+
+    impl FailingModel {
+        fn new() -> Self {
+            Self {
+                ports: vec![PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Current,
+                    allowed_types: vec![PortType::Current],
+                    is_vector: false,
+                    null_allowed: false,
+                    description: String::new(),
+                }],
+                params: Vec::new(),
+            }
+        }
+    }
+
+    impl CodeModel for FailingModel {
+        fn name(&self) -> &str {
+            "failing_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            &self.ports
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &self.params
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Err(CmError::EvaluationError("intentional failure".to_string()))
+        }
+    }
+
+    fn output_instance(port_type: PortType, connection: PortConnection) -> XspiceInstance {
+        XspiceInstance::new(
+            "Aout",
+            Arc::new(OutputModel::new(port_type)),
+            vec![connection],
+            &[],
+            &[],
+        )
+        .expect("output instance should construct")
+    }
+
+    fn failing_instance() -> XspiceInstance {
+        XspiceInstance::new(
+            "Afail",
+            Arc::new(FailingModel::new()),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+        )
+        .expect("failing instance should construct")
+    }
+
+    #[test]
+    fn evaluate_xspice_reports_model_errors_without_stamping_stale_outputs() {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("n1");
+        circuit.xspice_instances.push(failing_instance());
+
+        circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0], AnalysisType::Transient);
+        let err = circuit
+            .take_xspice_evaluation_error()
+            .expect("legacy engine-facing XSPICE evaluation must record model errors");
+
+        assert!(err.contains("Afail"));
+        assert!(err.contains("intentional failure"));
+    }
+
+    #[test]
+    fn stamp_xspice_skips_out_of_range_current_output_without_panicking() {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("n1");
+        circuit.xspice_instances.push(output_instance(
+            PortType::Current,
+            PortConnection::Analog(2),
+        ));
+        circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0], AnalysisType::Transient);
+
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
+        let mut rhs = vec![0.0];
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            circuit.stamp_xspice(&mut matrix, &mut rhs);
+        }));
+
+        result.expect("out-of-range XSPICE output node must not panic");
+        assert_eq!(rhs, vec![0.0]);
+    }
+
+    #[test]
+    fn stamp_xspice_skips_out_of_range_voltage_branch_without_panicking() {
+        let mut instance = output_instance(PortType::Voltage, PortConnection::Analog(1));
+        instance
+            .set_output_branch(0, 8)
+            .expect("test instance should accept branch assignment");
+
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("n1");
+        circuit.xspice_instances.push(instance);
+        circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0], AnalysisType::Transient);
+
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
+        let mut rhs = vec![0.0];
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            circuit.stamp_xspice(&mut matrix, &mut rhs);
+        }));
+
+        result.expect("out-of-range XSPICE branch row must not panic");
+        assert_eq!(rhs, vec![0.0]);
     }
 }

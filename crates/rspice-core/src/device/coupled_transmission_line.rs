@@ -435,7 +435,7 @@ impl CoupledTransmissionLine {
         dt_seconds: Value,
     ) -> Option<NativeCplStampPlan> {
         let native = self.native.as_ref()?;
-        if !native.dc_seeded || !(dt_seconds > 0.0) {
+        if !native.dc_seeded || !dt_seconds.is_finite() || dt_seconds <= 0.0 {
             return None;
         }
         let t1_ps = native.last_committed_ps;

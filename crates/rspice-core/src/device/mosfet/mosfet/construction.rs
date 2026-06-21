@@ -1051,7 +1051,7 @@ impl Mosfet {
 
         let temp = temp_kelvin;
         let tnom = tnom_kelvin;
-        if !(temp > 0.0) || !(tnom > 0.0) {
+        if !temp.is_finite() || temp <= 0.0 || !tnom.is_finite() || tnom <= 0.0 {
             return;
         }
 

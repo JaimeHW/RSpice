@@ -3,6 +3,8 @@
 //! Implements the Ebers-Moll model for NPN and PNP transistors.
 //! Supports both large-signal DC and small-signal AC analysis.
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{Value, circuit::NodeId};
@@ -1347,8 +1349,10 @@ impl Bjt {
 
     #[inline]
     fn add_branches(lhs: BranchLinearization, rhs: BranchLinearization) -> BranchLinearization {
-        let mut branch = BranchLinearization::default();
-        branch.current = lhs.current + rhs.current;
+        let mut branch = BranchLinearization {
+            current: lhs.current + rhs.current,
+            ..Default::default()
+        };
         for idx in 0..INTERNAL_DIM {
             branch.d_internal[idx] = lhs.d_internal[idx] + rhs.d_internal[idx];
         }
@@ -1360,8 +1364,10 @@ impl Bjt {
 
     #[inline]
     fn sub_branches(lhs: BranchLinearization, rhs: BranchLinearization) -> BranchLinearization {
-        let mut branch = BranchLinearization::default();
-        branch.current = lhs.current - rhs.current;
+        let mut branch = BranchLinearization {
+            current: lhs.current - rhs.current,
+            ..Default::default()
+        };
         for idx in 0..INTERNAL_DIM {
             branch.d_internal[idx] = lhs.d_internal[idx] - rhs.d_internal[idx];
         }
@@ -1373,8 +1379,10 @@ impl Bjt {
 
     #[inline]
     fn scale_branch(branch: BranchLinearization, factor: Value) -> BranchLinearization {
-        let mut scaled = BranchLinearization::default();
-        scaled.current = branch.current * factor;
+        let mut scaled = BranchLinearization {
+            current: branch.current * factor,
+            ..Default::default()
+        };
         for idx in 0..INTERNAL_DIM {
             scaled.d_internal[idx] = branch.d_internal[idx] * factor;
         }
@@ -1386,8 +1394,10 @@ impl Bjt {
 
     #[inline]
     fn branch_from_vbe_vbc(current: Value, d_dvbe: Value, d_dvbc: Value) -> BranchLinearization {
-        let mut branch = BranchLinearization::default();
-        branch.current = current;
+        let mut branch = BranchLinearization {
+            current,
+            ..Default::default()
+        };
         branch.d_internal[IDX_VBI] = d_dvbe + d_dvbc;
         branch.d_internal[IDX_VCI] = -d_dvbc;
         branch.d_internal[IDX_VEI] = -d_dvbe;
@@ -1401,8 +1411,10 @@ impl Bjt {
         d_voltage_internal: [Value; INTERNAL_DIM],
         d_voltage_external: [Value; EXTERNAL_DIM],
     ) -> BranchLinearization {
-        let mut power = BranchLinearization::default();
-        power.current = current_branch.current * voltage;
+        let mut power = BranchLinearization {
+            current: current_branch.current * voltage,
+            ..Default::default()
+        };
         for idx in 0..INTERNAL_DIM {
             power.d_internal[idx] = current_branch.d_internal[idx] * voltage
                 + current_branch.current * d_voltage_internal[idx];

@@ -103,11 +103,11 @@ fn from_couplings(n: usize, couplings: Vec<Vec<usize>>, rng: &mut Rng) -> Csc {
 /// structure like real circuit matrices, not a random expander.
 fn ring_osc_matrix(n: usize, rng: &mut Rng) -> Csc {
     let mut couplings: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for j in 1..n {
-        couplings[j].push(j - 1);
-        couplings[j].push((j + 1) % n);
+    for (j, coupling) in couplings.iter_mut().enumerate().take(n).skip(1) {
+        coupling.push(j - 1);
+        coupling.push((j + 1) % n);
         if j % 3 == 0 {
-            couplings[j].push(0); // node 0 = supply rail
+            coupling.push(0); // node 0 = supply rail
         }
     }
     from_couplings(n, couplings, rng)
@@ -117,9 +117,9 @@ fn ring_osc_matrix(n: usize, rng: &mut Rng) -> Csc {
 /// pathological reference row; real circuits are local, not expanders).
 fn expander_matrix(n: usize, rng: &mut Rng) -> Csc {
     let mut couplings: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for j in 0..n {
+    for coupling in couplings.iter_mut().take(n) {
         for _ in 0..4 {
-            couplings[j].push((rng.next() as usize) % n);
+            coupling.push((rng.next() as usize) % n);
         }
     }
     from_couplings(n, couplings, rng)

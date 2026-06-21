@@ -249,6 +249,9 @@ impl TransientCheckpoint {
                         .map_err(|_| format!("'{name}' row {row}: bad value '{field}'"))?;
                     col.push(value);
                 }
+                if let Some(extra) = fields.next() {
+                    return Err(format!("'{name}' row {row}: extra field '{extra}'"));
+                }
             }
             Ok(cols)
         };
@@ -256,6 +259,9 @@ impl TransientCheckpoint {
         let mut solution_cols = read_section("solution", 1)?;
         let cap_cols = read_section("capacitors", 5)?;
         let ind_cols = read_section("inductors", 3)?;
+        if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
+            return Err(format!("checkpoint has trailing content: '{extra}'"));
+        }
 
         let mut cap_iter = cap_cols.into_iter();
         let mut ind_iter = ind_cols.into_iter();
@@ -332,5 +338,25 @@ mod tests {
         let text = sample().to_text();
         let truncated = &text[..text.len() / 2];
         assert!(TransientCheckpoint::from_text(truncated).is_err());
+    }
+
+    #[test]
+    fn malformed_input_rejects_extra_row_fields_and_trailing_data() {
+        let text = sample().to_text();
+        let extra_row_field = text.replacen("0.5\n", "0.5 99\n", 1);
+        let err = TransientCheckpoint::from_text(&extra_row_field)
+            .expect_err("extra checkpoint row fields must be rejected");
+        assert!(
+            err.contains("extra field"),
+            "expected extra-field diagnostic, got {err}"
+        );
+
+        let trailing = format!("{text}unexpected trailer\n");
+        let err = TransientCheckpoint::from_text(&trailing)
+            .expect_err("trailing checkpoint content must be rejected");
+        assert!(
+            err.contains("trailing content"),
+            "expected trailing-content diagnostic, got {err}"
+        );
     }
 }

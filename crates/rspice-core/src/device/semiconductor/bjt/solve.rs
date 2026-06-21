@@ -1,5 +1,7 @@
 //! Intrinsic solve, thermal residual, convergence, and terminal stamping helpers.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::*;
 
 impl Bjt {
@@ -203,24 +205,19 @@ impl Bjt {
         if self.charge_model == BjtChargeModel::Vbic
             && reuse_previous_state
             && self.vbic_max_local_branch_delta(best_state, predicted_state.unwrap_or(state)) > 0.1
-        {
-            if let Some((continued_state, continued_residual_norm)) = self
+            && let Some((continued_state, continued_residual_norm)) = self
                 .solve_intrinsic_state_with_external_continuation(
                     previous_external,
                     state,
                     [vc, vb, ve, vs],
                 )
-            {
-                if continued_residual_norm + 1e-15 < best_residual_norm
-                    || self.vbic_max_local_branch_delta(
-                        continued_state,
-                        predicted_state.unwrap_or(state),
-                    ) <= 0.1
-                {
-                    best_state = continued_state;
-                    best_residual_norm = continued_residual_norm;
-                }
-            }
+            && (continued_residual_norm + 1e-15 < best_residual_norm
+                || self
+                    .vbic_max_local_branch_delta(continued_state, predicted_state.unwrap_or(state))
+                    <= 0.1)
+        {
+            best_state = continued_state;
+            best_residual_norm = continued_residual_norm;
         }
         if predicted_state.is_some()
             && best_residual_norm > 1e-9

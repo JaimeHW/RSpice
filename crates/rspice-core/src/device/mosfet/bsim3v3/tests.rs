@@ -445,7 +445,7 @@ fn junction_diode_matches_ijth_linearization() {
     // Reverse bias: -Is*(1) + gmin*v.
     let op = op_at(&dev, 0.0, 0.0, -1.0);
     let is_s = dev.inst.source_sat_current;
-    let expected = is_s * ((-1.0_f64 / dev.model_temp.vtm).exp() - 1.0) + GMIN * -1.0;
+    let expected = is_s * ((-1.0_f64 / dev.model_temp.vtm).exp() - 1.0) - GMIN;
     let rel = (op.cbs - expected).abs() / expected.abs();
     assert!(rel < 1e-12, "cbs={:.6e} expected={:.6e}", op.cbs, expected);
 

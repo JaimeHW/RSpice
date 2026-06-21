@@ -1,5 +1,7 @@
 //! Charge truncation and transient LTE control helpers.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::*;
 
 impl Engine {

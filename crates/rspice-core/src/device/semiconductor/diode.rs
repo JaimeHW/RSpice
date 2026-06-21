@@ -313,7 +313,7 @@ impl Diode {
             .map(|c| c + 273.15)
             .unwrap_or(default_tnom_kelvin);
         let temp = temp_kelvin;
-        if !(temp > 0.0) || !(tnom > 0.0) {
+        if !temp.is_finite() || temp <= 0.0 || !tnom.is_finite() || tnom <= 0.0 {
             return;
         }
 

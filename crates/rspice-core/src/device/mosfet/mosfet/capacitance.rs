@@ -291,10 +291,13 @@ impl Mosfet {
     #[inline]
     pub(crate) fn eval_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
-        if self.has_branch_history && self.vgs == vgs && self.vds == vds && self.vbs == vbs {
-            if let Some(eval) = self.cached_eval_branch_voltages() {
-                return eval;
-            }
+        if self.has_branch_history
+            && self.vgs == vgs
+            && self.vds == vds
+            && self.vbs == vbs
+            && let Some(eval) = self.cached_eval_branch_voltages()
+        {
+            return eval;
         }
 
         self.limited_branch_voltages_for_eval(vgs, vds, vbs)

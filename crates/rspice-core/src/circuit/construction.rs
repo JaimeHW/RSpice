@@ -54,6 +54,7 @@ impl CircuitData {
             xspice_digital_event_times: HashMap::new(),
             xspice_event_queue: EventQueue::new(),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
+            xspice_evaluation_error: None,
             // Verilog-A devices
             #[cfg(feature = "veriloga")]
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),

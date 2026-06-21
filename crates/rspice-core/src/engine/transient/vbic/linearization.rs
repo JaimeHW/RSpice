@@ -1,5 +1,7 @@
 //! VBIC transient linearization, thermal rebalance, and reduced-system assembly.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::*;
 
 impl Engine {

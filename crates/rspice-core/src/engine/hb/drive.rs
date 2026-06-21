@@ -168,6 +168,26 @@ impl Engine {
         num_nodes: usize,
     ) -> Option<String> {
         let mut kinds: Vec<String> = Vec::new();
+        let describe = |name: &str, count: usize| -> String {
+            let noun = if count == 1 { "device" } else { "devices" };
+            format!("{name} ({count} {noun})")
+        };
+
+        if !circuit.bsim3v3.is_empty() {
+            kinds.push(describe("native BSIM3v3", circuit.bsim3v3.len()));
+        }
+        if !circuit.bsim4v8.is_empty() {
+            kinds.push(describe("native BSIM4", circuit.bsim4v8.len()));
+        }
+        if !circuit.b3soi.is_empty() {
+            kinds.push(describe("native B3SOI DD", circuit.b3soi.len()));
+        }
+        if !circuit.b3soi_fd.is_empty() {
+            kinds.push(describe("native B3SOI FD", circuit.b3soi_fd.len()));
+        }
+        if !circuit.b3soi_pd.is_empty() {
+            kinds.push(describe("native B3SOI PD", circuit.b3soi_pd.len()));
+        }
 
         let unsupported_iswitch = circuit
             .iswitches

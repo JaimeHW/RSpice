@@ -429,12 +429,12 @@ impl Mosfet {
             let a4 = a1 / 2.0 + SIG1[i] * a3;
             let b4 = y3 / 2.0 + SIG2[i] * b3;
             let delta4 = a4 * a4 / 4.0 - b4;
-            if !(delta4 >= 0.0) {
+            if !delta4.is_finite() || delta4 < 0.0 {
                 continue;
             }
             let tmp = delta4.sqrt();
             for root in [-a4 / 2.0 + tmp, -a4 / 2.0 - tmp] {
-                if !(root > 0.0) {
+                if !root.is_finite() || root <= 0.0 {
                     continue;
                 }
                 let poly = root * root * root * root
@@ -442,7 +442,7 @@ impl Mosfet {
                     + b1 * root * root
                     + c1 * root
                     + d1;
-                if !(poly.abs() <= 1.0e-6) {
+                if !poly.is_finite() || poly.abs() > 1.0e-6 {
                     continue;
                 }
                 match xvalid {

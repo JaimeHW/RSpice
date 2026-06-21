@@ -4,6 +4,8 @@
 //! frequency-domain analysis at each specified frequency. Supports
 //! parallel frequency sweeps when the `parallel` feature is enabled.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::{Engine, SimulationError};
 use crate::analysis::ac::AcResult;
 use crate::device::semiconductor::{
@@ -804,10 +806,10 @@ impl Engine {
         // nodal Y-parameter stamp would land on absent matrix cells and
         // leave the branch equations singular (dead far port).
         for tline in &circuit.tlines {
-            if let Some((br1, br2)) = tline.ltra_branch_matrix_indices() {
-                if Self::stamp_ltra_branch_ac(ac_matrix, tline, br1, br2, omega) {
-                    continue;
-                }
+            if let Some((br1, br2)) = tline.ltra_branch_matrix_indices()
+                && Self::stamp_ltra_branch_ac(ac_matrix, tline, br1, br2, omega)
+            {
+                continue;
             }
             if let Some((br1, br2)) = tline.txl_branch_matrix_indices() {
                 Self::stamp_txl_branch_ac(ac_matrix, tline, br1, br2);
@@ -1285,6 +1287,7 @@ impl Engine {
         netlist: &Netlist,
         frequencies: &[Value],
     ) -> Result<Vec<AcResult>, SimulationError> {
+        validate_ac_frequencies(frequencies)?;
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
@@ -1408,5 +1411,65 @@ impl Engine {
             .iter()
             .map(|&freq| solve_at_freq(&circuit, &mut workspace, freq))
             .collect()
+    }
+}
+
+fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), SimulationError> {
+    if frequencies.is_empty() {
+        return Err(SimulationError::Circuit(
+            "AC analysis requires at least one frequency point".to_string(),
+        ));
+    }
+
+    if let Some((index, frequency)) = frequencies
+        .iter()
+        .enumerate()
+        .find(|(_, frequency)| !frequency.is_finite() || **frequency < 0.0)
+    {
+        return Err(SimulationError::Circuit(format!(
+            "AC frequency at index {index} must be finite and non-negative, got {frequency}"
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ac_deck() -> Netlist {
+        Netlist::parse(
+            "AC deck\n\
+             V1 in 0 DC 0 AC 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1u\n\
+             .end\n",
+        )
+        .expect("deck parses")
+    }
+
+    #[test]
+    fn ac_rejects_empty_or_invalid_frequency_grid() {
+        let netlist = ac_deck();
+        let engine = Engine::default();
+
+        let err = engine
+            .run_ac(&netlist, &[])
+            .expect_err("empty AC sweep must not report success");
+        assert!(
+            err.to_string().contains("frequency"),
+            "unexpected error: {err}"
+        );
+
+        for freq in [f64::NAN, f64::INFINITY, -1.0] {
+            let err = engine
+                .run_ac(&netlist, &[freq])
+                .expect_err("invalid AC frequency must not enter the solver");
+            assert!(
+                err.to_string().contains("finite") || err.to_string().contains("non-negative"),
+                "unexpected error for freq={freq:?}: {err}"
+            );
+        }
     }
 }
