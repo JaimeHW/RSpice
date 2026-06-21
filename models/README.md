@@ -17,7 +17,6 @@ attribution lives in the root [`NOTICE`](../NOTICE).
 
 | Path | Model | Origin | License |
 |------|-------|--------|---------|
-| `bsim4.va` | BSIM4 MOSFET | BSIM Group, UC Berkeley | UC Berkeley (see file header) |
 | `ekv26_mod.va` | EKV v2.6 MOSFET | EPFL / Tiburon Design Automation | ECL-2.0 (see file header) |
 | `psp103/` | PSP 103 MOSFET + JUNCAP200 junction (CMC standard) | NXP / CEA / Arizona State University | ECL-2.0 |
 | `r3_cmc/` | R3_CMC three-terminal resistor (CMC standard) | Si2 Compact Model Coalition | ECL-2.0 (`LICENSE.txt` / `NOTICE.txt` in directory) |
@@ -25,3 +24,8 @@ attribution lives in the root [`NOTICE`](../NOTICE).
 
 `psp103/releasenotesPSP103p6.txt` is the upstream release-notes file for
 the vendored PSP snapshot.
+
+RSpice does not bundle a BSIM4 Verilog-A source file. Native BSIM4 v4.8
+simulation is implemented in `rspice-core` for MOS `LEVEL=14/54`; a clean,
+properly licensed external BSIM4 Verilog-A file can be supplied by users or
+reintroduced later only with documented upstream provenance.

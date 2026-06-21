@@ -22,6 +22,10 @@ Derived components include:
     bsim3soi_pd — Copyright 1990, 1999 Regents of the University of California.
     Authors: Samuel Fung, Dennis Sinitsky, Stephen Tang, Weidong Liu, Pin Su,
     and others.
+  - Native BSIM4 v4.8 MOSFET model (crates/rspice-core/src/device/mosfet/bsim4v8/)
+    ported from ngspice src/spicelib/devices/bsim4, which carries the UC
+    Berkeley BSIM4 / Educational Community License notices described in
+    section 2 below.
   - Coupled and lossy transmission-line convolution runtimes (CPL, TXL)
     (crates/rspice-core/src/device/cpl_native.rs,
     crates/rspice-core/src/device/transmission_line/txl.rs) ported from
@@ -79,57 +83,68 @@ at the behavior/format level, validated against ngspice as an external test
 oracle, and does not incorporate ngspice source code.
 
 -------------------------------------------------------------------------------
-2. BSIM4 Verilog-A model (BSD-3-Clause style, UC Berkeley)
+2. UC Berkeley BSIM4 model code (Educational Community License 2.0)
 -------------------------------------------------------------------------------
 
-models/veriloga/bsim4.va is the BSIM4 version 4.8 compact MOSFET model in
-Verilog-A from the BSIM Group at the University of California, Berkeley.
+RSpice's native BSIM4 v4.8 MOSFET model for SPICE MOS LEVEL=14/54 is ported
+from the BSIM4 4.8.3 model code distributed in ngspice-46 under
+src/spicelib/devices/bsim4. Those source files carry the following upstream
+notice:
 
-  Copyright 2001 Regents of the University of California. All rights reserved.
-  Author: Weidong Liu.
-  Authors: Xuemei Xi, Kanyu M. Cao, Hui Wan, Mansun Chan, Chenming Hu.
-  Project Director: Prof. Chenming Hu.
+  BSIM4 4.8.3 released on 05/19/2025
+  Copyright (c) 2025 University of California
+  Project Directors: Prof. Sayeef Salahuddin and Prof. Chenming Hu
+  Developers list: https://www.bsim.berkeley.edu/models/bsim4/auth_bsim4/
 
-Distributed under the BSIM4 license terms of the Regents of the University
-of California (BSD-3-Clause in current BSIM releases).
+The upstream BSIM4 files state that they are licensed under the Educational
+Community License, Version 2.0, available at:
+  http://opensource.org/licenses/ECL-2.0
 
--------------------------------------------------------------------------------
-3. EKV 2.6 Verilog-A model (Educational Community License 2.0)
--------------------------------------------------------------------------------
+The accompanying B4TERMS_OF_USE file grants rights to modify, copy, and
+redistribute the software and documentation, subject to its stated restrictions,
+including acknowledgement of the UC Berkeley BSIM Research Group in product
+documentation, reproduction of copyright notices on copies or modifications
+made available to others, and compliance with applicable U.S. Government
+redistribution/export restrictions.
 
-models/veriloga/ekv26_mod.va contains the EKV 2.6 compact MOSFET model
-distributed by the Compact Model Coalition under the Educational Community
-License, Version 2.0.
-
-The file header identifies the upstream model and its license. The bundled
-copy is provided as a starter/reference Verilog-A model; retain the header
-and license notice when redistributing or modifying that file.
-
--------------------------------------------------------------------------------
-4. PSP103 / JUNCAP200 Verilog-A models (Apache-2.0 and ECL-2.0)
--------------------------------------------------------------------------------
-
-models/veriloga/psp103/ contains PSP103 and JUNCAP200 compact-model
-Verilog-A sources and upstream release notes. The model headers identify the
-Compact Model Coalition material and license terms, including Apache License
-2.0 and Educational Community License 2.0 notices where applicable.
-
-Retain the upstream headers and bundled release/license notices when
-redistributing or modifying these files.
+RSpice does not bundle a BSIM4 Verilog-A source file.
 
 -------------------------------------------------------------------------------
-5. R3_CMC Verilog-A model (Apache-2.0)
+3. Vendored Verilog-A compact models
 -------------------------------------------------------------------------------
 
-models/veriloga/r3_cmc/ contains the R3_CMC compact resistor model and its
-upstream LICENSE.txt and NOTICE.txt files. The model is distributed under the
-Apache License, Version 2.0 by the Compact Model Coalition contributors.
+RSpice bundles selected upstream Verilog-A compact-model sources under
+models/veriloga/. Each file retains its original copyright and license header.
 
-The bundled LICENSE.txt and NOTICE.txt files are part of the attribution
-record for this model and must accompany redistributed copies.
+  - EKV v2.6 rev.15 MOSFET model (models/veriloga/ekv26_mod.va):
+    EKV MOS model by Matthias Bucher, Christophe Lallement, Christian Enz,
+    Fabien Theodoloz, and Francois Krummenacher, Electronics Laboratories,
+    Swiss Federal Institute of Technology Lausanne (EPFL), Switzerland.
+    The Verilog-A was developed by Wladek Grabinski with modifications by
+    Tiburon Design Automation. The file header states it is licensed under
+    the Educational Community License, Version 2.0:
+      http://opensource.org/licenses/ECL-2.0
+
+  - PSP 103.6.0 and JUNCAP200 200.5.0 compact models
+    (models/veriloga/psp103/): Copyright 2004-2017 NXP Semiconductors,
+    2015-2017 Commissariat a l'energie atomique et aux energies alternatives
+    (CEA), 2012-2015 Delft University of Technology, and 2004-2011 Arizona
+    State University. The PSP/JUNCAP source headers state they are licensed
+    under the Educational Community License, Version 2.0:
+      http://opensource.org/licenses/ECL-2.0
+    The bundled release-notes file also states that the release notes are
+    licensed under Creative Commons Attribution 4.0 International.
+
+  - R3_CMC three-terminal resistor compact model (models/veriloga/r3_cmc/):
+    Copyright (c) 2020 Silicon Integration Initiative, Inc. The original
+    R3_CMC files are licensed under the Educational Community License,
+    Version 2.0. The bundled 2023 source/macro files also carry Apache
+    License, Version 2.0 headers for later contributions that incorporate
+    the original R3_CMC model. The R3_CMC standard was developed by the
+    Silicon Integration Initiative's Si2 Compact Model Coalition.
 
 -------------------------------------------------------------------------------
-6. IBM Plex fonts (SIL Open Font License 1.1)
+4. IBM Plex fonts (SIL Open Font License 1.1)
 -------------------------------------------------------------------------------
 
 RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
@@ -143,7 +158,7 @@ RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
   https://scripts.sil.org/OFL
 
 -------------------------------------------------------------------------------
-7. Rust crate dependencies
+5. Rust crate dependencies
 -------------------------------------------------------------------------------
 
 RSpice links against open-source Rust crates. Most are dual-licensed
@@ -170,6 +185,9 @@ distributions on https://crates.io.
 
 -------------------------------------------------------------------------------
 
-The names of the University of California, the ngspice project, IBM, or any
-other copyright holders listed above may not be used to endorse or promote
-RSpice or products derived from it without their prior written permission.
+The names of the University of California, the ngspice project, EPFL, Tiburon
+Design Automation, NXP, CEA, Delft University of Technology, Arizona State
+University, Silicon Integration Initiative, the Si2 Compact Model Coalition,
+IBM, or any other copyright holders listed above may not be used to endorse or
+promote RSpice or products derived from it without their prior written
+permission.

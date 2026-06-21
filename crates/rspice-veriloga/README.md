@@ -132,9 +132,10 @@ The 14 integration test files under `tests/` cover end-to-end compilation
 (`device_eval.rs`), array variables, `aliasparam`, indirect contributions,
 `zi_*` filters, timestep control, `$mfactor` scaling, multi-module
 selection, bytecode-vs-native equivalence (`native_equivalence.rs`), and
-real production models: EKV 2.6 physics, plus BSIM4, PSP 103, and CMC
-model frontier tests. Engine-level oracle tests that compare compiled
-models against reference results live in
+real production models: EKV 2.6 physics, PSP 103, and CMC model frontier
+tests, plus optional BSIM4 coverage when `RSPICE_BSIM4_VA` points at an
+externally supplied clean source file. Engine-level oracle tests
+that compare compiled models against reference results live in
 [rspice-core's test suite](../rspice-core/README.md#building-and-testing)
 (`veriloga_*.rs`).
 

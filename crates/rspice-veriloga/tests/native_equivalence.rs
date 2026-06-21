@@ -6,10 +6,11 @@
 //! device both ways and compare matrix and RHS entries.
 #![cfg(feature = "native")]
 
+mod support;
+
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
-use std::path::Path;
 
 fn compile(source: &str) -> rspice_veriloga::CompiledModel {
     VerilogACompiler::new(CompilerOptions::default())
@@ -126,19 +127,13 @@ endmodule
 }
 
 fn bsim4_model() -> Option<rspice_veriloga::CompiledModel> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga")
-        .join("bsim4.va");
-    if !path.exists() {
+    let Some(path) = support::optional_bsim4_va_path(env!("CARGO_MANIFEST_DIR")) else {
         eprintln!("bsim4.va not present; skipping");
         return None;
-    }
+    };
     Some(
         VerilogACompiler::default()
-            .compile_file(&path)
+            .compile_file(path.as_path())
             .expect("bsim4 compiles"),
     )
 }

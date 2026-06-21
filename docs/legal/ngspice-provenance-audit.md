@@ -4,13 +4,15 @@
 **Scope:** RSpice repository (`C:\Users\James\Desktop\RSpice`) audited against the local ngspice-46 source tree (`C:\Users\James\Desktop\ngspice-46-release\ngspice-46`).
 **Status:** Engineering research, not legal advice. Prepared by automated/manual code survey; have counsel review before relying on it for licensing or distribution decisions.
 
-**Maintenance note (2026-06-19):** this is a dated provenance audit, not a
-live feature inventory. The current tree contains RSpice's own KLU-class real
-solver backend in `crates/rspice-core/src/solver/klu.rs`. A follow-up source
-survey of that Rust solver and its wrapper comments found no vendored,
-translated, or linked code from ngspice `src/maths/KLU`; the implementation is
-an in-tree sparse-LU backend using published KLU-class algorithm concepts and
-faer's AMD ordering support. Re-run this audit before any formal release.
+**2026-06-18 KLU-class solver addendum:** the current tree contains RSpice's
+own KLU-class real solver backend in `crates/rspice-core/src/solver/klu.rs`.
+A source survey of that module and its call sites found that no SuiteSparse
+KLU source or binding is vendored. The implementation is in-tree Rust using
+faer's permissively licensed AMD ordering support, with KLU-class terminology
+limited to algorithm-family descriptions (sparse circuit LU, diagonal-biased
+pivoting, reusable symbolic/pivot structure, and future BTF-style blocking).
+The prohibition on reading or translating ngspice `src/maths/KLU` remains in
+force.
 
 ---
 
@@ -42,7 +44,7 @@ ngspice is **Modified BSD (BSD-3-Clause)** for *"all of its source code, test an
 | `m4/` | DFSG-compatible |
 | ngspice manual | CC-BY-SA 4.0 |
 
-**Key audit result: every ngspice file that RSpice ported from or studied is in the Modified-BSD-covered portion. Nothing was taken from KLU, numparam, xspice/icm/table, tclspice, osdi, or the manual.**
+**Key audit result after the 2026-06-18 KLU-class solver addendum: identified code-level derivation traces to permissive upstream sources: ngspice Modified-BSD-covered files, plus the native BSIM4 v4.8 port whose upstream BSIM4 4.8.3 files carry explicit UC Berkeley BSIM4 / Educational Community License 2.0 notices and B4TERMS_OF_USE. No SuiteSparse KLU source or binding is vendored, and nothing was taken from ngspice KLU, numparam, xspice/icm/table, tclspice, osdi, or the ngspice manual.**
 
 ## 3. Findings table
 
@@ -53,10 +55,11 @@ Risk legend: **none** = behavioral only; **low** = BSD-3 attribution required (n
 | RSpice file(s) | ngspice source | License (header checked) | Risk | Action |
 |---|---|---|---|---|
 | `crates/rspice-core/src/device/mosfet/b3soi/**` (~13.9k lines: `dd/`, `fd/`, `pd/` — `eval.rs` "faithful port", `temp.rs` "faithful port", `params.rs` "transcribed", `common.rs` constants) | `src/spicelib/devices/bsim3soi_dd/`, `bsim3soi_fd/`, `bsim3soi_pd/` (`b3soi{dd,fd,pd}ld.c`, `*temp.c`, `*set.c`, `*.c` param tables) | Modified BSD — "Copyright 1990/1999 Regents of the University of California", authors Fung/Sinitsky/Tang/Liu/Su et al. | low | Attribution added to `NOTICE`. Recommended: add the UC Regents copyright line to the module headers of the ported files. |
+| `crates/rspice-core/src/device/mosfet/bsim4v8/**` (native BSIM4 v4.8 path for MOS `LEVEL=14/54`) | `src/spicelib/devices/bsim4/` (`b4.c`, `b4set.c`, `b4temp.c`, `b4check.c`, `b4ld.c`, `b4acld.c`, `b4geo.c`, `bsim4def.h`, etc.) | Educational Community License 2.0 plus `B4TERMS_OF_USE`; "Copyright (c) 2025 University of California"; project directors Prof. Sayeef Salahuddin and Prof. Chenming Hu | low | Attribution added to `NOTICE`; keep UC Berkeley BSIM Research Group acknowledgement in product documentation and preserve upstream copyright notices on distributed copies/modifications. |
 | `crates/rspice-core/src/device/cpl_native.rs` (3.6k lines; self-describes as "direct, private port") | `src/spicelib/devices/cpl/cplsetup.c`, `cpl/cplload.c` | Modified BSD — "Copyright 1992 Regents of the University of California. Author: 1992 Charles Hough" | low | Attribution added to `NOTICE`; recommend in-file header notice. |
 | `crates/rspice-core/src/device/transmission_line/txl.rs` (1.1k lines, TXL convolution runtime incl. integer-picosecond clock) | `src/spicelib/devices/txl/txlload.c` (+ txl setup) | Modified BSD — same Charles Hough / UC Regents header | low | Same as above. |
-| `models/veriloga/bsim4.va` (verbatim vendored file) | Not from ngspice: UC Berkeley **BSIM4 v4.8 Verilog-A** ("Copyright 2001 Regents of the University of California", Liu/Xi/Cao/Wan/Chan/Hu), Xyce-adapted variant (`__XYCE_VAMS__` define) | Berkeley BSIM license (BSD-3-Clause in current BSIM releases); header carries only the Regents copyright block | **flag (low-medium)** | Attribution added to `NOTICE`. **Confirm origin**: the `__XYCE_VAMS__` marker suggests it was obtained via the Xyce project (GPL-3 repo). The file itself is Berkeley-copyright model code that Xyce redistributes, not Xyce-authored code, but the cleanest fix is to re-vendor the pristine `.va` from the official Berkeley BSIM4.8 release and document that origin. |
-| `tests/` (entire tree: 113 `.cir` decks, `.out` oracles, `bin/` scripts incl. `ngspice.pm`, `check.sh`, CMC `qaSpec` harness, `Makefile.am`s, `README`, `ChangeLog`) | ngspice-46 `tests/` (verbatim copy) | Modified BSD — `COPYING` explicitly covers "test and example files" | low | Attribution added to `NOTICE`. See §4. |
+| `models/veriloga/bsim4.va` (removed 2026-06-17) | Formerly a UC Berkeley BSIM4 v4.8 Verilog-A file with `__XYCE_VAMS__` adaptation markers | Removed from the tree; native BSIM4 v4.8 remains implemented in `rspice-core` for MOS `LEVEL=14/54` | none for current tree | The ambiguous file was removed after the commercial-readiness review. A BSIM4 Verilog-A source may be reintroduced only from a clean official upstream release, with source package/date/hash/license recorded. The official BSIM4 page checked on 2026-06-17 lists the current BSIM4 Standard package contents as C model code, benchmark tests, technical manual, and update document, so no clean Berkeley Verilog-A replacement was vendored in this pass. |
+| `tests/` (entire tree: 113 `.cir` decks, `.out` oracles, `bin/` scripts incl. `ngspice.pm`, `check.sh`, CMC `qaSpec` harness, `Makefile.am`s, `README`, `ChangeLog`) | ngspice-46 `tests/` with one documented local normalization in `bsim3soifd/nmosfd.mod` (`RTH0 94 = .006` -> `RTH0 = .006`) | Modified BSD — `COPYING` explicitly covers "test and example files" | low | Attribution added to `NOTICE`. See §4. |
 
 ### Class (b) — algorithms studied / equations translated from named ngspice files (all Modified BSD)
 
@@ -82,24 +85,25 @@ Risk legend: **none** = behavioral only; **low** = BSD-3 attribution required (n
 - `crates/rspice-bench/**`, `benchmarks/circuits/*` — original harness; decks written fresh (ring51.cir adapted from the vendored test family, which is BSD-covered).
 - `docs/ROADMAP.md`, `README.md`, `design/` — descriptive references only.
 - `crates/rspice-ui/src/io/waveform_io/**` — reads/writes the NUTMEG raw **file format** (format compatibility, no code derivation).
-- `crates/rspice-ui/src/simulation/dialog/options/enums.rs` — as of the
-  2026-06-10 audit, this mentioned KLU only as a *named option in ngspice*
-  for UI parity. As of the 2026-06-19 maintenance pass, RSpice's default
-  KLU-class real solver is in-tree Rust code and is not a SuiteSparse/ngspice
-  KLU binding or port.
+- `crates/rspice-core/src/solver/klu.rs` and its call sites in
+  `solver/sparse.rs` — KLU-class sparse circuit LU implemented in original
+  Rust. The source uses faer for AMD ordering; it does not vendor or bind
+  SuiteSparse KLU or ngspice `src/maths/KLU`.
+- `crates/rspice-ui/src/simulation/dialog/options/enums.rs` — references KLU
+  only as a solver-family/UI term; no code is copied from ngspice KLU.
 
 ## 4. Vendored test decks assessment
 
-- `tests/` is a verbatim copy of ngspice-46's `tests/` directory (113 `.cir` decks plus reference `.out` files, the Perl/shell QA harness in `tests/bin/`, `Makefile.am`s, and ngspice's own `tests/README`). Some decks originate from Spice3f5 and MacSpice3f4 per their comment headers; all are distributed by ngspice under its blanket Modified BSD grant ("source code, test and example files").
+- `tests/` is a vendored copy of ngspice-46's `tests/` directory (113 `.cir` decks plus reference `.out` files, the Perl/shell QA harness in `tests/bin/`, `Makefile.am`s, and ngspice's own `tests/README`) with one documented model-card normalization in `bsim3soifd/nmosfd.mod`: `RTH0 94 = .006` is corrected to `RTH0 = .006`, matching the sibling BSIM3SOI model cards. The recorded `.out` oracles are unchanged. Some decks originate from Spice3f5 and MacSpice3f4 per their comment headers; all are distributed by ngspice under its blanket Modified BSD grant ("source code, test and example files").
 - **Redistribution in a commercial/proprietary repo is permitted** under BSD-3 provided the copyright notice, condition list, and disclaimer are reproduced — now done in the repository `NOTICE`.
-- **Xyce_Regression (GPL-3):** verified that nothing from it is vendored — `grep -ril xyce tests/` returns no hits. Project policy (CI-clone-only) is being followed for `tests/`. The one Xyce-marked file in the repo is `models/veriloga/bsim4.va` (Berkeley-copyright model code, see §3 class (c)) — re-vendor from the Berkeley BSIM release to remove any ambiguity.
+- **Xyce_Regression (GPL-3):** verified that nothing from it is vendored — `grep -ril xyce tests/` returns no hits. Project policy (CI-clone-only) is being followed for `tests/`. The previously Xyce-marked `models/veriloga/bsim4.va` file was removed on 2026-06-17 to eliminate provenance ambiguity.
 - The CMC-style QA scripts (`tests/bin/ngspice.pm`, `run_cmc_check`, `qaSpec` files) ship inside ngspice's `tests/` and carry no separate license header; they fall under the same blanket BSD statement.
 
 ## 5. Embedded assets
 
 - **IBM Plex fonts** (`crates/rspice-ui/assets/fonts/`: Sans Regular/Medium/SemiBold, Mono Regular/Medium) — SIL OFL 1.1. License file **confirmed present**: `crates/rspice-ui/assets/fonts/OFL-IBMPlex.txt` ("Copyright © 2017 IBM Corp. with Reserved Font Name 'Plex'"). OFL obligations (keep notice with the fonts, no selling fonts standalone) are met; also listed in `NOTICE`.
 - `assets/` (logo, images) — project-authored.
-- `models/spice/*.lib` — RSpice-authored model libraries (headers say "RSpice … Library"). `models/veriloga/constants.vams` / `disciplines.vams` — written against IEEE 1800/Verilog-A LRM definitions (facts/standard names). `models/veriloga/bsim4.va` — see §3.
+- `models/spice/*.lib` — RSpice-authored model libraries (headers say "RSpice … Library"). `models/veriloga/constants.vams` / `disciplines.vams` — written against IEEE 1800/Verilog-A LRM definitions (facts/standard names). No BSIM4 Verilog-A file is currently bundled; native BSIM4 v4.8 support lives in `rspice-core`.
 
 ## 6. Dependency licenses (direct deps of workspace crates; license fields verified from cargo registry cache)
 
@@ -123,13 +127,13 @@ No LGPL/GPL crates in the dependency graph's direct tier. (`rustyhdf5` confirmed
 ## 7. What to avoid going forward
 
 1. **Never port, translate, or "study-then-rewrite" code from these ngspice directories** (copyleft): `src/maths/KLU` (LGPLv2), `src/frontend/numparam` (LGPLv2+), `src/xspice/icm/table` (GPLv2+), `src/tclspice.c` (LGPLv2), `src/osdi` (MPL-2.0). Matching their *behavior* from documentation, black-box testing, or the (CC-BY-SA) manual's described semantics is fine — that is exactly how the `.if/.elseif` numparam-semantics work was done; keep that discipline.
-2. **Solver work:** for any KLU-class solver work, implement from the published papers (Davis/Palamadai Natarajan, AMD/BTF literature) or use/keep pure-Rust libraries (`faer`). Do **not** read KLU source as a reference. If a KLU binding is ever truly needed, link SuiteSparse KLU dynamically and respect LGPL terms — keep it an optional, clearly isolated feature. Refresh this audit against the current solver source before release.
+2. **Solver work:** continue implementing KLU-class behavior from published papers (Davis/Palamadai Natarajan, AMD/BTF literature), black-box behavior, and permissively licensed Rust libraries (`faer`). Do **not** read KLU source as a reference. If a KLU binding is ever truly needed, link SuiteSparse KLU dynamically and respect LGPL terms — keep it an optional, clearly isolated feature and record a new audit addendum.
 3. **A `table` code model** for xspice compatibility must be written from the ngspice manual's description only — the reference implementation is GPLv2+.
 4. When porting any further ngspice device (BSD-covered dirs), check the file header first, and carry the upstream copyright line into the Rust module header at port time, plus a `NOTICE` entry.
-5. Keep Xyce and Xyce_Regression (GPL-3) CI-clone-only; never vendor decks, scripts, or `.va` files from those repos. Replace `models/veriloga/bsim4.va` with the pristine Berkeley release copy.
+5. Keep Xyce and Xyce_Regression (GPL-3) CI-clone-only; never vendor decks, scripts, or `.va` files from those repos. If BSIM4 Verilog-A is reintroduced, use only a pristine official upstream source and record provenance in this audit and `NOTICE`.
 6. The ngspice **manual** is CC-BY-SA 4.0: don't paste manual text into RSpice docs (share-alike would attach); paraphrase.
 7. ngspice oracle *outputs* (waveform tables, gdb-extracted fixtures) are safe to check in; keep labeling them with the generating version as is current practice.
 
 ## 8. Conclusion
 
-All identified code-level derivation (class b/c) traces to Modified-BSD-covered ngspice files — predominantly UC Regents copyright. The obligations are: reproduce the copyright notice, conditions, and disclaimer (done in `NOTICE`), and do not use UC/contributor names for endorsement. No LGPL/GPL ngspice code was found in the tree. Open follow-ups: (1) re-vendor `models/veriloga/bsim4.va` from the official Berkeley BSIM4.8 distribution; (2) add upstream copyright lines to the directly-ported module headers (`b3soi/**`, `cpl_native.rs`, `txl.rs`).
+All identified code-level derivation (class b/c) traces to permissive upstream sources: Modified-BSD-covered ngspice files and the UC Berkeley BSIM4 ECL-2.0 / B4TERMS_OF_USE source set. The obligations are: reproduce the applicable copyright notices, conditions, and disclaimers (tracked in `NOTICE`), keep required BSIM Research Group acknowledgement in product documentation, comply with applicable export restrictions, and do not use UC/contributor names for endorsement. No LGPL/GPL ngspice code was found in the tree; the in-tree KLU-class solver is original Rust and no SuiteSparse KLU source or binding is vendored. Open follow-up: add upstream copyright lines to the directly-ported module headers (`b3soi/**`, `cpl_native.rs`, `txl.rs`).

@@ -1,30 +1,42 @@
-//! Full-compilation regression pin for the bundled BSIM4.8 model.
+//! Full-compilation regression pin for an optional BSIM4.8 Verilog-A model.
 //!
-//! The 12.6k-line bsim4.va exercises the entire pipeline: heavy macro
+//! When present, bsim4.va exercises the entire pipeline: heavy macro
 //! preprocessing, the full parser, guarded-dataflow lowering, runtime
 //! (nf-bounded) loops, analog function inlining, branch-current unknowns
 //! for its collapse/impedance voltage contributions, and shadow-based
 //! Jacobian generation. Any regression that breaks one of those features
 //! fails this test immediately.
 
+mod support;
+
 use rspice_veriloga::VerilogACompiler;
 use std::path::Path;
 
 #[test]
+fn bsim4_optional_source_prefers_configured_external_path() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-bsim4-env-path-{}-{}.va",
+        std::process::id(),
+        "frontier"
+    ));
+    std::fs::write(&path, "module bsim4va; endmodule\n").expect("write temporary VA source");
+
+    let actual =
+        support::optional_bsim4_va_path_from(Some(path.clone().into_os_string()), Path::new(""));
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(actual, Some(path));
+}
+
+#[test]
 fn bsim4_compiles_end_to_end() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga")
-        .join("bsim4.va");
-    if !path.exists() {
-        eprintln!("bsim4.va not present; skipping full-compile pin");
+    let Some(path) = support::optional_bsim4_va_path(env!("CARGO_MANIFEST_DIR")) else {
+        eprintln!("bsim4.va not present; skipping optional full-compile pin");
         return;
-    }
+    };
 
     let model = VerilogACompiler::default()
-        .compile_file(&path)
+        .compile_file(path.as_path())
         .expect("BSIM4.8 must compile end to end");
 
     // Structural pins: drain/gate/source/bulk terminals, the model's

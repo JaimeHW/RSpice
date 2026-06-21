@@ -100,7 +100,8 @@ rejection for unsupported advanced BJT levels).
   compatibility path for Xyce regression coverage.
 
 `bsim4v8/` is the native BSIM4 v4.8 path for MOS `LEVEL=14/54`, ported from
-ngspice-46's `src/spicelib/devices/bsim4/`. It is wired through the builder,
+ngspice-46's `src/spicelib/devices/bsim4/`; those upstream BSIM4 files carry
+UC Berkeley BSIM4 / ECL-2.0 terms tracked in the root `NOTICE`. It is wired through the builder,
 matrix reservation, nonlinear Newton stamping, AC small-signal stamping, and
 transient charge integration; `tests/bsim4_native.rs` pins the engine wiring
 against OP, DC sweep, transient, and `LEVEL=54` decks. The port supports
@@ -231,12 +232,13 @@ cargo test -p rspice-core --features veriloga-native
 cargo run --release -p rspice-core --example klu_bench
 ```
 
-Unit tests in the library itself are disabled (`[lib] test = false`); all
-tests live in `tests/`. The suite includes oracle tests that pin device and
-analysis behavior to reference values (diode rectifier, VBIC excess phase,
-LTRA AC, BSIM4/PSP103 via Verilog-A), RF-analysis tests (HB Jacobian/
-Krylov/varactor, PSS shooting, pnoise folding, PAC conversion, STB loop
-gain), parser robustness tests, and a determinism test.
+Library unit tests are excluded from the default package test target by
+`[lib] test = false`; run them explicitly with `cargo test -p rspice-core
+--lib`. The integration suite in `tests/` includes oracle tests that pin
+device and analysis behavior to reference values (diode rectifier, VBIC
+excess phase, LTRA AC, native BSIM4, PSP103 via Verilog-A), RF-analysis tests
+(HB Jacobian/Krylov/varactor, PSS shooting, pnoise folding, PAC conversion,
+STB loop gain), parser robustness tests, and a determinism test.
 
 ### ngspice conformance harness
 

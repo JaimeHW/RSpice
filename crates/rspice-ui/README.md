@@ -73,7 +73,7 @@ Other user-facing machinery, all verified in source:
 | `properties/` | Property editing: engineering-notation value parsing/formatting, model browser, PWL editor, tabbed property dialog, property bridge |
 | `waveform/` | Waveform measurement utilities (min/max/RMS over sample slices) |
 | `ui/` | The VOLTA design system: design tokens, generated color palettes, theme (direction/mode/density), embedded IBM Plex fonts, vector icon set, the widget vocabulary (buttons, chips, dialogs, docbar, forms, pills, tables, toasts, trees…), and the strip-plot engine (axes, scales, traces, cursors, min/max decimation, SI formatting) |
-| `utils/` | File-op helpers, formatting, output specifications |
+| `utils/` | Formatting, numeric, and layout helpers shared by UI surfaces |
 
 ## Engine integration
 
@@ -98,7 +98,7 @@ std-only so license verification also works on wasm32.
 
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
-| `desktop` | off | Enables the rfd-based async file-dialog helpers in `utils/file_ops.rs`; without it those helpers return `FileError::NotSupported` |
+| `desktop` | off | Compatibility marker for native desktop builds; desktop-only behavior is selected by target-specific dependencies and `cfg(not(target_arch = "wasm32"))` code paths |
 | `veriloga` | off | Lets the Verilog-A dialog (`panels/veriloga_dialog/`) build its module info from a real `rspice_veriloga::CompiledModel`; without it a mock constructor is compiled for testing |
 
 `default = []`. Note that the engine's Verilog-A support is wired through
@@ -124,8 +124,11 @@ config directory (via `dirs`).
 
 For the wasm build of the full UI, the target is wired up in `Cargo.toml`
 (`main.rs` has a `wasm32` entry point that attaches to a `#rspice_canvas`
-element), but the shipped browser demo today is the thin
-[rspice-wasm](../rspice-wasm/README.md) playground, not this crate.
+element). The deployed `/ide/` surface is an experimental browser IDE that
+requires a WebGPU-capable browser and routes simulations through the module
+worker guarded by `tools/ci/test_ide_worker.py`. The narrower
+[rspice-wasm](../rspice-wasm/README.md) `/play/` playground remains the
+lightweight OP/AC/TRAN engine demo.
 
 ### `license_tool` example
 

@@ -25,6 +25,8 @@ Around the engine sit a CLI built for batch runs and CI, a desktop application f
 
 RSpice is a young project under active development. The surface area below is broad, and all of it exists in code and is exercised by tests — but maturity varies between areas, and accuracy is measured against ngspice continuously rather than assumed. It is not yet a substitute for hardened EDA tooling.
 
+Platform support is tracked by evidence in [docs/platform-support.md](docs/platform-support.md); mobile/tablet browser use and signed release artifacts are still experimental or launch-only until their gates exist.
+
 ## Quick start
 
 The toolchain is pinned to Rust 1.94 via [rust-toolchain.toml](rust-toolchain.toml); rustup picks it up automatically.
@@ -236,4 +238,4 @@ RSpice is source-available software under the [RSpice Personal Use License](LICE
 
 ## Acknowledgments
 
-RSpice's device models and transient engine owe a great deal to [ngspice](https://ngspice.sourceforge.io/): several models are ported from its BSD-licensed code base (ngspice 46), and its test suite is RSpice's primary accuracy reference. Sparse linear algebra uses the in-tree KLU-class real solver plus [faer](https://crates.io/crates/faer) for complex/AC-family paths.
+RSpice's device models and transient engine owe a great deal to [ngspice](https://ngspice.sourceforge.io/): several models are ported from BSD-licensed portions of ngspice 46, native BSIM4 acknowledges the UC Berkeley BSIM Research Group under the upstream BSIM4 terms, and the ngspice test suite is RSpice's primary accuracy reference. Sparse linear algebra uses the in-tree KLU-class real solver plus [faer](https://crates.io/crates/faer) for complex/AC-family paths.
