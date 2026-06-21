@@ -332,6 +332,14 @@ impl TestRunner {
 
             if let Some(directive) = trimmed.strip_prefix('.') {
                 let token = format!(".{}", directive.split_whitespace().next().unwrap_or(""));
+                if token == ".model"
+                    && let Some(model) = Self::unsupported_xspice_digital_event_model(&trimmed)
+                {
+                    return Some(format!(
+                        "XSPICE digital event models such as '{}' require the digital event kernel, which is not implemented yet",
+                        model
+                    ));
+                }
                 for (pattern, reason) in directive_patterns {
                     if token == pattern {
                         return Some(reason.to_string());
@@ -355,6 +363,45 @@ impl TestRunner {
         None
     }
 
+    fn unsupported_xspice_digital_event_model(line: &str) -> Option<&'static str> {
+        let mut parts = line.split_whitespace();
+        if !parts.next()?.eq_ignore_ascii_case(".model") {
+            return None;
+        }
+        let _model_name = parts.next()?;
+        if let Some(model_type) = parts.next()
+            && let Some(model) = Self::unsupported_xspice_digital_event_model_name(model_type)
+        {
+            return Some(model);
+        }
+
+        for token in line.split(|ch: char| ch.is_whitespace() || ch == '(' || ch == ')') {
+            let Some((key, value)) = token.split_once('=') else {
+                continue;
+            };
+            if key.eq_ignore_ascii_case("model")
+                && let Some(model) = Self::unsupported_xspice_digital_event_model_name(value)
+            {
+                return Some(model);
+            }
+        }
+
+        None
+    }
+
+    fn unsupported_xspice_digital_event_model_name(token: &str) -> Option<&'static str> {
+        let normalized = token
+            .trim_matches(|ch| ch == '"' || ch == '\'' || ch == '(' || ch == ')')
+            .to_ascii_lowercase();
+        match normalized.as_str() {
+            "d_source" => Some("d_source"),
+            "d_state" => Some("d_state"),
+            "d_ram" => Some("d_ram"),
+            "d_rom" => Some("d_rom"),
+            _ => None,
+        }
+    }
+
     pub(super) fn strip_netlist_comment(line: &str) -> &str {
         let no_inline = line.split_once(';').map(|(head, _)| head).unwrap_or(line);
         let trimmed = no_inline.trim_start();
@@ -368,4 +415,31 @@ impl TestRunner {
     // ═══════════════════════════════════════════════════════════════════════════
     // Suite Execution
     // ═══════════════════════════════════════════════════════════════════════════
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_detection_rejects_event_driven_xspice_digital_file_models() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let deck = "\
+digital file model
+a_source [a1 a2] d_source1
+a_counter [up] clk reset [o1 o2] d_state1
+.model d_source1 d_source (input_file=\"stimulus.txt\")
+.model d_state1 d_state (state_file=\"states.txt\")
+.end
+";
+
+        let reason = runner
+            .check_unsupported(deck)
+            .expect("event-driven XSPICE digital file models are not supported yet");
+
+        assert!(
+            reason.contains("XSPICE digital event models"),
+            "unexpected unsupported reason: {reason}"
+        );
+    }
 }

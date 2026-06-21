@@ -7,10 +7,11 @@ impl TestRunner {
         &self,
         name: &str,
         cir_path: &Path,
+        source_path: &Path,
         source: &str,
         start: std::time::Instant,
     ) -> TestResult {
-        let netlist = match Netlist::parse(source) {
+        let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
                 return TestResult {
@@ -143,6 +144,7 @@ impl TestRunner {
         &self,
         name: &str,
         cir_path: &Path,
+        source_path: &Path,
         source: &str,
         sweep_source: &str,
         start_val: Value,
@@ -150,7 +152,7 @@ impl TestRunner {
         step_val: Value,
         start: std::time::Instant,
     ) -> TestResult {
-        let netlist = match Netlist::parse(source) {
+        let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
                 return TestResult {
@@ -400,6 +402,7 @@ impl TestRunner {
         &self,
         name: &str,
         cir_path: &Path,
+        source_path: &Path,
         source: &str,
         inner_source: &str,
         inner_start: Value,
@@ -411,7 +414,7 @@ impl TestRunner {
         outer_step: Value,
         start: std::time::Instant,
     ) -> TestResult {
-        let base_netlist = match Netlist::parse(source) {
+        let base_netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
                 return TestResult {

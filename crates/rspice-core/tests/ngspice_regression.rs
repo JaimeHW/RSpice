@@ -7,8 +7,12 @@
 //! against the current local ngspice source tree and executable instead, set
 //! `RSPICE_NGSPICE_LIVE_REFERENCES=1`, `NGSPICE_SOURCE_ROOT`, and `NGSPICE_EXE`.
 
-use rspice_core::testing::{
-    TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics, decode_test_result,
+use rspice_core::{
+    netlist::Netlist,
+    testing::{
+        TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics,
+        decode_test_result,
+    },
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -263,8 +267,7 @@ fn resolve_hard_case_timeout_ms(config_timeout_ms: u128, hard_cap_ms: u128) -> u
 fn case_runner_soft_timeout_ms(hard_timeout_ms: u128) -> u128 {
     let hard_timeout_ms = hard_timeout_ms.max(1);
     let grace = (hard_timeout_ms / CASE_RUNNER_RESULT_GRACE_DIVISOR)
-        .max(1)
-        .min(CASE_RUNNER_RESULT_GRACE_MS)
+        .clamp(1, CASE_RUNNER_RESULT_GRACE_MS)
         .min(hard_timeout_ms.saturating_sub(1));
     hard_timeout_ms.saturating_sub(grace).max(1)
 }
@@ -781,6 +784,28 @@ fn test_suite_config_applies_soi_timeout_override() {
             suite
         );
     }
+}
+
+#[test]
+fn test_bsim3soifd_nmos_model_card_has_parseable_rth0_parameter() {
+    let tests_dir = get_tests_dir();
+    let deck_path = tests_dir.join("bsim3soifd").join("RampVg2.cir");
+    let source = fs::read_to_string(&deck_path).expect("read BSIM3SOIFD smoke deck");
+    let netlist =
+        Netlist::parse_with_path(&source, &deck_path).expect("BSIM3SOIFD model card parses");
+    let model = netlist
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("n1"))
+        .expect("included NMOS model is present");
+
+    assert!(
+        model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("RTH0") && (*value - 0.006).abs() < 1e-15
+        }),
+        "expected included NMOS model to preserve RTH0=.006, got {:?}",
+        model.params
+    );
 }
 
 #[test]
@@ -1359,6 +1384,7 @@ fn test_full_ngspice_suite_summary() {
         passed: 0,
         failed: 0,
         skipped: 0,
+        expected_unsupported: 0,
         total_time_ms: 0,
     };
     let mut total_foreign_skips = 0usize;
@@ -1369,8 +1395,8 @@ fn test_full_ngspice_suite_summary() {
             total_stats.failed += 1;
             total_stats.total_time_ms += full_suite_start.elapsed().as_millis();
             println!(
-                "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | full-suite timeout exhausted after {}ms",
-                "HARNESS", 1, 0, 1, 0, full_suite_timeout_ms
+                "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | {:4} expected unsupported | full-suite timeout exhausted after {}ms",
+                "HARNESS", 1, 0, 1, 0, 0, full_suite_timeout_ms
             );
             break;
         }
@@ -1383,17 +1409,19 @@ fn test_full_ngspice_suite_summary() {
         total_stats.passed += stats.passed;
         total_stats.failed += stats.failed;
         total_stats.skipped += stats.skipped;
+        total_stats.expected_unsupported += stats.expected_unsupported;
         total_stats.total_time_ms += stats.total_time_ms;
         total_foreign_skips += count_foreign_skips(&results);
 
         if stats.total > 0 {
             println!(
-                "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | {:.1}%",
+                "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | {:4} expected unsupported | {:.1}%",
                 suite,
                 stats.total,
                 stats.passed,
                 stats.failed,
                 stats.skipped,
+                stats.expected_unsupported,
                 stats.pass_rate()
             );
         }
@@ -1405,12 +1433,13 @@ fn test_full_ngspice_suite_summary() {
 
     println!("\n{:=<72}", "");
     println!(
-        "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | {:.1}%",
+        "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | {:4} expected unsupported | {:.1}%",
         "TOTAL",
         total_stats.total,
         total_stats.passed,
         total_stats.failed,
         total_stats.skipped,
+        total_stats.expected_unsupported,
         total_stats.pass_rate()
     );
     println!("Total time: {}ms", total_stats.total_time_ms);
@@ -1578,9 +1607,10 @@ fn test_validation_manifest_only_covers_decks_without_direct_oracles() {
     for (rel, mode) in &manifest {
         let deck_path = tests_dir.join(rel);
         // Smoke is the only mode that asserts the absence of a comparable
-        // oracle; the other contracts (scripted_control, locked_grid,
-        // measures, expected_unsolvable) describe HOW an existing reference
-        // or expected outcome gates the deck.
+        // oracle; the other contracts (scripted_control,
+        // expected_unsupported, locked_grid, measures, expected_unsolvable)
+        // describe HOW an existing reference or expected outcome gates the
+        // deck.
         if mode != "smoke" {
             continue;
         }
@@ -1636,12 +1666,37 @@ fn test_scripted_control_manifest_entries_match_control_decks() {
 }
 
 #[test]
+fn test_expected_unsupported_manifest_entries_match_unsupported_decks() {
+    let tests_dir = get_tests_dir();
+    let manifest = load_validation_manifest();
+    let runner = CoreTestRunner::new(&tests_dir, TestRunnerConfig::default());
+
+    for (rel, mode) in manifest {
+        if mode != "expected_unsupported" {
+            continue;
+        }
+        let result = runner.run_test(&tests_dir.join(&rel));
+        assert!(
+            result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with("EXPECTED_UNSUPPORTED:")),
+            "validation-manifest marks '{}' as expected_unsupported, but the runner did not report a named unsupported feature: {:?}",
+            rel,
+            result
+        );
+    }
+}
+
+#[test]
 fn test_statistics_calculation() {
     let stats = TestStatistics {
         total: 100,
         passed: 75,
         failed: 15,
         skipped: 10,
+        expected_unsupported: 0,
         total_time_ms: 1234,
     };
 

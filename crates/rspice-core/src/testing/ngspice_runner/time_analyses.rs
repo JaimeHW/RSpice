@@ -7,6 +7,7 @@ impl TestRunner {
         &self,
         name: &str,
         cir_path: &Path,
+        source_path: &Path,
         source: &str,
         tstep: Value,
         tstop: Value,
@@ -14,7 +15,7 @@ impl TestRunner {
         tmax: Option<Value>,
         start: std::time::Instant,
     ) -> TestResult {
-        let netlist = match Netlist::parse(source) {
+        let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
                 return TestResult {

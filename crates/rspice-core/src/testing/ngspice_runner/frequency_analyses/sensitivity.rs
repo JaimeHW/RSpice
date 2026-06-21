@@ -4,13 +4,14 @@ impl TestRunner {
     pub(in crate::testing::ngspice_runner) fn run_sensitivity_test(
         &self,
         name: &str,
+        source_path: &Path,
         source: &str,
         output_pos: &str,
         output_neg: Option<&str>,
         sweep: Option<(AcSweepType, usize, Value, Value)>,
         start: std::time::Instant,
     ) -> TestResult {
-        let netlist = match Netlist::parse(source) {
+        let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
                 return TestResult {

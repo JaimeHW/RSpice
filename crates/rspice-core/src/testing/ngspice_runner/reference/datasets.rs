@@ -18,7 +18,10 @@ impl TestRunner {
             return Ok(Some(table));
         }
         if self.load_reference_output(cir_path)?.is_some() {
-            if self.validation_contract_for(cir_path).is_some() {
+            if self
+                .validation_contract_for(cir_path)
+                .is_some_and(ValidationContract::allows_missing_comparable_reference)
+            {
                 return Ok(None);
             }
             return Err(format!(
@@ -789,5 +792,73 @@ impl TestRunner {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn locked_grid_contract_rejects_reference_output_without_time_table() {
+        let (root, cir_path) = synthetic_manifest_fixture("locked_grid");
+        let mut runner = TestRunner::new(&root, TestRunnerConfig::default());
+        runner.live_reference_config = Ok(None);
+
+        let err = runner
+            .reference_table_or_absence(&cir_path, &["time"])
+            .expect_err("locked_grid requires a comparable time table");
+
+        assert!(
+            err.contains("reference output exists but contains no comparable table"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_dir_all(root).expect("remove temporary test directory");
+    }
+
+    #[test]
+    fn smoke_contract_allows_reference_output_without_comparable_table() {
+        let (root, cir_path) = synthetic_manifest_fixture("smoke");
+        let mut runner = TestRunner::new(&root, TestRunnerConfig::default());
+        runner.live_reference_config = Ok(None);
+
+        let table = runner
+            .reference_table_or_absence(&cir_path, &["time"])
+            .expect("smoke may remain execution-only");
+
+        assert!(table.is_none());
+
+        fs::remove_dir_all(root).expect("remove temporary test directory");
+    }
+
+    fn synthetic_manifest_fixture(contract: &str) -> (PathBuf, PathBuf) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after the Unix epoch")
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("rspice_reference_contract_{contract}_{unique}"));
+        fs::create_dir_all(&root).expect("create temporary test directory");
+
+        let cir_path = root.join("fixture.cir");
+        fs::write(
+            &cir_path,
+            "fixture\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 2n\n.end\n",
+        )
+        .expect("write circuit");
+        fs::write(
+            root.join("fixture.out"),
+            "Circuit: fixture\nNo. of Data Rows : 0\nngspice done\n",
+        )
+        .expect("write table-free reference output");
+        fs::write(
+            root.join("validation-manifest.tsv"),
+            format!("fixture.cir\t{contract}\n"),
+        )
+        .expect("write validation manifest");
+
+        (root, cir_path)
     }
 }

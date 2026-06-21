@@ -145,6 +145,20 @@ pub struct TestResult {
     pub analysis_type: Option<String>,
 }
 
+const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
+
+fn expected_unsupported_message(reason: &str) -> String {
+    format!("{EXPECTED_UNSUPPORTED_MARKER} {reason}")
+}
+
+fn is_expected_unsupported_result(result: &TestResult) -> bool {
+    result.passed
+        && result
+            .error
+            .as_ref()
+            .is_some_and(|error| error.starts_with(EXPECTED_UNSUPPORTED_MARKER))
+}
+
 /// A mismatch between expected and actual values
 #[derive(Debug, Clone)]
 pub struct ValueMismatch {
@@ -236,6 +250,11 @@ enum ValidationContract {
     /// Upstream deck whose validation lives in a `.control` script RSpice
     /// does not interpret.
     ScriptedControl,
+    /// The deck intentionally exercises a simulator feature that has not
+    /// been implemented in RSpice yet. The unsupported feature detector
+    /// must name the gap explicitly; if the detector stops matching, the
+    /// contract is stale and the deck must be re-adjudicated.
+    ExpectedUnsupported,
     /// The deck is adjudicated genuinely un-simulatable (e.g., a certified
     /// right-half-plane instability that the reference simulator also
     /// fails): some analysis must terminate with a clean refusal
@@ -270,11 +289,16 @@ impl ValidationContract {
         match token.trim() {
             "smoke" => Some(Self::Smoke),
             "scripted_control" => Some(Self::ScriptedControl),
+            "expected_unsupported" => Some(Self::ExpectedUnsupported),
             "expected_unsolvable" => Some(Self::ExpectedUnsolvable),
             "locked_grid" => Some(Self::LockedGrid),
             "measures" => Some(Self::Measures),
             _ => None,
         }
+    }
+
+    fn allows_missing_comparable_reference(self) -> bool {
+        matches!(self, Self::Smoke | Self::ScriptedControl)
     }
 }
 
@@ -363,6 +387,13 @@ impl TestRunner {
     pub fn config(&self) -> &TestRunnerConfig {
         &self.config
     }
+
+    fn parse_regression_source(
+        source: &str,
+        source_path: &Path,
+    ) -> Result<Netlist, crate::netlist::ParseError> {
+        Netlist::parse_with_path(source, source_path)
+    }
 }
 
 /// Aggregate test statistics
@@ -372,6 +403,7 @@ pub struct TestStatistics {
     pub passed: usize,
     pub failed: usize,
     pub skipped: usize,
+    pub expected_unsupported: usize,
     pub total_time_ms: u128,
 }
 

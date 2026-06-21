@@ -28,7 +28,7 @@ impl TestRunner {
 
     pub(super) fn discover_circuit_files_in_dir(dir: &Path) -> Vec<PathBuf> {
         let mut tests = Vec::new();
-        if let Ok(entries) = fs::read_dir(&dir) {
+        if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path

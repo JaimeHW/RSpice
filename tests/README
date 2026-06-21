@@ -6,12 +6,18 @@ oracle suite (provenance: docs/legal/ngspice-provenance-audit.md). The
 .out files are recorded ngspice-46 results and serve as the golden
 references.
 
+Local normalization: `bsim3soifd/nmosfd.mod` repairs the malformed model-card
+token run `RTH0 94 = .006` to the intended `RTH0 = .006`, matching the sibling
+BSIM3SOI model cards. The recorded ngspice-46 `.out` references remain
+unchanged.
+
 How RSpice runs it: crates/rspice-core/tests/ngspice_regression.rs drives
 the decks suite by suite (test_ngspice_<suite>_suite). Per-deck validation
 contracts live in validation-manifest.tsv (smoke, scripted_control,
-expected_unsolvable, locked_grid, measures); measure gates are declared in
-<deck>.gates.tsv sidecars next to their decks. The full run gates nightly
-CI against the conformance watermark (.github/workflows/nightly.yml).
+expected_unsupported, expected_unsolvable, locked_grid, measures); measure
+gates are declared in <deck>.gates.tsv sidecars next to their decks. The
+full run gates nightly CI against the conformance watermark
+(.github/workflows/nightly.yml).
 
 Layer map — three separate validation surfaces:
   tests/       conformance against recorded ngspice-46 oracles (this tree)

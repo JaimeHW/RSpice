@@ -42,8 +42,10 @@ impl TestRunner {
         })?;
         let preprocessed =
             Netlist::preprocess_includes(&source, &source_cir_path).unwrap_or(source);
-        let stripped = Netlist::strip_control_blocks(&preprocessed);
-        let Ok(netlist) = Netlist::parse(&stripped) else {
+        let Ok(stripped) = Netlist::strip_control_blocks(&preprocessed) else {
+            return Ok(Vec::new());
+        };
+        let Ok(netlist) = Self::parse_regression_source(&stripped, &source_cir_path) else {
             return Ok(Vec::new());
         };
         let Ok(circuit) = self.create_dynamic_engine().build_circuit(&netlist) else {

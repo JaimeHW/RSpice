@@ -153,12 +153,13 @@ impl TestRunner {
         &self,
         name: &str,
         cir_path: &Path,
+        source_path: &Path,
         source: &str,
         output: &str,
         input_source: &str,
         start: std::time::Instant,
     ) -> TestResult {
-        let base_netlist = match Netlist::parse(source) {
+        let base_netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
                 return TestResult {

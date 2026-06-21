@@ -889,7 +889,7 @@ fn parse_raw_ascii_data(
             return Err("unexpected end of rawfile while reading ASCII values".to_string());
         };
         let first = index_line.split_whitespace().collect::<Vec<_>>();
-        if first.len() >= header.variables.len() + 1 {
+        if first.len() > header.variables.len() {
             for var_idx in 0..header.variables.len() {
                 let value = first[var_idx + 1].parse::<f64>().map_err(|err| {
                     format!(
@@ -970,6 +970,54 @@ fn read_raw_f32(content: &[u8], pos: &mut usize) -> Result<f32, String> {
     bytes.copy_from_slice(&content[*pos..end]);
     *pos = end;
     Ok(f32::from_le_bytes(bytes))
+}
+
+fn unique_temp_path(cir_path: &Path, suffix: &str) -> PathBuf {
+    let stem = cir_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    std::env::temp_dir().join(format!(
+        "rspice-ngspice-live-reference-{stem}-{suffix}-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos()
+    ))
+}
+
+fn tail(content: &str) -> String {
+    let lines = content
+        .lines()
+        .rev()
+        .take(3)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" | ");
+    truncate(lines.trim(), 240)
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    let mut iter = value.chars();
+    let truncated = iter.by_ref().take(max_chars).collect::<String>();
+    if iter.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
 }
 
 #[cfg(test)]
@@ -1087,7 +1135,6 @@ mod tests {
         }
     }
 }
-
 fn unique_temp_path(cir_path: &Path, suffix: &str) -> PathBuf {
     let stem = cir_path
         .file_stem()

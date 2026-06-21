@@ -4,6 +4,9 @@
 #                        parse, build, and complete the requested analyses.
 #   scripted_control     Upstream ngspice deck carries validation logic in a
 #                        .control script that RSpice does not yet interpret.
+#   expected_unsupported The deck intentionally exercises an unimplemented
+#                        feature. The runner must report a named unsupported
+#                        feature; if it does not, the contract is stale.
 #   expected_unsolvable  The deck is adjudicated genuinely un-simulatable
 #                        (the reference simulator fails it too); some
 #                        analysis must end in a clean refusal diagnostic --
@@ -78,9 +81,9 @@ regression/temper/temper-1.cir	scripted_control
 regression/temper/temper-2.cir	scripted_control
 regression/temper/temper-3.cir	scripted_control
 regression/temper/temper-res-1.cir	scripted_control
-xspice/digital/d_ram.cir	smoke
-xspice/digital/d_source.cir	smoke
-xspice/digital/d_state.cir	smoke
+xspice/digital/d_ram.cir	expected_unsupported
+xspice/digital/d_source.cir	expected_unsupported
+xspice/digital/d_state.cir	expected_unsupported
 transmission/cpl3_4_line.cir	measures
 transmission/cpl_ibm2.cir	measures
 transmission/ltra1_1_line.cir	locked_grid

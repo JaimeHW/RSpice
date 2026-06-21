@@ -20,12 +20,16 @@ impl TestRunner {
             .iter()
             .filter(|r| r.error.as_ref().is_some_and(|e| e.starts_with("SKIPPED")))
             .count();
-        let failed = total - passed - skipped;
+        let expected_unsupported = results
+            .iter()
+            .filter(|r| is_expected_unsupported_result(r))
+            .count();
+        let failed = total - passed - skipped - expected_unsupported;
 
         println!("\n════════════════════════════════════════════════════════════");
         println!(
-            "  Test Summary: {} total | {} passed | {} failed | {} skipped",
-            total, passed, failed, skipped
+            "  Test Summary: {} total | {} passed | {} failed | {} skipped | {} expected unsupported",
+            total, passed, failed, skipped, expected_unsupported
         );
         println!("════════════════════════════════════════════════════════════\n");
 
@@ -60,6 +64,15 @@ impl TestRunner {
                 }
             }
         }
+
+        if expected_unsupported > 0 {
+            println!();
+            for result in results.iter().filter(|r| is_expected_unsupported_result(r)) {
+                if let Some(ref err) = result.error {
+                    println!("  ! {} - {}", result.name, err);
+                }
+            }
+        }
     }
 
     /// Generate aggregate statistics
@@ -73,7 +86,11 @@ impl TestRunner {
             .iter()
             .filter(|r| r.error.as_ref().is_some_and(|e| e.starts_with("SKIPPED")))
             .count();
-        let failed = total - passed - skipped;
+        let expected_unsupported = results
+            .iter()
+            .filter(|r| is_expected_unsupported_result(r))
+            .count();
+        let failed = total - passed - skipped - expected_unsupported;
         let total_time_ms: u128 = results.iter().map(|r| r.duration_ms).sum();
 
         TestStatistics {
@@ -81,7 +98,46 @@ impl TestRunner {
             passed,
             failed,
             skipped,
+            expected_unsupported,
             total_time_ms,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn statistics_counts_expected_unsupported_separately() {
+        let results = vec![
+            TestResult {
+                name: "digital_source".to_string(),
+                passed: true,
+                error: Some(expected_unsupported_message(
+                    "d_source requires event kernel",
+                )),
+                mismatches: Vec::new(),
+                duration_ms: 1,
+                analysis_type: Some("EXPECTED_UNSUPPORTED".to_string()),
+            },
+            TestResult {
+                name: "rc".to_string(),
+                passed: true,
+                error: None,
+                mismatches: Vec::new(),
+                duration_ms: 1,
+                analysis_type: Some("TRAN".to_string()),
+            },
+        ];
+
+        let stats = TestRunner::statistics(&results);
+
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.passed, 1);
+        assert_eq!(stats.failed, 0);
+        assert_eq!(stats.skipped, 0);
+        assert_eq!(stats.expected_unsupported, 1);
+        assert!((stats.pass_rate() - 50.0).abs() < 0.01);
     }
 }
