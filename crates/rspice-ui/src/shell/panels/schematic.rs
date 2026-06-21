@@ -856,15 +856,16 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         let result = row.show(ui);
 
         if result.response.double_clicked() && hierarchical {
-            let binding = component.library_cell.as_ref().expect("hierarchical");
-            descend = Some((
-                component.name.clone(),
-                CellViewRef::new(
-                    binding.library.clone(),
-                    binding.cell.clone(),
-                    binding.view.clone(),
-                ),
-            ));
+            if let Some(binding) = component.library_cell.as_ref() {
+                descend = Some((
+                    component.name.clone(),
+                    CellViewRef::new(
+                        binding.library.clone(),
+                        binding.cell.clone(),
+                        binding.view.clone(),
+                    ),
+                ));
+            }
         } else if result.response.clicked() {
             // Clicking the twist zone peeks; anywhere else selects.
             let twist_zone = result.response.rect.left() + 16.0 + 12.0;
@@ -883,15 +884,19 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         // Ghost peek: the master's contents, read-only — cheap to look,
         // impossible to edit by accident. Descend to make it real.
         if peeked && hierarchical {
-            let binding = component.library_cell.as_ref().expect("hierarchical");
+            let Some(binding) = component.library_cell.as_ref() else {
+                continue;
+            };
             match master_status(state, binding) {
                 MasterStatus::Open => {
                     let key = format!("{}/{}/{}", binding.library, binding.cell, binding.view);
-                    let master = state
-                        .workspace
-                        .schematic_buffers
-                        .get(&key)
-                        .expect("open status requires a schematic buffer");
+                    let Some(master) = state.workspace.schematic_buffers.get(&key) else {
+                        TreeRow::new("Master schematic is no longer open")
+                            .indent(2)
+                            .dim()
+                            .show(ui);
+                        continue;
+                    };
                     for child in master.components.iter().take(8) {
                         if child.kind == ComponentType::Port {
                             continue;

@@ -34,7 +34,9 @@ impl SchematicState {
         for wire in &self.wires {
             // Check if explicitly selected
             if self.selection.has_wire(wire.id) {
-                wires_to_copy.push(wire.clone());
+                if wire.points.len() >= 2 {
+                    wires_to_copy.push(wire.clone());
+                }
                 continue;
             }
 
@@ -78,9 +80,22 @@ impl SchematicState {
 
         self.with_undo("paste", |s| {
             let clipboard_components = s.clipboard.components.clone();
-            let clipboard_wires = s.clipboard.wires.clone();
+            let clipboard_wires: Vec<Wire> = s
+                .clipboard
+                .wires
+                .iter()
+                .filter(|wire| wire.points.len() >= 2)
+                .cloned()
+                .collect();
             let clipboard_junctions = s.clipboard.junctions.clone();
             let origin = s.clipboard.origin;
+
+            if clipboard_components.is_empty()
+                && clipboard_wires.is_empty()
+                && clipboard_junctions.is_empty()
+            {
+                return;
+            }
 
             let offset_x = pos.x - origin.x;
             let offset_y = pos.y - origin.y;
@@ -119,5 +134,33 @@ impl SchematicState {
             s.is_dirty = true;
             s.bump_topology_version();
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clipboard_drops_malformed_wires_from_corrupt_import_state() {
+        let mut schematic = SchematicState::default();
+        schematic.wires.push(Wire::new(10, Vec::new()));
+        schematic.wires.push(Wire::new(11, vec![Point::new(5, 5)]));
+        schematic.selection.select_wire(10);
+        schematic.selection.select_wire(11);
+        let original_wire_count = schematic.wires.len();
+
+        schematic.copy_selection();
+
+        assert!(
+            schematic.clipboard.wires.is_empty(),
+            "malformed wires must not propagate into clipboard state"
+        );
+        schematic.paste_at(Point::new(20, 20));
+        assert_eq!(
+            schematic.wires.len(),
+            original_wire_count,
+            "paste must not create additional invalid wires"
+        );
     }
 }

@@ -62,6 +62,14 @@ impl ResolvedCellSymbol {
         self.pins.iter()
     }
 
+    pub fn effective_point(&self, point: Point) -> Point {
+        point - self.document.origin
+    }
+
+    pub fn effective_pin_offset(&self, pin: &ResolvedSymbolPin) -> Point {
+        self.effective_point(pin.offset)
+    }
+
     fn from_authored(document: SymbolDocument, ports: &[PortSpec]) -> Self {
         let mut pins = Vec::new();
         let mut issues = Vec::new();

@@ -81,24 +81,26 @@ impl Theme {
 /// - `radius`            → widget rounding; `radius-lg` → window/menu rounding
 fn build_style(t: &Tokens) -> egui::Style {
     let c = &t.color;
-    let mut style = egui::Style::default();
 
     // ------------------------------------------------------------- typography
-    style.text_styles = [
-        (TextStyle::Small, FontId::new(tokens::FS_0, fonts::sans())),
-        (TextStyle::Body, FontId::new(tokens::FS_2, fonts::sans())),
-        (TextStyle::Button, FontId::new(tokens::FS_1, fonts::sans())),
-        (
-            TextStyle::Monospace,
-            FontId::new(tokens::FS_1, fonts::mono()),
-        ),
-        (
-            TextStyle::Heading,
-            FontId::new(tokens::FS_3, fonts::sans_semibold()),
-        ),
-    ]
-    .into();
-    style.drag_value_text_style = TextStyle::Monospace;
+    let mut style = egui::Style {
+        text_styles: [
+            (TextStyle::Small, FontId::new(tokens::FS_0, fonts::sans())),
+            (TextStyle::Body, FontId::new(tokens::FS_2, fonts::sans())),
+            (TextStyle::Button, FontId::new(tokens::FS_1, fonts::sans())),
+            (
+                TextStyle::Monospace,
+                FontId::new(tokens::FS_1, fonts::mono()),
+            ),
+            (
+                TextStyle::Heading,
+                FontId::new(tokens::FS_3, fonts::sans_semibold()),
+            ),
+        ]
+        .into(),
+        drag_value_text_style: TextStyle::Monospace,
+        ..Default::default()
+    };
 
     // --------------------------------------------------------------- spacing
     let m = &t.metrics;

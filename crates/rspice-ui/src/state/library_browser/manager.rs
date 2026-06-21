@@ -78,6 +78,13 @@ impl LibraryManager {
         self.libraries.get(name)
     }
 
+    /// Iterate libraries with their canonical map keys.
+    pub fn libraries_by_key(&self) -> impl Iterator<Item = (&str, &Library)> {
+        self.libraries
+            .iter()
+            .map(|(key, library)| (key.as_str(), library))
+    }
+
     /// Get mutable library by name (assumes mutation: bumps the revision)
     pub fn get_library_mut(&mut self, name: &str) -> Option<&mut Library> {
         self.revision = self.revision.wrapping_add(1);

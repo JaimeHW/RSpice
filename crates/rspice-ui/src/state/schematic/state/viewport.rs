@@ -14,7 +14,16 @@ impl SchematicState {
     /// - `viewport_height`: Height of the schematic canvas in pixels
     pub fn zoom_to_fit(&mut self, viewport_width: f64, viewport_height: f64) {
         // Calculate bounding box of all content (in schematic pixel coordinates)
-        let Some((min_x, min_y, max_x, max_y)) = self.content_bounds() else {
+        self.zoom_to_fit_bounds(self.content_bounds(), viewport_width, viewport_height);
+    }
+
+    pub(crate) fn zoom_to_fit_bounds(
+        &mut self,
+        bounds: Option<(i32, i32, i32, i32)>,
+        viewport_width: f64,
+        viewport_height: f64,
+    ) {
+        let Some((min_x, min_y, max_x, max_y)) = bounds else {
             // No content - reset to default view
             self.zoom = 1.0;
             self.pan = (0.0, 0.0);

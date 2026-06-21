@@ -137,10 +137,10 @@ pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, sta
         let color = severity_color(violation.severity, &palette);
         draw_badge(painter, pos, color, palette.canvas_bg);
 
-        if let Some(cursor) = cursor {
-            if cursor.distance(pos) <= HALF + 4.0 {
-                hovered = Some((pos, violation));
-            }
+        if let Some(cursor) = cursor
+            && cursor.distance(pos) <= HALF + 4.0
+        {
+            hovered = Some((pos, violation));
         }
     }
 

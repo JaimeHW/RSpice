@@ -54,6 +54,7 @@ impl DecimationCache {
     }
 
     /// Fetch or compute the envelope for one trace at the given view.
+    #[allow(clippy::too_many_arguments)]
     pub fn envelope(
         &mut self,
         trace_key: u64,
@@ -106,7 +107,7 @@ pub fn decimate_minmax(
     columns: usize,
 ) -> Vec<[f64; 2]> {
     let n = x.len().min(y.len());
-    if n == 0 || columns == 0 || !(x1 > x0) {
+    if n == 0 || columns == 0 || !matches!(x1.partial_cmp(&x0), Some(std::cmp::Ordering::Greater)) {
         return Vec::new();
     }
     // Visible index range (x is sorted ascending).

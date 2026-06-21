@@ -46,10 +46,10 @@ pub fn component_value_label_cached(component: &Component) -> Rc<str> {
 
     LABEL_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some((hash, label)) = cache.get(&component.id) {
-            if *hash == content {
-                return Rc::clone(label);
-            }
+        if let Some((hash, label)) = cache.get(&component.id)
+            && *hash == content
+        {
+            return Rc::clone(label);
         }
         if cache.len() >= LABEL_CACHE_CAP {
             cache.clear();

@@ -16,6 +16,8 @@ use egui::{Context, Rect, Sense, Stroke, Ui, vec2};
 use super::compile::{poll_compile, start_compile};
 use super::options::VerilogADialogOptions;
 use super::state::VerilogALoadDialogState;
+#[cfg(target_arch = "wasm32")]
+use super::types::CompileErrorDisplay;
 use super::types::{CompilationState, ErrorSeverity, VerilogADialogResult};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -34,6 +36,8 @@ pub fn render_veriloga_load_dialog(
 
     // Pump the background compile; on the frame it finishes, stamp the
     // wall-clock for the "compiled in X s" line.
+    #[cfg(target_arch = "wasm32")]
+    poll_browser_veriloga_source_import(state);
     let was_compiling = matches!(state.compilation_state, CompilationState::Compiling);
     poll_compile(state);
     let now = ctx.input(|i| i.time);
@@ -172,27 +176,110 @@ fn render_source_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
 /// mono editor and compiled from memory (`include is not resolved).
 #[cfg(target_arch = "wasm32")]
 fn render_source_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
-    let c = Tokens::get(ui.ctx()).color;
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
 
     caption(ui, "SOURCE");
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), t.metrics.row_h),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let can_import = !matches!(state.compilation_state, CompilationState::Compiling);
+            if Button::new("Browse…")
+                .ghost()
+                .enabled(can_import)
+                .show(ui)
+                .clicked()
+            {
+                match start_browser_veriloga_source_import() {
+                    Ok(()) => {}
+                    Err(error) => {
+                        state.reset_compile_outcome();
+                        state.errors = vec![CompileErrorDisplay::error(error)];
+                        state.compilation_state = CompilationState::Failed;
+                    }
+                }
+            }
+            let source_label = if state.file_path_text.trim().is_empty() {
+                "No source selected"
+            } else {
+                state.file_path_text.trim()
+            };
+            ui.label(
+                egui::RichText::new(source_label)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text_dim),
+            );
+        },
+    );
+    ui.add_space(4.0);
     let response = ui.add(
         egui::TextEdit::multiline(&mut state.source_text)
             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .hint_text("paste Verilog-A source — `module … endmodule`")
+            .hint_text("module … endmodule")
             .desired_rows(10)
             .desired_width(f32::INFINITY),
     );
     if response.changed() {
         state.reset_compile_outcome();
     }
-    ui.add_space(2.0);
-    ui.label(
-        egui::RichText::new(
-            "compiles the pasted text — `include directives are not resolved in the browser",
-        )
-        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-        .color(c.text_faint),
-    );
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+enum BrowserVerilogAImportResult {
+    Cancelled,
+    Failed(String),
+    Loaded(crate::common::browser_file_import::PickedTextFile),
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BROWSER_VERILOGA_IMPORT_RESULT: std::cell::RefCell<Option<BrowserVerilogAImportResult>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn start_browser_veriloga_source_import() -> Result<(), String> {
+    crate::common::browser_file_import::try_begin_text_import(
+        crate::common::browser_file_import::BrowserTextImportKind::VerilogA,
+    )?;
+
+    crate::common::browser_file_import::pick_text_file("Verilog-A", &["va", "vams"], |result| {
+        let event = match result {
+            Ok(Some(file)) => BrowserVerilogAImportResult::Loaded(file),
+            Ok(None) => BrowserVerilogAImportResult::Cancelled,
+            Err(error) => BrowserVerilogAImportResult::Failed(error),
+        };
+        BROWSER_VERILOGA_IMPORT_RESULT.with(|slot| {
+            *slot.borrow_mut() = Some(event);
+        });
+    });
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_veriloga_source_import(state: &mut VerilogALoadDialogState) {
+    let event = BROWSER_VERILOGA_IMPORT_RESULT.with(|slot| slot.borrow_mut().take());
+    if event.is_some() {
+        crate::common::browser_file_import::finish_text_import(
+            crate::common::browser_file_import::BrowserTextImportKind::VerilogA,
+        );
+    }
+    match event {
+        Some(BrowserVerilogAImportResult::Loaded(file)) => {
+            state.set_browser_source_file(file.name, file.contents);
+        }
+        Some(BrowserVerilogAImportResult::Failed(error)) => {
+            state.reset_compile_outcome();
+            state.errors = vec![CompileErrorDisplay::error(format!(
+                "Verilog-A import failed: {error}"
+            ))];
+            state.compilation_state = CompilationState::Failed;
+        }
+        Some(BrowserVerilogAImportResult::Cancelled) | None => {}
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

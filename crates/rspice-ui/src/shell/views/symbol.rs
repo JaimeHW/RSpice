@@ -723,11 +723,14 @@ fn draw_body(
                         stroke,
                     );
                 }
-                if *closed && points.len() > 2 {
+                if *closed
+                    && points.len() > 2
+                    && let (Some(first), Some(last)) = (points.first(), points.last())
+                {
                     painter.line_segment(
                         [
-                            viewport.world_to_screen(*points.last().expect("last point")),
-                            viewport.world_to_screen(points[0]),
+                            viewport.world_to_screen(*last),
+                            viewport.world_to_screen(*first),
                         ],
                         stroke,
                     );
@@ -994,7 +997,7 @@ fn preview_tile_rect(canvas: Rect) -> Rect {
 }
 
 fn preview_viewport_for_tile(rect: Rect, document: &SymbolDocument) -> SymbolViewport {
-    let (min, max) = document_bounds(document);
+    let (min, max) = preview_effective_bounds(document);
     let width = (max.x - min.x).abs().max(1) as f32;
     let height = (max.y - min.y).abs().max(1) as f32;
     let fit_rect = rect.shrink(PREVIEW_FIT_PADDING);
@@ -1007,6 +1010,11 @@ fn preview_viewport_for_tile(rect: Rect, document: &SymbolDocument) -> SymbolVie
         zoom,
         pan: vec2(-(center.x as f32) * zoom, -(center.y as f32) * zoom),
     }
+}
+
+fn preview_effective_bounds(document: &SymbolDocument) -> (Point, Point) {
+    let (min, max) = document_bounds(document);
+    (min - document.origin, max - document.origin)
 }
 
 fn pins_rail(
@@ -1203,11 +1211,16 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                 ) <= HIT_PX
             }) || (*closed
                 && points.len() > 2
-                && distance_to_screen_segment(
-                    pos,
-                    viewport.world_to_screen(*points.last().expect("last point")),
-                    viewport.world_to_screen(points[0]),
-                ) <= HIT_PX)
+                && points
+                    .first()
+                    .zip(points.last())
+                    .is_some_and(|(first, last)| {
+                        distance_to_screen_segment(
+                            pos,
+                            viewport.world_to_screen(*last),
+                            viewport.world_to_screen(*first),
+                        ) <= HIT_PX
+                    }))
         }
         SymbolShape::Circle { center, radius } => {
             let center = viewport.world_to_screen(*center);
@@ -1535,6 +1548,40 @@ mod tests {
             viewport.zoom < 0.25,
             "large authored symbols must be scaled down for preview: {}",
             viewport.zoom
+        );
+    }
+
+    #[test]
+    fn preview_viewport_fits_nonzero_origin_as_placed_symbol() {
+        let document = SymbolDocument {
+            origin: Point::new(200, 100),
+            name_anchor: Point::new(200, 70),
+            value_anchor: Point::new(200, 130),
+            body: vec![SymbolShape::Polyline {
+                points: vec![
+                    Point::new(160, 80),
+                    Point::new(240, 80),
+                    Point::new(240, 120),
+                    Point::new(160, 120),
+                ],
+                closed: true,
+            }],
+            ..SymbolDocument::default()
+        };
+        let body_rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(168.0, 102.0));
+
+        let viewport = preview_viewport_for_tile(body_rect, &document);
+        let (min, max) = document_bounds(&document);
+        let min_screen = viewport.world_to_screen(min - document.origin);
+        let max_screen = viewport.world_to_screen(max - document.origin);
+
+        assert!(
+            body_rect.shrink(10.0).contains(min_screen),
+            "effective min={min_screen:?}"
+        );
+        assert!(
+            body_rect.shrink(10.0).contains(max_screen),
+            "effective max={max_screen:?}"
         );
     }
 

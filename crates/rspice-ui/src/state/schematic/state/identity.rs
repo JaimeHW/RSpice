@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
 
 impl SchematicState {
     // =========================================================================
@@ -33,6 +34,13 @@ impl SchematicState {
     /// Recalculate runtime state after loading from file
     /// This MUST be called after deserialization to prevent ID collisions
     pub fn recalculate_runtime_state(&mut self) {
+        let wire_count_before_repair = self.wires.len();
+        self.wires.retain(|wire| wire.points.len() >= 2);
+        self.clipboard.wires.retain(|wire| wire.points.len() >= 2);
+        if self.wires.len() != wire_count_before_repair {
+            self.bump_topology_version();
+        }
+
         // Find the maximum ID currently in use across every collection that
         // allocates from the shared counter (components, wires, junctions,
         // and net labels).
@@ -62,6 +70,23 @@ impl SchematicState {
             self.components[index].id = self.next_id();
         }
 
+        // Repair duplicate live wire IDs as well. Wire operations are keyed by
+        // ID, so keeping duplicates would make edits apply inconsistently.
+        let mut seen = HashSet::with_capacity(self.wires.len());
+        let duplicates: Vec<usize> = self
+            .wires
+            .iter()
+            .enumerate()
+            .filter(|(_, wire)| !seen.insert(wire.id))
+            .map(|(index, _)| index)
+            .collect();
+        if !duplicates.is_empty() {
+            for index in duplicates {
+                self.wires[index].id = self.next_id();
+            }
+            self.bump_topology_version();
+        }
+
         // Rebuild component counters from existing component names
         self.component_counters.clear();
         for comp in &self.components {
@@ -76,6 +101,50 @@ impl SchematicState {
                 }
             }
         }
+
+        self.remove_stale_runtime_references();
+    }
+
+    fn remove_stale_runtime_references(&mut self) {
+        let component_ids: HashSet<u64> = self
+            .components
+            .iter()
+            .map(|component| component.id)
+            .collect();
+        let wire_point_counts: HashMap<u64, usize> = self
+            .wires
+            .iter()
+            .map(|wire| (wire.id, wire.points.len()))
+            .collect();
+        let junction_positions: HashSet<Point> =
+            self.junctions.iter().map(|junction| junction.pos).collect();
+
+        self.selection
+            .components
+            .retain(|id| component_ids.contains(id));
+        self.selection
+            .wires
+            .retain(|id| wire_point_counts.contains_key(id));
+        self.selection.wire_segments.retain(|segment| {
+            wire_point_counts
+                .get(&segment.wire_id)
+                .is_some_and(|point_count| segment.segment_index < point_count.saturating_sub(1))
+        });
+        self.selection.wire_vertices.retain(|vertex| {
+            wire_point_counts
+                .get(&vertex.wire_id)
+                .is_some_and(|point_count| vertex.vertex_index < *point_count)
+        });
+        self.selection
+            .junctions
+            .retain(|junction| junction_positions.contains(&junction.pos));
+
+        self.connections.retain(|connection| {
+            component_ids.contains(&connection.component_id)
+                && wire_point_counts
+                    .get(&connection.wire_id)
+                    .is_some_and(|point_count| connection.point_index < *point_count)
+        });
     }
 
     /// Generate a unique component name

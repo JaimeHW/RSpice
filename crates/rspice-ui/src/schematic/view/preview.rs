@@ -1,11 +1,12 @@
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::common::app::AppState;
-use crate::state::{ComponentType, Point, Tool};
+use crate::state::{Component, ComponentType, Point, ResolvedCellSymbol, Tool};
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_wire_grid};
+use super::resolved_symbol_render::draw_resolved_symbol;
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_diode_symbol, draw_ground_symbol, draw_inductor_symbol,
     draw_isource_symbol, draw_nmos_symbol, draw_npn_symbol, draw_pmos_symbol, draw_pnp_symbol,
@@ -25,7 +26,14 @@ pub(super) fn draw_interaction_previews(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     draw_wire_preview(painter, response, state, viewport, symbol_context);
-    draw_component_preview(painter, response, state, viewport, symbol_library);
+    draw_component_preview(
+        painter,
+        response,
+        state,
+        viewport,
+        symbol_context,
+        symbol_library,
+    );
     draw_selection_rect(painter, state, viewport);
 }
 
@@ -101,11 +109,25 @@ fn wire_preview_snap_position(
         .snapped_position
 }
 
+fn pending_library_cell_preview<'a>(
+    state: &AppState,
+    symbol_context: &'a SchematicSymbolContext,
+    grid_pos: Point,
+) -> Option<(Component, &'a ResolvedCellSymbol)> {
+    let binding = state.schematic.pending_library_cell.clone()?;
+    let symbol = symbol_context.pending_library_symbol()?;
+    let component = Component::new(0, ComponentType::CellInstance, grid_pos)
+        .with_rotation(state.schematic.preview_rotation)
+        .with_library_cell(binding);
+    Some((component, symbol))
+}
+
 fn draw_component_preview(
     painter: &Painter,
     response: &Response,
     state: &AppState,
     viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
     if !component_preview_enabled(state.schematic.read_only) {
@@ -129,6 +151,21 @@ fn draw_component_preview(
                 .accent
                 .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
         );
+
+        if component_type == ComponentType::CellInstance
+            && let Some((preview_component, symbol)) =
+                pending_library_cell_preview(state, symbol_context, grid_pos)
+        {
+            draw_resolved_symbol(
+                painter,
+                preview_pos,
+                viewport.zoom,
+                &preview_component,
+                symbol,
+                preview_stroke,
+            );
+            return;
+        }
 
         let svg_rendered = if let Some(library) = symbol_library {
             if let Some((symbol, adjusted_rotation)) =
@@ -258,6 +295,56 @@ mod tests {
             wire_preview_snap_position(&state, &symbol_context, near_terminal),
             terminal
         );
+    }
+
+    #[test]
+    fn pending_library_cell_preview_uses_selected_authored_symbol() {
+        let mut state = AppState::default();
+        let mut library = crate::state::Library::new("work");
+        let mut cell = crate::state::Cell::new("amp");
+        cell.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        let mut symbol_view = crate::state::View::new("symbol", crate::state::ViewType::Symbol);
+        crate::state::SymbolDocument {
+            pins: vec![crate::state::SymbolPin::new(
+                "OUT",
+                crate::state::PortDirection::Out,
+                Some(Point::new(40, 0)),
+            )],
+            ..crate::state::SymbolDocument::default()
+        }
+        .store_in_view(&mut symbol_view)
+        .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+
+        let mut binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[crate::state::PortSpec {
+            name: "OUT".to_owned(),
+            direction: crate::state::PortDirection::Out,
+        }]);
+        state.schematic.pending_library_cell = Some(binding);
+        state.schematic.preview_rotation = crate::state::Rotation::R90;
+        let context = SchematicSymbolContext::from_state(&state);
+
+        let (component, symbol) =
+            pending_library_cell_preview(&state, &context, Point::new(100, 50))
+                .expect("pending library cell has preview symbol");
+
+        assert_eq!(component.kind, ComponentType::CellInstance);
+        assert_eq!(component.pos, Point::new(100, 50));
+        assert_eq!(component.rotation, crate::state::Rotation::R90);
+        assert_eq!(
+            component
+                .library_cell
+                .as_ref()
+                .map(|binding| (binding.library.as_str(), binding.cell.as_str())),
+            Some(("work", "amp"))
+        );
+        assert_eq!(symbol.connectable_pins().count(), 1);
     }
 }
 

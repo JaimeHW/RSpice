@@ -150,6 +150,10 @@ impl SchematicState {
         }
         let mut ids: Vec<u64> = self.selection.components.iter().copied().collect();
         ids.sort_unstable();
+        ids.retain(|id| self.components.iter().any(|component| component.id == *id));
+        if ids.is_empty() {
+            return;
+        }
         self.with_undo(description, move |s| {
             let before: Vec<(u64, Vec<Point>)> = ids
                 .iter()
@@ -347,5 +351,18 @@ mod tests {
             "wire endpoint should follow the first component's pin once, not then match and follow \
              the second component's old pin"
         );
+    }
+
+    #[test]
+    fn rotating_stale_component_selection_is_noop() {
+        let mut schematic = SchematicState::default();
+        schematic.selection.select_component(404);
+        let topology_version = schematic.topology_version();
+
+        schematic.rotate_selection();
+
+        assert!(!schematic.is_dirty);
+        assert_eq!(schematic.topology_version(), topology_version);
+        assert!(schematic.components.is_empty());
     }
 }

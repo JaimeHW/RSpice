@@ -123,13 +123,13 @@ fn selection_text(state: &AppState) -> String {
         );
     }
     let selection = &state.schematic.selection;
-    if let Some(id) = selection.single_component() {
-        if let Some(component) = state.schematic.components.iter().find(|c| c.id == id) {
-            if component.value.is_empty() {
-                return format!("Sel: {}", component.name);
-            }
-            return format!("Sel: {} ({})", component.name, component.value);
+    if let Some(id) = selection.single_component()
+        && let Some(component) = state.schematic.components.iter().find(|c| c.id == id)
+    {
+        if component.value.is_empty() {
+            return format!("Sel: {}", component.name);
         }
+        return format!("Sel: {} ({})", component.name, component.value);
     }
     let count = selection.count();
     if count == 0 {

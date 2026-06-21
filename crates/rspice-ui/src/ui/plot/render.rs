@@ -123,8 +123,14 @@ pub fn show(
     };
     if plot_rect.width() < 24.0
         || plot_rect.height() < 24.0
-        || !(spec.x.max > spec.x.min)
-        || !(spec.y.max > spec.y.min)
+        || !matches!(
+            spec.x.max.partial_cmp(&spec.x.min),
+            Some(std::cmp::Ordering::Greater)
+        )
+        || !matches!(
+            spec.y.max.partial_cmp(&spec.y.min),
+            Some(std::cmp::Ordering::Greater)
+        )
     {
         return out;
     }
@@ -306,16 +312,16 @@ pub fn show(
             c.text_dim,
         );
     }
-    if let Some((axis, tint)) = &spec.y_right {
-        if !axis.unit.is_empty() {
-            painter.text(
-                pos2(plot_rect.right() + 8.0, rect.top() + 8.0),
-                Align2::LEFT_CENTER,
-                axis.unit,
-                tick_font.clone(),
-                *tint,
-            );
-        }
+    if let Some((axis, tint)) = &spec.y_right
+        && !axis.unit.is_empty()
+    {
+        painter.text(
+            pos2(plot_rect.right() + 8.0, rect.top() + 8.0),
+            Align2::LEFT_CENTER,
+            axis.unit,
+            tick_font.clone(),
+            *tint,
+        );
     }
     if !spec.x.unit.is_empty() {
         painter.text(
@@ -400,27 +406,27 @@ pub fn show(
     }
 
     // ---- pointer: crosshair, readout, clicks
-    if let Some(pointer) = out.response.hover_pos() {
-        if plot_rect.contains(pointer) {
-            let frac = ((pointer.x - plot_rect.left()) / plot_rect.width()) as f64;
-            let data_x = spec.x_scale.denormalize(frac, spec.x.min, spec.x.max);
-            out.hover_x = Some(data_x);
+    if let Some(pointer) = out.response.hover_pos()
+        && plot_rect.contains(pointer)
+    {
+        let frac = ((pointer.x - plot_rect.left()) / plot_rect.width()) as f64;
+        let data_x = spec.x_scale.denormalize(frac, spec.x.min, spec.x.max);
+        out.hover_x = Some(data_x);
 
-            if let Some(readout) = readout {
-                painter.extend(Shape::dashed_line(
-                    &[
-                        pos2(pointer.x, plot_rect.top()),
-                        pos2(pointer.x, plot_rect.bottom()),
-                    ],
-                    Stroke::new(1.0, c.text_faint),
-                    3.0,
-                    3.0,
-                ));
-                draw_readout(ui, &t, rect, plot_rect, pointer, &readout(data_x));
-            }
-            if out.response.clicked() {
-                out.clicked_x = Some(data_x);
-            }
+        if let Some(readout) = readout {
+            painter.extend(Shape::dashed_line(
+                &[
+                    pos2(pointer.x, plot_rect.top()),
+                    pos2(pointer.x, plot_rect.bottom()),
+                ],
+                Stroke::new(1.0, c.text_faint),
+                3.0,
+                3.0,
+            ));
+            draw_readout(ui, &t, rect, plot_rect, pointer, &readout(data_x));
+        }
+        if out.response.clicked() {
+            out.clicked_x = Some(data_x);
         }
     }
 

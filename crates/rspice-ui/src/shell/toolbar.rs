@@ -12,6 +12,42 @@ use crate::ui::widgets::{Button, IconButton};
 
 /// Toolbar height.
 pub const TOOLBAR_HEIGHT: f32 = 42.0;
+const FULL_TOOLBAR_REQUIRED_WIDTH: f32 = 680.0;
+const COMPACT_TOOLBAR_REQUIRED_WIDTH: f32 = 324.0;
+const COMPACT_SYMBOL_TOOLBAR_REQUIRED_WIDTH: f32 = 360.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolbarPresentation {
+    Full,
+    Compact,
+}
+
+fn toolbar_presentation_for_width(width: f32) -> ToolbarPresentation {
+    if width < toolbar_required_width(ToolbarPresentation::Full, true) {
+        ToolbarPresentation::Compact
+    } else {
+        ToolbarPresentation::Full
+    }
+}
+
+fn toolbar_required_width(presentation: ToolbarPresentation, symbol_tools: bool) -> f32 {
+    match presentation {
+        ToolbarPresentation::Full => {
+            if symbol_tools {
+                FULL_TOOLBAR_REQUIRED_WIDTH + 72.0
+            } else {
+                FULL_TOOLBAR_REQUIRED_WIDTH
+            }
+        }
+        ToolbarPresentation::Compact => {
+            if symbol_tools {
+                COMPACT_SYMBOL_TOOLBAR_REQUIRED_WIDTH
+            } else {
+                COMPACT_TOOLBAR_REQUIRED_WIDTH
+            }
+        }
+    }
+}
 
 /// Render the toolbar panel.
 pub fn show(ctx: &Context, state: &mut AppState) {
@@ -30,47 +66,191 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                 egui::Stroke::new(1.0, c.border),
             );
 
-            ui.horizontal_centered(|ui| {
-                ui.add_space(8.0);
-                ui.spacing_mut().item_spacing.x = 2.0;
-
-                schematic_tools(ui, state);
-                toolbar_separator(ui);
-                view_controls(ui, state);
-                toolbar_separator(ui);
-                history_controls(ui, state);
-                toolbar_separator(ui);
-                check_controls(ui, state);
-
-                // Right cluster: corner select, stop, run.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
-                    ui.spacing_mut().item_spacing.x = 8.0;
-
-                    let can_run = state.can_run_simulation();
-                    if Button::new("Run")
-                        .icon(Icon::Run)
-                        .hint("F5")
-                        .accent()
-                        .enabled(can_run)
-                        .show(ui)
-                        .clicked()
-                    {
-                        state.request_run_set_simulation();
-                        state.shell.view = WorkspaceView::Simulate;
-                    }
-                    if Button::new("Stop")
-                        .icon(Icon::Stop)
-                        .enabled(state.simulation.is_running)
-                        .show(ui)
-                        .clicked()
-                    {
-                        state.simulation.trigger_abort = true;
-                    }
-                    corner_select(ui, state);
-                });
-            });
+            ui.horizontal_centered(
+                |ui| match toolbar_presentation_for_width(panel_rect.width()) {
+                    ToolbarPresentation::Full => full_toolbar(ui, state),
+                    ToolbarPresentation::Compact => compact_toolbar(ui, state),
+                },
+            );
         });
+}
+
+fn full_toolbar(ui: &mut Ui, state: &mut AppState) {
+    ui.add_space(8.0);
+    ui.spacing_mut().item_spacing.x = 2.0;
+
+    schematic_tools(ui, state);
+    toolbar_separator(ui);
+    view_controls(ui, state);
+    toolbar_separator(ui);
+    history_controls(ui, state);
+    toolbar_separator(ui);
+    check_controls(ui, state);
+
+    // Right cluster: corner select, stop, run.
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add_space(8.0);
+        ui.spacing_mut().item_spacing.x = 8.0;
+
+        let run_block_reason = state.simulation_run_block_reason();
+        let can_run = run_block_reason.is_none();
+        let run_response = Button::new("Run")
+            .icon(Icon::Run)
+            .hint("F5")
+            .accent()
+            .enabled(can_run)
+            .show(ui);
+        let run_clicked = run_response.clicked();
+        if let Some(reason) = run_block_reason.as_deref() {
+            run_response.on_hover_text(reason);
+        }
+        if run_clicked {
+            state.request_run_set_simulation();
+            state.shell.view = WorkspaceView::Simulate;
+        }
+        if Button::new("Stop")
+            .icon(Icon::Stop)
+            .enabled(state.simulation.is_running)
+            .show(ui)
+            .clicked()
+        {
+            state.simulation.trigger_abort = true;
+        }
+        corner_select(ui, state);
+    });
+}
+
+fn compact_toolbar(ui: &mut Ui, state: &mut AppState) {
+    ui.add_space(8.0);
+    ui.spacing_mut().item_spacing.x = 2.0;
+
+    schematic_tools(ui, state);
+
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add_space(8.0);
+        ui.spacing_mut().item_spacing.x = 4.0;
+
+        compact_run_control(ui, state);
+        compact_stop_control(ui, state);
+        compact_toolbar_overflow(ui, state);
+    });
+}
+
+fn compact_run_control(ui: &mut Ui, state: &mut AppState) {
+    let run_block_reason = state.simulation_run_block_reason();
+    let can_run = run_block_reason.is_none();
+    let run_response = IconButton::new(Icon::Run)
+        .enabled(can_run)
+        .tooltip("Run simulation (F5)")
+        .show(ui);
+    let run_clicked = run_response.clicked();
+    if let Some(reason) = run_block_reason.as_deref() {
+        run_response.on_hover_text(reason);
+    }
+    if run_clicked {
+        state.request_run_set_simulation();
+        state.shell.view = WorkspaceView::Simulate;
+    }
+}
+
+fn compact_stop_control(ui: &mut Ui, state: &mut AppState) {
+    if IconButton::new(Icon::Stop)
+        .enabled(state.simulation.is_running)
+        .tooltip("Stop simulation (Shift+F5)")
+        .show(ui)
+        .clicked()
+    {
+        state.simulation.trigger_abort = true;
+    }
+}
+
+fn compact_toolbar_overflow(ui: &mut Ui, state: &mut AppState) {
+    ui.menu_button("More", |ui| {
+        ui.set_min_width(220.0);
+        if crate::shell::menubar::item(ui, "Zoom in", None) {
+            if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                state.shell.symbol.zoom = (state.shell.symbol.zoom * 1.25).min(18.0);
+            } else {
+                state.schematic.zoom = (state.schematic.zoom * 1.25).min(4.0);
+            }
+        }
+        if crate::shell::menubar::item(ui, "Zoom out", None) {
+            if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                state.shell.symbol.zoom = (state.shell.symbol.zoom / 1.25).max(1.0);
+            } else {
+                state.schematic.zoom = (state.schematic.zoom / 1.25).max(0.25);
+            }
+        }
+        if crate::shell::menubar::item(ui, "Zoom to fit", Some("F")) {
+            if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                state.shell.symbol.needs_fit = true;
+            } else {
+                state.schematic.needs_fit = true;
+            }
+        }
+        if crate::shell::menubar::item(ui, "Cycle grid", None) {
+            state.shell.grid = state.shell.grid.cycled();
+        }
+        crate::shell::menubar::separator(ui);
+
+        let (can_undo, can_redo, redo_shortcut) = compact_history_controls(state);
+        if can_undo {
+            if crate::shell::menubar::item(ui, "Undo", Some("Ctrl+Z")) {
+                if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                    let _ = state.undo_active_symbol_document();
+                } else {
+                    state.schematic.undo();
+                }
+            }
+        } else {
+            crate::shell::menubar::item_disabled(ui, "Undo", Some("Ctrl+Z"));
+        }
+        if can_redo {
+            if crate::shell::menubar::item(ui, "Redo", Some(redo_shortcut)) {
+                if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                    let _ = state.redo_active_symbol_document();
+                } else {
+                    state.schematic.redo();
+                }
+            }
+        } else {
+            crate::shell::menubar::item_disabled(ui, "Redo", Some(redo_shortcut));
+        }
+        crate::shell::menubar::separator(ui);
+
+        if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            if crate::shell::menubar::item(ui, "Run symbol pin checks", Some("Ctrl+E")) {
+                state.run_active_symbol_pin_checks();
+            }
+        } else {
+            if crate::shell::menubar::item(ui, "Run design checks", Some("Ctrl+E")) {
+                crate::common::menu_bar::run_design_rule_check(state);
+            }
+            if crate::shell::menubar::item(ui, "Generate netlist", None) {
+                crate::common::menu_bar::action_view_netlist(state);
+                state.shell.view = WorkspaceView::Netlist;
+            }
+        }
+        crate::shell::menubar::separator(ui);
+        ui.label("Process corner");
+        corner_select(ui, state);
+    });
+}
+
+fn compact_history_controls(state: &AppState) -> (bool, bool, &'static str) {
+    if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        (
+            state.can_undo_active_symbol_document(),
+            state.can_redo_active_symbol_document(),
+            "Ctrl+Y",
+        )
+    } else {
+        (
+            state.schematic.can_undo(),
+            state.schematic.can_redo(),
+            "Ctrl+Shift+Z",
+        )
+    }
 }
 
 fn toolbar_separator(ui: &mut Ui) {
@@ -346,5 +526,56 @@ fn corner_select(ui: &mut Ui, state: &mut AppState) {
         crate::ui::widgets::select(ui, "volta.corner", &current_label, &LABELS, 120.0)
     {
         state.shell.corner = corners[index].name.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phone_width_toolbar_uses_compact_presentation_that_fits() {
+        let presentation = toolbar_presentation_for_width(390.0);
+
+        assert_eq!(presentation, ToolbarPresentation::Compact);
+        assert!(
+            toolbar_required_width(presentation, false) <= 390.0,
+            "compact schematic toolbar should fit a phone viewport"
+        );
+        assert!(
+            toolbar_required_width(presentation, true) <= 390.0,
+            "compact symbol toolbar should fit a phone viewport"
+        );
+    }
+
+    #[test]
+    fn tablet_width_toolbar_keeps_full_presentation() {
+        let presentation = toolbar_presentation_for_width(900.0);
+
+        assert_eq!(presentation, ToolbarPresentation::Full);
+    }
+
+    #[test]
+    fn toolbar_stays_compact_until_widest_full_estimate_fits() {
+        let symbol_required = toolbar_required_width(ToolbarPresentation::Full, true);
+
+        assert_eq!(
+            toolbar_presentation_for_width(symbol_required - 1.0),
+            ToolbarPresentation::Compact
+        );
+        assert_eq!(
+            toolbar_presentation_for_width(symbol_required),
+            ToolbarPresentation::Full
+        );
+    }
+
+    #[test]
+    fn compact_history_controls_mirror_schematic_desktop_state() {
+        let state = AppState::default();
+
+        assert_eq!(
+            compact_history_controls(&state),
+            (false, false, "Ctrl+Shift+Z")
+        );
     }
 }

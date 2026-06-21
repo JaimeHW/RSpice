@@ -22,8 +22,9 @@ pub use property_types::{
 };
 pub use schematic::*;
 pub use simulation::{
-    AnalysisResult, AnalysisType, CrossProbeMapping, DcOpResult, NoiseContributorRow, NoiseSummary,
-    OperatingPointValue, SimulationRun, SimulationRunIntent, SimulationState, WaveformData,
+    AcBodeMetrics, AcBodeSummary, AnalysisResult, AnalysisType, CrossProbeMapping, DcOpResult,
+    NoiseContributorRow, NoiseSummary, OperatingPointValue, SharedWaveformValues, SimulationRun,
+    SimulationRunIntent, SimulationState, WaveformData, ac_bode_summary_for_run,
 };
 pub use symbol::{
     PinFinding, PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_TERMINAL_GRID,

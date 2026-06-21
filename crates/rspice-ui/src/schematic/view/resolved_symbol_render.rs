@@ -35,23 +35,12 @@ pub(crate) fn resolved_symbol_world_bounds(
     component: &Component,
     symbol: &ResolvedCellSymbol,
 ) -> Option<(Point, Point)> {
-    let points = local_symbol_extent_points(symbol);
-    if points.is_empty() {
-        return None;
-    }
-
-    let mut min_x = i32::MAX;
-    let mut min_y = i32::MAX;
-    let mut max_x = i32::MIN;
-    let mut max_y = i32::MIN;
-    for point in points {
+    let mut bounds = BoundsAccumulator::default();
+    fold_symbol_extent_points(symbol, |point| {
         let world = component.pos + component.transform_point(point);
-        min_x = min_x.min(world.x);
-        min_y = min_y.min(world.y);
-        max_x = max_x.max(world.x);
-        max_y = max_y.max(world.y);
-    }
-    Some((Point::new(min_x, min_y), Point::new(max_x, max_y)))
+        bounds.include(world);
+    });
+    bounds.finish()
 }
 
 fn draw_symbol_body(
@@ -67,21 +56,21 @@ fn draw_symbol_body(
             SymbolShape::Polyline { points, closed } => {
                 let screen_points: Vec<Pos2> = points
                     .iter()
-                    .map(|point| to_screen(origin, scale, component, *point))
+                    .map(|point| to_screen_symbol(origin, scale, component, symbol, *point))
                     .collect();
                 for pair in screen_points.windows(2) {
                     painter.line_segment([pair[0], pair[1]], stroke);
                 }
-                if *closed && screen_points.len() > 2 {
-                    painter.line_segment(
-                        [*screen_points.last().expect("last point"), screen_points[0]],
-                        stroke,
-                    );
+                if *closed
+                    && screen_points.len() > 2
+                    && let (Some(first), Some(last)) = (screen_points.first(), screen_points.last())
+                {
+                    painter.line_segment([*last, *first], stroke);
                 }
             }
             SymbolShape::Circle { center, radius } => {
                 painter.circle_stroke(
-                    to_screen(origin, scale, component, *center),
+                    to_screen_symbol(origin, scale, component, symbol, *center),
                     *radius as f32 * scale,
                     stroke,
                 );
@@ -95,7 +84,7 @@ fn draw_symbol_body(
                 let points: Vec<Pos2> =
                     arc_points(*center, *radius, *start_degrees, *sweep_degrees)
                         .into_iter()
-                        .map(|point| to_screen(origin, scale, component, point))
+                        .map(|point| to_screen_symbol(origin, scale, component, symbol, point))
                         .collect();
                 painter.add(Shape::line(points, stroke));
             }
@@ -105,13 +94,13 @@ fn draw_symbol_body(
             } => {
                 let points: Vec<Pos2> = arrow_points(*tip, *rotation_quarters)
                     .into_iter()
-                    .map(|point| to_screen(origin, scale, component, point))
+                    .map(|point| to_screen_symbol(origin, scale, component, symbol, point))
                     .collect();
                 painter.add(Shape::convex_polygon(points, stroke.color, Stroke::NONE));
             }
             SymbolShape::Dot { center, radius } => {
                 painter.circle_filled(
-                    to_screen(origin, scale, component, *center),
+                    to_screen_symbol(origin, scale, component, symbol, *center),
                     *radius as f32 * scale,
                     stroke.color,
                 );
@@ -131,8 +120,9 @@ fn draw_symbol_pins(
     let stroke = Stroke::new(1.1 * scale, color);
     let font_size = 6.5 * scale;
     for pin in symbol.connectable_pins() {
-        let terminal = to_screen(origin, scale, component, pin.offset);
-        let inner = to_screen(origin, scale, component, stub_inner(pin.offset));
+        let offset = symbol.effective_pin_offset(pin);
+        let terminal = to_screen(origin, scale, component, offset);
+        let inner = to_screen(origin, scale, component, stub_inner(offset));
         painter.line_segment([terminal, inner], stroke);
         painter.circle_filled(terminal, 1.6 * scale, color);
         draw_direction_mark(painter, terminal, inner, pin.direction, color);
@@ -164,7 +154,13 @@ fn draw_symbol_labels(
     let font = crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Medium);
     if !component.name.is_empty() {
         painter.text(
-            to_screen(origin, scale, component, symbol.document().name_anchor),
+            to_screen_symbol(
+                origin,
+                scale,
+                component,
+                symbol,
+                symbol.document().name_anchor,
+            ),
             Align2::LEFT_CENTER,
             &component.name,
             font.clone(),
@@ -182,7 +178,13 @@ fn draw_symbol_labels(
     };
     if !value.is_empty() {
         painter.text(
-            to_screen(origin, scale, component, symbol.document().value_anchor),
+            to_screen_symbol(
+                origin,
+                scale,
+                component,
+                symbol,
+                symbol.document().value_anchor,
+            ),
             Align2::LEFT_CENTER,
             value,
             font,
@@ -205,7 +207,7 @@ fn write_symbol_body_svg(
                 }
                 svg.push_str(r#"<path class="component" d=""#);
                 for (index, point) in points.iter().enumerate() {
-                    let (x, y) = to_svg(component, *point, config);
+                    let (x, y) = to_svg_symbol(component, symbol, *point, config);
                     if index == 0 {
                         write!(svg, "M {x} {y}").unwrap();
                     } else {
@@ -218,7 +220,7 @@ fn write_symbol_body_svg(
                 svg.push_str("\"/>\n");
             }
             SymbolShape::Circle { center, radius } => {
-                let (cx, cy) = to_svg(component, *center, config);
+                let (cx, cy) = to_svg_symbol(component, symbol, *center, config);
                 let radius = *radius as f64 * config.grid_size;
                 writeln!(
                     svg,
@@ -238,7 +240,7 @@ fn write_symbol_body_svg(
                 }
                 svg.push_str(r#"<path class="component" d=""#);
                 for (index, point) in points.into_iter().enumerate() {
-                    let (x, y) = to_svg(component, point, config);
+                    let (x, y) = to_svg_symbol(component, symbol, point, config);
                     if index == 0 {
                         write!(svg, "M {x} {y}").unwrap();
                     } else {
@@ -254,12 +256,13 @@ fn write_symbol_body_svg(
                 write_polygon_svg(
                     svg,
                     component,
+                    symbol,
                     &arrow_points(*tip, *rotation_quarters),
                     config,
                 );
             }
             SymbolShape::Dot { center, radius } => {
-                let (cx, cy) = to_svg(component, *center, config);
+                let (cx, cy) = to_svg_symbol(component, symbol, *center, config);
                 let radius = *radius as f64 * config.grid_size;
                 writeln!(
                     svg,
@@ -279,8 +282,9 @@ fn write_symbol_pins_svg(
     config: &SvgExportConfig,
 ) {
     for pin in symbol.connectable_pins() {
-        let (x1, y1) = to_svg(component, pin.offset, config);
-        let (x2, y2) = to_svg(component, stub_inner(pin.offset), config);
+        let offset = symbol.effective_pin_offset(pin);
+        let (x1, y1) = to_svg(component, offset, config);
+        let (x2, y2) = to_svg(component, stub_inner(offset), config);
         writeln!(
             svg,
             r#"<line class="component" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#
@@ -293,7 +297,7 @@ fn write_symbol_pins_svg(
             fill = config.component_color
         )
         .unwrap();
-        let (tx, ty) = to_svg(component, stub_inner(pin.offset), config);
+        let (tx, ty) = to_svg(component, stub_inner(offset), config);
         write_text_svg(svg, tx, ty, &pin.name);
     }
 }
@@ -305,7 +309,7 @@ fn write_symbol_labels_svg(
     config: &SvgExportConfig,
 ) {
     if !component.name.is_empty() {
-        let (x, y) = to_svg(component, symbol.document().name_anchor, config);
+        let (x, y) = to_svg_symbol(component, symbol, symbol.document().name_anchor, config);
         write_text_svg(svg, x, y, &component.name);
     }
     let value = if component.value.is_empty() {
@@ -318,7 +322,7 @@ fn write_symbol_labels_svg(
         component.value.as_str()
     };
     if !value.is_empty() {
-        let (x, y) = to_svg(component, symbol.document().value_anchor, config);
+        let (x, y) = to_svg_symbol(component, symbol, symbol.document().value_anchor, config);
         write_text_svg(svg, x, y, value);
     }
 }
@@ -326,12 +330,13 @@ fn write_symbol_labels_svg(
 fn write_polygon_svg(
     svg: &mut String,
     component: &Component,
+    symbol: &ResolvedCellSymbol,
     points: &[Point],
     config: &SvgExportConfig,
 ) {
     svg.push_str("<polygon points=\"");
     for (index, point) in points.iter().enumerate() {
-        let (x, y) = to_svg(component, *point, config);
+        let (x, y) = to_svg_symbol(component, symbol, *point, config);
         if index > 0 {
             svg.push(' ');
         }
@@ -359,12 +364,31 @@ fn to_screen(origin: Pos2, scale: f32, component: &Component, point: Point) -> P
     origin + vec2(transformed.x as f32 * scale, transformed.y as f32 * scale)
 }
 
+fn to_screen_symbol(
+    origin: Pos2,
+    scale: f32,
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    point: Point,
+) -> Pos2 {
+    to_screen(origin, scale, component, symbol.effective_point(point))
+}
+
 fn to_svg(component: &Component, point: Point, config: &SvgExportConfig) -> (f64, f64) {
     let transformed = component.pos + component.transform_point(point);
     (
         transformed.x as f64 * config.grid_size,
         transformed.y as f64 * config.grid_size,
     )
+}
+
+fn to_svg_symbol(
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    point: Point,
+    config: &SvgExportConfig,
+) -> (f64, f64) {
+    to_svg(component, symbol.effective_point(point), config)
 }
 
 fn draw_direction_mark(
@@ -442,35 +466,79 @@ fn arrow_points(tip: Point, rotation_quarters: i32) -> [Point; 3] {
     ]
 }
 
-fn local_symbol_extent_points(symbol: &ResolvedCellSymbol) -> Vec<Point> {
-    let mut points = vec![
-        symbol.document().origin,
-        symbol.document().name_anchor,
-        symbol.document().value_anchor,
-    ];
+fn fold_symbol_extent_points(symbol: &ResolvedCellSymbol, mut include: impl FnMut(Point)) {
+    include(Point::origin());
+    include(symbol.effective_point(symbol.document().name_anchor));
+    include(symbol.effective_point(symbol.document().value_anchor));
+
     for pin in symbol.connectable_pins() {
-        points.push(pin.offset);
-        points.push(stub_inner(pin.offset));
+        let offset = symbol.effective_pin_offset(pin);
+        include(offset);
+        include(stub_inner(offset));
     }
+
     for shape in &symbol.document().body {
         match shape {
             SymbolShape::Polyline {
                 points: shape_points,
                 ..
-            } => points.extend(shape_points.iter().copied()),
+            } => {
+                for point in shape_points {
+                    include(symbol.effective_point(*point));
+                }
+            }
             SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
-                points.extend(cardinal_bounds(*center, *radius));
+                for point in cardinal_bounds(symbol.effective_point(*center), *radius) {
+                    include(point);
+                }
             }
             SymbolShape::Arc { center, radius, .. } => {
-                points.extend(cardinal_bounds(*center, *radius));
+                for point in cardinal_bounds(symbol.effective_point(*center), *radius) {
+                    include(point);
+                }
             }
             SymbolShape::Arrow {
                 tip,
                 rotation_quarters,
-            } => points.extend(arrow_points(*tip, *rotation_quarters)),
+            } => {
+                for point in arrow_points(*tip, *rotation_quarters) {
+                    include(symbol.effective_point(point));
+                }
+            }
         }
     }
-    points
+}
+
+#[cfg(test)]
+fn resolved_symbol_local_bounds(symbol: &ResolvedCellSymbol) -> Option<(Point, Point)> {
+    let mut bounds = BoundsAccumulator::default();
+    fold_symbol_extent_points(symbol, |point| bounds.include(point));
+    bounds.finish()
+}
+
+#[derive(Default)]
+struct BoundsAccumulator {
+    min: Option<Point>,
+    max: Option<Point>,
+}
+
+impl BoundsAccumulator {
+    fn include(&mut self, point: Point) {
+        match (self.min, self.max) {
+            (Some(min), Some(max)) => {
+                self.min = Some(Point::new(min.x.min(point.x), min.y.min(point.y)));
+                self.max = Some(Point::new(max.x.max(point.x), max.y.max(point.y)));
+            }
+            _ => {
+                self.min = Some(point);
+                self.max = Some(point);
+            }
+        }
+    }
+
+    fn finish(self) -> Option<(Point, Point)> {
+        Some((self.min?, self.max?))
+    }
 }
 
 fn cardinal_bounds(center: Point, radius: i32) -> [Point; 4] {
@@ -487,4 +555,81 @@ fn escape_xml(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schematic::export::SvgExportConfig;
+    use crate::state::{ComponentType, PortSpec, SymbolDocument, SymbolPin};
+
+    fn port(name: &str, direction: PortDirection) -> PortSpec {
+        PortSpec {
+            name: name.to_owned(),
+            direction,
+        }
+    }
+
+    fn symbol_with_shifted_origin() -> ResolvedCellSymbol {
+        ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                origin: Point::new(20, 10),
+                name_anchor: Point::new(20, 10),
+                value_anchor: Point::new(20, 10),
+                pins: vec![SymbolPin::new(
+                    "OUT",
+                    PortDirection::Out,
+                    Some(Point::new(70, 10)),
+                )],
+                body: vec![SymbolShape::Polyline {
+                    points: vec![Point::new(20, 10), Point::new(50, 20)],
+                    closed: false,
+                }],
+            },
+            &[port("OUT", PortDirection::Out)],
+        )
+    }
+
+    #[test]
+    fn resolved_symbol_bounds_are_relative_to_symbol_origin() {
+        let symbol = symbol_with_shifted_origin();
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+
+        let bounds =
+            resolved_symbol_world_bounds(&component, &symbol).expect("resolved symbol has extents");
+
+        assert_eq!(bounds, (Point::new(100, 50), Point::new(150, 60)));
+    }
+
+    #[test]
+    fn resolved_symbol_svg_coordinates_are_relative_to_symbol_origin() {
+        let symbol = symbol_with_shifted_origin();
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+        let mut svg = String::new();
+        let config = SvgExportConfig {
+            grid_size: 1.0,
+            ..SvgExportConfig::default()
+        };
+
+        write_resolved_symbol_svg(&mut svg, &component, &symbol, &config);
+
+        assert!(
+            svg.contains(r#"<path class="component" d="M 100 50 L 130 60"/>"#),
+            "svg must place authored body points relative to the symbol origin: {svg}"
+        );
+        assert!(
+            svg.contains(r#"<line class="component" x1="150" y1="50" x2="140" y2="50"/>"#),
+            "svg must place authored pin stubs relative to the symbol origin: {svg}"
+        );
+    }
+
+    #[test]
+    fn resolved_symbol_local_bounds_fold_uses_effective_points_without_world_component() {
+        let symbol = symbol_with_shifted_origin();
+
+        let bounds =
+            resolved_symbol_local_bounds(&symbol).expect("resolved symbol has local extents");
+
+        assert_eq!(bounds, (Point::new(0, 0), Point::new(50, 10)));
+    }
 }

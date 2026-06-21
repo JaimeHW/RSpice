@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use egui::{Sense, Ui};
 
 use crate::common::app::AppState;
-use crate::state::{Component, ComponentType, Point, ResolvedCellSymbol, SymbolResolver};
+use crate::state::{
+    Component, ComponentType, Point, ResolvedCellSymbol, SchematicState, SymbolResolver,
+};
 
 use super::symbols::SymbolLibrary;
 
@@ -29,10 +31,12 @@ use self::coordinates::viewport_from_state;
 use self::interaction::handle_tool_interactions;
 use self::navigation::handle_viewport_navigation;
 use self::preview::draw_interaction_previews;
+use self::resolved_symbol_render::resolved_symbol_world_bounds;
 use self::scene::draw_scene;
 
 pub(crate) struct SchematicSymbolContext {
     resolved_by_component_id: HashMap<u64, ResolvedCellSymbol>,
+    pending_library_symbol: Option<ResolvedCellSymbol>,
 }
 
 impl SchematicSymbolContext {
@@ -50,14 +54,24 @@ impl SchematicSymbolContext {
                 Some((component.id, resolved))
             })
             .collect();
+        let pending_library_symbol = state
+            .schematic
+            .pending_library_cell
+            .as_ref()
+            .and_then(|binding| resolver.resolve_binding(binding));
 
         Self {
             resolved_by_component_id,
+            pending_library_symbol,
         }
     }
 
     pub(super) fn resolved_symbol(&self, component: &Component) -> Option<&ResolvedCellSymbol> {
         self.resolved_by_component_id.get(&component.id)
+    }
+
+    pub(super) fn pending_library_symbol(&self) -> Option<&ResolvedCellSymbol> {
+        self.pending_library_symbol.as_ref()
     }
 
     pub(crate) fn terminal_points(&self, component: &Component) -> Vec<Point> {
@@ -75,12 +89,295 @@ impl SchematicSymbolContext {
     ) -> Option<u64> {
         components
             .iter()
-            .find(|component| {
-                self.terminal_points(component)
-                    .iter()
-                    .any(|terminal_pos| *terminal_pos == pos)
-            })
+            .find(|component| self.terminal_points(component).contains(&pos))
             .map(|component| component.id)
+    }
+
+    pub(super) fn component_at_resolved_symbol(
+        &self,
+        components: &[Component],
+        pos: Point,
+    ) -> Option<u64> {
+        self.component_at_resolved_terminal(components, pos)
+            .or_else(|| {
+                components
+                    .iter()
+                    .map(|component| (component.id, self.component_bounds(component)))
+                    .find(|(_, (min, max))| {
+                        pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y
+                    })
+                    .map(|(id, _)| id)
+            })
+    }
+
+    pub(super) fn component_bounds(&self, component: &Component) -> (Point, Point) {
+        if let Some(symbol) = self.resolved_symbol(component)
+            && let Some(bounds) = resolved_symbol_world_bounds(component, symbol)
+        {
+            return bounds;
+        }
+        let (min_x, min_y, max_x, max_y) = component.bounding_box();
+        (Point::new(min_x, min_y), Point::new(max_x, max_y))
+    }
+
+    pub(super) fn content_bounds(
+        &self,
+        schematic: &SchematicState,
+    ) -> Option<(i32, i32, i32, i32)> {
+        if schematic.components.is_empty()
+            && schematic.wires.is_empty()
+            && schematic.junctions.is_empty()
+        {
+            return None;
+        }
+
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+        let mut include = |min: Point, max: Point| {
+            min_x = min_x.min(min.x);
+            min_y = min_y.min(min.y);
+            max_x = max_x.max(max.x);
+            max_y = max_y.max(max.y);
+        };
+
+        for component in &schematic.components {
+            let (min, max) = self.component_bounds(component);
+            include(min, max);
+        }
+
+        for wire in &schematic.wires {
+            for point in &wire.points {
+                include(*point, *point);
+            }
+        }
+
+        for junction in &schematic.junctions {
+            include(junction.pos, junction.pos);
+        }
+
+        Some((min_x, min_y, max_x, max_y))
+    }
+
+    pub(super) fn select_in_rect(
+        &self,
+        schematic: &mut SchematicState,
+        min_x: i32,
+        min_y: i32,
+        max_x: i32,
+        max_y: i32,
+        add_to_selection: bool,
+    ) -> usize {
+        if !add_to_selection {
+            schematic.selection.clear();
+        }
+
+        let mut count = 0;
+
+        for component in &schematic.components {
+            let (min, max) = self.component_bounds(component);
+            if rects_intersect(min, max, min_x, min_y, max_x, max_y)
+                && !schematic.selection.has_component(component.id)
+            {
+                schematic.selection.select_component(component.id);
+                count += 1;
+            }
+        }
+
+        for wire in &schematic.wires {
+            let wire_in_rect = wire
+                .points
+                .iter()
+                .any(|point| point_in_rect(*point, min_x, min_y, max_x, max_y));
+            if wire_in_rect && !schematic.selection.has_wire(wire.id) {
+                schematic.selection.select_wire(wire.id);
+                count += 1;
+            }
+        }
+
+        for junction in &schematic.junctions {
+            if point_in_rect(junction.pos, min_x, min_y, max_x, max_y)
+                && !schematic.selection.has_junction(junction.pos)
+            {
+                schematic.selection.select_junction(junction.pos);
+                count += 1;
+            }
+        }
+
+        count
+    }
+}
+
+fn point_in_rect(point: Point, min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> bool {
+    point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
+}
+
+fn rects_intersect(min: Point, max: Point, min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> bool {
+    max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y
+}
+
+fn refresh_symbol_context_after_interactions(
+    state: &AppState,
+    symbol_context: &mut SchematicSymbolContext,
+    before_topology_version: u64,
+) -> bool {
+    if state.schematic.topology_version() == before_topology_version {
+        return false;
+    }
+    *symbol_context = SchematicSymbolContext::from_state(state);
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{
+        Cell, Library, LibraryCellInstance, PortDirection, PortSpec, SymbolDocument, SymbolPin,
+        SymbolShape, View, ViewType,
+    };
+
+    fn port(name: &str, direction: PortDirection) -> PortSpec {
+        PortSpec {
+            name: name.to_owned(),
+            direction,
+        }
+    }
+
+    #[test]
+    fn component_at_resolved_symbol_hits_authored_body_outside_generic_bounds() {
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+        let symbol = ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                body: vec![SymbolShape::Polyline {
+                    points: vec![Point::new(80, -10), Point::new(120, 10)],
+                    closed: false,
+                }],
+                pins: vec![SymbolPin::new(
+                    "OUT",
+                    PortDirection::Out,
+                    Some(Point::new(120, 0)),
+                )],
+                ..SymbolDocument::default()
+            },
+            &[port("OUT", PortDirection::Out)],
+        );
+        let mut resolved_by_component_id = HashMap::new();
+        resolved_by_component_id.insert(component.id, symbol);
+        let context = SchematicSymbolContext {
+            resolved_by_component_id,
+            pending_library_symbol: None,
+        };
+
+        assert_eq!(
+            context.component_at_resolved_symbol(&[component], Point::new(200, 50)),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn content_bounds_include_authored_symbol_body() {
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+        let symbol = ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                body: vec![SymbolShape::Polyline {
+                    points: vec![Point::new(80, -10), Point::new(120, 10)],
+                    closed: false,
+                }],
+                pins: vec![SymbolPin::new(
+                    "OUT",
+                    PortDirection::Out,
+                    Some(Point::new(120, 0)),
+                )],
+                ..SymbolDocument::default()
+            },
+            &[port("OUT", PortDirection::Out)],
+        );
+        let mut resolved_by_component_id = HashMap::new();
+        resolved_by_component_id.insert(component.id, symbol);
+        let context = SchematicSymbolContext {
+            resolved_by_component_id,
+            pending_library_symbol: None,
+        };
+        let mut schematic = SchematicState::default();
+        schematic.components.push(component);
+
+        assert_eq!(context.content_bounds(&schematic), Some((80, 10, 220, 90)));
+    }
+
+    #[test]
+    fn select_in_rect_commits_authored_body_intersections() {
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
+        let symbol = ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                body: vec![SymbolShape::Polyline {
+                    points: vec![Point::new(80, -10), Point::new(120, 10)],
+                    closed: false,
+                }],
+                pins: vec![SymbolPin::new(
+                    "OUT",
+                    PortDirection::Out,
+                    Some(Point::new(120, 0)),
+                )],
+                ..SymbolDocument::default()
+            },
+            &[port("OUT", PortDirection::Out)],
+        );
+        let mut resolved_by_component_id = HashMap::new();
+        resolved_by_component_id.insert(component.id, symbol);
+        let context = SchematicSymbolContext {
+            resolved_by_component_id,
+            pending_library_symbol: None,
+        };
+        let mut schematic = SchematicState::default();
+        schematic.components.push(component);
+
+        let selected = context.select_in_rect(&mut schematic, 190, 40, 210, 60, false);
+
+        assert_eq!(selected, 1);
+        assert!(schematic.selection.has_component(1));
+    }
+
+    #[test]
+    fn refresh_symbol_context_after_interactions_resolves_newly_placed_cell() {
+        let mut state = AppState::default();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        SymbolDocument {
+            pins: vec![SymbolPin::new(
+                "OUT",
+                PortDirection::Out,
+                Some(Point::new(40, 0)),
+            )],
+            ..SymbolDocument::default()
+        }
+        .store_in_view(&mut symbol_view)
+        .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+
+        let before_topology = state.schematic.topology_version();
+        let mut context = SchematicSymbolContext::from_state(&state);
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[port("OUT", PortDirection::Out)]);
+        let id = state
+            .schematic
+            .add_library_cell_component(Point::new(100, 50), binding);
+
+        let refreshed =
+            refresh_symbol_context_after_interactions(&state, &mut context, before_topology);
+        let component = state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("component placed");
+
+        assert!(refreshed);
+        assert!(context.resolved_symbol(component).is_some());
     }
 }
 
@@ -91,12 +388,16 @@ pub fn render_schematic_view(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let available = ui.available_rect_before_wrap();
+    let mut symbol_context = SchematicSymbolContext::from_state(state);
 
     if state.schematic.needs_fit {
         state.schematic.needs_fit = false;
-        state
-            .schematic
-            .zoom_to_fit(available.width() as f64, available.height() as f64);
+        let bounds = symbol_context.content_bounds(&state.schematic);
+        state.schematic.zoom_to_fit_bounds(
+            bounds,
+            available.width() as f64,
+            available.height() as f64,
+        );
     }
     if let Some(target) = state.schematic.center_request.take() {
         state
@@ -113,13 +414,18 @@ pub fn render_schematic_view(
     // frame during pans and drags.
     handle_viewport_navigation(ui, &response, available, state);
     let viewport = viewport_from_state(state, available, ui.ctx().pixels_per_point());
-    let symbol_context = SchematicSymbolContext::from_state(state);
+    let before_interactions_topology = state.schematic.topology_version();
     // Right-click owns two meanings: finishing a live wire run (inside the
     // tool handler) and the context menu (here). Capture whether a run was
     // live before the tool handler so the click that finishes a wire can
     // never also open the menu.
     let wire_was_active = state.schematic.wire_drawing.active;
     handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
+    refresh_symbol_context_after_interactions(
+        state,
+        &mut symbol_context,
+        before_interactions_topology,
+    );
     context_menu::handle_context_menu(
         &response,
         state,

@@ -278,7 +278,8 @@ impl Component {
             return resolved_symbol
                 .connectable_pins()
                 .map(|pin| {
-                    let transformed = self.transform_point(pin.offset);
+                    let transformed =
+                        self.transform_point(resolved_symbol.effective_pin_offset(pin));
                     (
                         pin.name.clone(),
                         Point::new(self.pos.x + transformed.x, self.pos.y + transformed.y),
@@ -548,5 +549,27 @@ mod tests {
                 ("OUT".to_owned(), Point::new(80, -20)),
             ]
         );
+    }
+
+    #[test]
+    fn resolved_instance_terminals_are_relative_to_symbol_origin() {
+        let document = SymbolDocument {
+            origin: Point::new(20, -10),
+            pins: vec![SymbolPin::new(
+                "OUT",
+                PortDirection::Out,
+                Some(Point::new(70, 20)),
+            )],
+            ..SymbolDocument::default()
+        };
+        let resolved = crate::state::ResolvedCellSymbol::from_authored_document(
+            document,
+            &[port("OUT", PortDirection::Out)],
+        );
+        let component = Component::new(8, ComponentType::CellInstance, Point::new(100, 50));
+
+        let terminals = component.terminal_positions_resolved(Some(&resolved));
+
+        assert_eq!(terminals, vec![("OUT".to_owned(), Point::new(150, 80))]);
     }
 }

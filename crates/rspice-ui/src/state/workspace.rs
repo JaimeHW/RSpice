@@ -186,10 +186,15 @@ pub struct ProjectWorkspace {
     /// `None` means the netlist view shows the generated artifact.
     #[serde(default)]
     pub netlist_source: Option<String>,
-    /// Original file for `netlist_source`, when the manual deck was opened
-    /// from disk. Relative `.include`/`.lib` paths resolve from here.
+    /// Native filesystem origin for `netlist_source`, used to resolve relative
+    /// `.include`/`.lib` paths for imported decks. Browser imports and direct
+    /// editor edits clear this because they do not have a reliable file base.
     #[serde(default)]
     pub netlist_source_path: Option<PathBuf>,
+    /// Runtime dirty bit for `netlist_source`; skipped because dirty state is
+    /// session-local while the source itself is persisted with the project.
+    #[serde(default, skip)]
+    pub netlist_source_dirty: bool,
 }
 
 impl Default for ProjectWorkspace {
@@ -208,6 +213,7 @@ impl Default for ProjectWorkspace {
             specs: Vec::new(),
             netlist_source: None,
             netlist_source_path: None,
+            netlist_source_dirty: false,
         }
     }
 }
@@ -328,6 +334,7 @@ impl ProjectWorkspace {
         for schematic in self.schematic_buffers.values_mut() {
             schematic.is_dirty = false;
         }
+        self.netlist_source_dirty = false;
     }
 
     pub fn any_dirty(&self) -> bool {
@@ -336,6 +343,11 @@ impl ProjectWorkspace {
                 .schematic_buffers
                 .values()
                 .any(|schematic| schematic.is_dirty)
+            || self.netlist_source_dirty
+    }
+
+    pub fn set_netlist_source_dirty(&mut self, dirty: bool) {
+        self.netlist_source_dirty = dirty;
     }
 
     pub fn open_view(&mut self, reference: CellViewRef, view_type: ViewType) {
@@ -467,14 +479,6 @@ pub fn ensure_project_library(libraries: &mut LibraryManager) {
         );
         libraries.add_library(library);
     }
-
-    ensure_cell_view(
-        libraries,
-        DEFAULT_PROJECT_LIBRARY,
-        DEFAULT_TOP_CELL,
-        DEFAULT_SCHEMATIC_VIEW,
-        ViewType::Schematic,
-    );
 }
 
 /// Ensure a cell view exists in the library manager.

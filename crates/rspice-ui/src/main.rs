@@ -41,11 +41,9 @@ fn load_window_icon() -> Option<egui::IconData> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    // Initialize logging with wgpu_core set to warn to reduce noise
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info,wgpu_core=warn"),
-    )
-    .init();
+    // Keep RSpice diagnostics visible while suppressing routine GPU backend
+    // probe warnings from normal desktop stderr.
+    env_logger::Builder::from_env(rspice_ui::common::logging::native_log_env()).init();
 
     log::info!("Starting RSpice UI with egui (commercial-grade GPU rendering)...");
 
@@ -90,62 +88,71 @@ fn main() {
 // Web Entry Point — eframe WebRunner into the #rspice_canvas element
 // =============================================================================
 
-#[cfg(any(target_arch = "wasm32", test))]
-fn escape_web_startup_text(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = runRspiceUiWorkerRequest)]
+pub fn run_rspice_ui_worker_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    rspice_ui::run_rspice_ui_worker_request(value)
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
-fn web_startup_error_html(message: &str) -> String {
-    format!(
-        "<p class=\"err\">{}</p>\
-         <p class=\"err\">A WebGPU-capable browser (current Chrome/Edge) is required.</p>",
-        escape_web_startup_text(message)
-    )
+#[cfg(target_arch = "wasm32")]
+const WEB_STARTUP_REQUIREMENT: &str = "A WebGPU-capable browser (current Chrome/Edge) is required.";
+
+#[cfg(target_arch = "wasm32")]
+fn report_web_startup_error(document: Option<&web_sys::Document>, message: &str) {
+    web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(message));
+
+    let Some(document) = document else {
+        return;
+    };
+    let Some(loading) = document.get_element_by_id("rspice_loading") else {
+        return;
+    };
+
+    loading.set_inner_html("");
+    for text in [message, WEB_STARTUP_REQUIREMENT] {
+        let Ok(paragraph) = document.create_element("p") else {
+            return;
+        };
+        paragraph.set_class_name("err");
+        paragraph.set_text_content(Some(text));
+        let _ = loading.append_child(&paragraph);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
 
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        report_web_startup_error(
+            None,
+            "RSpice failed to start: no browser document is available.",
+        );
+        return;
+    };
+
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
 
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async move {
-        let Some(window) = web_sys::window() else {
-            log::error!("RSpice failed to start: browser window is unavailable");
-            return;
-        };
-        let Some(document) = window.document() else {
-            log::error!("RSpice failed to start: browser document is unavailable");
-            return;
-        };
         let Some(canvas_element) = document.get_element_by_id("rspice_canvas") else {
-            let message = "RSpice failed to start: web shell must provide #rspice_canvas";
-            log::error!("{message}");
-            if let Some(loading) = document.get_element_by_id("rspice_loading") {
-                loading.set_inner_html(&web_startup_error_html(message));
-            }
+            report_web_startup_error(
+                Some(&document),
+                "RSpice failed to start: the web shell did not provide #rspice_canvas.",
+            );
             return;
         };
         let Ok(canvas) = canvas_element.dyn_into::<web_sys::HtmlCanvasElement>() else {
-            let message = "RSpice failed to start: #rspice_canvas is not a canvas element";
-            log::error!("{message}");
-            if let Some(loading) = document.get_element_by_id("rspice_loading") {
-                loading.set_inner_html(&web_startup_error_html(message));
-            }
+            report_web_startup_error(
+                Some(&document),
+                "RSpice failed to start: #rspice_canvas is not a canvas element.",
+            );
             return;
         };
 
@@ -161,25 +168,11 @@ fn main() {
         if let Some(loading) = document.get_element_by_id("rspice_loading") {
             match result {
                 Ok(_) => loading.remove(),
-                Err(e) => {
-                    loading.set_inner_html(&web_startup_error_html(&format!(
-                        "RSpice failed to start: {e:?}"
-                    )));
-                }
+                Err(e) => report_web_startup_error(
+                    Some(&document),
+                    &format!("RSpice failed to start: {e:?}"),
+                ),
             }
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::web_startup_error_html;
-
-    #[test]
-    fn web_startup_error_html_escapes_message_text() {
-        let html = web_startup_error_html("bad <canvas> & \"shell\"");
-
-        assert!(html.contains("bad &lt;canvas&gt; &amp; &quot;shell&quot;"));
-        assert!(!html.contains("bad <canvas>"));
-    }
 }

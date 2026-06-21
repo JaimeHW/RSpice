@@ -269,14 +269,13 @@ impl<'a> Dialog<'a> {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if let Some(label) = self.ghost {
-                        if crate::ui::widgets::Button::new(label)
+                    if let Some(label) = self.ghost
+                        && crate::ui::widgets::Button::new(label)
                             .ghost()
                             .show(ui)
                             .clicked()
-                        {
-                            choice = DialogChoice::Ghost;
-                        }
+                    {
+                        choice = DialogChoice::Ghost;
                     }
                     if let Some(hint) = self.hint {
                         ui.label(
@@ -294,10 +293,10 @@ impl<'a> Dialog<'a> {
                         if primary.clicked() {
                             choice = DialogChoice::Primary;
                         }
-                        if let Some(label) = self.secondary {
-                            if crate::ui::widgets::Button::new(label).show(ui).clicked() {
-                                choice = DialogChoice::Secondary;
-                            }
+                        if let Some(label) = self.secondary
+                            && crate::ui::widgets::Button::new(label).show(ui).clicked()
+                        {
+                            choice = DialogChoice::Secondary;
                         }
                     });
                 });

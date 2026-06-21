@@ -73,7 +73,7 @@ pub(super) fn handle_tool_interactions(
         // gesture); the breadcrumb pops back out. Everything else opens
         // its properties.
         let cell_instance = symbol_context
-            .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+            .component_at_resolved_symbol(&state.schematic.components, grid_pos)
             .or_else(|| state.schematic.component_at(grid_pos))
             .and_then(|id| state.schematic.components.iter().find(|c| c.id == id))
             .filter(|c| c.kind == ComponentType::CellInstance)
@@ -149,7 +149,7 @@ fn handle_select_dragging(
                 .drag
                 .start((wire_grid_pos.x, wire_grid_pos.y), DragType::WireVertex);
         } else if let Some(comp_id) = symbol_context
-            .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+            .component_at_resolved_symbol(&state.schematic.components, grid_pos)
             .or_else(|| state.schematic.component_at(grid_pos))
         {
             if !state.schematic.selection.has_component(comp_id) {
@@ -211,9 +211,14 @@ fn handle_select_dragging(
             state.dialogs.last_drag_pos = None;
         } else if let Some((min_x, min_y, max_x, max_y)) = state.schematic.selection_rect.finish() {
             let add_mode = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
-            state
-                .schematic
-                .select_in_rect(min_x, min_y, max_x, max_y, add_mode);
+            symbol_context.select_in_rect(
+                &mut state.schematic,
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+                add_mode,
+            );
         }
     }
 }
@@ -258,7 +263,7 @@ fn handle_select_click(
     let alt_held = ui.input(|i| i.modifiers.alt);
 
     let comp_id = symbol_context
-        .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+        .component_at_resolved_symbol(&state.schematic.components, grid_pos)
         .or_else(|| state.schematic.component_at(grid_pos));
     let wire_id = state.schematic.wire_at(grid_pos);
 
@@ -368,7 +373,7 @@ fn handle_probe_click(
             ));
         }
     } else if let Some(comp_id) = symbol_context
-        .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+        .component_at_resolved_symbol(&state.schematic.components, grid_pos)
         .or_else(|| state.schematic.component_at(grid_pos))
     {
         handle_component_probe(ui, state, comp_id, grid_pos, symbol_context);

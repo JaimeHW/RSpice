@@ -10,6 +10,9 @@ use super::pins::add_default_pins;
 use super::render::{BakedSymbol, bake_symbol};
 use super::types::Symbol;
 
+type BakedSymbolKey = (usize, i32, bool, bool);
+type BakedSymbolCache = RefCell<HashMap<BakedSymbolKey, Rc<BakedSymbol>>>;
+
 mod embedded_symbols {
     include!(concat!(env!("OUT_DIR"), "/embedded_symbols.rs"));
 }
@@ -32,7 +35,7 @@ pub struct SymbolLibrary {
     /// Flattened symbol geometry per (symbol address, rotation, mirror).
     /// The library is immutable after load, so symbol addresses are stable
     /// keys for the process lifetime. RefCell: painting is single-threaded.
-    baked: RefCell<HashMap<(usize, i32, bool, bool), Rc<BakedSymbol>>>,
+    baked: BakedSymbolCache,
 }
 
 impl Default for SymbolLibrary {
@@ -438,8 +441,6 @@ impl SymbolLibrary {
         add_default_pins(&mut symbol, component_type);
         Ok(symbol)
     }
-
-    /// Load an embedded SVG file by name
 
     /// Get a symbol by component type (O(1) lookup)
     pub fn get(&self, component_type: ComponentType) -> Option<&Symbol> {

@@ -14,6 +14,56 @@ use crate::ui::tokens::{self, Tokens};
 
 /// Workspace tab strip height.
 pub const WTABS_HEIGHT: f32 = 35.0;
+const ICON_ONLY_TAB_WIDTH: f32 = 48.0;
+const WTABS_LEADING_SPACE: f32 = 8.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceTabsPresentation {
+    FullLabels,
+    IconOnly,
+}
+
+fn workspace_tabs_presentation_for_width(
+    width: f32,
+    schematic_label: &str,
+) -> WorkspaceTabsPresentation {
+    if width < workspace_tabs_required_width(WorkspaceTabsPresentation::FullLabels, schematic_label)
+    {
+        WorkspaceTabsPresentation::IconOnly
+    } else {
+        WorkspaceTabsPresentation::FullLabels
+    }
+}
+
+fn workspace_tabs_required_width(
+    presentation: WorkspaceTabsPresentation,
+    schematic_label: &str,
+) -> f32 {
+    match presentation {
+        WorkspaceTabsPresentation::IconOnly => {
+            WTABS_LEADING_SPACE + WorkspaceView::ALL.len() as f32 * ICON_ONLY_TAB_WIDTH
+        }
+        WorkspaceTabsPresentation::FullLabels => {
+            WTABS_LEADING_SPACE
+                + tab_estimated_width("Library", false, None)
+                + tab_estimated_width(schematic_label, true, None)
+                + tab_estimated_width("Netlist", false, None)
+                + tab_estimated_width("Simulate", false, None)
+                + tab_estimated_width("Results", false, Some(1))
+        }
+    }
+}
+
+fn tab_estimated_width(label: &str, dirty: bool, badge: Option<u32>) -> f32 {
+    let mut width = 14.0 + 13.0 + 7.0 + label.chars().count() as f32 * 7.5 + 14.0;
+    if dirty {
+        width += 6.0 + 7.0;
+    }
+    if badge.is_some() {
+        width += 16.0 + 7.0;
+    }
+    width
+}
 
 fn view_icon(view: WorkspaceView) -> Icon {
     match view {
@@ -52,6 +102,9 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                 } else {
                     format!("Schematic · {}", state.workspace.active_view.cell)
                 };
+                let presentation =
+                    workspace_tabs_presentation_for_width(panel_rect.width(), &schematic_label);
+                let show_labels = presentation == WorkspaceTabsPresentation::FullLabels;
                 let new_results = state.simulation.data_version > state.shell.results_seen_version
                     && state.shell.view != WorkspaceView::Results;
 
@@ -72,7 +125,21 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                         view_icon(view)
                     };
 
-                    if tab(ui, label, icon, state.shell.view == view, dirty, badge).clicked() {
+                    let display_label = if show_labels { label } else { "" };
+                    let response = tab(
+                        ui,
+                        display_label,
+                        icon,
+                        state.shell.view == view,
+                        dirty,
+                        badge,
+                    );
+                    let response = if show_labels {
+                        response
+                    } else {
+                        response.on_hover_text(label)
+                    };
+                    if response.clicked() {
                         state.shell.view = view;
                         if view == WorkspaceView::Results {
                             state.shell.results_seen_version = state.simulation.data_version;
@@ -197,4 +264,44 @@ fn tab(
     }
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phone_width_workspace_tabs_use_icon_presentation_that_fits() {
+        let presentation =
+            workspace_tabs_presentation_for_width(390.0, "Symbol - folded-current-mirror");
+
+        assert_eq!(presentation, WorkspaceTabsPresentation::IconOnly);
+        assert!(
+            workspace_tabs_required_width(presentation, "Symbol - folded-current-mirror") <= 390.0,
+            "icon-only workspace tabs should fit a phone viewport"
+        );
+    }
+
+    #[test]
+    fn desktop_workspace_tabs_keep_document_labels() {
+        let presentation = workspace_tabs_presentation_for_width(900.0, "Schematic - top");
+
+        assert_eq!(presentation, WorkspaceTabsPresentation::FullLabels);
+    }
+
+    #[test]
+    fn workspace_tabs_stay_icon_only_until_long_label_estimate_fits() {
+        let label = "Symbol - precision_frontend_with_long_corner_sweep";
+        let full_required =
+            workspace_tabs_required_width(WorkspaceTabsPresentation::FullLabels, label);
+
+        assert_eq!(
+            workspace_tabs_presentation_for_width(full_required - 1.0, label),
+            WorkspaceTabsPresentation::IconOnly
+        );
+        assert_eq!(
+            workspace_tabs_presentation_for_width(full_required, label),
+            WorkspaceTabsPresentation::FullLabels
+        );
+    }
 }

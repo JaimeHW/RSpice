@@ -683,9 +683,6 @@ pub struct ShellStateSer {
     autosave_minutes: u8,
     #[serde(default)]
     result_viewer: super::results::ResultViewer,
-    /// User expression traces per waves strip: (analysis index, expression).
-    #[serde(default)]
-    expr_traces: Vec<(usize, String)>,
 }
 
 fn default_corner() -> String {
@@ -708,17 +705,6 @@ impl Default for ShellStateSer {
 
 impl From<&ShellState> for ShellStateSer {
     fn from(shell: &ShellState) -> Self {
-        let mut expr_traces: Vec<(usize, String)> = shell
-            .results
-            .exprs
-            .iter()
-            .flat_map(|(&analysis, traces)| {
-                traces
-                    .iter()
-                    .map(move |trace| (analysis, trace.text.clone()))
-            })
-            .collect();
-        expr_traces.sort();
         Self {
             view: shell.view,
             theme: shell.theme,
@@ -729,7 +715,6 @@ impl From<&ShellState> for ShellStateSer {
             panels_hidden: shell.panels_hidden,
             autosave_minutes: shell.autosave_minutes,
             result_viewer: shell.results.viewer,
-            expr_traces,
         }
     }
 }
@@ -752,17 +737,6 @@ impl From<ShellStateSer> for ShellState {
             ..Self::new()
         };
         shell.results.viewer = ser.result_viewer;
-        for (analysis, text) in ser.expr_traces {
-            shell
-                .results
-                .exprs
-                .entry(analysis)
-                .or_default()
-                .push(super::results::ExprTrace {
-                    text,
-                    visible: true,
-                });
-        }
         shell
     }
 }

@@ -98,3 +98,10 @@ pub(crate) mod output_spec;
 
 /// Re-export the main application type
 pub use common::RSpiceApp;
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_rspice_ui_worker_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    simulation::runner::worker_contract::run_worker_request_value(value)
+}

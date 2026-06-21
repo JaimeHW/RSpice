@@ -39,7 +39,7 @@ pub(super) fn handle_context_menu(
     {
         let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pos);
         let target = if let Some(id) = symbol_context
-            .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+            .component_at_resolved_symbol(&state.schematic.components, grid_pos)
             .or_else(|| state.schematic.component_at(grid_pos))
         {
             state.schematic.net_highlight.clear();

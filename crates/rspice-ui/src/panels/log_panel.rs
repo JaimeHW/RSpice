@@ -287,10 +287,10 @@ impl LogBuffer {
         self.next_id += 1;
 
         // Remove oldest if at capacity
-        if self.entries.len() >= self.capacity {
-            if let Some(evicted) = self.entries.pop_front() {
-                self.severity_counts[severity_index(evicted.severity)] -= 1;
-            }
+        if self.entries.len() >= self.capacity
+            && let Some(evicted) = self.entries.pop_front()
+        {
+            self.severity_counts[severity_index(evicted.severity)] -= 1;
         }
 
         self.severity_counts[severity_index(entry.severity)] += 1;
@@ -372,6 +372,18 @@ impl LogBuffer {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.severity_counts = [0; 5];
+    }
+
+    /// Clear entries from one source while preserving unrelated console history.
+    pub fn clear_source(&mut self, source: LogSource) {
+        self.entries.retain(|entry| {
+            if entry.source == source {
+                self.severity_counts[severity_index(entry.severity)] -= 1;
+                false
+            } else {
+                true
+            }
+        });
     }
 
     /// Count entries by severity (O(1) — maintained on log/evict/clear)

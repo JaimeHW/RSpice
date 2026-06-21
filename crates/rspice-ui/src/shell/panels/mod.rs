@@ -25,6 +25,19 @@ const RIGHT_WIDTH: f32 = 304.0;
 /// Resize bounds — narrow enough to tuck away, wide enough for ultrawides.
 const PANEL_MIN: f32 = 200.0;
 const PANEL_MAX: f32 = 520.0;
+const RESPONSIVE_PANEL_BREAKPOINT: f32 = 760.0;
+
+fn side_panels_visible_for_width(
+    viewport_width: f32,
+    view: WorkspaceView,
+    panels_hidden: bool,
+    active_view_is_symbol: bool,
+) -> bool {
+    if active_view_is_symbol && view == WorkspaceView::Schematic {
+        return false;
+    }
+    !panels_hidden && view.has_side_panels() && viewport_width >= RESPONSIVE_PANEL_BREAKPOINT
+}
 
 fn left_default_width(view: WorkspaceView) -> f32 {
     match view {
@@ -51,12 +64,14 @@ pub fn show(
     state: &mut AppState,
     symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
 ) {
-    if state.shell.view == WorkspaceView::Schematic
-        && state.workspace.active_view_type() == crate::state::ViewType::Symbol
-    {
-        return;
-    }
-    if state.shell.panels_hidden || !state.shell.view.has_side_panels() {
+    let active_view_is_symbol =
+        state.workspace.active_view_type() == crate::state::ViewType::Symbol;
+    if !side_panels_visible_for_width(
+        ctx.screen_rect().width(),
+        state.shell.view,
+        state.shell.panels_hidden,
+        active_view_is_symbol,
+    ) {
         return;
     }
     let t = Tokens::get(ctx);
@@ -122,5 +137,30 @@ pub fn show(
                         _ => {}
                     });
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phone_width_hides_context_side_panels() {
+        assert!(!side_panels_visible_for_width(
+            390.0,
+            WorkspaceView::Schematic,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn desktop_width_keeps_context_side_panels_visible() {
+        assert!(side_panels_visible_for_width(
+            1280.0,
+            WorkspaceView::Schematic,
+            false,
+            false
+        ));
     }
 }

@@ -17,6 +17,33 @@ use crate::ui::{Density, Direction, Mode};
 
 /// Menu bar height.
 pub const MENUBAR_HEIGHT: f32 = 32.0;
+const COMPACT_MENUBAR_REQUIRED_WIDTH: f32 = 142.0;
+const FULL_MENUBAR_REQUIRED_WIDTH: f32 = 760.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenubarPresentation {
+    Full,
+    CompactMenu,
+}
+
+fn menubar_presentation_for_width(width: f32) -> MenubarPresentation {
+    if width < menubar_required_width(MenubarPresentation::Full, true) {
+        MenubarPresentation::CompactMenu
+    } else {
+        MenubarPresentation::Full
+    }
+}
+
+fn menubar_required_width(presentation: MenubarPresentation, project_label: bool) -> f32 {
+    match presentation {
+        MenubarPresentation::CompactMenu => {
+            COMPACT_MENUBAR_REQUIRED_WIDTH + if project_label { 88.0 } else { 0.0 }
+        }
+        MenubarPresentation::Full => {
+            FULL_MENUBAR_REQUIRED_WIDTH + if project_label { 180.0 } else { 0.0 }
+        }
+    }
+}
 
 /// Render the menu bar panel.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
@@ -37,35 +64,10 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                brand(ui);
-
-                top_menu(ui, "File", |ui| file_menu(ui, app));
-                top_menu(ui, "Edit", |ui| edit_menu(ui, &mut app.state));
-                top_menu(ui, "View", |ui| view_menu(ui, &mut app.state));
-                top_menu(ui, "Create", |ui| create_menu(ui, &mut app.state));
-                top_menu(ui, "Check", |ui| check_menu(ui, &mut app.state));
-                top_menu(ui, "Simulate", |ui| simulate_menu(ui, &mut app.state));
-                top_menu(ui, "Tools", |ui| tools_menu(ui, &mut app.state));
-                top_menu(ui, "Window", |ui| window_menu(ui, &mut app.state));
-                top_menu(ui, "Help", |ui| help_menu(ui, app));
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(10.0);
-                    let label = app.state.workspace.project.display_name().to_owned();
-                    ui.label(
-                        egui::RichText::new(label)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_faint),
-                    );
-                    if let Some(info) = &app.state.license {
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new(&info.tier)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                .color(c.accent),
-                        );
-                    }
-                });
+                match menubar_presentation_for_width(panel_rect.width()) {
+                    MenubarPresentation::Full => full_menubar(ui, app),
+                    MenubarPresentation::CompactMenu => compact_menubar(ui, app),
+                }
             });
         });
 }
@@ -99,6 +101,97 @@ fn brand(ui: &mut Ui) {
         galley,
         c.text,
     );
+}
+
+fn full_menubar(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    brand(ui);
+
+    top_menu(ui, "File", |ui| file_menu(ui, app));
+    top_menu(ui, "Edit", |ui| edit_menu(ui, &mut app.state));
+    top_menu(ui, "View", |ui| view_menu(ui, &mut app.state));
+    top_menu(ui, "Create", |ui| create_menu(ui, &mut app.state));
+    top_menu(ui, "Check", |ui| check_menu(ui, &mut app.state));
+    top_menu(ui, "Simulate", |ui| simulate_menu(ui, &mut app.state));
+    top_menu(ui, "Tools", |ui| tools_menu(ui, &mut app.state));
+    top_menu(ui, "Window", |ui| window_menu(ui, &mut app.state));
+    top_menu(ui, "Help", |ui| help_menu(ui, app));
+
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add_space(10.0);
+        let label = app.state.workspace.project.display_name().to_owned();
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(c.text_faint),
+        );
+        if let Some(info) = &app.state.license {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(&info.tier)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(c.accent),
+            );
+        }
+    });
+}
+
+fn compact_menubar(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    brand(ui);
+    top_menu(ui, "Menu", |ui| {
+        submenu(ui, "File", |ui| file_menu(ui, app));
+        submenu(ui, "Edit", |ui| edit_menu(ui, &mut app.state));
+        submenu(ui, "View", |ui| view_menu(ui, &mut app.state));
+        submenu(ui, "Create", |ui| create_menu(ui, &mut app.state));
+        submenu(ui, "Check", |ui| check_menu(ui, &mut app.state));
+        submenu(ui, "Simulate", |ui| simulate_menu(ui, &mut app.state));
+        submenu(ui, "Tools", |ui| tools_menu(ui, &mut app.state));
+        submenu(ui, "Window", |ui| window_menu(ui, &mut app.state));
+        submenu(ui, "Help", |ui| help_menu(ui, app));
+    });
+
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add_space(8.0);
+        if let Some(info) = &app.state.license {
+            ui.label(
+                egui::RichText::new(&info.tier)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(c.accent),
+            );
+        } else if let Some(label) = compact_project_label(
+            app.state.workspace.project.display_name(),
+            ui.available_width(),
+        ) {
+            ui.label(
+                egui::RichText::new(label)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text_faint),
+            );
+        }
+    });
+}
+
+fn compact_project_label(label: &str, available_width: f32) -> Option<String> {
+    if available_width < 140.0 {
+        return None;
+    }
+    let label = label.trim();
+    if label.is_empty() {
+        return None;
+    }
+    let max_chars = ((available_width / 8.5).floor() as usize).clamp(12, 24);
+    if label.chars().count() <= max_chars {
+        return Some(label.to_owned());
+    }
+    let keep = max_chars.saturating_sub(3);
+    let mut truncated: String = label.chars().take(keep).collect();
+    truncated.push_str("...");
+    Some(truncated)
 }
 
 /// A top-level menu button with flat, square, full-height styling.
@@ -159,15 +252,21 @@ fn top_menu(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
 /// One menu row: label left, optional shortcut right. Returns `true` when
 /// activated (and closes the menu).
 pub(crate) fn item(ui: &mut Ui, label: &str, kbd: Option<&str>) -> bool {
-    item_impl(ui, label, kbd, true)
+    item_impl(ui, label, kbd, true).0
 }
 
 /// A non-interactive (disabled) menu row.
 pub(crate) fn item_disabled(ui: &mut Ui, label: &str, kbd: Option<&str>) {
-    item_impl(ui, label, kbd, false);
+    let _ = item_impl(ui, label, kbd, false);
 }
 
-fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> bool {
+/// A disabled menu row with explanatory hover text.
+pub(crate) fn item_disabled_with_hint(ui: &mut Ui, label: &str, kbd: Option<&str>, hint: &str) {
+    let (_, response) = item_impl(ui, label, kbd, false);
+    response.on_hover_text(hint);
+}
+
+fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> (bool, egui::Response) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -181,7 +280,7 @@ fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> bool
         },
     );
     if !ui.is_rect_visible(rect) {
-        return false;
+        return (false, response);
     }
 
     let painter = ui.painter();
@@ -207,9 +306,9 @@ fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> bool
 
     if enabled && response.clicked() {
         ui.close_menu();
-        return true;
+        return (true, response);
     }
-    false
+    (false, response)
 }
 
 /// Hairline separator between item groups.
@@ -292,8 +391,10 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     separator(ui);
     submenu(ui, "Open example", |ui| {
         for example in crate::common::examples::EXAMPLES {
-            if item(ui, example.name, None) {
-                crate::common::menu_bar::load_named_example(&mut app.state, example.name);
+            if item(ui, example.name, None)
+                && crate::common::menu_bar::request_load_named_example(&mut app.state, example.name)
+                && !app.state.dialogs.confirmation_dialog.visible
+            {
                 app.state.shell.view = WorkspaceView::Schematic;
             }
         }
@@ -302,6 +403,10 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     set(
         FileMenuAction::ImportVerilogA,
         item(ui, "Import Verilog-A…", None),
+    );
+    set(
+        FileMenuAction::ImportNetlist,
+        item(ui, "Import SPICE deck...", None),
     );
     submenu(ui, "Export netlist", |ui| {
         for (label, format) in [
@@ -575,14 +680,14 @@ fn check_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
 }
 
 fn simulate_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
-    let can_run = state.can_run_simulation();
-    if can_run {
+    let run_block_reason = state.simulation_run_block_reason();
+    if run_block_reason.is_none() {
         if item(ui, "Run", Some("F5")) {
             state.request_run_set_simulation();
             state.shell.view = WorkspaceView::Simulate;
         }
-    } else {
-        item_disabled(ui, "Run", Some("F5"));
+    } else if let Some(reason) = run_block_reason.as_deref() {
+        item_disabled_with_hint(ui, "Run", Some("F5"), reason);
     }
     if state.simulation.is_running {
         if item(ui, "Stop", Some("Shift+F5")) {
@@ -605,7 +710,7 @@ fn simulate_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     separator(ui);
     if state.simulation.has_results() {
         if item(ui, "Clear results", None) {
-            state.simulation.clear_runs();
+            state.clear_simulation_results();
         }
     } else {
         item_disabled(ui, "Clear results", None);
@@ -697,5 +802,52 @@ fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     separator(ui);
     if item(ui, "About RSpice", None) {
         app.state.dialogs.about = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phone_width_menubar_uses_compact_menu_that_fits() {
+        let presentation = menubar_presentation_for_width(390.0);
+
+        assert_eq!(presentation, MenubarPresentation::CompactMenu);
+        assert!(
+            menubar_required_width(presentation, true) <= 390.0,
+            "compact menu bar should fit a phone viewport"
+        );
+    }
+
+    #[test]
+    fn desktop_menubar_keeps_top_level_menus_and_project_label() {
+        let presentation = menubar_presentation_for_width(1280.0);
+
+        assert_eq!(presentation, MenubarPresentation::Full);
+    }
+
+    #[test]
+    fn compact_project_label_is_bounded_for_long_names() {
+        let label =
+            compact_project_label("precision_frontend_with_long_corner_sweep_project", 220.0)
+                .expect("label has enough room");
+
+        assert!(label.chars().count() <= 24);
+        assert!(label.ends_with("..."));
+    }
+
+    #[test]
+    fn menubar_stays_compact_until_full_estimated_width_fits() {
+        let full_required = menubar_required_width(MenubarPresentation::Full, true);
+
+        assert_eq!(
+            menubar_presentation_for_width(full_required - 1.0),
+            MenubarPresentation::CompactMenu
+        );
+        assert_eq!(
+            menubar_presentation_for_width(full_required),
+            MenubarPresentation::Full
+        );
     }
 }

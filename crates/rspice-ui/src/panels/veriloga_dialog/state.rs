@@ -153,6 +153,20 @@ impl VerilogALoadDialogState {
         self.reset_compile_outcome();
     }
 
+    /// Set browser-imported source text from a picked `.va`/`.vams` file.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn set_browser_source_file(
+        &mut self,
+        file_name: impl Into<String>,
+        contents: impl Into<String>,
+    ) {
+        let file_name = file_name.into();
+        self.file_path_text = file_name.clone();
+        self.file_path = Some(PathBuf::from(file_name));
+        self.source_text = contents.into();
+        self.reset_compile_outcome();
+    }
+
     /// Drop the last compile's outcome (the source changed under it).
     pub fn reset_compile_outcome(&mut self) {
         self.errors.clear();
@@ -176,5 +190,41 @@ impl VerilogALoadDialogState {
     /// Check if compilation succeeded.
     pub fn is_success(&self) -> bool {
         matches!(self.compilation_state, CompilationState::Success)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_source_file_import_replaces_source_and_resets_compile_outcome() {
+        let mut state = VerilogALoadDialogState {
+            source_text: "module stale; endmodule".to_string(),
+            file_path_text: "stale.va".to_string(),
+            compilation_state: CompilationState::Success,
+            errors: vec![CompileErrorDisplay::warning("stale warning")],
+            compiled_module: Some(CompiledModuleInfo {
+                name: "stale".to_string(),
+                ports: Vec::new(),
+                parameters: Vec::new(),
+                source_path: PathBuf::from("stale.va"),
+                internal_nodes: 0,
+                num_variables: 0,
+            }),
+            ..Default::default()
+        };
+
+        state.set_browser_source_file("fresh.va", "module fresh; endmodule");
+
+        assert_eq!(state.file_path_text, "fresh.va");
+        assert_eq!(
+            state.file_path.as_deref(),
+            Some(std::path::Path::new("fresh.va"))
+        );
+        assert_eq!(state.source_text, "module fresh; endmodule");
+        assert_eq!(state.compilation_state, CompilationState::Idle);
+        assert!(state.errors.is_empty());
+        assert!(state.compiled_module.is_none());
     }
 }

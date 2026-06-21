@@ -144,6 +144,7 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
 pub(crate) fn load_example_into_app(name: &str, app: &mut crate::common::app::AppState) -> bool {
     if name == HIERARCHICAL_RC_FILTER {
         build_hierarchical_rc_project(app);
+        reset_example_runtime_context(app);
         return true;
     }
 
@@ -151,9 +152,18 @@ pub(crate) fn load_example_into_app(name: &str, app: &mut crate::common::app::Ap
         return false;
     }
 
-    load_example(name, &mut app.schematic);
+    let mut schematic = SchematicState::default();
+    load_example(name, &mut schematic);
+    app.schematic = schematic;
     app.sync_active_schematic_to_workspace();
+    reset_example_runtime_context(app);
     true
+}
+
+fn reset_example_runtime_context(app: &mut crate::common::app::AppState) {
+    app.schematic.current_file = None;
+    app.schematic.read_only = false;
+    app.clear_design_execution_context();
 }
 
 /// RC Lowpass Filter

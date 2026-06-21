@@ -492,7 +492,7 @@ mod tests {
         }
     }
 
-    fn of_type<'a>(result: &'a DrcResult, vt: DrcViolationType) -> Vec<&'a DrcViolation> {
+    fn of_type(result: &DrcResult, vt: DrcViolationType) -> Vec<&DrcViolation> {
         result
             .violations()
             .iter()
