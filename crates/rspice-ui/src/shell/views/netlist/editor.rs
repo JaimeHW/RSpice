@@ -5,15 +5,17 @@
 //! resolver the runner uses; the squiggle (underline), the gutter pip,
 //! and the bottom strip all read that single vector.
 
-use std::collections::HashMap;
-
-use egui::{Color32, Ui};
+use egui::Ui;
 
 use crate::common::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::{Diagnostic, DiagnosticSeverity, baseline, completion, diagnostics, highlight};
+use super::{
+    Diagnostic, DiagnosticSeverity, completion,
+    diagnostics::{line_column_for_span, unknown_reference_diagnostics},
+    highlight,
+};
 
 /// Editor body font size (gutter follows it).
 const FONT_SIZE: f32 = 12.5;
@@ -53,23 +55,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let font = theme::mono(FONT_SIZE, FontWeight::Regular);
     let diagnostics = state.shell.netlist.diagnostics.clone();
-    let diagnostic_lines: HashMap<usize, DiagnosticSeverity> = diagnostics
-        .iter()
-        .filter_map(|d| d.line.map(|line| (line, d.severity)))
-        .fold(HashMap::new(), |mut acc, (line, severity)| {
-            acc.entry(line)
-                .and_modify(|current| *current = (*current).max(severity))
-                .or_insert(severity);
-            acc
-        });
-    let edited_lines = if state.shell.netlist.last_run_buffer.is_some() {
-        baseline::changed_lines_since_baseline(
-            &state.simulation.netlist_content,
-            state.shell.netlist.last_run_buffer.as_deref(),
-        )
-    } else {
-        state.shell.netlist.edited_lines.clone()
-    };
+    let edited_lines = state.shell.netlist.edited_lines.clone();
 
     // Take the buffer out so the layouter and the post-edit bookkeeping
     // don't fight over `state`.
@@ -82,6 +68,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
 
     let mut changed = false;
+    let mut source_changed = false;
     let mut cursor_line = state.shell.netlist.cursor_line;
     let mut te_output: Option<egui::text_edit::TextEditOutput> = None;
 
@@ -121,9 +108,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     if !ui.clip_rect().y_range().contains(y) {
                         continue;
                     }
-                    let severity = diagnostic_lines.get(&idx).copied();
-                    let color = if let Some(severity) = severity {
-                        severity_color(&c, severity)
+                    let diagnostic_severity = line_diagnostic_severity(&diagnostics, idx, &buffer);
+                    let color = if let Some(severity) = diagnostic_severity {
+                        diagnostic_color(severity, &c)
                     } else if idx == cursor_line {
                         c.text_dim
                     } else {
@@ -136,11 +123,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         gutter_font.clone(),
                         color,
                     );
-                    if let Some(severity) = severity {
+                    if let Some(severity) = diagnostic_severity {
                         painter.circle_filled(
                             egui::pos2(origin.x - 12.0, y),
                             2.5,
-                            severity_color(&c, severity),
+                            diagnostic_color(severity, &c),
                         );
                     } else if edited_lines.contains(&idx) {
                         painter.circle_filled(egui::pos2(origin.x - 12.0, y), 2.5, c.accent);
@@ -155,12 +142,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let now = ui.input(|input| input.time);
     state.shell.netlist.cursor_line = cursor_line;
     if changed {
+        source_changed = true;
         let netlist = &mut state.shell.netlist;
         netlist.revision += 1;
         netlist.last_edit_time = now;
         netlist.edited_lines.insert(cursor_line);
         // Editing makes the buffer the source of truth for runs.
         state.workspace.netlist_source = Some(buffer.clone());
+        state.workspace.netlist_source_path = None;
+        state.workspace.set_netlist_source_dirty(true);
     }
 
     // Completion popover: trigger, render, and apply an acceptance.
@@ -173,6 +163,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             completion_keys,
         )
     {
+        source_changed = true;
         buffer.replace_range(start..end, &text);
         completion::place_caret(ui, editor_id(), caret);
         let netlist = &mut state.shell.netlist;
@@ -180,9 +171,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         netlist.last_edit_time = now;
         netlist.edited_lines.insert(cursor_line);
         state.workspace.netlist_source = Some(buffer.clone());
+        state.workspace.netlist_source_path = None;
+        state.workspace.set_netlist_source_dirty(true);
     }
 
     state.simulation.netlist_content = buffer;
+    if source_changed {
+        super::refresh_diff_pips_from_baseline(state);
+    }
 
     if strip_rows > 0 {
         diagnostics_strip(ui, state, strip_rows);
@@ -215,32 +211,125 @@ fn diagnostics_strip(ui: &mut Ui, state: &AppState, rows: usize) {
         .enumerate()
     {
         let y = rect.top() + 5.0 + idx as f32 * 22.0 + 11.0;
-        let sev_color = severity_color(&c, diagnostic.severity);
+        let color = diagnostic_color(diagnostic.severity, &c);
         ui.painter()
-            .circle_filled(egui::pos2(rect.left() + 14.0, y), 2.5, sev_color);
-        let location = diagnostic
-            .line
-            .map(|line| match diagnostic.column {
-                Some(column) => format!("line {}:{} · ", line + 1, column + 1),
-                None => format!("line {} · ", line + 1),
-            })
-            .unwrap_or_default();
+            .circle_filled(egui::pos2(rect.left() + 14.0, y), 2.5, color);
+        let text =
+            diagnostic_strip_text(diagnostic, &state.simulation.netlist_content, rect.width());
         ui.painter().text(
             egui::pos2(rect.left() + 26.0, y),
             egui::Align2::LEFT_CENTER,
-            format!("{location}{}", diagnostic.message),
+            text,
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            sev_color,
+            color,
         );
-        if let Some(fix) = &diagnostic.fix {
-            ui.painter().text(
-                egui::pos2(rect.right() - 16.0, y),
-                egui::Align2::RIGHT_CENTER,
-                fix.label.as_str(),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.accent,
-            );
-        }
+    }
+}
+
+const DIAGNOSTIC_STRIP_TEXT_X: f32 = 26.0;
+const DIAGNOSTIC_STRIP_RIGHT_PADDING: f32 = 8.0;
+const DIAGNOSTIC_STRIP_CHAR_WIDTH: f32 = 7.0;
+
+fn diagnostic_strip_text(diagnostic: &Diagnostic, buffer: &str, width: f32) -> String {
+    let location = diagnostic_location(diagnostic, buffer);
+    let primary = format!(
+        "{}{location}{}",
+        diagnostic_label(diagnostic.severity),
+        diagnostic.message
+    );
+    let with_fix = diagnostic
+        .fix
+        .as_ref()
+        .map(|fix| format!("{primary} · fix: {}", fix.label));
+
+    if let Some(text) = with_fix
+        && diagnostic_strip_text_fits(&text, width)
+    {
+        return text;
+    }
+    if diagnostic_strip_text_fits(&primary, width) {
+        return primary;
+    }
+    truncate_diagnostic_strip_text(&primary, width)
+}
+
+fn diagnostic_strip_text_fits(text: &str, width: f32) -> bool {
+    text.chars().count() <= diagnostic_strip_char_budget(width)
+}
+
+fn truncate_diagnostic_strip_text(text: &str, width: f32) -> String {
+    let budget = diagnostic_strip_char_budget(width);
+    if text.chars().count() <= budget {
+        return text.to_string();
+    }
+    if budget <= 3 {
+        return text.chars().take(budget).collect();
+    }
+    let mut truncated: String = text.chars().take(budget - 3).collect();
+    truncated.push_str("...");
+    truncated
+}
+
+fn diagnostic_strip_char_budget(width: f32) -> usize {
+    ((width - DIAGNOSTIC_STRIP_TEXT_X - DIAGNOSTIC_STRIP_RIGHT_PADDING).max(0.0)
+        / DIAGNOSTIC_STRIP_CHAR_WIDTH)
+        .floor() as usize
+}
+
+fn line_diagnostic_severity(
+    diagnostics: &[Diagnostic],
+    line: usize,
+    buffer: &str,
+) -> Option<DiagnosticSeverity> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic_line(diagnostic, buffer) == Some(line))
+        .map(|diagnostic| diagnostic.severity)
+        .max()
+}
+
+fn diagnostic_line(diagnostic: &Diagnostic, buffer: &str) -> Option<usize> {
+    diagnostic.line.or_else(|| {
+        diagnostic
+            .span
+            .as_ref()
+            .map(|span| line_column_for_span(buffer, span.start).0)
+    })
+}
+
+fn diagnostic_location(diagnostic: &Diagnostic, buffer: &str) -> String {
+    let derived = diagnostic
+        .span
+        .as_ref()
+        .map(|span| line_column_for_span(buffer, span.start));
+    let line = diagnostic.line.or_else(|| derived.map(|(line, _)| line));
+    let column = diagnostic
+        .column
+        .or_else(|| derived.map(|(_, column)| column));
+
+    match (line, column) {
+        (Some(line), Some(column)) => format!("line {}:{} · ", line + 1, column + 1),
+        (Some(line), None) => format!("line {} · ", line + 1),
+        _ => String::new(),
+    }
+}
+
+fn diagnostic_label(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Error => "error · ",
+        DiagnosticSeverity::Warning => "warning · ",
+        DiagnosticSeverity::Info => "info · ",
+    }
+}
+
+fn diagnostic_color(
+    severity: DiagnosticSeverity,
+    c: &crate::ui::palette::Palette,
+) -> egui::Color32 {
+    match severity {
+        DiagnosticSeverity::Error => c.err,
+        DiagnosticSeverity::Warning => c.warn,
+        DiagnosticSeverity::Info => c.text_dim,
     }
 }
 
@@ -282,40 +371,15 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
     match rspice_core::Netlist::parse(buffer) {
         Ok(netlist) => (
-            diagnostics::unknown_reference_diagnostics(buffer),
+            unknown_reference_diagnostics(buffer),
             Some(harvest_symbols(&netlist)),
         ),
         Err(rspice_core::netlist::ParseError::Syntax { line, message }) => (
-            vec![Diagnostic {
-                // Parser lines are 1-based; `line == 0` means "unlocated".
-                severity: DiagnosticSeverity::Error,
-                span: None,
-                line: line.checked_sub(1),
-                column: None,
-                message,
-                fix: None,
-            }],
+            // Parser lines are 1-based; `line == 0` means "unlocated".
+            vec![Diagnostic::error(message).with_line(line.checked_sub(1))],
             None,
         ),
-        Err(other) => (
-            vec![Diagnostic {
-                severity: DiagnosticSeverity::Error,
-                span: None,
-                line: None,
-                column: None,
-                message: other.to_string(),
-                fix: None,
-            }],
-            None,
-        ),
-    }
-}
-
-fn severity_color(c: &crate::ui::palette::Palette, severity: DiagnosticSeverity) -> Color32 {
-    match severity {
-        DiagnosticSeverity::Error => c.err,
-        DiagnosticSeverity::Warning => c.warn,
-        DiagnosticSeverity::Info => c.text_dim,
+        Err(other) => (vec![Diagnostic::error(other.to_string())], None),
     }
 }
 
@@ -343,4 +407,61 @@ fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntr
         });
     }
     symbols
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_buffer_maps_syntax_error_to_structured_diagnostic() {
+        let (diagnostics, symbols) = parse_buffer("title\nR1 out 0\n");
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostic.line, Some(1));
+        assert_eq!(diagnostic.column, None);
+        assert!(diagnostic.span.is_none());
+        assert!(diagnostic.fix.is_none());
+        assert!(!diagnostic.message.trim().is_empty());
+    }
+
+    #[test]
+    fn parse_buffer_appends_unknown_reference_lints_after_clean_parse() {
+        let source = "deck\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.op\n.end\n";
+
+        let (diagnostics, symbols) = parse_buffer(source);
+
+        assert!(symbols.is_some());
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(&source[diagnostic.span.clone().unwrap()], "nchh");
+        assert_eq!(diagnostic.fix.as_ref().unwrap().replacement, "nch");
+    }
+
+    #[test]
+    fn diagnostic_strip_text_omits_fix_and_truncates_for_phone_width() {
+        let source = "deck\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
+        let diagnostic = Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            span: Some(18..22),
+            line: Some(1),
+            column: Some(11),
+            message: "Unknown model `nchh` in this deck.".to_string(),
+            fix: Some(crate::shell::views::netlist::diagnostics::DiagnosticFix {
+                label: "Replace with nch".to_string(),
+                span: 18..22,
+                replacement: "nch".to_string(),
+            }),
+        };
+
+        let text = diagnostic_strip_text(&diagnostic, source, 160.0);
+
+        assert!(!text.contains("fix:"));
+        assert!(text.ends_with("..."), "{text}");
+        assert!(diagnostic_strip_text_fits(&text, 160.0));
+    }
 }

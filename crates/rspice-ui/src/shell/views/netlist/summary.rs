@@ -1,125 +1,377 @@
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use crate::common::AppState;
-use crate::state::AnalysisType;
-use crate::ui::plot::sample_at;
+use crate::state::{
+    AcBodeMetrics, AcBodeSummary, SimulationRun, SpecEntry, ac_bode_summary_for_run,
+};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct MeasurementDelta {
+    pub name: String,
+    pub old: f64,
+    pub new: f64,
+    pub improved: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct BodeDelta {
+    pub name: &'static str,
+    pub unit: &'static str,
+    pub old: f64,
+    pub new: f64,
+    pub improved: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct NetlistRunSummary {
-    pub frequency: Arc<[f64]>,
-    pub gain_db: Arc<[f64]>,
-    pub stability: StabilitySummary,
+    pub stability: AcBodeMetrics,
+    pub bode: Option<AcBodeSummary>,
+    pub measurements: HashMap<String, (String, f64)>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct StabilitySummary {
-    pub adc_db: Option<f64>,
-    pub ugf: Option<f64>,
-    pub pm_deg: Option<f64>,
-    pub gm_db: Option<f64>,
-    pub f180: Option<f64>,
-    pub f3db: Option<f64>,
-    pub gain_extremes: Option<(f64, f64)>,
+pub(super) fn active_run_summary(state: &AppState) -> Option<NetlistRunSummary> {
+    state.simulation.active_run().map(run_summary)
 }
 
-pub(super) fn active_run_summary(state: &mut AppState) -> Option<NetlistRunSummary> {
-    let simulation = &state.simulation;
-    let run = simulation.active_run()?;
-    let (analysis_index, analysis) = run.analyses.iter().enumerate().find(|(_, analysis)| {
-        analysis.analysis_type == AnalysisType::Ac && !analysis.waveforms.is_empty()
-    })?;
+pub(super) fn measurement_deltas(state: &AppState, max_items: usize) -> Vec<MeasurementDelta> {
+    if max_items == 0 {
+        return Vec::new();
+    }
 
-    let (mag_index, mag) = analysis
-        .waveforms
-        .iter()
-        .enumerate()
-        .filter(|(_, waveform)| waveform.name.starts_with('|'))
-        .max_by_key(|(_, waveform)| waveform.visible)?;
-    let base = mag.name.trim_start_matches('|').trim_end_matches('|');
-    let phase = analysis
-        .waveforms
-        .iter()
-        .find(|waveform| waveform.name == format!("phase({base})"))
-        .map(|waveform| Arc::clone(&waveform.y));
-
-    let gain_db = state
-        .shell
-        .results
-        .derived
-        .db((analysis_index as u64) << 32 | mag_index as u64, &mag.y);
-    let frequency = Arc::clone(&mag.x);
-    let adc_db = gain_db.first().copied();
-    let ugf = crossing(&frequency, &gain_db, 0.0);
-    let f3db = adc_db.and_then(|adc| crossing(&frequency, &gain_db, adc - 3.0));
-    let (pm_deg, f180, gm_db) = match phase {
-        Some(phase) => {
-            let pm = ugf.map(|f| 180.0 + sample_at(&frequency, &phase, f));
-            let f180 = crossing(&frequency, &phase, -180.0);
-            let gm = f180.map(|f| -sample_at(&frequency, &gain_db, f));
-            (pm, f180, gm)
-        }
-        None => (None, None, None),
+    let Some((latest_run, previous_run)) = latest_two_runs(&state.simulation.runs) else {
+        return Vec::new();
     };
+    let latest = run_summary(latest_run);
+    let previous = run_summary(previous_run);
+    if latest.measurements.is_empty() || previous.measurements.is_empty() {
+        return Vec::new();
+    }
 
-    Some(NetlistRunSummary {
-        frequency,
-        gain_db: Arc::clone(&gain_db),
-        stability: StabilitySummary {
-            adc_db,
-            ugf,
-            pm_deg,
-            gm_db,
-            f180,
-            f3db,
-            gain_extremes: finite_extremes(&gain_db),
-        },
+    let mut keys: Vec<&String> = latest.measurements.keys().collect();
+    keys.sort();
+    let mut out = Vec::new();
+    for key in keys {
+        if out.len() == max_items {
+            break;
+        }
+        let (name, new) = &latest.measurements[key];
+        let Some((_, old)) = previous.measurements.get(key) else {
+            continue;
+        };
+        if old == new {
+            continue;
+        }
+        out.push(MeasurementDelta {
+            name: name.clone(),
+            old: *old,
+            new: *new,
+            improved: delta_verdict(&state.workspace.specs, name, *old, *new),
+        });
+    }
+
+    out
+}
+
+pub(super) fn bode_deltas(state: &AppState, max_items: usize) -> Vec<BodeDelta> {
+    if max_items == 0 {
+        return Vec::new();
+    }
+
+    let Some((latest_run, previous_run)) = latest_two_runs(&state.simulation.runs) else {
+        return Vec::new();
+    };
+    let previous = run_summary(previous_run);
+    let latest = run_summary(latest_run);
+    if previous.bode.is_none() || latest.bode.is_none() {
+        return Vec::new();
+    }
+
+    let old = previous.stability;
+    let new = latest.stability;
+    [
+        metric_delta("PM", "deg", old.pm_deg, new.pm_deg, Some(true)),
+        metric_delta("GM", "dB", old.gm_db, new.gm_db, Some(true)),
+        metric_delta("UGF", "Hz", old.ugf, new.ugf, None),
+        metric_delta("f-3dB", "Hz", old.f3db, new.f3db, None),
+        metric_delta("A_dc", "dB", old.adc_db, new.adc_db, None),
+    ]
+    .into_iter()
+    .flatten()
+    .take(max_items)
+    .collect()
+}
+
+fn latest_two_runs(runs: &[SimulationRun]) -> Option<(&SimulationRun, &SimulationRun)> {
+    let mut by_id: Vec<&SimulationRun> = runs.iter().collect();
+    by_id.sort_by(|a, b| b.id.cmp(&a.id));
+    Some((*by_id.first()?, *by_id.get(1)?))
+}
+
+fn run_summary(run: &SimulationRun) -> NetlistRunSummary {
+    let bode = ac_bode_summary_for_run(run);
+    let stability = bode
+        .as_ref()
+        .map(|summary| summary.metrics)
+        .unwrap_or_default();
+    NetlistRunSummary {
+        stability,
+        bode,
+        measurements: run_measurements(run),
+    }
+}
+
+fn run_measurements(run: &SimulationRun) -> HashMap<String, (String, f64)> {
+    let mut out = HashMap::new();
+    for analysis in &run.analyses {
+        for measurement in &analysis.measurements {
+            if let Some(value) = measurement.value {
+                out.insert(
+                    measurement.name.to_ascii_lowercase(),
+                    (measurement.name.clone(), value),
+                );
+            }
+        }
+    }
+    out
+}
+
+fn delta_verdict(specs: &[SpecEntry], name: &str, old: f64, new: f64) -> Option<bool> {
+    let spec = specs
+        .iter()
+        .find(|spec| spec.measurement.eq_ignore_ascii_case(name))?;
+    let (old_v, new_v) = (spec.violation(old), spec.violation(new));
+    if old_v == new_v {
+        return None;
+    }
+    Some(new_v < old_v)
+}
+
+fn metric_delta(
+    name: &'static str,
+    unit: &'static str,
+    old: Option<f64>,
+    new: Option<f64>,
+    higher_is_better: Option<bool>,
+) -> Option<BodeDelta> {
+    let (old, new) = (old?, new?);
+    if !old.is_finite() || !new.is_finite() || !meaningfully_changed(old, new) {
+        return None;
+    }
+    let improved = higher_is_better.map(|higher| if higher { new > old } else { new < old });
+    Some(BodeDelta {
+        name,
+        unit,
+        old,
+        new,
+        improved,
     })
 }
 
-pub(super) fn crossing(frequency: &[f64], series: &[f64], level: f64) -> Option<f64> {
-    let n = frequency.len().min(series.len());
-    for i in 1..n {
-        let (y0, y1) = (series[i - 1] - level, series[i] - level);
-        if y0 == 0.0 {
-            return Some(frequency[i - 1]);
-        }
-        if y0 * y1 < 0.0 {
-            let t = y0 / (y0 - y1);
-            let (l0, l1) = (frequency[i - 1].log10(), frequency[i].log10());
-            return Some(10f64.powf(l0 + t * (l1 - l0)));
-        }
-    }
-    None
-}
-
-fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
-    values
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .fold(None, |acc, value| match acc {
-            Some((lo, hi)) => Some((lo.min(value), hi.max(value))),
-            None => Some((value, value)),
-        })
+fn meaningfully_changed(old: f64, new: f64) -> bool {
+    let scale = old.abs().max(new.abs()).max(1.0);
+    (old - new).abs() > scale * 1.0e-9
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{AnalysisResult, AnalysisType, WaveformData};
 
-    #[test]
-    fn crossing_interpolates_in_log_frequency() {
-        let frequency = [1.0, 10.0, 100.0];
-        let gain = [20.0, 0.0, -20.0];
+    fn run_with_measurement(id: u64, name: &str, value: f64) -> SimulationRun {
+        let mut run = SimulationRun::new(id);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC")
+                .with_measurements(vec![rspice_core::MeasureResult::success(name, value)]),
+        );
+        run
+    }
 
-        assert_eq!(crossing(&frequency, &gain, 0.0), Some(10.0));
+    fn run_with_bode(id: u64, magnitude: &[f64], phase: &[f64]) -> SimulationRun {
+        let frequency = [1.0, 10.0, 100.0, 1000.0];
+        let mut run = SimulationRun::new(id);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+                wave("|V(out)|", &frequency, magnitude),
+                wave("phase(V(out))", &frequency, phase),
+            ]),
+        );
+        run
+    }
+
+    fn wave(name: &str, x: &[f64], y: &[f64]) -> WaveformData {
+        WaveformData::new(name, x.to_vec(), y.to_vec(), "#fff")
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1.0e-9,
+            "expected {expected}, got {actual}"
+        );
     }
 
     #[test]
-    fn crossing_returns_none_without_crossing() {
-        let frequency = [1.0, 10.0, 100.0];
-        let gain = [20.0, 10.0, 2.0];
+    fn delta_verdict_uses_spec_violation_distance() {
+        let specs = vec![SpecEntry {
+            measurement: "gain".to_string(),
+            min: Some(10.0),
+            max: None,
+            unit: "dB".to_string(),
+        }];
 
-        assert_eq!(crossing(&frequency, &gain, 0.0), None);
+        assert_eq!(delta_verdict(&specs, "GAIN", 8.0, 9.0), Some(true));
+        assert_eq!(delta_verdict(&specs, "GAIN", 9.0, 8.0), Some(false));
+        assert_eq!(delta_verdict(&specs, "GAIN", 11.0, 12.0), None);
+    }
+
+    #[test]
+    fn measurement_deltas_compare_latest_to_previous_run() {
+        let mut state = AppState::default();
+        state.workspace.specs.push(SpecEntry {
+            measurement: "gain".to_string(),
+            min: Some(10.0),
+            max: None,
+            unit: "dB".to_string(),
+        });
+        state
+            .simulation
+            .runs
+            .push(run_with_measurement(1, "gain", 8.0));
+        state
+            .simulation
+            .runs
+            .push(run_with_measurement(2, "gain", 9.0));
+
+        let deltas = measurement_deltas(&state, 4);
+
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].name, "gain");
+        assert_eq!(deltas[0].old, 8.0);
+        assert_eq!(deltas[0].new, 9.0);
+        assert_eq!(deltas[0].improved, Some(true));
+    }
+
+    #[test]
+    fn measurement_deltas_follow_newest_first_run_history() {
+        let mut state = AppState::default();
+        state.workspace.specs.push(SpecEntry {
+            measurement: "gain".to_string(),
+            min: Some(10.0),
+            max: None,
+            unit: "dB".to_string(),
+        });
+        state.simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 8.0)]),
+        );
+        state.simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC")
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 9.0)]),
+        );
+
+        let deltas = measurement_deltas(&state, 4);
+
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].old, 8.0);
+        assert_eq!(deltas[0].new, 9.0);
+        assert_eq!(deltas[0].improved, Some(true));
+    }
+
+    #[test]
+    fn bode_deltas_compare_latest_stability_summary_to_previous_run() {
+        let mut state = AppState::default();
+        state.simulation.runs.push(run_with_bode(
+            1,
+            &[10.0, 1.0, 0.1, 0.01],
+            &[-90.0, -135.0, -170.0, -190.0],
+        ));
+        state.simulation.runs.push(run_with_bode(
+            2,
+            &[10.0, 1.0, 0.01, 0.001],
+            &[-60.0, -120.0, -170.0, -190.0],
+        ));
+
+        let deltas = bode_deltas(&state, 2);
+
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(deltas[0].name, "PM");
+        assert_eq!(deltas[0].unit, "deg");
+        assert_close(deltas[0].old, 45.0);
+        assert_close(deltas[0].new, 60.0);
+        assert_eq!(deltas[0].improved, Some(true));
+        assert_eq!(deltas[1].name, "GM");
+        assert_eq!(deltas[1].unit, "dB");
+        assert_eq!(deltas[1].improved, Some(true));
+    }
+
+    #[test]
+    fn bode_deltas_follow_newest_first_run_history() {
+        let mut state = AppState::default();
+        let mut previous =
+            run_with_bode(1, &[10.0, 1.0, 0.1, 0.01], &[-90.0, -135.0, -170.0, -190.0]);
+        state
+            .simulation
+            .start_run()
+            .add_analysis(previous.analyses.remove(0));
+        let mut latest = run_with_bode(
+            2,
+            &[10.0, 1.0, 0.01, 0.001],
+            &[-60.0, -120.0, -170.0, -190.0],
+        );
+        state
+            .simulation
+            .start_run()
+            .add_analysis(latest.analyses.remove(0));
+
+        let deltas = bode_deltas(&state, 2);
+
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(deltas[0].name, "PM");
+        assert_close(deltas[0].old, 45.0);
+        assert_close(deltas[0].new, 60.0);
+        assert_eq!(deltas[0].improved, Some(true));
+    }
+
+    #[test]
+    fn bode_deltas_skip_missing_or_unchanged_metrics() {
+        let mut state = AppState::default();
+        state
+            .simulation
+            .runs
+            .push(run_with_bode(1, &[10.0, 1.0, 0.1, 0.01], &[-90.0; 4]));
+        state
+            .simulation
+            .runs
+            .push(run_with_bode(2, &[10.0, 1.0, 0.1, 0.01], &[-90.0; 4]));
+
+        assert!(bode_deltas(&state, 4).is_empty());
+    }
+
+    #[test]
+    fn active_run_summary_carries_measurements_and_ac_metrics() {
+        let frequency = [1.0, 10.0, 100.0, 1000.0];
+        let mut run = SimulationRun::new(3);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC")
+                .with_waveforms(vec![
+                    wave("|V(out)|", &frequency, &[10.0, 1.0, 0.1, 0.01]),
+                    wave(
+                        "phase(V(out))",
+                        &frequency,
+                        &[-45.0, -135.0, -180.0, -225.0],
+                    ),
+                ])
+                .with_measurements(vec![rspice_core::MeasureResult::success("gain", 42.0)]),
+        );
+
+        let mut state = AppState::default();
+        state.simulation.runs.push(run);
+        state.simulation.active_run_idx = Some(0);
+
+        let summary = active_run_summary(&state).expect("active summary");
+
+        assert_eq!(summary.measurements["gain"].1, 42.0);
+        assert!(summary.bode.is_some());
+        assert_close(summary.stability.ugf.unwrap(), 10.0);
+        assert_close(summary.stability.pm_deg.unwrap(), 45.0);
     }
 }

@@ -1,6 +1,10 @@
+//! Structured diagnostics for the netlist editor.
+
 use std::ops::Range;
 
-#[allow(dead_code)]
+use rspice_core::netlist::{NetlistDefinition, NetlistReference, ReferenceKind};
+
+/// Severity levels shown by the gutter, strip, and syntax highlighter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiagnosticSeverity {
     Info,
@@ -8,6 +12,7 @@ pub enum DiagnosticSeverity {
     Error,
 }
 
+/// A single quick fix candidate for a diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticFix {
     pub label: String,
@@ -15,151 +20,188 @@ pub struct DiagnosticFix {
     pub replacement: String,
 }
 
+/// One structured problem reported for the current editor buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
+    /// Byte span in the editor buffer, when known.
     pub span: Option<Range<usize>>,
+    /// 0-based buffer line, when localized.
     pub line: Option<usize>,
+    /// 0-based UTF-8 byte column within `line`, when localized.
     pub column: Option<usize>,
     pub message: String,
     pub fix: Option<DiagnosticFix>,
 }
 
-pub(super) fn line_column_for_span(buffer: &str, offset: usize) -> (usize, usize) {
-    let mut line = 0usize;
-    let mut line_start = 0usize;
-    for (idx, ch) in buffer.char_indices() {
-        if idx >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            line_start = idx + ch.len_utf8();
+impl Diagnostic {
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Error,
+            span: None,
+            line: None,
+            column: None,
+            message: message.into(),
+            fix: None,
         }
     }
-    (line, offset.saturating_sub(line_start))
+
+    pub fn with_line(mut self, line: Option<usize>) -> Self {
+        self.line = line;
+        self
+    }
+}
+
+/// Convert a byte offset into a 0-based `(line, column)` pair.
+pub fn line_column_for_span(buffer: &str, offset: usize) -> (usize, usize) {
+    let target = offset.min(buffer.len());
+    let mut line = 0usize;
+    let mut line_start = 0usize;
+
+    for (idx, byte) in buffer.as_bytes().iter().enumerate() {
+        if idx >= target {
+            break;
+        }
+        if *byte == b'\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+
+    (line, target.saturating_sub(line_start))
 }
 
 pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
-    if contains_external_include(buffer) {
+    if has_external_model_sources(buffer) {
         return Vec::new();
     }
 
-    let Ok(netlist) = rspice_core::Netlist::parse(buffer) else {
-        return Vec::new();
-    };
-    let map = netlist.source_map();
-    let mut model_names = definition_names_from_source(buffer, ".model");
-    model_names.extend(netlist.models.iter().map(|model| model.name.clone()));
-    let mut subckt_names = definition_names_from_source(buffer, ".subckt");
-    subckt_names.extend(netlist.subcircuits.iter().map(|subckt| subckt.name.clone()));
-    for include in &netlist.veriloga_includes {
-        if let Some(name) = &include.model_name {
-            model_names.push(name.clone());
-            subckt_names.push(name.clone());
+    let map = rspice_core::netlist::source_map_for_editor(buffer);
+    let mut diagnostics = Vec::new();
+
+    for reference in map.references {
+        let definitions = match reference.kind {
+            ReferenceKind::Model => &map.model_defs,
+            ReferenceKind::Subcircuit => &map.subckt_defs,
+        };
+        let visible = visible_definitions(&reference, definitions);
+        if visible
+            .iter()
+            .any(|definition| definition.name.eq_ignore_ascii_case(&reference.name))
+        {
+            continue;
         }
+
+        let replacement = nearest_definition(&reference.name, &visible);
+        let (line, column) = line_column_for_span(buffer, reference.span.start);
+        let kind = match reference.kind {
+            ReferenceKind::Model => "model",
+            ReferenceKind::Subcircuit => "subcircuit",
+        };
+        let fix = replacement.as_ref().map(|replacement| DiagnosticFix {
+            label: format!("Replace with {replacement}"),
+            span: reference.span.clone(),
+            replacement: replacement.clone(),
+        });
+
+        diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            span: Some(reference.span),
+            line: Some(line),
+            column: Some(column),
+            message: format!("Unknown {kind} `{}` in this deck.", reference.name),
+            fix,
+        });
     }
 
-    map.lint_unknown_references(&netlist)
-        .into_iter()
-        .filter_map(|diagnostic| {
-            let start =
-                byte_offset_for_line_column(buffer, diagnostic.range.line, diagnostic.range.start)?;
-            let end =
-                byte_offset_for_line_column(buffer, diagnostic.range.line, diagnostic.range.end)
-                    .unwrap_or(start + diagnostic.name.len());
-            let span = start..end;
-            let candidates = match diagnostic.kind {
-                rspice_core::netlist::UnknownReferenceKind::Model => &model_names,
-                rspice_core::netlist::UnknownReferenceKind::Subcircuit => &subckt_names,
-            };
-            let fix = nearest_name(&diagnostic.name, candidates).map(|replacement| DiagnosticFix {
-                label: format!("Replace with {replacement}"),
-                span: span.clone(),
-                replacement,
-            });
-            let (line, column) = line_column_for_span(buffer, start);
-            Some(Diagnostic {
-                severity: DiagnosticSeverity::Error,
-                span: Some(span),
-                line: Some(line),
-                column: Some(column),
-                message: diagnostic.message,
-                fix,
-            })
-        })
+    diagnostics
+}
+
+fn visible_definitions<'a>(
+    reference: &NetlistReference,
+    definitions: &'a [NetlistDefinition],
+) -> Vec<&'a NetlistDefinition> {
+    definitions
+        .iter()
+        .filter(|definition| definition_visible(reference, definition))
         .collect()
 }
 
-fn contains_external_include(buffer: &str) -> bool {
+fn definition_visible(reference: &NetlistReference, definition: &NetlistDefinition) -> bool {
+    match reference.kind {
+        ReferenceKind::Model => definition
+            .scope
+            .as_deref()
+            .is_none_or(|scope| scope_visible_from(scope, reference.scope.as_deref())),
+        ReferenceKind::Subcircuit => {
+            definition.scope.is_none() || definition.scope == reference.scope
+        }
+    }
+}
+
+fn scope_visible_from(definition_scope: &str, reference_scope: Option<&str>) -> bool {
+    let Some(reference_scope) = reference_scope else {
+        return false;
+    };
+    reference_scope == definition_scope
+        || reference_scope
+            .strip_prefix(definition_scope)
+            .is_some_and(|rest| rest.starts_with('.'))
+}
+
+fn nearest_definition(reference: &str, definitions: &[&NetlistDefinition]) -> Option<String> {
+    definitions
+        .iter()
+        .filter_map(|candidate| {
+            let distance = levenshtein(
+                &reference.to_ascii_lowercase(),
+                &candidate.name.to_ascii_lowercase(),
+            );
+            (distance <= 2).then_some((distance, candidate.name.clone()))
+        })
+        .min_by(|(a_distance, a_name), (b_distance, b_name)| {
+            a_distance.cmp(b_distance).then_with(|| a_name.cmp(b_name))
+        })
+        .map(|(_, candidate)| candidate)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    if a.is_empty() {
+        return b.chars().count();
+    }
+    if b.is_empty() {
+        return a.chars().count();
+    }
+
+    let b_chars = b.chars().collect::<Vec<_>>();
+    let mut previous = (0..=b_chars.len()).collect::<Vec<_>>();
+    let mut current = vec![0usize; b_chars.len() + 1];
+
+    for (i, a_ch) in a.chars().enumerate() {
+        current[0] = i + 1;
+        for (j, b_ch) in b_chars.iter().enumerate() {
+            let substitution = usize::from(a_ch != *b_ch);
+            current[j + 1] = (previous[j + 1] + 1)
+                .min(current[j] + 1)
+                .min(previous[j] + substitution);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[b_chars.len()]
+}
+
+fn has_external_model_sources(buffer: &str) -> bool {
     buffer.lines().any(|line| {
         let trimmed = line.trim_start();
-        dot_command_matches(trimmed, ".include") || dot_command_matches(trimmed, ".lib")
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            return false;
+        }
+        let head = trimmed.split_whitespace().next().unwrap_or_default();
+        head.eq_ignore_ascii_case(".include")
+            || head.eq_ignore_ascii_case(".inc")
+            || head.eq_ignore_ascii_case(".lib")
     })
-}
-
-fn dot_command_matches(line: &str, command: &str) -> bool {
-    if line.len() < command.len() || !line[..command.len()].eq_ignore_ascii_case(command) {
-        return false;
-    }
-    line[command.len()..]
-        .chars()
-        .next()
-        .is_none_or(char::is_whitespace)
-}
-
-fn definition_names_from_source(buffer: &str, command: &str) -> Vec<String> {
-    buffer
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim_start();
-            if !dot_command_matches(trimmed, command) {
-                return None;
-            }
-            trimmed.split_whitespace().nth(1).map(str::to_string)
-        })
-        .collect()
-}
-
-fn byte_offset_for_line_column(buffer: &str, line: usize, column: usize) -> Option<usize> {
-    let mut offset = 0usize;
-    for (idx, text) in buffer.split_inclusive('\n').enumerate() {
-        let line_text = text.strip_suffix('\n').unwrap_or(text);
-        if idx + 1 == line {
-            return Some(offset + column.min(line_text.len()));
-        }
-        offset += text.len();
-    }
-    None
-}
-
-fn nearest_name(name: &str, candidates: &[String]) -> Option<String> {
-    candidates
-        .iter()
-        .map(|candidate| (levenshtein_ci(name, candidate), candidate))
-        .filter(|(distance, _)| *distance <= 2)
-        .min_by_key(|(distance, candidate)| (*distance, candidate.len()))
-        .map(|(_, candidate)| candidate.clone())
-}
-
-fn levenshtein_ci(a: &str, b: &str) -> usize {
-    let a = a.to_ascii_lowercase();
-    let b = b.to_ascii_lowercase();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut cur = vec![0usize; b.len() + 1];
-
-    for (i, ca) in a.bytes().enumerate() {
-        cur[0] = i + 1;
-        for (j, cb) in b.bytes().enumerate() {
-            let substitution = prev[j] + usize::from(ca != cb);
-            let insertion = cur[j] + 1;
-            let deletion = prev[j + 1] + 1;
-            cur[j + 1] = substitution.min(insertion).min(deletion);
-        }
-        std::mem::swap(&mut prev, &mut cur);
-    }
-
-    prev[b.len()]
 }
 
 #[cfg(test)]
@@ -167,18 +209,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn line_column_maps_byte_offsets() {
+    fn line_column_for_span_counts_zero_based_lines_and_columns() {
         assert_eq!(line_column_for_span("a\nbc\n", 3), (1, 1));
+    }
+
+    #[test]
+    fn line_column_for_span_clamps_offsets_after_eof() {
+        assert_eq!(line_column_for_span("a\nbc", 99), (1, 2));
     }
 
     #[test]
     fn unknown_model_lint_suggests_nearest_known_model() {
         let src = "deck\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
+
         let diagnostics = unknown_reference_diagnostics(src);
 
         assert_eq!(diagnostics.len(), 1);
-        assert!(diagnostics[0].message.contains("NCHH"));
-        assert_eq!(diagnostics[0].line, Some(1));
-        assert_eq!(diagnostics[0].fix.as_ref().unwrap().replacement, "nch");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(&src[diagnostic.span.clone().unwrap()], "nchh");
+        assert_eq!(diagnostic.line, Some(1));
+        assert!(diagnostic.message.contains("nchh"));
+        let fix = diagnostic.fix.as_ref().unwrap();
+        assert_eq!(fix.replacement, "nch");
+        assert_eq!(&src[fix.span.clone()], "nchh");
+    }
+
+    #[test]
+    fn unknown_subckt_lint_suggests_nearest_known_subckt() {
+        let src = "deck\nX1 in out invv\n.subckt inv in out\n.ends\n.end\n";
+
+        let diagnostics = unknown_reference_diagnostics(src);
+
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(&src[diagnostic.span.clone().unwrap()], "invv");
+        assert!(diagnostic.message.contains("invv"));
+        assert_eq!(diagnostic.fix.as_ref().unwrap().replacement, "inv");
+    }
+
+    #[test]
+    fn unknown_reference_lint_skips_decks_with_external_includes() {
+        let src = "deck\n.include models.scs\nM1 d g s b nchh W=1u L=1u\n.end\n";
+
+        let diagnostics = unknown_reference_diagnostics(src);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn unknown_model_lint_does_not_resolve_sibling_local_model() {
+        let src = "deck\n.subckt amp in out\n.model nch nmos\n.ends\n.subckt buf in out\nM1 out in 0 0 nch\n.ends\n.end\n";
+
+        let diagnostics = unknown_reference_diagnostics(src);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(&src[diagnostics[0].span.clone().unwrap()], "nch");
+        assert!(diagnostics[0].fix.is_none());
     }
 }

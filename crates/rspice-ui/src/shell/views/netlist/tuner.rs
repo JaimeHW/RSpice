@@ -8,14 +8,17 @@
 
 use std::collections::HashMap;
 
-use egui::Ui;
+use egui::{Color32, Ui};
 
 use crate::common::AppState;
 use crate::properties::engineering::{format_engineering_value, parse_engineering_value};
-use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
+use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
+
+const MINI_BODE_GAIN_CACHE_KEY: u64 = 0x4E45_544C_0001;
+const MINI_BODE_PHASE_CACHE_KEY: u64 = 0x4E45_544C_0002;
 
 /// One tunable row: a `.param` assignment found in the buffer.
 #[derive(Clone)]
@@ -27,10 +30,15 @@ struct ParamRow {
     value: Option<f64>,
     /// Raw value text, for the expression readout.
     raw: String,
-    /// Optional explicit slider range from a preceding `* @tune` annotation.
+    /// Optional exact slider range from an `@tune` annotation.
     range: Option<(f64, f64)>,
-    /// Last successful run's numeric value for this parameter.
-    baseline: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TunedMetricRow {
+    name: &'static str,
+    value: String,
+    highlight: bool,
 }
 
 /// Render the tuner right panel (Netlist workspace).
@@ -39,6 +47,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let c = t.color;
 
     section_header(ui, "Tuner", None);
+    let rows = scan_params(&state.simulation.netlist_content);
+    let reset_payload = reset_values(&rows, &state.shell.netlist.last_run_params);
+    let mut reset_requested = false;
 
     // Mode toggle: live re-sim vs on-release.
     ui.horizontal(|ui| {
@@ -56,18 +67,22 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         {
             state.shell.netlist.tuner_live = false;
         }
+        if !reset_payload.is_empty()
+            && chip(ui, "reset", false)
+                .on_hover_text("Reset numeric .param values to the last successful run")
+                .clicked()
+        {
+            reset_requested = true;
+        }
     });
     ui.add_space(6.0);
 
-    let mut rows = scan_params(&state.simulation.netlist_content);
-    for row in &mut rows {
-        row.baseline = state
-            .shell
-            .netlist
-            .last_run_params
-            .get(&row.name.to_ascii_lowercase())
-            .copied();
+    if let Some(summary) = super::summary::active_run_summary(state) {
+        render_mini_bode(ui, state, &summary);
+        render_as_tuned(ui, &summary);
+        ui.add_space(8.0);
     }
+
     if rows.is_empty() {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
@@ -79,18 +94,22 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         });
         return;
     }
+    if reset_requested {
+        apply_reset_to_last_run(ui, state, &rows);
+        return;
+    }
 
     // Slider edits collected first; the buffer rewrite happens after the
     // row loop so the scan stays consistent within the frame.
     let mut write: Option<(ParamRow, f64, bool)> = None;
 
-    for row in &rows {
+    for row in rows {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(&row.name)
-                    .font(theme::mono(tokens::FS_1, FontWeight::Medium))
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                     .color(c.text),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -100,20 +119,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                     None => row.raw.clone(),
                 };
                 let color = if row.value.is_some() {
-                    match (row.value, row.baseline) {
-                        (Some(value), Some(baseline))
-                            if (value - baseline).abs() > f64::EPSILON =>
-                        {
-                            c.accent
-                        }
-                        _ => c.traces[1],
-                    }
+                    c.traces[1]
                 } else {
                     c.text_faint
                 };
                 ui.label(
                     egui::RichText::new(readout)
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                         .color(color),
                 );
             });
@@ -123,13 +135,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             continue; // expression-bound: readout only
         };
 
-        let (lo, hi) = row
-            .range
-            .unwrap_or_else(|| slider_range(state, &row.name, value));
+        let (lo, hi) = slider_range(state, &row.name, value, row.range);
         let mut slider_value = value;
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            ui.spacing_mut().slider_width = (ui.available_width() - 24.0).clamp(80.0, 220.0);
+            ui.spacing_mut().slider_width = slider_width_for_available(ui.available_width());
             let logarithmic = lo > 0.0;
             let response = ui.add(
                 egui::Slider::new(&mut slider_value, lo..=hi)
@@ -138,9 +148,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             );
             if response.changed() && slider_value != value {
                 let fire = state.shell.netlist.tuner_live;
-                write = Some((row.clone(), slider_value, fire));
+                write = Some((row, slider_value, fire));
             } else if response.drag_stopped() && !state.shell.netlist.tuner_live {
-                write = Some((row.clone(), slider_value, true));
+                write = Some((row, slider_value, true));
             }
         });
     }
@@ -148,35 +158,188 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     if let Some((row, new_value, fire_run)) = write {
         apply_param_edit(ui, state, &row, new_value, fire_run);
     }
+}
 
-    ui.add_space(8.0);
-    let reset_clicked = crate::ui::widgets::Button::new("reset to last run")
-        .enabled(!state.shell.netlist.last_run_params.is_empty())
-        .show(ui)
-        .clicked();
-    if reset_clicked {
-        let values = reset_values(&rows, &state.shell.netlist.last_run_params);
-        let changed = !values.is_empty();
-        for (name, value) in values {
-            if let Some(row) = rows.iter().find(|row| row.name.eq_ignore_ascii_case(&name)) {
-                apply_param_edit(ui, state, row, value, false);
-            }
-        }
-        if changed {
-            super::request_run(state);
+fn slider_width_for_available(available: f32) -> f32 {
+    (available - 24.0).clamp(80.0, 220.0)
+}
+
+fn render_mini_bode(
+    ui: &mut Ui,
+    state: &mut AppState,
+    summary: &super::summary::NetlistRunSummary,
+) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let Some(spec) = mini_bode_spec(summary, c.traces[0], c.traces[2]) else {
+        return;
+    };
+
+    ui.add_space(4.0);
+    state
+        .shell
+        .results
+        .cache
+        .ensure_version(state.simulation.data_version);
+    ui.allocate_ui(egui::vec2(ui.available_width(), 130.0), |ui| {
+        plot::show(ui, &spec, &mut state.shell.results.cache, None, None);
+    });
+    ui.add_space(4.0);
+}
+
+fn render_as_tuned(ui: &mut Ui, summary: &super::summary::NetlistRunSummary) {
+    section_header(ui, "As tuned", None);
+    let t = Tokens::get(ui.ctx());
+    for row in as_tuned_rows(summary) {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(row.name)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(row.value)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(if row.highlight {
+                            t.color.accent
+                        } else {
+                            t.color.text
+                        }),
+                );
+            });
+        });
+    }
+}
+
+fn as_tuned_rows(summary: &super::summary::NetlistRunSummary) -> [TunedMetricRow; 3] {
+    [
+        TunedMetricRow {
+            name: "UGF",
+            value: fmt_opt(summary.stability.ugf, |value| plot::fmt_si(value, "Hz", 2)),
+            highlight: true,
+        },
+        TunedMetricRow {
+            name: "PM",
+            value: fmt_opt(summary.stability.pm_deg, |value| format!("{value:.1} deg")),
+            highlight: true,
+        },
+        TunedMetricRow {
+            name: "GM",
+            value: fmt_opt(summary.stability.gm_db, |value| format!("{value:.1} dB")),
+            highlight: false,
+        },
+    ]
+}
+
+fn fmt_opt(value: Option<f64>, f: impl FnOnce(f64) -> String) -> String {
+    value.map(f).unwrap_or_else(|| "-".to_string())
+}
+
+fn mini_bode_spec<'a>(
+    summary: &'a super::summary::NetlistRunSummary,
+    gain_color: Color32,
+    phase_color: Color32,
+) -> Option<PlotSpec<'a>> {
+    let bode = summary.bode.as_ref()?;
+    let x0 = bode
+        .frequency
+        .iter()
+        .copied()
+        .find(|value| value.is_finite() && *value > 0.0)?;
+    let x1 = bode
+        .frequency
+        .iter()
+        .copied()
+        .rev()
+        .find(|value| value.is_finite() && *value > x0)?;
+    if !matches!(x1.partial_cmp(&x0), Some(std::cmp::Ordering::Greater)) {
+        return None;
+    }
+
+    let (g_min, g_max) =
+        finite_pair(summary.stability.gain_extremes).or_else(|| finite_extremes(&bode.gain_db))?;
+    let gain_pad = ((g_max - g_min) * 0.1).max(3.0);
+    let y0 = (g_min - gain_pad).min(-10.0);
+    let y1 = (g_max + gain_pad).max(10.0);
+    if !matches!(y1.partial_cmp(&y0), Some(std::cmp::Ordering::Greater)) {
+        return None;
+    }
+
+    let mut spec = PlotSpec::new(
+        Axis::log_decades(x0, x1, "Hz"),
+        XScale::Log10,
+        Axis::linear_with(y0, y1, "dB", 4),
+    );
+    spec.left_margin = 46.0;
+    spec.ref_lines.push(plot::RefLine { y: 0.0 });
+
+    if let Some(phase) = &bode.phase_deg {
+        let (p_min, p_max) = summary
+            .stability
+            .phase_extremes
+            .and_then(finite_pair)
+            .or_else(|| finite_extremes(phase))
+            .unwrap_or((-180.0, 0.0));
+        let p0 = p_min.min(-180.0);
+        let p1 = p_max.max(0.0);
+        if matches!(p1.partial_cmp(&p0), Some(std::cmp::Ordering::Greater)) {
+            spec.y_right = Some((Axis::linear_with(p0, p1, "deg", 3), phase_color));
+            spec.traces.push(
+                Trace::new(&bode.frequency, phase, phase_color)
+                    .right()
+                    .dashed()
+                    .thin()
+                    .cache_key(MINI_BODE_PHASE_CACHE_KEY),
+            );
         }
     }
 
-    if let Some(summary) = super::summary::active_run_summary(state) {
-        render_mini_bode(ui, state, &summary);
-        render_as_tuned(ui, &summary);
+    spec.traces.push(
+        Trace::new(&bode.frequency, &bode.gain_db, gain_color)
+            .thin()
+            .cache_key(MINI_BODE_GAIN_CACHE_KEY),
+    );
+
+    Some(spec)
+}
+
+fn finite_pair((lo, hi): (f64, f64)) -> Option<(f64, f64)> {
+    (lo.is_finite() && hi.is_finite() && lo <= hi).then_some((lo, hi))
+}
+
+fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for &value in values {
+        if value.is_finite() {
+            lo = lo.min(value);
+            hi = hi.max(value);
+        }
     }
+    (lo <= hi).then_some((lo, hi))
 }
 
 /// Slider bounds for one parameter, captured the first time the parameter
 /// appears so the range doesn't chase the value mid-drag. Positive values
 /// get a log decade either side; others a symmetric linear span.
-fn slider_range(state: &mut AppState, name: &str, value: f64) -> (f64, f64) {
+fn slider_range(
+    state: &mut AppState,
+    name: &str,
+    value: f64,
+    annotated: Option<(f64, f64)>,
+) -> (f64, f64) {
+    if let Some(range) = annotated {
+        state
+            .shell
+            .netlist
+            .param_ranges
+            .insert(name.to_ascii_lowercase(), range);
+        return range;
+    }
+
     *state
         .shell
         .netlist
@@ -221,11 +384,13 @@ fn apply_param_edit(ui: &Ui, state: &mut AppState, row: &ParamRow, value: f64, f
 
         state.simulation.netlist_content = next.clone();
         state.workspace.netlist_source = Some(next);
+        state.workspace.netlist_source_path = None;
 
         let netlist = &mut state.shell.netlist;
         netlist.revision += 1;
         netlist.last_edit_time = ui.input(|input| input.time);
         netlist.edited_lines.insert(row.line);
+        super::refresh_diff_pips_from_baseline(state);
     }
 
     if fire_run {
@@ -264,143 +429,20 @@ pub(super) fn buffer_assignments(buffer: &str) -> Vec<(String, usize, usize)> {
         .collect()
 }
 
-fn reset_values(rows: &[ParamRow], baseline: &HashMap<String, f64>) -> Vec<(String, f64)> {
-    rows.iter()
-        .filter(|row| row.value.is_some())
-        .filter_map(|row| {
-            baseline
-                .get(&row.name.to_ascii_lowercase())
-                .map(|value| (row.name.clone(), *value))
-        })
-        .collect()
-}
-
-fn render_mini_bode(
-    ui: &mut Ui,
-    state: &mut AppState,
-    summary: &super::summary::NetlistRunSummary,
-) {
-    let Some((&x0, &x1)) = summary
-        .frequency
-        .first()
-        .zip(summary.frequency.last())
-        .filter(|(lo, hi)| **lo > 0.0 && **hi > **lo)
-    else {
-        return;
-    };
-    let (g_min, g_max) = summary.stability.gain_extremes.unwrap_or((-20.0, 20.0));
-    let pad = ((g_max - g_min) * 0.12).max(6.0);
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-
-    ui.add_space(8.0);
-    ui.allocate_ui(egui::vec2(ui.available_width(), 130.0), |ui| {
-        let mut spec = PlotSpec::new(
-            Axis::log_decades(x0, x1, "Hz"),
-            XScale::Log10,
-            Axis::linear(g_min - pad, g_max + pad, "dB"),
-        );
-        spec.left_margin = 42.0;
-        spec.ref_lines.push(plot::RefLine { y: 0.0 });
-        spec.traces.push(
-            Trace::new(&summary.frequency, &summary.gain_db, c.traces[0])
-                .thin()
-                .cache_key(0x4E45_544C_4953_5401),
-        );
-        if let Some(ugf) = summary.stability.ugf {
-            spec.markers.push(plot::Marker {
-                x: ugf,
-                y: 0.0,
-                side: plot::YSide::Left,
-                color: c.accent,
-                label: "UGF".to_string(),
-                drop_line: true,
-                label_dy: 0.0,
-            });
-        }
-        plot::show(ui, &spec, &mut state.shell.results.cache, None, None);
-    });
-}
-
-fn render_as_tuned(ui: &mut Ui, summary: &super::summary::NetlistRunSummary) {
-    section_header(ui, "As tuned", None);
-    let rows = [
-        (
-            "ADC",
-            fmt_opt(summary.stability.adc_db, |v| format!("{v:.1} dB")),
-            false,
-        ),
-        (
-            "UGF",
-            fmt_opt(summary.stability.ugf, |v| fmt_si(v, "Hz", 2)),
-            true,
-        ),
-        (
-            "PM",
-            fmt_opt(summary.stability.pm_deg, |v| format!("{v:.1} deg")),
-            true,
-        ),
-        (
-            "GM",
-            fmt_opt(summary.stability.gm_db, |v| format!("{v:.1} dB")),
-            false,
-        ),
-        (
-            "f3dB",
-            fmt_opt(summary.stability.f3db, |v| fmt_si(v, "Hz", 1)),
-            false,
-        ),
-        (
-            "f180",
-            fmt_opt(summary.stability.f180, |v| fmt_si(v, "Hz", 1)),
-            false,
-        ),
-    ];
-    let t = Tokens::get(ui.ctx());
-    for (name, value, highlight) in rows {
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(name)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(value)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(if highlight {
-                            t.color.accent
-                        } else {
-                            t.color.text
-                        }),
-                );
-            });
-        });
-    }
-}
-
-fn fmt_opt(value: Option<f64>, f: impl FnOnce(f64) -> String) -> String {
-    value.map(f).unwrap_or_else(|| "-".to_string())
-}
-
-pub(crate) fn scan_assignments_for_baseline(line: &str) -> Option<Vec<(String, usize, usize)>> {
-    scan_assignments(line)
-}
-
 /// All `.param` rows in the buffer.
 fn scan_params(buffer: &str) -> Vec<ParamRow> {
     let mut rows = Vec::new();
     let mut named_ranges: HashMap<String, (f64, f64)> = HashMap::new();
-    let mut pending_next_range: Option<(f64, f64)> = None;
-
+    let mut next_range: Option<(f64, f64)> = None;
     for (idx, line) in buffer.lines().enumerate() {
-        if let Some((name, range)) = parse_tune_comment(line) {
-            if let Some(name) = name {
-                named_ranges.insert(name, range);
-            } else {
-                pending_next_range = Some(range);
+        if let Some(annotation) = tune_annotation(line) {
+            match annotation {
+                TuneAnnotation::Named { name, range } => {
+                    named_ranges.insert(name.to_ascii_lowercase(), range);
+                }
+                TuneAnnotation::Next(range) => {
+                    next_range = Some(range);
+                }
             }
             continue;
         }
@@ -415,37 +457,84 @@ fn scan_params(buffer: &str) -> Vec<ParamRow> {
             } else {
                 parse_engineering_value(&raw).ok()
             };
-            let key = name.to_ascii_lowercase();
             let range = named_ranges
-                .remove(&key)
-                .or_else(|| pending_next_range.take());
+                .get(&name.to_ascii_lowercase())
+                .copied()
+                .or_else(|| next_range.take());
             rows.push(ParamRow {
                 name,
                 line: idx,
                 value,
                 raw,
                 range,
-                baseline: None,
             });
         }
     }
     rows
 }
 
-fn parse_tune_comment(line: &str) -> Option<(Option<String>, (f64, f64))> {
-    let text = line.trim_start().strip_prefix('*')?.trim();
-    let tail = text.strip_prefix("@tune")?.trim();
-    let mut parts = tail.split_whitespace();
+enum TuneAnnotation {
+    Named { name: String, range: (f64, f64) },
+    Next((f64, f64)),
+}
+
+fn tune_annotation(line: &str) -> Option<TuneAnnotation> {
+    let trimmed = line.trim_start();
+    let comment = trimmed.strip_prefix('*')?.trim_start();
+    let rest = comment.strip_prefix("@tune")?.trim();
+    let mut parts = rest.split_whitespace();
     let first = parts.next()?;
-    let (name, range_text) = if first.contains("..") {
-        (None, first)
-    } else {
-        (Some(first.to_ascii_lowercase()), parts.next()?)
-    };
-    let (lo, hi) = range_text.split_once("..")?;
+    if first.contains("..") {
+        return parse_tune_range(first).map(TuneAnnotation::Next);
+    }
+
+    let range = parse_tune_range(parts.next()?)?;
+    Some(TuneAnnotation::Named {
+        name: first.to_string(),
+        range,
+    })
+}
+
+fn parse_tune_range(raw: &str) -> Option<(f64, f64)> {
+    let (lo, hi) = raw.split_once("..")?;
     let lo = parse_engineering_value(lo).ok()?;
     let hi = parse_engineering_value(hi).ok()?;
-    (hi > lo).then_some((name, (lo, hi)))
+    if lo <= hi {
+        Some((lo, hi))
+    } else {
+        Some((hi, lo))
+    }
+}
+
+fn reset_values(rows: &[ParamRow], baseline: &HashMap<String, f64>) -> Vec<(String, f64)> {
+    rows.iter()
+        .filter_map(|row| {
+            let current = row.value?;
+            let baseline_value = *baseline.get(&row.name.to_ascii_lowercase())?;
+            let scale = current.abs().max(baseline_value.abs()).max(1.0);
+            if (current - baseline_value).abs() <= f64::EPSILON * scale {
+                return None;
+            }
+            Some((row.name.clone(), baseline_value))
+        })
+        .collect()
+}
+
+fn apply_reset_to_last_run(ui: &Ui, state: &mut AppState, rows: &[ParamRow]) {
+    let baseline = state.shell.netlist.last_run_params.clone();
+    let mut changed = false;
+    for row in rows {
+        let Some(value) = baseline.get(&row.name.to_ascii_lowercase()).copied() else {
+            continue;
+        };
+        let before = state.simulation.netlist_content.clone();
+        apply_param_edit(ui, state, row, value, false);
+        changed |= before != state.simulation.netlist_content;
+    }
+
+    if changed {
+        super::request_run(state);
+    }
 }
 
 /// Parse a `.param` line into `(name, value_start, value_end)` triples
@@ -526,6 +615,13 @@ fn scan_assignments(line: &str) -> Option<Vec<(String, usize, usize)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use egui::Color32;
+
+    use super::super::summary;
+    use crate::state::{AcBodeMetrics, AcBodeSummary};
 
     #[test]
     fn scans_multiple_assignments_with_spans() {
@@ -556,13 +652,17 @@ mod tests {
     #[test]
     fn tune_annotation_by_name_sets_exact_range() {
         let rows = scan_params("* @tune itail 5u..60u\n.param itail=20u\n");
-        assert_range_close(rows[0].range, (5e-6, 60e-6));
+        let (lo, hi) = rows[0].range.expect("range");
+        assert!((lo - 5e-6).abs() < 1e-18);
+        assert!((hi - 60e-6).abs() < 1e-17);
     }
 
     #[test]
     fn tune_annotation_before_param_targets_next_assignment() {
         let rows = scan_params("* @tune 0.5p..8p\n.param cl=2p\n");
-        assert_range_close(rows[0].range, (0.5e-12, 8e-12));
+        let (lo, hi) = rows[0].range.expect("range");
+        assert!((lo - 0.5e-12).abs() < 1e-24);
+        assert!((hi - 8e-12).abs() < 1e-23);
     }
 
     #[test]
@@ -570,12 +670,90 @@ mod tests {
         let rows = scan_params(".param a=2 b={expr}\n");
         let mut baseline = std::collections::HashMap::new();
         baseline.insert("a".to_string(), 1.0);
+        baseline.insert("b".to_string(), 3.0);
+
         assert_eq!(reset_values(&rows, &baseline), vec![("a".to_string(), 1.0)]);
     }
 
-    fn assert_range_close(actual: Option<(f64, f64)>, expected: (f64, f64)) {
-        let actual = actual.expect("range");
-        assert!((actual.0 - expected.0).abs() <= expected.0.abs() * 1e-12);
-        assert!((actual.1 - expected.1).abs() <= expected.1.abs() * 1e-12);
+    #[test]
+    fn slider_width_is_bounded_for_compact_panels() {
+        assert_eq!(slider_width_for_available(40.0), 80.0);
+        assert_eq!(slider_width_for_available(144.0), 120.0);
+        assert_eq!(slider_width_for_available(600.0), 220.0);
+    }
+
+    #[test]
+    fn as_tuned_rows_format_present_and_missing_stability_metrics() {
+        let summary = summary::NetlistRunSummary {
+            stability: AcBodeMetrics {
+                ugf: Some(10.0),
+                pm_deg: Some(45.25),
+                gm_db: None,
+                ..Default::default()
+            },
+            bode: None,
+            measurements: HashMap::new(),
+        };
+
+        let rows = as_tuned_rows(&summary);
+
+        assert_eq!(
+            rows,
+            [
+                TunedMetricRow {
+                    name: "UGF",
+                    value: "10.00 Hz".to_string(),
+                    highlight: true,
+                },
+                TunedMetricRow {
+                    name: "PM",
+                    value: "45.2 deg".to_string(),
+                    highlight: true,
+                },
+                TunedMetricRow {
+                    name: "GM",
+                    value: "-".to_string(),
+                    highlight: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn mini_bode_spec_uses_active_ac_curves_and_dual_axis() {
+        let summary = summary::NetlistRunSummary {
+            stability: AcBodeMetrics {
+                gain_extremes: (-40.0, 20.0),
+                phase_extremes: Some((-225.0, -45.0)),
+                ..Default::default()
+            },
+            bode: Some(AcBodeSummary {
+                signal: "V(out)".to_string(),
+                frequency: Arc::new(vec![1.0, 10.0, 100.0, 1000.0]),
+                gain_db: Arc::new(vec![20.0, 0.0, -20.0, -40.0]),
+                phase_deg: Some(Arc::new(vec![-45.0, -135.0, -180.0, -225.0])),
+                metrics: AcBodeMetrics::default(),
+                analysis_index: 2,
+                mag_index: 3,
+                phase_index: Some(4),
+            }),
+            measurements: HashMap::new(),
+        };
+
+        let spec = mini_bode_spec(&summary, Color32::RED, Color32::BLUE).expect("mini bode spec");
+
+        assert_eq!(spec.x.unit, "Hz");
+        assert_eq!(spec.x.min, 1.0);
+        assert_eq!(spec.x.max, 1000.0);
+        assert_eq!(spec.x_scale, crate::ui::plot::XScale::Log10);
+        assert_eq!(spec.y.unit, "dB");
+        assert!(spec.y.min <= -40.0);
+        assert!(spec.y.max >= 20.0);
+        assert!(spec.y_right.is_some());
+        assert_eq!(spec.ref_lines.len(), 1);
+        assert_eq!(spec.traces.len(), 2);
+        assert_eq!(spec.traces[0].side, crate::ui::plot::YSide::Right);
+        assert!(spec.traces[0].dashed);
+        assert_eq!(spec.traces[1].side, crate::ui::plot::YSide::Left);
     }
 }

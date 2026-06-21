@@ -22,24 +22,25 @@ pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnost
     };
     job.wrap.max_width = f32::INFINITY;
 
-    let line_starts = line_start_offsets(text);
     let segments: Vec<&str> = text.split('\n').collect();
     let last = segments.len().saturating_sub(1);
+    let mut line_start = 0usize;
     for (line_idx, line) in segments.iter().enumerate() {
-        let line_ranges = diagnostic_ranges_for_line(
-            line_idx,
-            line.len(),
-            line_starts.get(line_idx).copied().unwrap_or(0),
+        let line_fallback = line_only_severity(diagnostics, line_idx);
+        let mut next_offset = line_start;
+        let style = DiagnosticStyle {
+            font: &font,
+            palette: c,
             diagnostics,
-            c,
-        );
-        let mut col = 0usize;
+            line_fallback,
+        };
         let mut push = |job: &mut LayoutJob, span: &str, color: Color32| {
             if span.is_empty() {
                 return;
             }
-            append_with_diagnostic_underlines(job, span, col, &line_ranges, font.clone(), color);
-            col += span.len();
+            let span_start = next_offset;
+            next_offset += span.len();
+            append_diagnostic_span(job, span, span_start, color, &style);
         };
         highlight_line(&mut job, line, c, &mut push);
         if line_idx != last {
@@ -53,129 +54,101 @@ pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnost
                     ..Default::default()
                 },
             );
+            line_start += line.len() + 1;
         }
     }
     job
 }
 
-#[derive(Clone)]
-struct DiagnosticLineRange {
-    range: std::ops::Range<usize>,
-    color: Color32,
+struct DiagnosticStyle<'a> {
+    font: &'a FontId,
+    palette: &'a Palette,
+    diagnostics: &'a [Diagnostic],
+    line_fallback: Option<DiagnosticSeverity>,
 }
 
-fn diagnostic_ranges_for_line(
-    line_idx: usize,
-    line_len: usize,
-    line_start: usize,
-    diagnostics: &[Diagnostic],
-    c: &Palette,
-) -> Vec<DiagnosticLineRange> {
-    diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.line == Some(line_idx))
-        .filter_map(|diagnostic| {
-            let color = severity_color(c, diagnostic.severity);
-            match &diagnostic.span {
-                Some(span) => {
-                    let start = span.start.saturating_sub(line_start).min(line_len);
-                    let end = span.end.saturating_sub(line_start).min(line_len);
-                    (start < end).then_some(DiagnosticLineRange {
-                        range: start..end,
-                        color,
-                    })
-                }
-                None => Some(DiagnosticLineRange {
-                    range: 0..line_len,
-                    color,
-                }),
-            }
-        })
-        .collect()
-}
-
-fn append_with_diagnostic_underlines(
+fn append_diagnostic_span(
     job: &mut LayoutJob,
     span: &str,
-    line_col: usize,
-    diagnostics: &[DiagnosticLineRange],
-    font: FontId,
+    global_start: usize,
     color: Color32,
+    style: &DiagnosticStyle<'_>,
 ) {
-    if diagnostics.is_empty() {
-        append_text(job, span, font, color, Stroke::NONE);
-        return;
-    }
-
-    let mut cuts = vec![0usize, span.len()];
-    for diagnostic in diagnostics {
-        let local_start = diagnostic
-            .range
-            .start
-            .saturating_sub(line_col)
-            .min(span.len());
-        let local_end = diagnostic
-            .range
-            .end
-            .saturating_sub(line_col)
-            .min(span.len());
-        if local_start < local_end {
-            if span.is_char_boundary(local_start) {
-                cuts.push(local_start);
-            }
-            if span.is_char_boundary(local_end) {
-                cuts.push(local_end);
+    let global_end = global_start + span.len();
+    let mut split_points = vec![global_start, global_end];
+    for diagnostic in style.diagnostics {
+        let Some(range) = diagnostic.span.as_ref() else {
+            continue;
+        };
+        for point in [range.start, range.end] {
+            if point > global_start
+                && point < global_end
+                && span.is_char_boundary(point - global_start)
+            {
+                split_points.push(point);
             }
         }
     }
-    cuts.sort_unstable();
-    cuts.dedup();
+    split_points.sort_unstable();
+    split_points.dedup();
 
-    for pair in cuts.windows(2) {
-        let start = pair[0];
-        let end = pair[1];
-        if start == end {
+    for window in split_points.windows(2) {
+        let part_start = window[0];
+        let part_end = window[1];
+        if part_start == part_end {
             continue;
         }
-        let midpoint = line_col + start + (end - start) / 2;
-        let underline = diagnostics
-            .iter()
-            .find(|diagnostic| diagnostic.range.contains(&midpoint))
-            .map(|diagnostic| Stroke::new(1.0, diagnostic.color))
-            .unwrap_or(Stroke::NONE);
-        append_text(job, &span[start..end], font.clone(), color, underline);
+        let local_start = part_start - global_start;
+        let local_end = part_end - global_start;
+        let severity =
+            span_severity(style.diagnostics, part_start..part_end).or(style.line_fallback);
+        job.append(
+            &span[local_start..local_end],
+            0.0,
+            TextFormat {
+                font_id: style.font.clone(),
+                color,
+                underline: severity
+                    .map(|severity| severity_stroke(severity, style.palette))
+                    .unwrap_or(Stroke::NONE),
+                ..Default::default()
+            },
+        );
     }
 }
 
-fn append_text(job: &mut LayoutJob, span: &str, font: FontId, color: Color32, underline: Stroke) {
-    job.append(
-        span,
-        0.0,
-        TextFormat {
-            font_id: font,
-            color,
-            underline,
-            ..Default::default()
-        },
-    );
+fn line_only_severity(diagnostics: &[Diagnostic], line_idx: usize) -> Option<DiagnosticSeverity> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.span.is_none() && diagnostic.line == Some(line_idx))
+        .map(|diagnostic| diagnostic.severity)
+        .max()
 }
 
-fn line_start_offsets(text: &str) -> Vec<usize> {
-    let mut starts = vec![0usize];
-    for (idx, ch) in text.char_indices() {
-        if ch == '\n' {
-            starts.push(idx + ch.len_utf8());
-        }
-    }
-    starts
+fn span_severity(
+    diagnostics: &[Diagnostic],
+    range: std::ops::Range<usize>,
+) -> Option<DiagnosticSeverity> {
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let span = diagnostic.span.as_ref()?;
+            ranges_overlap(span, &range).then_some(diagnostic.severity)
+        })
+        .max()
 }
 
-fn severity_color(c: &Palette, severity: DiagnosticSeverity) -> Color32 {
-    match severity {
+fn ranges_overlap(a: &std::ops::Range<usize>, b: &std::ops::Range<usize>) -> bool {
+    a.start < b.end && b.start < a.end
+}
+
+fn severity_stroke(severity: DiagnosticSeverity, c: &Palette) -> Stroke {
+    let color = match severity {
         DiagnosticSeverity::Error => c.err,
         DiagnosticSeverity::Warning => c.warn,
         DiagnosticSeverity::Info => c.text_dim,
-    }
+    };
+    Stroke::new(1.0, color)
 }
 
 /// Append one line's tokens to the job.
@@ -203,9 +176,9 @@ fn highlight_line(
 
     if code_trimmed.starts_with('.') {
         highlight_dot_line(job, code_trimmed, c, push);
-    } else if code_trimmed.starts_with('+') {
+    } else if let Some(stripped) = code_trimmed.strip_prefix('+') {
         push(job, &code_trimmed[..1], c.text_faint);
-        highlight_fields(job, &code_trimmed[1..], c, push, false);
+        highlight_fields(job, stripped, c, push, false);
     } else {
         // Element line: refdes neutral-bright, then nodes/values.
         highlight_fields(job, code_trimmed, c, push, true);
@@ -371,5 +344,65 @@ fn find_inline_comment(line: &str) -> Option<usize> {
     match (semicolon, dollar) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Range;
+
+    use egui::FontId;
+
+    use super::super::DiagnosticSeverity;
+    use super::*;
+    use crate::ui::palette::INSTRUMENT_DARK;
+
+    fn underlined_ranges(job: &LayoutJob) -> Vec<Range<usize>> {
+        job.sections
+            .iter()
+            .filter(|section| section.format.underline.width > 0.0)
+            .map(|section| section.byte_range.clone())
+            .collect()
+    }
+
+    fn error_diagnostic(span: Option<Range<usize>>, line: Option<usize>) -> Diagnostic {
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            span,
+            line,
+            column: None,
+            message: "bad token".to_owned(),
+            fix: None,
+        }
+    }
+
+    #[test]
+    fn span_diagnostic_underlines_only_the_offending_range() {
+        let text = "R1 in out bad\n";
+        let diagnostic = error_diagnostic(Some(10..13), Some(0));
+
+        let job = layout_job(
+            text,
+            FontId::monospace(12.0),
+            &INSTRUMENT_DARK,
+            &[diagnostic],
+        );
+
+        assert_eq!(underlined_ranges(&job), vec![10..13]);
+    }
+
+    #[test]
+    fn line_only_diagnostic_underlines_the_reported_line() {
+        let text = "R1 in out 1k\nBAD\nC1 out 0 1p";
+        let diagnostic = error_diagnostic(None, Some(1));
+
+        let job = layout_job(
+            text,
+            FontId::monospace(12.0),
+            &INSTRUMENT_DARK,
+            &[diagnostic],
+        );
+
+        assert_eq!(underlined_ranges(&job), vec![13..16]);
     }
 }

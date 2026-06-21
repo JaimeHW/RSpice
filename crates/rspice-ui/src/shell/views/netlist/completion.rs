@@ -32,6 +32,15 @@ struct Candidate {
     insert: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CompletionPopoverGeometry {
+    position: egui::Pos2,
+    width: f32,
+}
+
+const POPOVER_DESIRED_WIDTH: f32 = 300.0;
+const POPOVER_SCREEN_MARGIN: f32 = 8.0;
+
 /// Dot-commands with signatures (the popover's static source).
 const DOT_COMMANDS: &[(&str, &str, &str)] = &[
     (
@@ -293,6 +302,23 @@ fn collect_candidates(
     out
 }
 
+fn completion_popover_geometry(
+    anchor: egui::Pos2,
+    screen_rect: egui::Rect,
+) -> CompletionPopoverGeometry {
+    let max_width = (screen_rect.width() - POPOVER_SCREEN_MARGIN * 2.0).max(0.0);
+    let width = POPOVER_DESIRED_WIDTH.min(max_width);
+    let min_x = screen_rect.left() + POPOVER_SCREEN_MARGIN;
+    let max_x = (screen_rect.right() - POPOVER_SCREEN_MARGIN - width).max(min_x);
+    let min_y = screen_rect.top() + POPOVER_SCREEN_MARGIN;
+    let max_y = (screen_rect.bottom() - POPOVER_SCREEN_MARGIN).max(min_y);
+
+    CompletionPopoverGeometry {
+        position: egui::pos2(anchor.x.clamp(min_x, max_x), anchor.y.clamp(min_y, max_y)),
+        width,
+    }
+}
+
 /// The popover itself: items grid + selected-item doc footer. Returns the
 /// row index the pointer accepted, if any.
 fn draw_popover(
@@ -306,15 +332,14 @@ fn draw_popover(
     let mut clicked = None;
 
     // Anchor at the caret's baseline.
-    let Some(range) = output.cursor_range else {
-        return None;
-    };
+    let range = output.cursor_range?;
     let caret_rect = output.galley.pos_from_cursor(&range.primary);
     let anchor = output.galley_pos + caret_rect.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
+    let geometry = completion_popover_geometry(anchor, ui.ctx().screen_rect());
 
     egui::Area::new(egui::Id::new("volta.netlist.completion"))
         .order(egui::Order::Foreground)
-        .fixed_pos(anchor)
+        .fixed_pos(geometry.position)
         .show(ui.ctx(), |ui| {
             egui::Frame::none()
                 .fill(c.bg_elevated)
@@ -327,12 +352,12 @@ fn draw_popover(
                     color: egui::Color32::from_black_alpha(115),
                 })
                 .show(ui, |ui| {
-                    ui.set_min_width(300.0);
+                    ui.set_min_width(geometry.width);
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
                     for (idx, candidate) in candidates.iter().enumerate() {
                         let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width().max(300.0), 24.0),
+                            egui::vec2(geometry.width, 24.0),
                             egui::Sense::click(),
                         );
                         if response.clicked() {
@@ -373,10 +398,10 @@ fn draw_popover(
                             format!("{doc}  ·  ⇥ to accept"),
                             theme::sans(tokens::FS_0, FontWeight::Regular),
                             c.text_dim,
-                            320.0,
+                            (geometry.width - 20.0).max(0.0),
                         );
                         let (rect, _) = ui.allocate_exact_size(
-                            galley.size() + egui::vec2(20.0, 14.0),
+                            egui::vec2(geometry.width, galley.size().y + 14.0),
                             egui::Sense::hover(),
                         );
                         ui.painter().hline(
@@ -390,4 +415,21 @@ fn draw_popover(
                 });
         });
     clicked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn popover_geometry_clamps_width_and_position_to_phone_viewport() {
+        let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 640.0));
+        let anchor = egui::pos2(292.0, 40.0);
+
+        let geometry = completion_popover_geometry(anchor, screen);
+
+        assert!(geometry.width <= 304.0);
+        assert!(geometry.position.x >= 8.0);
+        assert!(geometry.position.x + geometry.width <= 312.0);
+    }
 }
