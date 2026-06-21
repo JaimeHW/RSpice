@@ -674,7 +674,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
     }
 
     let jobs = super::effective_jobs(ctx.args.jobs, corners.len());
-    let results: Vec<(String, bool)> = if jobs > 1 && corners.len() > 1 {
+    let results: Vec<(String, bool, bool)> = if jobs > 1 && corners.len() > 1 {
         run_corners_parallel(ctx, &corners, corner_lib.as_deref(), jobs)?
     } else {
         let mut results = Vec::with_capacity(corners.len());
@@ -683,20 +683,28 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
                 println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), name);
             }
 
-            let corner_passed = match corner_lib.as_deref() {
+            let (simulation_passed, measurements_passed) = match corner_lib.as_deref() {
                 Some(lib) => match run_corner_with_lib(ctx, lib, name) {
-                    Ok(passed) => passed,
+                    Ok(status) => status,
                     Err(e) => {
                         if !ctx.quiet {
                             eprintln!("  Corner '{}' failed: {}", name, e);
                         }
-                        false
+                        (false, false)
                     }
                 },
-                None => run_corner_nominal(ctx),
+                None => match run_corner_nominal(ctx, name) {
+                    Ok(status) => status,
+                    Err(e) => {
+                        if !ctx.quiet {
+                            eprintln!("  Corner '{}' failed: {}", name, e);
+                        }
+                        (false, false)
+                    }
+                },
             };
 
-            results.push((name.clone(), corner_passed));
+            results.push((name.clone(), simulation_passed, measurements_passed));
         }
         results
     };
@@ -705,13 +713,19 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
         println!("\n┌─────────────────────────────────────┐");
         println!("│        Corner Sweep Summary         │");
         println!("├─────────────────────────────────────┤");
-        for (name, passed) in &results {
-            let status = if *passed { "✓ PASS" } else { "✗ FAIL" };
+        for (name, simulation_passed, measurements_passed) in &results {
+            let passed = *simulation_passed && *measurements_passed;
+            let status = if passed { "✓ PASS" } else { "✗ FAIL" };
             println!("│  {:6}  {:>24}  │", name, status);
         }
         println!("└─────────────────────────────────────┘");
 
-        let passed_count = results.iter().filter(|(_, passed)| *passed).count();
+        let passed_count = results
+            .iter()
+            .filter(|(_, simulation_passed, measurements_passed)| {
+                *simulation_passed && *measurements_passed
+            })
+            .count();
         println!(
             "\n✓ Corner sweep complete: {}/{} corners passed",
             passed_count,
@@ -721,8 +735,8 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
 
     let failed: Vec<&str> = results
         .iter()
-        .filter(|(_, passed)| !passed)
-        .map(|(name, _)| name.as_str())
+        .filter(|(_, simulation_passed, _)| !simulation_passed)
+        .map(|(name, _, _)| name.as_str())
         .collect();
     if failed.is_empty() {
         Ok(())
@@ -737,7 +751,8 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
 /// The result of one corner run, returned from worker threads so the
 /// parent context merges everything deterministically in corner order.
 struct CornerOutcome {
-    passed: bool,
+    simulation_passed: bool,
+    measurements_passed: bool,
     error: Option<String>,
     measurements: Vec<crate::report::MeasurementReport>,
     outputs: Vec<std::path::PathBuf>,
@@ -813,7 +828,8 @@ fn run_corner_job(
         Ok(netlist) => netlist,
         Err(e) => {
             return CornerOutcome {
-                passed: false,
+                simulation_passed: false,
+                measurements_passed: false,
                 error: Some(format!("corner '{}': {}", corner, e)),
                 measurements: Vec::new(),
                 outputs: Vec::new(),
@@ -856,7 +872,7 @@ fn run_corner_job(
     }
 
     corner_ctx.record_unevaluated_measurements();
-    let measurements = corner_ctx
+    let measurements: Vec<_> = corner_ctx
         .measurements
         .into_inner()
         .into_iter()
@@ -865,9 +881,11 @@ fn run_corner_job(
             m
         })
         .collect();
+    let measurements_passed = measurements.iter().all(|m| m.passed);
 
     CornerOutcome {
-        passed,
+        simulation_passed: passed,
+        measurements_passed,
         error,
         measurements,
         outputs: corner_ctx.outputs.into_inner(),
@@ -883,7 +901,7 @@ fn run_corners_parallel(
     corners: &[String],
     lib: Option<&std::path::Path>,
     jobs: usize,
-) -> Result<Vec<(String, bool)>, CliError> {
+) -> Result<Vec<(String, bool, bool)>, CliError> {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -929,7 +947,11 @@ fn run_corners_parallel(
         }
         ctx.measurements.borrow_mut().extend(outcome.measurements);
         ctx.outputs.borrow_mut().extend(outcome.outputs);
-        results.push((name.clone(), outcome.passed));
+        results.push((
+            name.clone(),
+            outcome.simulation_passed,
+            outcome.measurements_passed,
+        ));
     }
     Ok(results)
 }
@@ -940,7 +962,7 @@ fn run_corner_with_lib(
     ctx: &RunContext<'_>,
     lib: &std::path::Path,
     corner: &str,
-) -> Result<bool, CliError> {
+) -> Result<(bool, bool), CliError> {
     let source = ctx
         .netlist
         .source_text
@@ -968,13 +990,20 @@ fn run_corner_with_lib(
         .source_path
         .clone()
         .unwrap_or_else(|| ctx.args.input.clone());
+    run_corner_serial_source(ctx, &corner_source, &base, corner)
+}
+
+fn run_corner_serial_source(
+    ctx: &RunContext<'_>,
+    source: &str,
+    base: &std::path::Path,
+    corner: &str,
+) -> Result<(bool, bool), CliError> {
     let corner_netlist =
-        rspice_core::Netlist::parse_with_path(&corner_source, &base).map_err(|e| {
-            CliError::ParseError {
-                message: format!("corner '{}': {}", corner, e),
-                line: None,
-                suggestion: None,
-            }
+        rspice_core::Netlist::parse_with_path(source, base).map_err(|e| CliError::ParseError {
+            message: format!("corner '{}': {}", corner, e),
+            line: None,
+            suggestion: None,
         })?;
 
     let corner_engine = rspice_core::Engine::new(ctx.engine.config().clone());
@@ -1017,6 +1046,7 @@ fn run_corner_with_lib(
     // Surface this corner's measurements in CI reports under tagged names.
     corner_ctx.record_unevaluated_measurements();
     let corner_measurements = corner_ctx.measurements.into_inner();
+    let measurements_passed = corner_measurements.iter().all(|m| m.passed);
     ctx.measurements
         .borrow_mut()
         .extend(corner_measurements.into_iter().map(|mut m| {
@@ -1027,30 +1057,25 @@ fn run_corner_with_lib(
         .borrow_mut()
         .extend(corner_ctx.outputs.into_inner());
 
-    Ok(passed)
+    Ok((passed, measurements_passed))
 }
 
 /// Run the deck's analyses unchanged (no corner library available).
-fn run_corner_nominal(ctx: &RunContext<'_>) -> bool {
-    let mut passed = true;
-    if ctx.netlist.analyses.is_empty() {
-        if let Err(e) = run_dc_op(ctx) {
-            if !ctx.quiet {
-                eprintln!("  DC OP failed: {}", e);
-            }
-            passed = false;
-        }
-    } else {
-        for analysis in &ctx.netlist.analyses {
-            if let Err(e) = ctx.run_analysis(analysis) {
-                if !ctx.quiet {
-                    eprintln!("  Analysis failed: {}", e);
-                }
-                passed = false;
-            }
-        }
-    }
-    passed
+fn run_corner_nominal(ctx: &RunContext<'_>, corner: &str) -> Result<(bool, bool), CliError> {
+    let source = ctx
+        .netlist
+        .source_text
+        .as_deref()
+        .ok_or_else(|| CliError::InternalError {
+            message: "netlist source unavailable for nominal corner re-elaboration".to_string(),
+        })?;
+    let base = ctx
+        .netlist
+        .source_path
+        .clone()
+        .unwrap_or_else(|| ctx.args.input.clone());
+
+    run_corner_serial_source(ctx, source, &base, corner)
 }
 
 /// `results.csv` -> `results.ss.csv` so corner exports cannot collide.

@@ -45,7 +45,12 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
             if args.json {
                 println!(
                     "{}",
-                    serde_json::json!({"valid": false, "errors": [{"message": e.to_string()}]})
+                    serde_json::json!({
+                        "valid": false,
+                        "strict_valid": false,
+                        "errors": [{"message": e.to_string()}],
+                        "warnings": [],
+                    })
                 );
             } else {
                 println!("✗ Syntax error: {}", e);
@@ -245,7 +250,8 @@ fn is_builtin_model(name: &str) -> bool {
 
 fn output_json(result: &ValidationResult) {
     let json = serde_json::json!({
-        "valid": result.is_ok() && result.warnings.is_empty(),
+        "valid": result.is_ok(),
+        "strict_valid": result.is_ok() && result.warnings.is_empty(),
         "errors": result.errors.iter().map(|e| serde_json::json!({"message": e.message})).collect::<Vec<_>>(),
         "warnings": result.warnings.iter().map(|w| serde_json::json!({"message": w.message, "element": w.element})).collect::<Vec<_>>(),
     });

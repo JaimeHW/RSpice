@@ -7,6 +7,7 @@
 
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::waveform_io::{detect_format, load_table};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Arguments for the compare command
@@ -96,6 +97,9 @@ pub struct Difference {
 
 /// Execute the compare command
 pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
+    validate_compare_tolerance("--abstol", args.abstol)?;
+    validate_compare_tolerance("--reltol", args.reltol)?;
+
     // Validate files exist
     if !args.result.exists() {
         return Err(CliError::InputNotFound {
@@ -105,6 +109,10 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
     }
     if !args.golden.exists() {
         if args.bless {
+            // Missing-golden bootstrap is still a promotion of a result
+            // artifact. Validate the result before copying so malformed CSV,
+            // JSON, RAW, etc. cannot become the accepted baseline.
+            let _ = load_waveform_data(&args.result)?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
             return Ok(());
         }
@@ -139,17 +147,23 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
     // Perform comparison
     let cmp_result = compare_waveforms(&result_data, &golden_data, &args)?;
 
-    // Output results
+    let blessed = !cmp_result.passed && args.bless;
+
+    // Output results. JSON reports the final command outcome, so bless first
+    // and only then emit a machine-readable accepted/blessed status.
     if args.format == OutputFormat::Json {
-        output_json(&cmp_result);
+        if blessed {
+            bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
+        }
+        output_json(&cmp_result, blessed);
     } else {
         output_text(&cmp_result, quiet);
+        if blessed {
+            bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
+        }
     }
 
-    if cmp_result.passed {
-        Ok(())
-    } else if args.bless {
-        bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
+    if cmp_result.passed || blessed {
         Ok(())
     } else {
         let mut parts = Vec::new();
@@ -168,6 +182,18 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
             message: format!("comparison failed: {}", parts.join("; ")),
         })
     }
+}
+
+fn validate_compare_tolerance(name: &str, value: f64) -> Result<(), CliError> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(CliError::InvalidArgument {
+            message: format!("{name} must be a finite non-negative tolerance, got {value}"),
+            suggestion: Some(
+                "Use 0 for an exact comparison, or a positive SPICE value".to_string(),
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Promote the result file to the new golden reference.
@@ -193,25 +219,34 @@ struct WaveformData {
     values: Vec<Vec<f64>>,
 }
 
-fn variable_name_matches(left: &str, right: &str) -> bool {
-    let left = left.trim();
-    let right = right.trim();
-    left.eq_ignore_ascii_case(right)
-        || voltage_node_alias(left)
-            .zip(voltage_node_alias(right))
-            .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right))
-        || voltage_node_alias(left).is_some_and(|left| left.eq_ignore_ascii_case(right))
-        || voltage_node_alias(right).is_some_and(|right| right.eq_ignore_ascii_case(left))
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ComplexPart {
+    Real,
+    Imag,
 }
 
-fn voltage_node_alias(name: &str) -> Option<&str> {
-    let trimmed = name.trim();
-    let inner = trimmed
-        .strip_prefix(['V', 'v'])
-        .and_then(|tail| tail.strip_prefix('('))
-        .and_then(|tail| tail.strip_suffix(')'))?
-        .trim();
-    (!inner.is_empty() && !inner.contains(',')).then_some(inner)
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct VariableKey {
+    part: Option<ComplexPart>,
+    base: String,
+}
+
+#[derive(Clone, Debug)]
+struct ParsedVariableName {
+    key: VariableKey,
+    aliases: Vec<String>,
+}
+
+fn parsed_variable_names_match(left: &ParsedVariableName, right: &ParsedVariableName) -> bool {
+    left.key.part == right.key.part
+        && left
+            .aliases
+            .iter()
+            .any(|alias| right.aliases.iter().any(|candidate| candidate == alias))
+}
+
+fn variable_name_matches(left: &str, right: &str) -> bool {
+    parsed_variable_names_match(&parse_variable_name(left), &parse_variable_name(right))
 }
 
 fn contains_variable(variables: &[String], requested: &str) -> bool {
@@ -311,6 +346,162 @@ fn resample_onto_golden(
     })
 }
 
+fn parse_variable_name(name: &str) -> ParsedVariableName {
+    let trimmed = name.trim();
+    let (part, base) = if let Some(inner) = strip_outer_call(trimmed, "Re") {
+        (Some(ComplexPart::Real), inner)
+    } else if let Some(inner) = strip_outer_call(trimmed, "Im") {
+        (Some(ComplexPart::Imag), inner)
+    } else {
+        (None, trimmed)
+    };
+    let base = normalize_variable_name(base);
+    let mut aliases = vec![base.clone()];
+    if let Some(inner) = signal_inner_name(base.as_str()) {
+        push_alias(&mut aliases, normalize_variable_name(inner));
+    }
+    ParsedVariableName {
+        key: VariableKey { part, base },
+        aliases,
+    }
+}
+
+fn strip_outer_call<'a>(name: &'a str, function: &str) -> Option<&'a str> {
+    let rest = name.get(function.len()..)?;
+    if !name
+        .get(..function.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(function))
+        || !rest.starts_with('(')
+        || !rest.ends_with(')')
+    {
+        return None;
+    }
+    rest.get(1..rest.len() - 1).map(str::trim)
+}
+
+fn normalize_variable_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
+fn signal_inner_name(name: &str) -> Option<&str> {
+    let (prefix, rest) = name.split_once('(')?;
+    if prefix.eq_ignore_ascii_case("v") || prefix.eq_ignore_ascii_case("i") {
+        return rest.strip_suffix(')').map(str::trim);
+    }
+    None
+}
+
+fn push_alias(aliases: &mut Vec<String>, alias: String) {
+    if !aliases.iter().any(|existing| existing == &alias) {
+        aliases.push(alias);
+    }
+}
+
+fn requested_variable_matches(
+    request: &ParsedVariableName,
+    candidate: &ParsedVariableName,
+) -> bool {
+    if request.key.part.is_some() && request.key.part != candidate.key.part {
+        return false;
+    }
+    request
+        .aliases
+        .iter()
+        .any(|alias| candidate.aliases.iter().any(|candidate| candidate == alias))
+}
+
+fn explicit_variable_pairs(
+    result: &WaveformData,
+    golden: &WaveformData,
+    args: &CompareArgs,
+    cmp_result: &mut CompareResult,
+) -> Vec<(usize, usize)> {
+    let result_names: Vec<_> = result
+        .variables
+        .iter()
+        .map(|name| parse_variable_name(name))
+        .collect();
+    let golden_names: Vec<_> = golden
+        .variables
+        .iter()
+        .map(|name| parse_variable_name(name))
+        .collect();
+
+    let mut pairs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for requested in &args.variables {
+        let request = parse_variable_name(requested);
+        let result_indices: Vec<_> = result_names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, parsed)| {
+                requested_variable_matches(&request, parsed).then_some(index)
+            })
+            .collect();
+        let golden_indices: Vec<_> = golden_names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, parsed)| {
+                requested_variable_matches(&request, parsed).then_some(index)
+            })
+            .collect();
+
+        if result_indices.is_empty() || golden_indices.is_empty() {
+            if !args.ignore_missing {
+                if result_indices.is_empty() {
+                    cmp_result
+                        .problems
+                        .push(format!("variable '{requested}' is missing from the result"));
+                }
+                if golden_indices.is_empty() {
+                    cmp_result.problems.push(format!(
+                        "variable '{requested}' is missing from the golden file"
+                    ));
+                }
+            }
+            continue;
+        }
+
+        let mut matched_golden = HashSet::new();
+
+        for result_index in result_indices {
+            let mut matched = false;
+            for &golden_index in &golden_indices {
+                if parsed_variable_names_match(
+                    &result_names[result_index],
+                    &golden_names[golden_index],
+                ) {
+                    matched = true;
+                    matched_golden.insert(golden_index);
+                    if seen.insert((result_index, golden_index)) {
+                        pairs.push((result_index, golden_index));
+                    }
+                }
+            }
+            if !matched && !args.ignore_missing {
+                cmp_result.problems.push(format!(
+                    "variable '{}' is missing from the golden file",
+                    result.variables[result_index]
+                ));
+            }
+        }
+
+        if !args.ignore_missing {
+            for golden_index in golden_indices {
+                if !matched_golden.contains(&golden_index) {
+                    cmp_result.problems.push(format!(
+                        "variable '{}' is missing from the result",
+                        golden.variables[golden_index]
+                    ));
+                }
+            }
+        }
+    }
+
+    pairs
+}
+
 /// Compare two waveform datasets.
 ///
 /// The golden file defines the contract: every golden variable must exist
@@ -333,8 +524,7 @@ fn compare_waveforms(
         problems: Vec::new(),
     };
 
-    // Structural checks: requested/golden variables must exist on both sides.
-    if args.variables.is_empty() {
+    let explicit_pairs = if args.variables.is_empty() {
         if !args.ignore_missing {
             for var in &golden.variables {
                 if !contains_variable(&result.variables, var) {
@@ -344,33 +534,33 @@ fn compare_waveforms(
                 }
             }
         }
+        None
     } else {
-        for var in &args.variables {
-            if !contains_variable(&result.variables, var) {
-                cmp_result
-                    .problems
-                    .push(format!("variable '{var}' is missing from the result"));
-            }
-            if !contains_variable(&golden.variables, var) {
-                cmp_result
-                    .problems
-                    .push(format!("variable '{var}' is missing from the golden file"));
-            }
-        }
-    }
+        Some(explicit_variable_pairs(
+            result,
+            golden,
+            args,
+            &mut cmp_result,
+        ))
+    };
 
     // Find matching variables
-    for (var_idx, var_name) in result.variables.iter().enumerate() {
-        // Skip if not in filter list (if filter is specified)
-        if !args.variables.is_empty() && !contains_variable(&args.variables, var_name) {
-            continue;
-        }
+    let pairs: Vec<_> = if let Some(pairs) = explicit_pairs {
+        pairs
+    } else {
+        result
+            .variables
+            .iter()
+            .enumerate()
+            .filter_map(|(var_idx, var_name)| {
+                find_variable_index(&golden.variables, var_name)
+                    .map(|golden_idx| (var_idx, golden_idx))
+            })
+            .collect()
+    };
 
-        // Find matching variable in golden
-        let golden_idx = match find_variable_index(&golden.variables, var_name) {
-            Some(idx) => idx,
-            None => continue, // Variable not in golden
-        };
+    for (var_idx, golden_idx) in pairs {
+        let var_name = &result.variables[var_idx];
 
         cmp_result.num_variables += 1;
 
@@ -437,9 +627,13 @@ fn compare_waveforms(
 }
 
 /// Output comparison result as JSON
-fn output_json(result: &CompareResult) {
+fn output_json(result: &CompareResult, blessed: bool) {
+    let accepted = result.passed || blessed;
     let json = serde_json::json!({
-        "passed": result.passed,
+        "passed": accepted,
+        "comparison_passed": result.passed,
+        "accepted": accepted,
+        "blessed": blessed,
         "num_variables": result.num_variables,
         "num_points": result.num_points,
         "max_abs_diff": result.max_abs_diff,

@@ -84,7 +84,8 @@ fn write_junit_report<W: Write>(
     let failures: usize = reports
         .iter()
         .map(|r| {
-            (if r.passed { 0 } else { 1 }) + r.measurements.iter().filter(|m| !m.passed).count()
+            usize::from(run_failure_message(r).is_some())
+                + r.measurements.iter().filter(|m| !m.passed).count()
         })
         .sum();
     let total_time: f64 = reports.iter().map(|r| r.duration_secs).sum();
@@ -105,7 +106,8 @@ fn write_junit_report<W: Write>(
 
     for report in reports {
         let test_count = 1 + report.measurements.len();
-        let failure_count = (if report.passed { 0 } else { 1 })
+        let run_failure = run_failure_message(report);
+        let failure_count = usize::from(run_failure.is_some())
             + report.measurements.iter().filter(|m| !m.passed).count();
 
         write_line(
@@ -131,15 +133,13 @@ fn write_junit_report<W: Write>(
             ),
         )?;
 
-        if !report.passed
-            && let Some(ref err) = report.error
-        {
+        if let Some(ref message) = run_failure {
             write_line(
                 writer,
                 path,
                 format_args!(
-                    "      <failure message=\"Simulation failed\">{}</failure>",
-                    xml_escape(err)
+                    "      <failure message=\"Run verification failed\">{}</failure>",
+                    xml_escape(message)
                 ),
             )?;
         }
@@ -203,23 +203,21 @@ fn write_tap_report<W: Write>(
     let mut test_num = 0;
     for report in reports {
         test_num += 1;
-        if report.passed {
-            write_line(
-                writer,
-                path,
-                format_args!("ok {} - {}", test_num, report.name),
-            )?;
-        } else {
+        if let Some(message) = run_failure_message(report) {
             write_line(
                 writer,
                 path,
                 format_args!("not ok {} - {}", test_num, report.name),
             )?;
-            if let Some(ref err) = report.error {
-                write_line(writer, path, format_args!("  ---"))?;
-                write_line(writer, path, format_args!("  message: '{}'", err))?;
-                write_line(writer, path, format_args!("  ..."))?;
-            }
+            write_line(writer, path, format_args!("  ---"))?;
+            write_line(writer, path, format_args!("  message: '{}'", message))?;
+            write_line(writer, path, format_args!("  ..."))?;
+        } else {
+            write_line(
+                writer,
+                path,
+                format_args!("ok {} - {}", test_num, report.name),
+            )?;
         }
 
         for meas in &report.measurements {
@@ -250,6 +248,32 @@ fn write_tap_report<W: Write>(
     }
 
     Ok(())
+}
+
+fn run_failure_message(report: &SimulationReport) -> Option<String> {
+    if report.passed && report.error.is_none() {
+        return None;
+    }
+
+    if let Some(err) = &report.error {
+        return Some(format!("Simulation failed: {err}"));
+    }
+
+    let failed_measurements: Vec<&str> = report
+        .measurements
+        .iter()
+        .filter(|meas| !meas.passed)
+        .map(|meas| meas.name.as_str())
+        .collect();
+    if failed_measurements.is_empty() {
+        Some("Run verification failed".to_string())
+    } else {
+        Some(format!(
+            "Run verification failed: {} measurement(s) failed: {}",
+            failed_measurements.len(),
+            failed_measurements.join(", ")
+        ))
+    }
 }
 
 /// JSON report for measurements

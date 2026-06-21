@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 /// Configuration for the RSpice CLI
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 #[derive(Default)]
 pub struct Config {
     /// Simulation settings
@@ -28,7 +28,7 @@ pub struct Config {
 
 /// Simulation-related configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SimulationConfig {
     /// Default temperature in Celsius
     pub temperature: f64,
@@ -63,7 +63,7 @@ pub struct SimulationConfig {
 
 /// Output-related configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct OutputConfig {
     /// Default output format
     pub format: String,
@@ -77,7 +77,7 @@ pub struct OutputConfig {
 
 /// Path-related configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 #[derive(Default)]
 pub struct PathConfig {
     /// Include paths for .include directives
@@ -125,7 +125,7 @@ impl Default for OutputConfig {
 /// "explicitly set back to the default" from "not mentioned" — comparing
 /// concrete values against defaults cannot.
 #[derive(Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct ConfigLayer {
     simulation: SimulationLayer,
     output: OutputLayer,
@@ -133,7 +133,7 @@ struct ConfigLayer {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct SimulationLayer {
     temperature: Option<f64>,
     max_iterations: Option<usize>,
@@ -148,7 +148,7 @@ struct SimulationLayer {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct OutputLayer {
     format: Option<String>,
     show_progress: Option<bool>,
@@ -163,24 +163,27 @@ impl Config {
     /// 2. User config (~/.config/rspice/config.toml or ~/.rspicerc)
     /// 3. Project config (./.rspicerc)
     /// 4. Environment variables
-    pub fn load() -> Self {
+    pub fn load() -> Result<Self, ConfigError> {
         let mut config = Config::default();
 
-        if let Some(user_layer) = Self::load_user_layer() {
+        if let Some(user_layer) = Self::load_user_layer()? {
             config.apply_layer(user_layer);
         }
-        if let Some(project_layer) = Self::load_project_layer() {
+        if let Some(project_layer) = Self::load_project_layer()? {
             config.apply_layer(project_layer);
         }
 
-        config.apply_env();
-        config
+        config.apply_env()?;
+        config.validate()?;
+        Ok(config)
     }
 
     /// Load configuration from a specific file (applied over defaults)
     pub fn load_file(path: &std::path::Path) -> Result<Self, ConfigError> {
         let mut config = Config::default();
         config.apply_layer(Self::load_layer(path)?);
+        config.apply_env()?;
+        config.validate()?;
         Ok(config)
     }
 
@@ -197,42 +200,31 @@ impl Config {
     }
 
     /// Load user configuration from standard locations
-    fn load_user_layer() -> Option<ConfigLayer> {
+    fn load_user_layer() -> Result<Option<ConfigLayer>, ConfigError> {
         if let Some(config_dir) = dirs::config_dir() {
             let config_path = config_dir.join("rspice").join("config.toml");
             if config_path.exists() {
-                match Self::load_layer(&config_path) {
-                    Ok(layer) => return Some(layer),
-                    Err(e) => {
-                        log::warn!("ignoring unreadable config {}: {e}", config_path.display())
-                    }
-                }
+                return Self::load_layer(&config_path).map(Some);
             }
         }
 
         if let Some(home) = dirs::home_dir() {
             let rc_path = home.join(".rspicerc");
             if rc_path.exists() {
-                match Self::load_layer(&rc_path) {
-                    Ok(layer) => return Some(layer),
-                    Err(e) => log::warn!("ignoring unreadable config {}: {e}", rc_path.display()),
-                }
+                return Self::load_layer(&rc_path).map(Some);
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Load project configuration from current directory
-    fn load_project_layer() -> Option<ConfigLayer> {
+    fn load_project_layer() -> Result<Option<ConfigLayer>, ConfigError> {
         let rc_path = PathBuf::from(".rspicerc");
         if rc_path.exists() {
-            match Self::load_layer(&rc_path) {
-                Ok(layer) => return Some(layer),
-                Err(e) => log::warn!("ignoring unreadable config {}: {e}", rc_path.display()),
-            }
+            return Self::load_layer(&rc_path).map(Some);
         }
-        None
+        Ok(None)
     }
 
     /// Apply one file layer; only the fields the file set are overridden.
@@ -288,10 +280,22 @@ impl Config {
     }
 
     /// Apply environment variable overrides
-    fn apply_env(&mut self) {
-        if let Ok(temp) = std::env::var("RSPICE_TEMPERATURE")
-            && let Ok(t) = temp.parse()
-        {
+    fn apply_env(&mut self) -> Result<(), ConfigError> {
+        if let Ok(temp) = std::env::var("RSPICE_TEMPERATURE") {
+            let t = temp
+                .parse::<f64>()
+                .map_err(|e| ConfigError::EnvironmentError {
+                    variable: "RSPICE_TEMPERATURE".to_string(),
+                    value: temp.clone(),
+                    message: e.to_string(),
+                })?;
+            if !t.is_finite() {
+                return Err(ConfigError::EnvironmentError {
+                    variable: "RSPICE_TEMPERATURE".to_string(),
+                    value: temp,
+                    message: "temperature must be finite".to_string(),
+                });
+            }
             self.simulation.temperature = t;
         }
 
@@ -311,7 +315,90 @@ impl Config {
                 .library_paths
                 .extend(std::env::split_paths(&libs));
         }
+
+        Ok(())
     }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        validate_celsius("simulation.temperature", self.simulation.temperature)?;
+        validate_positive_usize("simulation.max_iterations", self.simulation.max_iterations)?;
+        validate_positive("simulation.abstol", self.simulation.abstol)?;
+        validate_positive("simulation.reltol", self.simulation.reltol)?;
+        validate_positive(
+            "simulation.residual_reltol",
+            self.simulation.residual_reltol,
+        )?;
+        validate_positive("simulation.min_timestep", self.simulation.min_timestep)?;
+        validate_positive("simulation.max_timestep", self.simulation.max_timestep)?;
+        if self.simulation.min_timestep > self.simulation.max_timestep {
+            return Err(ConfigError::InvalidValue {
+                field: "simulation.min_timestep".to_string(),
+                value: self.simulation.min_timestep.to_string(),
+                message: format!(
+                    "must be <= simulation.max_timestep ({})",
+                    self.simulation.max_timestep
+                ),
+            });
+        }
+        validate_positive(
+            "simulation.compression_tolerance",
+            self.simulation.compression_tolerance,
+        )?;
+        if !matches!(
+            self.simulation.convergence_mode.as_str(),
+            "fast" | "default" | "robust"
+        ) {
+            return Err(ConfigError::InvalidValue {
+                field: "simulation.convergence_mode".to_string(),
+                value: self.simulation.convergence_mode.clone(),
+                message: "must be one of fast, default, robust".to_string(),
+            });
+        }
+        if !matches!(
+            self.output.format.to_ascii_lowercase().as_str(),
+            "raw" | "ascii" | "csv" | "json" | "tsv" | "hdf5"
+        ) {
+            return Err(ConfigError::InvalidValue {
+                field: "output.format".to_string(),
+                value: self.output.format.clone(),
+                message: "must be one of raw, ascii, csv, json, tsv, hdf5".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn validate_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            value: value.to_string(),
+            message: "must be a positive finite number".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_positive_usize(field: &str, value: usize) -> Result<(), ConfigError> {
+    if value == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            value: value.to_string(),
+            message: "must be at least 1".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_celsius(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= -273.15 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            value: value.to_string(),
+            message: "must be finite and above absolute zero".to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Configuration loading errors
@@ -326,4 +413,18 @@ pub enum ConfigError {
 
     #[error("Failed to parse config file {path}: {message}")]
     ParseError { path: PathBuf, message: String },
+
+    #[error("Invalid environment variable {variable}={value:?}: {message}")]
+    EnvironmentError {
+        variable: String,
+        value: String,
+        message: String,
+    },
+
+    #[error("Invalid config value {field}={value:?}: {message}")]
+    InvalidValue {
+        field: String,
+        value: String,
+        message: String,
+    },
 }

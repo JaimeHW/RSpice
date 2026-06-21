@@ -1,6 +1,6 @@
 use rspice_core::{
     Complex64, Value, analysis::AcResult, engine::TransientResult, netlist::SaveSet,
-    solver::SimulationResult,
+    netlist::SaveSignal, solver::SimulationResult,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +86,7 @@ pub(crate) fn apply_save_set(signals: Vec<ScalarSignal>, saves: &SaveSet) -> Vec
     if saves.keeps_everything() {
         return signals;
     }
-    signals
+    with_differential_voltage_signals(signals, saves)
         .into_iter()
         .filter(|signal| saves.selects(&signal.display_name))
         .collect()
@@ -100,7 +100,7 @@ pub(crate) fn apply_save_set_complex(
     if saves.keeps_everything() {
         return signals;
     }
-    signals
+    with_differential_complex_signals(signals, saves)
         .into_iter()
         .filter(|signal| saves.selects(&signal.display_name))
         .collect()
@@ -122,6 +122,159 @@ fn current_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
         kind: SignalKind::Current,
         values,
     }
+}
+
+fn is_ground_node(name: &str) -> bool {
+    matches!(name.trim().to_ascii_lowercase().as_str(), "0" | "gnd")
+}
+
+fn requested_voltage_diffs(saves: &SaveSet) -> impl Iterator<Item = (&str, &str)> {
+    saves.signals.iter().filter_map(|signal| match signal {
+        SaveSignal::VoltageDiff(a, b) => Some((a.as_str(), b.as_str())),
+        _ => None,
+    })
+}
+
+fn scalar_voltage_values(
+    signals: &[ScalarSignal],
+    node: &str,
+    sample_count: usize,
+) -> Option<Vec<Value>> {
+    if is_ground_node(node) {
+        return Some(vec![0.0; sample_count]);
+    }
+
+    let target = voltage_raw_name(node, 0);
+    signals
+        .iter()
+        .find(|signal| {
+            signal.kind == SignalKind::Voltage && signal.raw_name.eq_ignore_ascii_case(&target)
+        })
+        .map(|signal| signal.values.clone())
+}
+
+fn complex_voltage_values(
+    signals: &[ComplexSignal],
+    node: &str,
+    sample_count: usize,
+) -> Option<(Vec<Value>, Vec<Value>)> {
+    if is_ground_node(node) {
+        return Some((vec![0.0; sample_count], vec![0.0; sample_count]));
+    }
+
+    let target = voltage_raw_name(node, 0);
+    signals
+        .iter()
+        .find(|signal| {
+            signal.kind == SignalKind::Voltage && signal.raw_name.eq_ignore_ascii_case(&target)
+        })
+        .map(|signal| (signal.real.clone(), signal.imag.clone()))
+}
+
+fn with_differential_voltage_signals(
+    mut signals: Vec<ScalarSignal>,
+    saves: &SaveSet,
+) -> Vec<ScalarSignal> {
+    let sample_count = signals
+        .iter()
+        .find(|signal| signal.kind == SignalKind::Voltage)
+        .map_or(0, |signal| signal.values.len());
+
+    for (positive, negative) in requested_voltage_diffs(saves) {
+        let raw_name = format!(
+            "{},{}",
+            voltage_raw_name(positive, 0),
+            voltage_raw_name(negative, 0)
+        );
+        let display_name = format!("V({raw_name})");
+        if signals
+            .iter()
+            .any(|signal| signal.display_name.eq_ignore_ascii_case(&display_name))
+        {
+            continue;
+        }
+
+        let Some(pos_values) = scalar_voltage_values(&signals, positive, sample_count) else {
+            continue;
+        };
+        let Some(neg_values) = scalar_voltage_values(&signals, negative, sample_count) else {
+            continue;
+        };
+        if pos_values.len() != neg_values.len() {
+            continue;
+        }
+
+        let values = pos_values
+            .into_iter()
+            .zip(neg_values)
+            .map(|(pos, neg)| pos - neg)
+            .collect();
+        signals.push(ScalarSignal {
+            display_name,
+            raw_name,
+            kind: SignalKind::Voltage,
+            values,
+        });
+    }
+
+    signals
+}
+
+fn with_differential_complex_signals(
+    mut signals: Vec<ComplexSignal>,
+    saves: &SaveSet,
+) -> Vec<ComplexSignal> {
+    let sample_count = signals
+        .iter()
+        .find(|signal| signal.kind == SignalKind::Voltage)
+        .map_or(0, |signal| signal.real.len());
+
+    for (positive, negative) in requested_voltage_diffs(saves) {
+        let raw_name = format!(
+            "{},{}",
+            voltage_raw_name(positive, 0),
+            voltage_raw_name(negative, 0)
+        );
+        let display_name = format!("V({raw_name})");
+        if signals
+            .iter()
+            .any(|signal| signal.display_name.eq_ignore_ascii_case(&display_name))
+        {
+            continue;
+        }
+
+        let Some((pos_real, pos_imag)) = complex_voltage_values(&signals, positive, sample_count)
+        else {
+            continue;
+        };
+        let Some((neg_real, neg_imag)) = complex_voltage_values(&signals, negative, sample_count)
+        else {
+            continue;
+        };
+        if pos_real.len() != neg_real.len() || pos_imag.len() != neg_imag.len() {
+            continue;
+        }
+
+        let real = pos_real
+            .into_iter()
+            .zip(neg_real)
+            .map(|(pos, neg)| pos - neg)
+            .collect();
+        let imag = pos_imag
+            .into_iter()
+            .zip(neg_imag)
+            .map(|(pos, neg)| pos - neg)
+            .collect();
+        signals.push(ComplexSignal {
+            display_name,
+            raw_name,
+            kind: SignalKind::Voltage,
+            real,
+            imag,
+        });
+    }
+
+    signals
 }
 
 pub(crate) fn transient_voltage_signals(result: &TransientResult) -> Vec<ScalarSignal> {

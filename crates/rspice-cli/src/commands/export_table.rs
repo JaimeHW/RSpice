@@ -306,15 +306,28 @@ impl ExportTable {
     ) -> Result<(), CliError> {
         let io_err = |e: std::io::Error| CliError::output_error(path, e);
 
-        write!(writer, "{}", self.scale_name).map_err(io_err)?;
+        write!(writer, "{}", delimited_cell(&self.scale_name, delimiter)).map_err(io_err)?;
         for column in &self.columns {
             match column.data {
                 ColumnData::Real(_) => {
-                    write!(writer, "{}{}", delimiter, column.name).map_err(io_err)?;
+                    write!(
+                        writer,
+                        "{}{}",
+                        delimiter,
+                        delimited_cell(&column.name, delimiter)
+                    )
+                    .map_err(io_err)?;
                 }
                 ColumnData::Complex { .. } => {
-                    write!(writer, "{0}Re({1}){0}Im({1})", delimiter, column.name)
-                        .map_err(io_err)?;
+                    write!(
+                        writer,
+                        "{}{}{}{}",
+                        delimiter,
+                        delimited_cell(&format!("Re({})", column.name), delimiter),
+                        delimiter,
+                        delimited_cell(&format!("Im({})", column.name), delimiter)
+                    )
+                    .map_err(io_err)?;
                 }
             }
         }
@@ -372,5 +385,17 @@ impl ExportTable {
             .write_all(b"\n")
             .map_err(|e| CliError::output_error(path, e))?;
         Ok(())
+    }
+}
+
+pub(crate) fn delimited_cell(value: &str, delimiter: char) -> String {
+    if value.contains(delimiter)
+        || value.contains('"')
+        || value.contains('\n')
+        || value.contains('\r')
+    {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
     }
 }

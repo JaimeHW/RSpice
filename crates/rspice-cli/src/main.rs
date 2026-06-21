@@ -54,7 +54,16 @@ fn main() -> ExitCode {
             }
         }
     } else {
-        Config::load()
+        match Config::load() {
+            Ok(c) => c,
+            Err(e) => {
+                let err = cli::CliError::ConfigError {
+                    message: e.to_string(),
+                };
+                eprintln!("Error: {}", err);
+                return err.exit_code().into();
+            }
+        }
     };
 
     // Execute command

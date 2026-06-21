@@ -6,6 +6,7 @@ use crate::commands::run_signals::{
     dc_operating_point_voltage_signals, dc_sweep_signals, transient_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
+use std::borrow::Cow;
 use std::path::Path;
 
 pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
@@ -200,12 +201,16 @@ fn write_dc_op_output(
                 source: e,
             })?;
             for signal in &signals {
-                writeln!(file, "{},{:.9e}", signal.display_name, signal.values[0]).map_err(
-                    |e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    },
-                )?;
+                writeln!(
+                    file,
+                    "{},{:.9e}",
+                    super::export::delimited_cell(&signal.display_name, ','),
+                    signal.values[0]
+                )
+                .map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
             }
         }
         OutputFormat::Tsv => {
@@ -642,11 +647,11 @@ pub(super) fn run_fourier(
     for output in outputs {
         if let Some((node_idx, reference_idx)) = resolver.parse_voltage_probe(output) {
             let result = if reference_idx == 0 {
-                let waveform = tran_result.voltage_waveform(node_idx);
-                fourier.analyze(&tran_result.time, waveform)
+                let waveform = fourier_voltage_waveform(&tran_result, output, node_idx)?;
+                fourier.analyze(&tran_result.time, waveform.as_ref())
             } else {
-                let pos_waveform = tran_result.voltage_waveform(node_idx);
-                let neg_waveform = tran_result.voltage_waveform(reference_idx);
+                let pos_waveform = fourier_voltage_waveform(&tran_result, output, node_idx)?;
+                let neg_waveform = fourier_voltage_waveform(&tran_result, output, reference_idx)?;
                 let diff_waveform: Vec<f64> = pos_waveform
                     .iter()
                     .zip(neg_waveform.iter())
@@ -705,6 +710,29 @@ pub(super) fn run_fourier(
     }
 
     Ok(())
+}
+
+fn fourier_voltage_waveform<'a>(
+    result: &'a rspice_core::engine::TransientResult,
+    output: &str,
+    node: usize,
+) -> Result<Cow<'a, [f64]>, CliError> {
+    if node == 0 {
+        return Ok(Cow::Owned(vec![0.0; result.time.len()]));
+    }
+
+    result
+        .try_voltage_waveform(node)
+        .map(Cow::Borrowed)
+        .ok_or_else(|| {
+            CliError::simulation_error_in(
+                format!(
+                    "Fourier output '{output}' is not available: node {node} is outside transient result node range 0..={}",
+                    result.num_nodes
+                ),
+                "Fourier",
+            )
+        })
 }
 
 /// Export Fourier results with full harmonic data (JSON or CSV).

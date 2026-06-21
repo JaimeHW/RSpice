@@ -26,19 +26,76 @@ pub(crate) fn detect_format(path: &Path) -> OutputFormat {
 
 /// Load a result file into a table.
 pub(crate) fn load_table(path: &Path, format: OutputFormat) -> Result<ExportTable, CliError> {
-    match format {
+    let table = match format {
         OutputFormat::Raw | OutputFormat::RawAscii => load_rawfile(path),
         OutputFormat::Csv => load_delimited(path, ','),
         OutputFormat::Tsv => load_delimited(path, '\t'),
         OutputFormat::Json => load_json(path),
         OutputFormat::Hdf5 => load_hdf5(path),
-    }
+    }?;
+    validate_table_shape(path, table)
 }
 
 fn conversion_error(path: &Path, message: impl std::fmt::Display) -> CliError {
     CliError::ConversionError {
         message: format!("{}: {}", path.display(), message),
     }
+}
+
+fn validate_table_shape(path: &Path, table: ExportTable) -> Result<ExportTable, CliError> {
+    validate_values(path, &table.scale_name, "scale", &table.scale)?;
+    let expected = table.scale.len();
+    for column in &table.columns {
+        match &column.data {
+            ColumnData::Real(values) => {
+                validate_series_len(path, &column.name, "values", values.len(), expected)?;
+                validate_values(path, &column.name, "values", values)?;
+            }
+            ColumnData::Complex { real, imag } => {
+                validate_series_len(path, &column.name, "real", real.len(), expected)?;
+                validate_series_len(path, &column.name, "imag", imag.len(), expected)?;
+                validate_values(path, &column.name, "real", real)?;
+                validate_values(path, &column.name, "imag", imag)?;
+            }
+        }
+    }
+    Ok(table)
+}
+
+fn validate_series_len(
+    path: &Path,
+    signal: &str,
+    part: &str,
+    actual: usize,
+    expected: usize,
+) -> Result<(), CliError> {
+    if actual != expected {
+        return Err(conversion_error(
+            path,
+            format!(
+                "signal '{}' {} has {} points; expected {} to match the scale",
+                signal, part, actual, expected
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_values(path: &Path, signal: &str, part: &str, values: &[f64]) -> Result<(), CliError> {
+    if let Some((index, value)) = values
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(conversion_error(
+            path,
+            format!(
+                "non-finite value {} in '{}' {} at point {}",
+                value, signal, part, index
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn load_rawfile(path: &Path) -> Result<ExportTable, CliError> {
@@ -88,12 +145,13 @@ fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError>
     })?;
 
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
-    let header: Vec<String> = lines
-        .next()
-        .ok_or_else(|| conversion_error(path, "empty input file"))?
-        .split(separator)
-        .map(|s| s.trim().to_string())
-        .collect();
+    let header = parse_delimited_record(
+        lines
+            .next()
+            .ok_or_else(|| conversion_error(path, "empty input file"))?,
+        separator,
+    )
+    .map_err(|message| conversion_error(path, format!("header row: {message}")))?;
     if header.is_empty() {
         return Err(conversion_error(path, "missing header row"));
     }
@@ -101,29 +159,47 @@ fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError>
     let mut scale = Vec::new();
     let mut series: Vec<Vec<f64>> = vec![Vec::new(); header.len().saturating_sub(1)];
     for (row, line) in lines.enumerate() {
-        let fields: Vec<&str> = line.split(separator).collect();
+        let line_number = row + 2;
+        let fields = parse_delimited_record(line, separator)
+            .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
         let parse = |field: &str, column: &str| {
-            field.trim().parse::<f64>().map_err(|_| {
+            let token = field.trim();
+            let value = token.parse::<f64>().map_err(|_| {
                 conversion_error(
                     path,
                     format!(
                         "non-numeric value '{}' in column '{}', row {}",
-                        field.trim(),
-                        column,
-                        row + 2
+                        token, column, line_number
                     ),
                 )
-            })
+            })?;
+            if !value.is_finite() {
+                return Err(conversion_error(
+                    path,
+                    format!(
+                        "non-finite value '{}' in column '{}', row {}",
+                        token, column, line_number
+                    ),
+                ));
+            }
+            Ok(value)
         };
 
-        let Some(first) = fields.first() else {
-            continue;
-        };
-        scale.push(parse(first, &header[0])?);
+        if fields.len() != header.len() {
+            return Err(conversion_error(
+                path,
+                format!(
+                    "row {} has {} columns; expected {} columns",
+                    line_number,
+                    fields.len(),
+                    header.len()
+                ),
+            ));
+        }
+
+        scale.push(parse(&fields[0], &header[0])?);
         for (i, field) in fields.iter().skip(1).enumerate() {
-            if i < series.len() {
-                series[i].push(parse(field, &header[i + 1])?);
-            }
+            series[i].push(parse(field, &header[i + 1])?);
         }
     }
 
@@ -131,18 +207,21 @@ fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError>
     let mut iter = header.iter().skip(1).zip(series).peekable();
     while let Some((name, values)) = iter.next() {
         // Fold adjacent `Re(x)` / `Im(x)` pairs back into one complex column.
-        if let Some(inner) = complex_part_name(name, "Re(") {
-            if let Some((next_name, _)) = iter.peek()
-                && complex_part_name(next_name, "Im(") == Some(inner.clone())
-            {
-                let (_, imag) = iter.next().expect("peeked");
-                columns.push(ExportColumn {
-                    name: inner,
-                    var_type: "voltage".to_string(),
-                    data: ColumnData::Complex { real: values, imag },
-                });
-                continue;
-            }
+        let complex_pair = complex_part_name(name, "Re(").and_then(|inner| {
+            let has_matching_imag = iter.peek().is_some_and(|(next_name, _)| {
+                complex_part_name(next_name, "Im(").as_deref() == Some(inner.as_str())
+            });
+            has_matching_imag
+                .then(|| iter.next().map(|(_, imag)| (inner, imag)))
+                .flatten()
+        });
+        if let Some((inner, imag)) = complex_pair {
+            columns.push(ExportColumn {
+                name: inner,
+                var_type: "voltage".to_string(),
+                data: ColumnData::Complex { real: values, imag },
+            });
+            continue;
         }
         columns.push(ExportColumn {
             name: name.clone(),
@@ -160,6 +239,56 @@ fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError>
         scale,
         columns,
     })
+}
+
+fn parse_delimited_record(line: &str, separator: char) -> Result<Vec<String>, String> {
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut chars = line.chars().peekable();
+    let mut in_quotes = false;
+    let mut quoted = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    field.push('"');
+                } else {
+                    in_quotes = false;
+                    quoted = true;
+                }
+            } else {
+                field.push(ch);
+            }
+            continue;
+        }
+
+        if ch == separator {
+            fields.push(finish_delimited_field(&field, quoted));
+            field.clear();
+            quoted = false;
+        } else if ch == '"' && field.trim().is_empty() {
+            field.clear();
+            in_quotes = true;
+        } else {
+            field.push(ch);
+        }
+    }
+
+    if in_quotes {
+        return Err("unterminated quoted field".to_string());
+    }
+    fields.push(finish_delimited_field(&field, quoted));
+    Ok(fields)
+}
+
+fn finish_delimited_field(field: &str, quoted: bool) -> String {
+    if quoted {
+        field.to_string()
+    } else {
+        field.trim().to_string()
+    }
 }
 
 fn load_json(path: &Path) -> Result<ExportTable, CliError> {

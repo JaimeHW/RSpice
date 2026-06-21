@@ -68,9 +68,10 @@ impl<'a> RunContext<'a> {
         quiet: bool,
         run_label: Option<&str>,
     ) -> Result<Self, CliError> {
-        let format = args
-            .format
-            .unwrap_or_else(|| parse_format_name(&config.output.format));
+        let format = match args.format {
+            Some(format) => format,
+            None => parse_format_name(&config.output.format)?,
+        };
         let mut output = resolve_output_path(args.output.clone(), config)?;
         // Multi-run decks tag each run's output so later runs cannot
         // silently overwrite earlier ones: `out.csv` -> `out.hot.csv`.
@@ -329,13 +330,8 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     crate::abort::install_interrupt_handler();
+    validate_run_numeric_args(&args)?;
     if let Some(seconds) = args.timeout {
-        if !seconds.is_finite() || seconds <= 0.0 {
-            return Err(CliError::InvalidArgument {
-                message: format!("--timeout must be a positive number of seconds, got {seconds}"),
-                suggestion: Some("e.g. --timeout 300 for a five-minute budget".to_string()),
-            });
-        }
         crate::abort::arm_timeout(seconds);
     }
 
@@ -352,7 +348,13 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     // HSPICE `.ALTER` / `.DATA` constructs expand into several concrete
     // runs; a plain deck passes through as a single unlabeled run.
-    let plan = rspice_core::netlist::multi_run::expand_multi_run(&source);
+    let plan = rspice_core::netlist::multi_run::try_expand_multi_run(&source).map_err(|error| {
+        CliError::ParseError {
+            message: error.to_string(),
+            line: None,
+            suggestion: Some("fix the .DATA table or its DATA=<name> reference".to_string()),
+        }
+    })?;
     let multi_run = plan.len() > 1;
     if multi_run && !quiet {
         println!(
@@ -395,9 +397,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             let label = deck.label.as_deref().unwrap_or("base");
             let (report, deck_outputs) = outcome?;
             if !quiet {
-                match &report.error {
-                    None => println!("  ✓ {label} ({:.3}s)", report.duration_secs),
-                    Some(error) => println!("  ✗ {label}: {error}"),
+                if report.passed {
+                    println!("  ✓ {label} ({:.3}s)", report.duration_secs);
+                } else {
+                    println!("  ✗ {label}: {}", status_failure_summary(&report));
                 }
             }
             if first_error.is_none() {
@@ -488,6 +491,89 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     Ok(())
+}
+
+fn validate_run_numeric_args(args: &RunArgs) -> Result<(), CliError> {
+    if matches!(args.maxiter, Some(0)) {
+        return Err(invalid_run_arg(
+            "--maxiter",
+            "must be at least 1",
+            "e.g. --maxiter 100",
+        ));
+    }
+
+    require_celsius_arg("--temp", args.temp)?;
+    require_positive_arg("--timeout", args.timeout)?;
+    require_positive_arg("--tran-stop", args.tran_stop)?;
+    require_positive_arg("--compress-tol", args.compress_tol)?;
+    require_positive_arg("--abstol", args.abstol)?;
+    require_positive_arg("--reltol", args.reltol)?;
+    require_positive_arg("--residual-reltol", args.residual_reltol)?;
+    require_positive_arg("--min-step", args.min_step)?;
+    require_positive_arg("--max-step", args.max_step)?;
+    if let (Some(min_step), Some(max_step)) = (args.min_step, args.max_step)
+        && min_step > max_step
+    {
+        return Err(invalid_run_arg(
+            "--min-step/--max-step",
+            &format!("must satisfy --min-step <= --max-step, got {min_step} > {max_step}"),
+            "set --min-step less than or equal to --max-step",
+        ));
+    }
+    require_positive_arg("--trtol", args.trtol)?;
+    require_non_negative_arg("--gmin", args.gmin)?;
+    require_positive_arg("--voltage-abstol", args.voltage_abstol)?;
+    require_positive_arg("--current-abstol", args.current_abstol)?;
+    require_positive_arg("--charge-abstol", args.charge_abstol)?;
+    require_non_negative_arg("--mc-spread", args.mc_spread)?;
+
+    Ok(())
+}
+
+fn require_positive_arg(name: &str, value: Option<f64>) -> Result<(), CliError> {
+    if let Some(value) = value
+        && (!value.is_finite() || value <= 0.0)
+    {
+        return Err(invalid_run_arg(
+            name,
+            &format!("must be a positive finite number, got {value}"),
+            "use a positive SPICE value",
+        ));
+    }
+    Ok(())
+}
+
+fn require_non_negative_arg(name: &str, value: Option<f64>) -> Result<(), CliError> {
+    if let Some(value) = value
+        && (!value.is_finite() || value < 0.0)
+    {
+        return Err(invalid_run_arg(
+            name,
+            &format!("must be a finite non-negative number, got {value}"),
+            "use 0 or a positive SPICE value",
+        ));
+    }
+    Ok(())
+}
+
+fn require_celsius_arg(name: &str, value: Option<f64>) -> Result<(), CliError> {
+    if let Some(value) = value
+        && (!value.is_finite() || value <= -273.15)
+    {
+        return Err(invalid_run_arg(
+            name,
+            &format!("must be finite and above absolute zero, got {value} C"),
+            "use a Celsius value greater than -273.15",
+        ));
+    }
+    Ok(())
+}
+
+fn invalid_run_arg(name: &str, message: &str, suggestion: &str) -> CliError {
+    CliError::InvalidArgument {
+        message: format!("{name} {message}"),
+        suggestion: Some(suggestion.to_string()),
+    }
 }
 
 /// Write the one-artifact JSON contract for automation: tool identity,
@@ -581,7 +667,12 @@ fn run_deck(
         None => base_name,
     };
 
-    if run_requested_mode(&ctx, config)? {
+    let start_time = Instant::now();
+    let requested_mode = run_requested_mode(&ctx, config)?;
+    if requested_mode.ran() {
+        if requested_mode.needs_measurement_finalization() {
+            ctx.record_unevaluated_measurements();
+        }
         let measurements = ctx.measurements.borrow().clone();
         let passed = measurements.iter().all(|meas| meas.passed);
         return Ok((
@@ -589,7 +680,7 @@ fn run_deck(
                 name,
                 netlist: args.input.display().to_string(),
                 passed,
-                duration_secs: 0.0,
+                duration_secs: start_time.elapsed().as_secs_f64(),
                 error: None,
                 measurements,
             },
@@ -598,7 +689,6 @@ fn run_deck(
     }
 
     let mut ran_analysis = false;
-    let start_time = Instant::now();
     let mut simulation_error: Option<String> = None;
 
     for (idx, analysis) in netlist.analyses.iter().enumerate() {
@@ -613,6 +703,9 @@ fn run_deck(
 
         ran_analysis = true;
         if let Err(e) = ctx.run_analysis(analysis) {
+            if is_run_setup_or_output_error(&e) {
+                return Err(e);
+            }
             simulation_error = Some(simulation_error_message(&e));
             break;
         }
@@ -623,6 +716,9 @@ fn run_deck(
             println!("No analysis commands - running default DC OP...");
         }
         if let Err(e) = basic::run_dc_op(&ctx) {
+            if is_run_setup_or_output_error(&e) {
+                return Err(e);
+            }
             simulation_error = Some(simulation_error_message(&e));
         }
     }
@@ -633,8 +729,8 @@ fn run_deck(
     ctx.record_unevaluated_measurements();
 
     let duration = start_time.elapsed().as_secs_f64();
-    let passed = simulation_error.is_none();
     let measurements = ctx.measurements.borrow().clone();
+    let passed = simulation_error.is_none() && measurements.iter().all(|meas| meas.passed);
 
     Ok((
         SimulationReport {
@@ -656,6 +752,35 @@ fn simulation_error_message(e: &CliError) -> String {
     match e {
         CliError::SimulationError { message, .. } => message.clone(),
         other => other.to_string(),
+    }
+}
+
+fn is_run_setup_or_output_error(error: &CliError) -> bool {
+    matches!(
+        error,
+        CliError::OutputError { .. } | CliError::OutputSerializationError { .. }
+    )
+}
+
+fn status_failure_summary(report: &SimulationReport) -> String {
+    if let Some(error) = &report.error {
+        return error.clone();
+    }
+
+    let failed_measurements: Vec<&str> = report
+        .measurements
+        .iter()
+        .filter(|meas| !meas.passed)
+        .map(|meas| meas.name.as_str())
+        .collect();
+    if failed_measurements.is_empty() {
+        "run failed".to_string()
+    } else {
+        format!(
+            "{} measurement(s) failed: {}",
+            failed_measurements.len(),
+            failed_measurements.join(", ")
+        )
     }
 }
 
@@ -818,12 +943,14 @@ fn load_netlist_from_source(
     Ok(netlist)
 }
 
-/// Parse a config `output.format` name; unknown names warn and fall back to raw.
-fn parse_format_name(name: &str) -> OutputFormat {
+/// Parse a config `output.format` name.
+fn parse_format_name(name: &str) -> Result<OutputFormat, CliError> {
     use clap::ValueEnum;
-    OutputFormat::from_str(name, true).unwrap_or_else(|_| {
-        log::warn!("unrecognized output.format '{}' in config; using raw", name);
-        OutputFormat::Raw
+    OutputFormat::from_str(name, true).map_err(|_| CliError::ConfigError {
+        message: format!(
+            "invalid output.format '{}'; expected one of: raw, ascii, csv, json, tsv, hdf5",
+            name
+        ),
     })
 }
 
@@ -1053,14 +1180,35 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
     resolve_simulation_config(&base, Some(&netlist.options), &overrides)
 }
 
-fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, CliError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestedModeOutcome {
+    NotRequested,
+    RanNeedsMeasurementFinalization,
+    RanManagedMeasurements,
+}
+
+impl RequestedModeOutcome {
+    fn ran(self) -> bool {
+        !matches!(self, Self::NotRequested)
+    }
+
+    fn needs_measurement_finalization(self) -> bool {
+        matches!(self, Self::RanNeedsMeasurementFinalization)
+    }
+}
+
+fn run_requested_mode(
+    ctx: &RunContext<'_>,
+    _config: &Config,
+) -> Result<RequestedModeOutcome, CliError> {
     if let Some(num_runs) = ctx.args.monte_carlo {
         let spread = ctx.args.mc_spread.unwrap_or(0.01);
         if !spread.is_finite() || spread < 0.0 {
             return Err(CliError::InvalidArgument {
-                message: format!("--mc-spread must be a non-negative finite value, got {spread}"),
+                message: format!("--mc-spread must be a finite non-negative value, got {spread}"),
                 suggestion: Some(
-                    "use 0 for deterministic nominal samples, or 0.05 for 5% variation".to_string(),
+                    "Use 0 for deterministic samples, or e.g. --mc-spread 0.05 for 5% variation"
+                        .to_string(),
                 ),
             });
         }
@@ -1083,17 +1231,17 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
             distribution,
             parameter_filter,
         )?;
-        return Ok(true);
+        return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 
     if let Some(freq) = ctx.args.pss_freq {
         advanced::run_pss(ctx, freq, ctx.args.pss_harmonics, ctx.args.pss_tstab)?;
-        return Ok(true);
+        return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 
     if let Some(freq) = ctx.args.hb_freq {
         advanced::run_hb(ctx, freq, ctx.args.hb_harmonics)?;
-        return Ok(true);
+        return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 
     if let (Some(input), Some(output)) =
@@ -1101,7 +1249,7 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
     {
         let (input, output) = resolve_node_pair(ctx, input, output, "--pz-input/--pz-output")?;
         frequency::run_pz(ctx, input, output)?;
-        return Ok(true);
+        return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 
     if let (Some(output_node), Some(param)) = (
@@ -1110,20 +1258,20 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
     ) {
         let output_node = resolve_node(ctx, output_node, "--sens-output")?;
         frequency::run_sensitivity(ctx, output_node, param, ctx.args.sens_value.unwrap_or(1.0))?;
-        return Ok(true);
+        return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 
     if let Some(ports) = ctx.args.sparam.as_deref() {
         advanced::run_sparam(ctx, ports, ctx.args.sparam_z0.unwrap_or(50.0))?;
-        return Ok(true);
+        return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 
     if let Some(corners_str) = ctx.args.corners.as_deref() {
         advanced::run_corner_sweep(ctx, corners_str)?;
-        return Ok(true);
+        return Ok(RequestedModeOutcome::RanManagedMeasurements);
     }
 
-    Ok(false)
+    Ok(RequestedModeOutcome::NotRequested)
 }
 
 /// Resolve a node given by name or index for analysis flags.
