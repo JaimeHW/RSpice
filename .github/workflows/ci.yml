@@ -1,5 +1,5 @@
 # Per-commit gate: build the workspace warning-clean and run the fast test
-# tier on Linux and Windows. The ngspice conformance suites are excluded
+# tier on Linux/Windows, plus a macOS desktop compile check. The ngspice conformance suites are excluded
 # here for runtime; they gate in nightly.yml against the conformance
 # watermark. The live-oracle audit is `#[ignore]` and never runs in CI.
 name: CI
@@ -29,12 +29,28 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: CI configuration tests
+        run: python3 tools/ci/test_ci_configuration.py
+      - name: WASM playground worker tests
+        run: python3 tools/ci/test_wasm_playground.py
+      - name: WASM IDE worker tests
+        run: python3 tools/ci/test_ide_worker.py
+      - name: Site deploy gate tests
+        run: python3 tools/deploy/test_build_site.py
+      - name: Site deploy script tests
+        run: python3 tools/deploy/test_deploy.py
       - name: Check (warnings denied)
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
+      - name: Clippy (warnings denied)
+        run: cargo clippy --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
       - name: Clear check artifacts before tests
         run: cargo clean
       - name: Test (fast tier)
@@ -45,6 +61,8 @@ jobs:
         run: >-
           cargo test --workspace --exclude rspice-python --exclude rspice-wasm
           -- --skip test_ngspice_ --skip test_full_ngspice
+      - name: Core library unit tests
+        run: cargo test -p rspice-core --lib
 
   test-windows:
     name: Build & unit test (Windows)
@@ -52,12 +70,25 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Check
         run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Unit tests
         run: cargo test -p rspice-core --lib
+
+  check-macos-desktop:
+    name: Check desktop UI/CLI (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Check desktop crates
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check -p rspice-cli -p rspice-ui
 
   wasm:
     name: Check (wasm32)
@@ -65,12 +96,22 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Check rspice-wasm
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo check -p rspice-wasm --target wasm32-unknown-unknown
+      - name: Build rspice-wasm release library
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo build -p rspice-wasm --lib --target wasm32-unknown-unknown --release
+      - name: Check rspice-ui
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check -p rspice-ui --target wasm32-unknown-unknown
 
   python:
     name: Check (Python bindings)
@@ -81,7 +122,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Check rspice-python
         run: cargo check -p rspice-python

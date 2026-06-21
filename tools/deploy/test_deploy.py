@@ -91,60 +91,81 @@ class PublishScriptTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
-        self.remote = self.base / "publish.git"
+        self.remote = self.base / "origin.git"
         self.site = self.base / "_site"
 
         subprocess.run(["git", "init", "--bare", str(self.remote)], check=True)
-        write_file(self.site, "index.html", "first\n")
-        write_file(self.site, "assets/app.js", "console.log('first')\n")
+        write_file(self.site, "index.html", "v1\n")
+        write_file(self.site, "assets/app.js", "console.log('v1');\n")
 
-    def publish(self, *args):
-        env = os.environ.copy()
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
+    def publish(self, *args, env=None):
+        run_env = os.environ.copy()
+        run_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        if env:
+            run_env.update(env)
         return subprocess.run(
             [sys.executable, str(PUBLISH), *args],
             cwd=self.base,
             capture_output=True,
             text=True,
-            env=env,
+            env=run_env,
         )
 
     def test_publish_force_pushes_single_orphan_commit(self):
         result = self.publish(
-            "--branch",
-            "cf-pages-test",
-            "--dir",
-            str(self.site),
             "--remote",
             str(self.remote),
+            "--branch",
+            "cf-pages",
+            "--dir",
+            str(self.site),
             "--message",
             "deploy first",
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertFalse((self.site / ".git").exists(), "throwaway .git must be cleaned")
-        first_count = git(self.remote, "rev-list", "--count", "cf-pages-test").stdout.strip()
-        self.assertEqual(first_count, "1")
-        first_html = git(self.remote, "show", "cf-pages-test:index.html").stdout
-        self.assertEqual(first_html, "first\n")
+        self.assertFalse((self.site / ".git").exists(), "throwaway .git must be removed")
+        first_commit = git(self.remote, "rev-parse", "cf-pages").stdout.strip()
+        first_parents = git(self.remote, "rev-list", "--parents", "-n", "1", "cf-pages").stdout
+        self.assertEqual(len(first_parents.split()), 1, "publish commit must be orphaned")
+        tree = git(self.remote, "ls-tree", "-r", "--name-only", "cf-pages").stdout
+        self.assertIn("index.html", tree)
+        self.assertIn("assets/app.js", tree)
 
-        write_file(self.site, "index.html", "second\n")
+        write_file(self.site, "index.html", "v2\n")
         result = self.publish(
-            "--branch",
-            "cf-pages-test",
-            "--dir",
-            str(self.site),
             "--remote",
             str(self.remote),
+            "--branch",
+            "cf-pages",
+            "--dir",
+            str(self.site),
             "--message",
             "deploy second",
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        second_count = git(self.remote, "rev-list", "--count", "cf-pages-test").stdout.strip()
-        self.assertEqual(second_count, "1", "publish branch must remain single-commit")
-        second_html = git(self.remote, "show", "cf-pages-test:index.html").stdout
-        self.assertEqual(second_html, "second\n")
+        second_commit = git(self.remote, "rev-parse", "cf-pages").stdout.strip()
+        self.assertNotEqual(first_commit, second_commit)
+        self.assertEqual(git(self.remote, "rev-list", "--count", "cf-pages").stdout.strip(), "1")
+
+    def test_publish_cleans_throwaway_git_when_push_fails(self):
+        missing_remote = self.base / "missing.git"
+
+        result = self.publish(
+            "--remote",
+            str(missing_remote),
+            "--branch",
+            "cf-pages",
+            "--dir",
+            str(self.site),
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(
+            (self.site / ".git").exists(),
+            "failed publish must not leave a nested git repository in _site",
+        )
 
 
 if __name__ == "__main__":

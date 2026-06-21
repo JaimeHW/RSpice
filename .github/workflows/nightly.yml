@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
           key: nightly
@@ -29,6 +29,8 @@ jobs:
         run: >-
           cargo test --workspace --exclude rspice-python --exclude rspice-wasm
           --release -- --skip test_ngspice_ --skip test_full_ngspice
+      - name: Core library unit tests (release)
+        run: cargo test -p rspice-core --lib --release
       - name: ngspice conformance report
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner
@@ -72,7 +74,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
           key: nightly-release

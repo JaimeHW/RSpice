@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "crates/**"
+      - "examples/python/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/python.yml"
   pull_request:
     paths:
       - "crates/**"
+      - "examples/python/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/python.yml"
@@ -30,7 +32,7 @@ jobs:
         python: ["3.9", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: python-${{ matrix.os }}
@@ -81,7 +83,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: wheels-${{ matrix.os }}

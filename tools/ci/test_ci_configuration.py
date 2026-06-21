@@ -1,4 +1,5 @@
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -11,6 +12,20 @@ def read_text(relative_path: str) -> str:
 
 
 class CiConfigurationTests(unittest.TestCase):
+    def test_rust_workflows_use_pinned_toolchain(self) -> None:
+        workflows = [
+            ".github/workflows/ci.yml",
+            ".github/workflows/nightly.yml",
+            ".github/workflows/python.yml",
+            ".github/workflows/deploy-site.yml",
+        ]
+
+        for workflow_path in workflows:
+            with self.subTest(workflow=workflow_path):
+                workflow = read_text(workflow_path)
+                self.assertNotIn("dtolnay/rust-toolchain@stable", workflow)
+                self.assertIn("dtolnay/rust-toolchain@1.94.0", workflow)
+
     def test_rspice_python_generates_windows_abi3_import_library(self) -> None:
         manifest = read_text("crates/rspice-python/Cargo.toml")
 
@@ -31,10 +46,174 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('CARGO_BUILD_JOBS: "2"', workflow)
         self.assertIn('CARGO_PROFILE_DEV_DEBUG: "0"', workflow)
         self.assertIn('CARGO_PROFILE_TEST_DEBUG: "0"', workflow)
+        self.assertIn("python3 tools/ci/test_ci_configuration.py", workflow)
+        self.assertIn("python3 tools/ci/test_wasm_playground.py", workflow)
+        self.assertIn("python3 tools/ci/test_ide_worker.py", workflow)
+        self.assertIn("python3 tools/deploy/test_build_site.py", workflow)
+        self.assertIn("python3 tools/deploy/test_deploy.py", workflow)
         self.assertRegex(
             workflow,
             r"- name: Clear check artifacts before tests\s+run: cargo clean",
         )
+        self.assertRegex(
+            workflow,
+            r"- name: Format\s+run: cargo fmt --all -- --check",
+        )
+
+    def test_core_lib_tests_are_explicitly_gated(self) -> None:
+        ci_workflow = read_text(".github/workflows/ci.yml")
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertIn("cargo test -p rspice-core --lib", ci_workflow)
+        self.assertIn("cargo test -p rspice-core --lib --release", nightly_workflow)
+
+    def test_linux_ci_runs_clippy_warning_clean(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+
+        self.assertIn(
+            "cargo clippy --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings",
+            workflow,
+        )
+
+    def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+
+        self.assertIn("cargo check -p rspice-wasm --target wasm32-unknown-unknown", workflow)
+        self.assertIn("cargo check -p rspice-ui --target wasm32-unknown-unknown", workflow)
+        self.assertIn(
+            "cargo build -p rspice-wasm --lib --target wasm32-unknown-unknown --release",
+            workflow,
+        )
+        self.assertGreaterEqual(
+            workflow.count("RUSTFLAGS: -D warnings"),
+            2,
+            "wasm checks should deny warnings for both wasm crates",
+        )
+
+    def test_native_desktop_claim_has_macos_ui_cli_ci_coverage(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+
+        self.assertIn("runs-on: macos-latest", workflow)
+        self.assertIn("cargo check -p rspice-cli -p rspice-ui", workflow)
+
+    def test_python_workflow_runs_when_examples_change(self) -> None:
+        workflow = read_text(".github/workflows/python.yml")
+
+        self.assertIn('- "examples/python/**"', workflow)
+        self.assertEqual(
+            workflow.count('- "examples/python/**"'),
+            2,
+            "python workflow must include examples/python/** for push and pull_request filters",
+        )
+        self.assertIn("working-directory: examples/python", workflow)
+
+    def test_platform_support_matrix_documents_evidence_and_mobile_limits(self) -> None:
+        matrix = read_text("docs/platform-support.md")
+
+        self.assertIn("Native desktop", matrix)
+        self.assertIn("Browser IDE", matrix)
+        self.assertIn("WASM playground", matrix)
+        self.assertRegex(matrix, r"macOS.*cargo check -p rspice-cli -p rspice-ui")
+        self.assertRegex(matrix.lower(), r"mobile/tablet.*experimental")
+
+    def test_ui_readme_matches_current_feature_flags_and_modules(self) -> None:
+        readme = read_text("crates/rspice-ui/README.md")
+        manifest = read_text("crates/rspice-ui/Cargo.toml")
+
+        self.assertIn("desktop = []", manifest)
+        self.assertNotIn("utils/file_ops.rs", readme)
+        self.assertNotIn("FileError::NotSupported", readme)
+        self.assertIn(
+            "Compatibility marker for native desktop builds; desktop-only behavior is selected by target-specific dependencies",
+            readme,
+        )
+
+    def test_browser_surface_docs_distinguish_ide_and_playground(self) -> None:
+        ui_readme = read_text("crates/rspice-ui/README.md")
+        playground_readme = read_text("crates/rspice-wasm/web/README.md")
+        site_index = read_text("site/index.html")
+
+        self.assertNotIn("later milestone", playground_readme)
+        self.assertNotIn("not this crate", ui_readme)
+        self.assertIn("experimental browser IDE", ui_readme)
+        self.assertIn("experimental browser IDE", playground_readme)
+        self.assertIn("rspice.app/play", site_index)
+
+    def test_site_mobile_copy_matches_experimental_support_matrix(self) -> None:
+        index = read_text("site/index.html")
+        download = read_text("site/download.html")
+
+        self.assertIn("Experimental tablet/mobile preview", index)
+        self.assertIn("repeatable device matrix", index)
+        self.assertNotIn("ipad &amp; android browsers", index)
+        self.assertNotIn("available today", download)
+        self.assertIn("web/source available", download)
+        self.assertIn("mobile browser preview", download)
+
+    def test_site_validation_copy_does_not_overclaim_release_data(self) -> None:
+        parity = read_text("site/parity.html")
+        changelog = read_text("site/changelog.html")
+
+        self.assertNotIn("Every release", parity)
+        self.assertNotIn("Every release", changelog)
+        self.assertIn("pre-release validation snapshot", parity)
+        self.assertIn("static engineering snapshot", parity)
+
+    def test_notice_includes_vendored_compact_model_attributions(self) -> None:
+        notice = read_text("NOTICE")
+
+        for required in [
+            "EKV v2.6",
+            "PSP 103",
+            "JUNCAP200",
+            "R3_CMC",
+            "Educational Community License, Version 2.0",
+            "Si2 Compact Model Coalition",
+        ]:
+            with self.subTest(required=required):
+                self.assertIn(required, notice)
+
+    def test_klu_solver_provenance_audit_is_current(self) -> None:
+        audit = read_text("docs/legal/ngspice-provenance-audit.md")
+        core_readme = read_text("crates/rspice-core/README.md")
+
+        self.assertIn("KLU-class", core_readme)
+        self.assertIn("2026-06-18 KLU-class solver addendum", audit)
+        self.assertNotIn("not re-audited", audit)
+        self.assertIn("no SuiteSparse KLU source or binding is vendored", audit)
+
+    def test_referenced_source_files_are_tracked(self) -> None:
+        source_like_paths = [
+            "crates/rspice-core/src/netlist/source_map.rs",
+            "crates/rspice-core/tests/common/mod.rs",
+            "crates/rspice-ui/src/common/browser_download.rs",
+            "crates/rspice-ui/src/common/browser_file_import.rs",
+            "crates/rspice-ui/src/common/logging.rs",
+            "crates/rspice-ui/src/common/netlist_workflow.rs",
+            "crates/rspice-ui/src/shell/views/netlist/baseline.rs",
+            "crates/rspice-ui/src/shell/views/netlist/diagnostics.rs",
+            "crates/rspice-ui/src/shell/views/netlist/summary.rs",
+            "crates/rspice-ui/src/simulation/controller/manual_deck.rs",
+            "crates/rspice-ui/src/simulation/runner/wasm_worker.rs",
+            "crates/rspice-ui/src/simulation/runner/worker_contract.rs",
+            "crates/rspice-ui/src/state/simulation/ac_bode.rs",
+            "crates/rspice-veriloga/tests/support/mod.rs",
+            "docs/platform-support.md",
+        ]
+
+        for path in source_like_paths:
+            with self.subTest(path=path):
+                result = subprocess.run(
+                    ["git", "ls-files", "--error-unmatch", path],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    f"{path} is referenced by tracked code/docs but is not tracked",
+                )
 
     def test_site_validation_copy_does_not_overclaim_release_data(self) -> None:
         parity = read_text("site/parity.html")

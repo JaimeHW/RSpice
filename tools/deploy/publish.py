@@ -72,11 +72,13 @@ def main():
     # repo, so the nested .git is harmless.
     force_rmtree(os.path.join(site, ".git"))
     ident = ["-c", "user.name=rspice-deploy", "-c", "user.email=deploy@rspice.app"]
-    git(["init", "-q", "-b", args.branch], site)
-    git(["add", "-A"], site)
-    git(ident + ["commit", "-q", "-m", message], site)
-    git(["push", "--force", "--quiet", remote, args.branch], site)
-    force_rmtree(os.path.join(site, ".git"))
+    try:
+        git(["init", "-q", "-b", args.branch], site)
+        git(["add", "-A"], site)
+        git(ident + ["commit", "-q", "-m", message], site)
+        git(["push", "--force", "--quiet", remote, args.branch], site)
+    finally:
+        force_rmtree(os.path.join(site, ".git"))
 
     print("published %s as a single commit to '%s' (%s)" % (args.dir, args.branch, message))
 
