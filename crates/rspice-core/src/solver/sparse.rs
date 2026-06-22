@@ -1060,46 +1060,6 @@ impl Default for SparseLuSolver {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use num_complex::Complex64;
-
-    #[test]
-    fn static_matrix_missing_stamp_returns_solver_error() {
-        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
-
-        matrix.add(0, 1, 2.0);
-        let message = matrix.solve(&[1.0, 1.0]).unwrap_err().to_string();
-
-        assert!(
-            message.contains("missing matrix position")
-                && message.contains("StaticMatrix::add")
-                && message.contains("(0, 1)"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[test]
-    fn complex_matrix_missing_stamp_returns_solver_error() {
-        let real = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
-        let mut matrix = ComplexMatrix::from_real_structure(&real);
-
-        matrix.add_real(0, 1, 2.0);
-        let message = matrix
-            .solve(&[Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)])
-            .unwrap_err()
-            .to_string();
-
-        assert!(
-            message.contains("missing matrix position")
-                && message.contains("ComplexMatrix::add_real")
-                && message.contains("(0, 1)"),
-            "unexpected error: {message}"
-        );
-    }
-}
-
 /// Solve a sparse system Ax = b (convenience function)
 pub fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
     let sparse_mat = triplets.to_sparse_col_mat()?;
@@ -1159,4 +1119,44 @@ pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Valu
     }
 
     Ok(x)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num_complex::Complex64;
+
+    #[test]
+    fn static_matrix_missing_stamp_returns_solver_error() {
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+
+        matrix.add(0, 1, 2.0);
+        let message = matrix.solve(&[1.0, 1.0]).unwrap_err().to_string();
+
+        assert!(
+            message.contains("missing matrix position")
+                && message.contains("StaticMatrix::add")
+                && message.contains("(0, 1)"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn complex_matrix_missing_stamp_returns_solver_error() {
+        let real = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+
+        matrix.add_real(0, 1, 2.0);
+        let message = matrix
+            .solve(&[Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)])
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            message.contains("missing matrix position")
+                && message.contains("ComplexMatrix::add_real")
+                && message.contains("(0, 1)"),
+            "unexpected error: {message}"
+        );
+    }
 }

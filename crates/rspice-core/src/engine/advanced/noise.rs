@@ -99,15 +99,16 @@ impl Engine {
             _ => None,
         };
 
-        if let Some(conductance) = channel_thermal_conductance {
-            if conductance.is_finite() && conductance > 1e-30 {
-                sources.push(NoiseSource::thermal(
-                    format!("{}:id", device.name),
-                    device.node_drain,
-                    device.node_source,
-                    1.0 / conductance,
-                ));
-            }
+        if let Some(conductance) = channel_thermal_conductance
+            && conductance.is_finite()
+            && conductance > 1e-30
+        {
+            sources.push(NoiseSource::thermal(
+                format!("{}:id", device.name),
+                device.node_drain,
+                device.node_source,
+                1.0 / conductance,
+            ));
         }
 
         match model.noi_mod {
@@ -278,15 +279,16 @@ impl Engine {
             _ => None,
         };
 
-        if let Some(conductance) = channel_thermal_conductance {
-            if conductance.is_finite() && conductance > 1e-30 {
-                sources.push(NoiseSource::thermal(
-                    format!("{}:id", device.name),
-                    device.node_drain,
-                    device.node_source,
-                    1.0 / conductance,
-                ));
-            }
+        if let Some(conductance) = channel_thermal_conductance
+            && conductance.is_finite()
+            && conductance > 1e-30
+        {
+            sources.push(NoiseSource::thermal(
+                format!("{}:id", device.name),
+                device.node_drain,
+                device.node_source,
+                1.0 / conductance,
+            ));
         }
 
         if model.tnoi_mod == 2

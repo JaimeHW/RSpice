@@ -83,11 +83,13 @@ pub(super) fn run_periodic_spec(
         } => run_fourier(
             netlist,
             fundamental_freq,
-            num_harmonics,
-            output_node,
-            output_ref,
-            start_time,
-            stop_time,
+            FourierRunRequest {
+                num_harmonics,
+                output_node,
+                output_ref,
+                start_time,
+                stop_time,
+            },
             source_path,
         ),
         AnalysisSpec::Disto {
@@ -200,16 +202,27 @@ fn run_envelope(
     })
 }
 
-fn run_fourier(
-    netlist: &str,
-    fundamental_freq: f64,
+struct FourierRunRequest {
     num_harmonics: usize,
     output_node: String,
     output_ref: String,
     start_time: f64,
     stop_time: f64,
+}
+
+fn run_fourier(
+    netlist: &str,
+    fundamental_freq: f64,
+    request: FourierRunRequest,
     source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
+    let FourierRunRequest {
+        num_harmonics,
+        output_node,
+        output_ref,
+        start_time,
+        stop_time,
+    } = request;
     let output_ref = (!output_ref.trim().is_empty()).then_some(output_ref);
     let cfg = svc_runner::FourierRunConfig {
         fundamental_freq,

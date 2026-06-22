@@ -327,7 +327,6 @@ impl Mosfet {
             von,
             vdsat,
             region,
-            ..Mos3State::default()
         }
     }
 

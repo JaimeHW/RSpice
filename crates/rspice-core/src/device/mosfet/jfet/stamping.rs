@@ -283,12 +283,9 @@ impl NonlinearDevice for Jfet {
         }
 
         let mut bypassed = false;
-        let can_use_static_bypass =
-            !matches!(
-                self.params.channel_model,
-                JfetChannelModel::XyceModifiedShockley
-            ) && !(matches!(self.params.channel_model, JfetChannelModel::Hfet1)
-                && self.params.hfet_level >= 5);
+        let can_use_static_bypass = self.params.channel_model
+            != JfetChannelModel::XyceModifiedShockley
+            && (self.params.channel_model != JfetChannelModel::Hfet1 || self.params.hfet_level < 5);
         if can_use_static_bypass && self.eval_valid && vgs_prev.is_finite() && vgd_prev.is_finite()
         {
             const RELTOL: Value = 1e-3;

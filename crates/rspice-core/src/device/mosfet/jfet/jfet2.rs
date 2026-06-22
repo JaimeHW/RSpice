@@ -1088,6 +1088,11 @@ impl Jfet {
     }
 }
 
+#[inline]
+fn finite_or_zero(value: Value) -> Value {
+    if value.is_finite() { value } else { 0.0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1107,9 +1112,4 @@ mod tests {
         assert!((charge.qgd - -4.721_359_549_995_796e-7).abs() < 1.0e-18);
         assert!((charge.cgd - 1.788_854_381_999_831_5e-6).abs() < 1.0e-18);
     }
-}
-
-#[inline]
-fn finite_or_zero(value: Value) -> Value {
-    if value.is_finite() { value } else { 0.0 }
 }

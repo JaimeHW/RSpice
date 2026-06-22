@@ -179,21 +179,17 @@ impl Bsim4v8 {
                 model.rbody_mod
             ));
         }
-        if model.trnqs_mod != 0 {
-            if !matches!(model.rgate_mod, 0 | 1 | 2 | 3) {
-                return Err(format!(
-                    "BSIM4 '{name}': TRNQSMOD=1 with RGATEMOD={} is not implemented (only RGATEMOD=0, 1, 2, or 3)",
-                    model.rgate_mod
-                ));
-            }
+        if model.trnqs_mod != 0 && !matches!(model.rgate_mod, 0..=3) {
+            return Err(format!(
+                "BSIM4 '{name}': TRNQSMOD=1 with RGATEMOD={} is not implemented (only RGATEMOD=0, 1, 2, or 3)",
+                model.rgate_mod
+            ));
         }
-        if model.acnqs_mod != 0 {
-            if !matches!(model.rgate_mod, 0 | 1 | 2 | 3) {
-                return Err(format!(
-                    "BSIM4 '{name}': ACNQSMOD=1 with RGATEMOD={} is not implemented (only RGATEMOD=0, 1, 2, or 3)",
-                    model.rgate_mod
-                ));
-            }
+        if model.acnqs_mod != 0 && !matches!(model.rgate_mod, 0..=3) {
+            return Err(format!(
+                "BSIM4 '{name}': ACNQSMOD=1 with RGATEMOD={} is not implemented (only RGATEMOD=0, 1, 2, or 3)",
+                model.rgate_mod
+            ));
         }
         if !(0..=6).contains(&model.mob_mod) {
             return Err(format!(

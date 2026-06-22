@@ -320,7 +320,7 @@ fn poly_depletion(
 ///
 /// Errors only when charges are requested with an unported charge model
 /// (`capMod` 0 or an unknown `cvchargeMod` selector).
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn eval(
     model: &Bsim4v8Model,
     mt: &Bsim4v8ModelTemp,

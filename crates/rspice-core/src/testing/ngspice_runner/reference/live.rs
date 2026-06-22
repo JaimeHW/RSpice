@@ -1020,6 +1020,32 @@ fn truncate(value: &str, max_chars: usize) -> String {
     }
 }
 
+fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        let is_windows_gui_binary = ngspice_exe
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("ngspice.exe"));
+        if is_windows_gui_binary {
+            let console_exe = ngspice_exe.with_file_name("ngspice_con.exe");
+            if console_exe.is_file() {
+                log::warn!(
+                    "Using Windows console ngspice '{}' instead of GUI binary '{}'",
+                    console_exe.display(),
+                    ngspice_exe.display()
+                );
+                return Ok(console_exe);
+            }
+            return Err(format!(
+                "{NGSPICE_EXE_ENV} points to Windows GUI ngspice.exe '{}', but sibling console binary '{}' is missing; set {NGSPICE_EXE_ENV} to ngspice_con.exe to avoid GUI popup dialogs",
+                ngspice_exe.display(),
+                console_exe.display()
+            ));
+        }
+    }
+    Ok(ngspice_exe)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1134,30 +1160,4 @@ mod tests {
             }
         }
     }
-}
-
-fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, String> {
-    #[cfg(windows)]
-    {
-        let is_windows_gui_binary = ngspice_exe
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("ngspice.exe"));
-        if is_windows_gui_binary {
-            let console_exe = ngspice_exe.with_file_name("ngspice_con.exe");
-            if console_exe.is_file() {
-                log::warn!(
-                    "Using Windows console ngspice '{}' instead of GUI binary '{}'",
-                    console_exe.display(),
-                    ngspice_exe.display()
-                );
-                return Ok(console_exe);
-            }
-            return Err(format!(
-                "{NGSPICE_EXE_ENV} points to Windows GUI ngspice.exe '{}', but sibling console binary '{}' is missing; set {NGSPICE_EXE_ENV} to ngspice_con.exe to avoid GUI popup dialogs",
-                ngspice_exe.display(),
-                console_exe.display()
-            ));
-        }
-    }
-    Ok(ngspice_exe)
 }

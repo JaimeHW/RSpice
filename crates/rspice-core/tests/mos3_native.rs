@@ -4,6 +4,8 @@
 //! solver path and verify that MOS3 routes through the native Berkeley model
 //! rather than the simplified short-channel fallback.
 
+#![allow(clippy::excessive_precision)]
+
 use rspice_core::circuit::DeviceOpEntry;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{AnalysisCommand, Netlist};

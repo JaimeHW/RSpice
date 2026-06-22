@@ -36,15 +36,14 @@ pub(crate) fn action_export_csv_with_io(
                         prepared.dataset.signal_count(),
                         prepared.dataset.point_count()
                     );
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "{}",
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                         crate::common::export_workflow::export_completion_message(
                             "CSV",
                             &path,
                             Some(detail),
-                            io
-                        )
-                    )));
+                            io,
+                        ),
+                    ));
                 }
                 Err(e) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::error(format!(

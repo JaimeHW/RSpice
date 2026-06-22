@@ -125,7 +125,7 @@ fn is_magnetic_core_model_type(model_type: &str) -> bool {
 /// 8/9/49 (BSIM3v3.3), 14/54 (BSIM4 v4.8) and 55-57 (BSIM3-SOI) are routed
 /// to dedicated devices before this check applies.
 fn native_bulk_mos_level(level: i32) -> bool {
-    matches!(level, 1 | 2 | 3 | 4 | 5 | 6)
+    matches!(level, 1..=6)
 }
 
 fn bjt_level_matches(level: f64, expected: f64) -> bool {
@@ -160,12 +160,12 @@ fn validate_bjt_model_level(
     string_params: &[(String, String)],
 ) -> Result<(), SimulationError> {
     let level = params.get("LEVEL").copied();
-    if let Some(level_value) = level {
-        if !level_value.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' has invalid LEVEL={level_value}"
-            )));
-        }
+    if let Some(level_value) = level
+        && !level_value.is_finite()
+    {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' has invalid LEVEL={level_value}"
+        )));
     }
 
     let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
@@ -1130,53 +1130,53 @@ impl Engine {
                     // 55 -> FD (fully depleted), 56 -> DD (dynamic depletion),
                     // 57 -> PD (partially depleted). Xyce LEVEL=10 (BSIMSOI3)
                     // uses SOIMOD to select the same native family.
-                    if is_bsimsoi_level(level) {
-                        if let Some(params_map) = params_map.as_ref() {
-                            let native_level =
-                                native_bsimsoi_level_for(level, params_map, instance_params)
-                                    .map_err(|err| {
-                                        SimulationError::Circuit(format!(
-                                            "MOSFET '{}': model '{}' {err}",
-                                            element.name, model
-                                        ))
-                                    })?
-                                    .expect("is_bsimsoi_level must map to a native SOI level");
-                            match native_level {
-                                55 => {
-                                    Self::build_b3soi_fd(
-                                        &mut circuit,
-                                        element,
-                                        resolved_mos_type,
-                                        params_map,
-                                        instance_params,
-                                        self.config.temperature,
-                                    )?;
-                                    continue;
-                                }
-                                56 => {
-                                    Self::build_b3soi_dd(
-                                        &mut circuit,
-                                        element,
-                                        resolved_mos_type,
-                                        params_map,
-                                        instance_params,
-                                        self.config.temperature,
-                                    )?;
-                                    continue;
-                                }
-                                57 => {
-                                    Self::build_b3soi_pd(
-                                        &mut circuit,
-                                        element,
-                                        resolved_mos_type,
-                                        params_map,
-                                        instance_params,
-                                        self.config.temperature,
-                                    )?;
-                                    continue;
-                                }
-                                _ => {}
+                    if is_bsimsoi_level(level)
+                        && let Some(params_map) = params_map.as_ref()
+                    {
+                        let native_level =
+                            native_bsimsoi_level_for(level, params_map, instance_params)
+                                .map_err(|err| {
+                                    SimulationError::Circuit(format!(
+                                        "MOSFET '{}': model '{}' {err}",
+                                        element.name, model
+                                    ))
+                                })?
+                                .expect("is_bsimsoi_level must map to a native SOI level");
+                        match native_level {
+                            55 => {
+                                Self::build_b3soi_fd(
+                                    &mut circuit,
+                                    element,
+                                    resolved_mos_type,
+                                    params_map,
+                                    instance_params,
+                                    self.config.temperature,
+                                )?;
+                                continue;
                             }
+                            56 => {
+                                Self::build_b3soi_dd(
+                                    &mut circuit,
+                                    element,
+                                    resolved_mos_type,
+                                    params_map,
+                                    instance_params,
+                                    self.config.temperature,
+                                )?;
+                                continue;
+                            }
+                            57 => {
+                                Self::build_b3soi_pd(
+                                    &mut circuit,
+                                    element,
+                                    resolved_mos_type,
+                                    params_map,
+                                    instance_params,
+                                    self.config.temperature,
+                                )?;
+                                continue;
+                            }
+                            _ => {}
                         }
                     }
 

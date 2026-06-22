@@ -59,7 +59,7 @@ fn value_near_time(times: &[f64], values: &[f64], target: f64) -> f64 {
         .filter_map(|(&time, &value)| {
             ((time - target).abs() <= nearest_delta + f64::EPSILON).then_some(value)
         })
-        .last()
+        .next_back()
         .expect("nearest sample exists")
 }
 

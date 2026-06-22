@@ -33,12 +33,11 @@ pub(super) fn action_export_svg_with_io(
 
             match io.write_text_file(&path, &svg_content) {
                 Ok(()) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "{}",
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                         crate::common::export_workflow::export_completion_message(
-                            "SVG", &path, None, io
-                        )
-                    )));
+                            "SVG", &path, None, io,
+                        ),
+                    ));
                 }
                 Err(e) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
@@ -104,15 +103,14 @@ pub(crate) fn action_export_netlist_with_io(
 
             match io.write_text_file(&path, &netlist_content) {
                 Ok(()) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "{}",
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                         crate::common::export_workflow::export_completion_message(
                             filter_name,
                             &path,
                             None,
-                            io
-                        )
-                    )));
+                            io,
+                        ),
+                    ));
                 }
                 Err(e) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::error(format!(

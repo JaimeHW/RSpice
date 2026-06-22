@@ -655,6 +655,7 @@ fn ngspice_pinned_nmos_charges_capmod1() {
 }
 
 #[test]
+#[allow(clippy::excessive_precision)]
 fn ngspice_pinned_nmos_charges_capmod0_and_1_xpart_branches() {
     let cases = [
         // ngspice-46, models018.lib with CAPMOD/XPART rewritten, high-precision `print`.
@@ -751,6 +752,7 @@ fn ngspice_pinned_nmos_charges_capmod0_and_1_xpart_branches() {
 }
 
 #[test]
+#[allow(clippy::excessive_precision)]
 fn ngspice_pinned_nmos_charges_capmod0_and_1_inverse_mode() {
     let cases = [
         // ngspice-46, models018.lib with CAPMOD rewritten, vds=-50 mV.
@@ -827,6 +829,7 @@ fn ngspice_pinned_nmos_charges_capmod0_and_1_inverse_mode() {
 }
 
 #[test]
+#[allow(clippy::excessive_precision)]
 fn ngspice_pinned_nmos_charges_xpart_negative_suppresses_intrinsic_charge() {
     for capmod in [0.0, 1.0] {
         let mut card = nmos018();

@@ -136,6 +136,7 @@ pub struct Bsim4v8Device {
 }
 
 impl Bsim4v8Device {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         node_drain_external: NodeId,
@@ -706,7 +707,7 @@ impl Bsim4v8Device {
         mut stamp: impl FnMut(NodeId, NodeId, Complex64),
     ) {
         if !self.uses_ac_nqs()
-            || !matches!(self.core.model.rgate_mod, 0 | 1 | 2 | 3)
+            || !matches!(self.core.model.rgate_mod, 0..=3)
             || omega == 0.0
             || !omega.is_finite()
             || charge.taunet <= 0.0
@@ -1975,6 +1976,7 @@ struct ExternalRdsConductance {
     dgtot_dvb: Value,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn external_rds_conductance(
     vg: Value,
     vb: Value,

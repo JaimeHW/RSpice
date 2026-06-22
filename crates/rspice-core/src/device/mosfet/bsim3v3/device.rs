@@ -86,6 +86,7 @@ pub struct Bsim3v3Device {
 }
 
 impl Bsim3v3Device {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         node_drain: NodeId,

@@ -14,6 +14,8 @@
 //! - RDSMOD=1 external source/drain resistance creates native prime-node
 //!   topology and matches ngspice on a one-point operating point.
 
+#![allow(clippy::excessive_precision)]
+
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 

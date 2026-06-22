@@ -566,11 +566,11 @@ impl Vdmos {
         if let Some(&v) = params.get("CGDPB") {
             self.cgd_pb = v;
         }
-        if let Some(&v) = params.get("M") {
-            if !is_xyce_level18 {
-                self.cgs_m = v;
-                self.cgd_m = v;
-            }
+        if let Some(&v) = params.get("M")
+            && !is_xyce_level18
+        {
+            self.cgs_m = v;
+            self.cgd_m = v;
         }
         if let Some(&v) = params.get("CGSM") {
             self.cgs_m = v;

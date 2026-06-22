@@ -1658,6 +1658,7 @@ fn rds_end_sha(
 }
 
 /// `BSIM4RdseffGeo` (`b4geo.c`): resistance from implicit S/D geometry.
+#[allow(clippy::too_many_arguments)]
 fn rdseff_geo(
     nf: Value,
     geo: i32,

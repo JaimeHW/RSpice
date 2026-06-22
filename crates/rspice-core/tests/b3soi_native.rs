@@ -5,6 +5,8 @@
 //! these tests ensure the Xyce-compatible level routes to a native SOI port
 //! without opting into the simplified bulk-MOS approximation.
 
+#![allow(clippy::excessive_precision)]
+
 use rspice_core::analysis::advanced::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;

@@ -540,6 +540,16 @@ impl TransientResultCompressed {
     }
 }
 
+fn validate_channel_count(context: &str, actual: usize, expected: usize) -> Result<(), String> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{context} has {actual} value(s) but recorder expects {expected} channel(s)"
+        ))
+    }
+}
+
 //=============================================================================
 // Tests
 //=============================================================================
@@ -597,15 +607,5 @@ mod tests {
             .finalize(1.0, &[3.0])
             .expect_err("final sample width must be validated");
         assert!(err.contains("final waveform sample"));
-    }
-}
-
-fn validate_channel_count(context: &str, actual: usize, expected: usize) -> Result<(), String> {
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "{context} has {actual} value(s) but recorder expects {expected} channel(s)"
-        ))
     }
 }

@@ -4,6 +4,8 @@
 //! parser-builder-solver path, because the old RSpice behavior accepted the
 //! deck but silently evaluated it with the level-1 Shichman-Hodges model.
 
+#![allow(clippy::excessive_precision)]
+
 use rspice_core::device::Jfet;
 use rspice_core::engine::{Engine, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
@@ -567,9 +569,7 @@ fn jfet2_xyce_variant_matches_full_xyce_njfet_2109_dc_sweep() {
         // The published Xyce regression golden has a small low-Vds
         // linear-region offset relative to the local 7.10 source/binary; the
         // saturation/high-Vds rows still hold the variant to sub-nA.
-        let tolerance = if matches!(idx, 1 | 49) {
-            1.2e-7
-        } else if matches!(idx, 2 | 3 | 4 | 17 | 18 | 19 | 33 | 34 | 50) {
+        let tolerance = if matches!(idx, 1..=4 | 17..=19 | 33 | 34 | 49 | 50) {
             1.2e-7
         } else {
             8.0e-10

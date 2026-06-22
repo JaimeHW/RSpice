@@ -341,9 +341,7 @@ fn nth_token<'a>(tokens: &'a [&'a Token], idx: usize) -> Option<&'a Token> {
 fn passive_model_token<'a>(tokens: &'a [&'a Token]) -> Option<&'a Token> {
     named_model_value_token(tokens).or_else(|| {
         let candidate = nth_token(tokens, 3)?;
-        if ident_text(candidate).is_none() {
-            return None;
-        }
+        ident_text(candidate)?;
         if matches!(
             tokens.get(4).map(|token| &token.kind),
             Some(TokenKind::Equals)
@@ -404,9 +402,7 @@ fn mos_model_token<'a>(tokens: &'a [&'a Token]) -> Option<&'a Token> {
 fn tline_model_token<'a>(tokens: &'a [&'a Token]) -> Option<&'a Token> {
     named_model_value_token(tokens).or_else(|| {
         let candidate = nth_token(tokens, 5)?;
-        if ident_text(candidate).is_none() {
-            return None;
-        }
+        ident_text(candidate)?;
         if matches!(
             tokens.get(6).map(|token| &token.kind),
             Some(TokenKind::Equals)
