@@ -1,6 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+#[cfg(test)]
 use crate::properties::engineering::parse_engineering_value;
+#[cfg(test)]
+use std::collections::HashMap;
 
 pub(super) fn changed_lines_against_baseline(current: &str, baseline: &str) -> HashSet<usize> {
     let current_lines: Vec<&str> = current.lines().collect();
@@ -17,7 +20,8 @@ pub(super) fn changed_lines_against_baseline(current: &str, baseline: &str) -> H
     changed
 }
 
-pub(crate) fn param_values(buffer: &str) -> HashMap<String, f64> {
+#[cfg(test)]
+fn param_values(buffer: &str) -> HashMap<String, f64> {
     let mut values = HashMap::new();
     for line in buffer.lines() {
         let Some(assignments) = super::tuner::scan_assignments(line) else {
