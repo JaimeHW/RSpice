@@ -163,6 +163,12 @@ pub(super) fn parse_model_params(
             stream.advance();
 
             if stream.consume(&TokenKind::Equals) {
+                if name.eq_ignore_ascii_case("VERSION")
+                    && let Some(version) = try_dotted_model_version(stream)
+                {
+                    string_params.push((name, version));
+                    continue;
+                }
                 match &stream.peek().kind {
                     TokenKind::StringLit(value) => {
                         let value = value.clone();
@@ -212,6 +218,61 @@ pub(super) fn parse_model_params(
         expr: expr_params,
         string: string_params,
     })
+}
+
+fn try_dotted_model_version(stream: &mut TokenStream) -> Option<String> {
+    skip_commas(stream);
+
+    let mut parts = Vec::new();
+    match &stream.peek().kind {
+        TokenKind::Number(value) if value.is_finite() => {
+            parts.push(format_compact_number(*value));
+        }
+        _ => return None,
+    }
+
+    let mut token_count = 1usize;
+    loop {
+        let previous_span = stream.peek_n(token_count - 1).span;
+        let token = stream.peek_n(token_count);
+        if token.span.start != previous_span.end {
+            break;
+        }
+
+        let TokenKind::Number(value) = &token.kind else {
+            break;
+        };
+        let component =
+            dotted_version_tail_component(*value, token.span.end.saturating_sub(token.span.start))?;
+        parts.push(component);
+        token_count += 1;
+    }
+
+    if parts.len() < 2 {
+        return None;
+    }
+
+    for _ in 0..token_count {
+        stream.advance();
+    }
+    Some(parts.join("."))
+}
+
+fn format_compact_number(value: f64) -> String {
+    format!("{value}")
+}
+
+fn dotted_version_tail_component(value: f64, span_len: usize) -> Option<String> {
+    if !value.is_finite() || !(0.0..1.0).contains(&value) || span_len < 2 {
+        return None;
+    }
+    let digits = span_len - 1;
+    let scale = 10_f64.powi(digits as i32);
+    let scaled = (value * scale).round();
+    if (value * scale - scaled).abs() > 1e-9 {
+        return None;
+    }
+    Some(format!("{:0width$}", scaled as u64, width = digits))
 }
 
 pub(super) fn expect_ident(

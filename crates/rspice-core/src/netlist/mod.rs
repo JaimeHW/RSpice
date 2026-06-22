@@ -577,6 +577,50 @@ mod tests {
     }
 
     #[test]
+    fn model_version_accepts_x_y_z_string_values() {
+        let netlist = Netlist::parse(
+            "dotted model version\n\
+             M1 d g 0 0 n9 W=1u L=180n\n\
+             .model n9 nmos level=9 version=3.2.2 tox=4.1n\n\
+             .end\n",
+        )
+        .expect("dotted VERSION values are legal BSIM/Xyce model metadata");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("n9"))
+            .expect("model exists");
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("level") && (*value - 9.0).abs() < f64::EPSILON
+        }));
+        assert!(
+            model
+                .string_params
+                .iter()
+                .any(|(name, value)| { name.eq_ignore_ascii_case("version") && value == "3.2.2" })
+        );
+    }
+
+    #[test]
+    fn non_version_model_params_reject_dotted_numeric_tails() {
+        let err = Netlist::parse(
+            "bad dotted model param\n\
+             D1 out 0 dmod\n\
+             .model dmod D(IS=1.2.3 N=1)\n\
+             .op\n\
+             .end\n",
+        )
+        .expect_err("only VERSION accepts multi-dot metadata values");
+
+        let message = err.to_string();
+        assert!(
+            message.contains(".MODEL") || message.contains("model parameter"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
     fn mosfet_off_flag_stays_instance_parameter() {
         let netlist = Netlist::parse(
             "mos off\n\
