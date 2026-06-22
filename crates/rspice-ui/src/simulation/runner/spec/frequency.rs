@@ -35,12 +35,14 @@ pub(super) fn run_frequency_spec(
             probe_node,
             start_freq,
             stop_freq,
+            sweep,
             points_per_decade,
         } => run_stb(
             netlist,
             probe_node,
             start_freq,
             stop_freq,
+            sweep,
             points_per_decade,
         ),
         AnalysisSpec::Pstb => run_pstb(netlist, options),
@@ -252,14 +254,17 @@ fn run_stb(
     probe_node: String,
     start_freq: f64,
     stop_freq: f64,
+    sweep: FrequencySweep,
     points_per_decade: usize,
 ) -> Result<SimulationResult, SimulationError> {
-    let data = svc_runner::run_stb_analysis(
+    let data = svc_runner::run_stb_analysis_with_sweep_and_source_path(
         netlist,
         &probe_node,
         start_freq,
         stop_freq,
+        stb_sweep_type(sweep),
         points_per_decade,
+        None,
     )
     .map_err(SimulationError::InvalidConfig)?;
 
@@ -286,6 +291,14 @@ fn run_stb(
         waveforms,
         measurements: Vec::new(),
     })
+}
+
+fn stb_sweep_type(sweep: FrequencySweep) -> rspice_core::analysis::advanced::stb::StbSweepType {
+    match sweep {
+        FrequencySweep::Decade => rspice_core::analysis::advanced::stb::StbSweepType::Decade,
+        FrequencySweep::Octave => rspice_core::analysis::advanced::stb::StbSweepType::Octave,
+        FrequencySweep::Linear => rspice_core::analysis::advanced::stb::StbSweepType::Linear,
+    }
 }
 
 fn run_pstb(

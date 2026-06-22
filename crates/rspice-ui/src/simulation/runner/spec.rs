@@ -42,12 +42,12 @@ pub(super) fn run_spec_request(
         }
         AnalysisSpec::Reliability { .. }
         | AnalysisSpec::Optimization { .. }
-        | AnalysisSpec::Soa { .. } => device::run_device_spec(spec, netlist),
+        | AnalysisSpec::Soa { .. } => device::run_device_spec(spec, netlist, source_path),
         AnalysisSpec::Pss { .. }
         | AnalysisSpec::HarmonicBalance { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
-        | AnalysisSpec::Disto { .. } => periodic::run_periodic_spec(spec, netlist),
+        | AnalysisSpec::Disto { .. } => periodic::run_periodic_spec(spec, netlist, source_path),
         AnalysisSpec::SParameter { .. }
         | AnalysisSpec::Tf
         | AnalysisSpec::Pac
@@ -305,12 +305,12 @@ R2 out 0 1k\n\
             ),
             (
                 "device",
-                device::run_device_spec(AnalysisSpec::DcOp, ""),
+                device::run_device_spec(AnalysisSpec::DcOp, "", None),
                 "AnalysisSpec::DcOp",
             ),
             (
                 "periodic",
-                periodic::run_periodic_spec(AnalysisSpec::DcOp, ""),
+                periodic::run_periodic_spec(AnalysisSpec::DcOp, "", None),
                 "AnalysisSpec::DcOp",
             ),
             (

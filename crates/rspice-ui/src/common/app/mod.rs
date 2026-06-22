@@ -278,7 +278,7 @@ impl AppState {
     /// Request a run from the Simulate workspace run set.
     pub fn request_run_set_simulation(&mut self) {
         self.shell.netlist.rerun_queued = false;
-        self.simulation.request_run_set();
+        self.simulation.request_simulate_run_set();
     }
 
     fn log_severity_for_console(level: ConsoleLevel) -> crate::panels::LogSeverity {

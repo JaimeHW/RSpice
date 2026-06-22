@@ -621,6 +621,7 @@ mod tests {
                 probe_node: "Vprobe".to_string(),
                 start_freq: 1.0,
                 stop_freq: 1e6,
+                sweep: FrequencySweep::Decade,
                 points_per_decade: 12,
             },
             AnalysisSpec::SParameter {
@@ -2595,6 +2596,7 @@ pub(crate) enum WorkerAnalysisSpec {
         probe_node: String,
         start_freq: f64,
         stop_freq: f64,
+        sweep: WorkerSweepType,
         points_per_decade: usize,
     },
     SParameter {
@@ -2805,11 +2807,13 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 probe_node,
                 start_freq,
                 stop_freq,
+                sweep,
                 points_per_decade,
             } => Ok(Self::Stb {
                 probe_node: probe_node.clone(),
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
+                sweep: WorkerSweepType::from(*sweep),
                 points_per_decade: *points_per_decade,
             }),
             AnalysisSpec::SParameter {
@@ -3061,11 +3065,13 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 probe_node,
                 start_freq,
                 stop_freq,
+                sweep,
                 points_per_decade,
             } => Self::Stb {
                 probe_node,
                 start_freq,
                 stop_freq,
+                sweep: FrequencySweep::from(sweep),
                 points_per_decade,
             },
             WorkerAnalysisSpec::SParameter {

@@ -523,6 +523,7 @@ fn command_to_queue_item(
                 probe_node: probe.clone(),
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
+                sweep: frequency_sweep(*variation),
                 points_per_decade: *points,
             },
             config: None,

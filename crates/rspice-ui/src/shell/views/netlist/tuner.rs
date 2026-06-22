@@ -539,7 +539,7 @@ fn apply_reset_to_last_run(ui: &Ui, state: &mut AppState, rows: &[ParamRow]) {
 
 /// Parse a `.param` line into `(name, value_start, value_end)` triples
 /// (byte offsets into `line`). Returns `None` for non-`.param` lines.
-fn scan_assignments(line: &str) -> Option<Vec<(String, usize, usize)>> {
+pub(super) fn scan_assignments(line: &str) -> Option<Vec<(String, usize, usize)>> {
     let trimmed = line.trim_start();
     let prefix_len = line.len() - trimmed.len();
     let lower = trimmed.to_ascii_lowercase();

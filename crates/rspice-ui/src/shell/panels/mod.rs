@@ -46,18 +46,6 @@ fn left_default_width(view: WorkspaceView) -> f32 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn schematic_left_panel_defaults_to_premium_rail_width() {
-        assert_eq!(left_default_width(WorkspaceView::Schematic), 318.0);
-        assert_eq!(left_default_width(WorkspaceView::Simulate), LEFT_WIDTH);
-        assert_eq!(left_default_width(WorkspaceView::Results), LEFT_WIDTH);
-    }
-}
-
 /// Render both contextual side panels for the active view.
 pub fn show(
     ctx: &Context,
@@ -143,6 +131,13 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schematic_left_panel_defaults_to_premium_rail_width() {
+        assert_eq!(left_default_width(WorkspaceView::Schematic), 318.0);
+        assert_eq!(left_default_width(WorkspaceView::Simulate), LEFT_WIDTH);
+        assert_eq!(left_default_width(WorkspaceView::Results), LEFT_WIDTH);
+    }
 
     #[test]
     fn phone_width_hides_context_side_panels() {
