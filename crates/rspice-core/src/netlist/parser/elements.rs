@@ -994,10 +994,6 @@ pub(super) fn parse_mosfet(
         {
             if let TokenKind::Ident(raw_name) = &stream.peek().kind {
                 let name_upper = raw_name.to_ascii_uppercase();
-                if name_upper == "OFF" {
-                    break;
-                }
-
                 if !tail_tokens.is_empty()
                     && is_mosfet_assignment_name(&name_upper)
                     && mosfet_token_starts_unassigned_value(&stream.peek_n(1).kind, params)
@@ -1017,6 +1013,16 @@ pub(super) fn parse_mosfet(
         break;
     }
 
+    let mut tail_off_flag = false;
+    if tail_tokens.len() >= 2
+        && tail_tokens
+            .last()
+            .is_some_and(|token| token.eq_ignore_ascii_case("OFF"))
+    {
+        tail_tokens.pop();
+        tail_off_flag = true;
+    }
+
     let (bulk, model, compact_syntax) = if let Some(model) = tail_tokens.pop() {
         (bulk_or_model, model, false)
     } else {
@@ -1030,6 +1036,9 @@ pub(super) fn parse_mosfet(
 
     let mut instance_params = Vec::new();
     let mut deferred_params = Vec::new();
+    if tail_off_flag {
+        instance_params.push(("OFF".to_string(), 1.0));
+    }
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {

@@ -650,6 +650,36 @@ mod tests {
     }
 
     #[test]
+    fn mosfet_explicit_bulk_allows_off_as_model_name() {
+        let netlist = Netlist::parse(
+            "mos model named off\n\
+             M1 d g s b OFF W=1u L=50n\n\
+             .model OFF nmos level=18\n\
+             .end\n",
+        )
+        .expect("explicit bulk MOS with model named OFF parses");
+
+        match first_mosfet(&netlist) {
+            ElementKind::Mosfet {
+                model,
+                instance_params,
+                ..
+            } => {
+                assert!(model.eq_ignore_ascii_case("OFF"));
+                assert!(
+                    !instance_params
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case("OFF")),
+                    "OFF should remain the model name, not become an instance flag"
+                );
+                assert!(instance_params.iter().any(|(name, _)| name == "W"));
+                assert!(instance_params.iter().any(|(name, _)| name == "L"));
+            }
+            _ => unreachable!("first_mosfet only returns MOSFETs"),
+        }
+    }
+
+    #[test]
     fn mosfet_ic_vector_stays_instance_parameters() {
         let netlist = Netlist::parse(
             "mos ic vector\n\
