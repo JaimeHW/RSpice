@@ -31,17 +31,31 @@ def git(args, cwd):
 
 def force_rmtree(path):
     """Remove a tree even if it holds read-only files. git marks loose objects
-    0444, and on Windows the read-only bit blocks plain shutil.rmtree; clear it
-    first so the throwaway .git is always gone (version-proof, no onerror/onexc)."""
+    0444, and on Windows the read-only bit blocks plain shutil.rmtree. Keep
+    directories searchable on POSIX while clearing restrictive file modes."""
     if not os.path.exists(path):
         return
+    dir_mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+    file_mode = stat.S_IRUSR | stat.S_IWUSR
+
+    def make_removable(entry):
+        mode = (
+            dir_mode
+            if os.path.isdir(entry) and not os.path.islink(entry)
+            else file_mode
+        )
+        try:
+            os.chmod(entry, mode)
+        except OSError:
+            pass
+
+    make_removable(path)
     for root, dirs, files in os.walk(path):
-        for name in dirs + files:
-            try:
-                os.chmod(os.path.join(root, name), stat.S_IWRITE)
-            except OSError:
-                pass
-    shutil.rmtree(path, ignore_errors=True)
+        for name in dirs:
+            make_removable(os.path.join(root, name))
+        for name in files:
+            make_removable(os.path.join(root, name))
+    shutil.rmtree(path)
 
 
 def main():

@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
+import importlib.util
 import os
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "tools" / "deploy" / "deploy.py"
 PUBLISH = ROOT / "tools" / "deploy" / "publish.py"
+PUBLISH_SPEC = importlib.util.spec_from_file_location("publish", PUBLISH)
+publish_script = importlib.util.module_from_spec(PUBLISH_SPEC)
+PUBLISH_SPEC.loader.exec_module(publish_script)
 
 
 def git(cwd, *args, check=True):
@@ -166,6 +172,28 @@ class PublishScriptTest(unittest.TestCase):
             (self.site / ".git").exists(),
             "failed publish must not leave a nested git repository in _site",
         )
+
+    def test_force_rmtree_keeps_git_directories_searchable_before_delete(self):
+        write_file(self.site, ".git/objects/aa/object", "payload\n")
+        chmod_modes = {}
+        real_chmod = publish_script.os.chmod
+
+        def record_chmod(path, mode):
+            rel = Path(path).relative_to(self.site / ".git")
+            chmod_modes[rel] = mode
+            real_chmod(path, mode)
+
+        with mock.patch.object(publish_script.os, "chmod", side_effect=record_chmod):
+            publish_script.force_rmtree(str(self.site / ".git"))
+
+        required_dir_mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+        for rel in (Path("objects"), Path("objects/aa")):
+            self.assertIn(rel, chmod_modes)
+            self.assertEqual(
+                chmod_modes[rel] & required_dir_mode,
+                required_dir_mode,
+                "cleanup must keep git object directories searchable on POSIX",
+            )
 
 
 if __name__ == "__main__":
