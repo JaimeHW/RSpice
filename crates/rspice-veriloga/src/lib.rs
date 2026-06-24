@@ -119,6 +119,18 @@ pub struct CompiledFile {
     pub dependencies: Vec<std::path::PathBuf>,
 }
 
+/// Result of compiling a Verilog-A source file to canonical IR from disk.
+///
+/// Includes the canonical HIR/MIR/OptIR artifact and canonical dependency
+/// paths discovered during preprocessing (`include` expansion).
+#[derive(Debug, Clone)]
+pub struct CanonicalIrFile {
+    /// Canonical HIR/MIR/OptIR artifact for the selected module.
+    pub artifact: canonical_ir::CanonicalIrArtifact,
+    /// Canonical source/include dependencies captured at compile time.
+    pub dependencies: Vec<std::path::PathBuf>,
+}
+
 /// Main compiler entry point
 pub struct VerilogACompiler {
     options: CompilerOptions,
@@ -199,6 +211,34 @@ impl VerilogACompiler {
         self.compile_preprocessed(&preprocessed, module_name)
     }
 
+    /// Compile Verilog-A source code to the canonical HIR/MIR/OptIR artifact.
+    ///
+    /// The source is preprocessed first, so `include/`define/`ifdef work
+    /// identically to [`Self::compile`]. The source must contain exactly one
+    /// module; multi-module sources require
+    /// [`Self::compile_canonical_ir_module`].
+    pub fn compile_canonical_ir(
+        &self,
+        source: &str,
+    ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
+        self.compile_canonical_ir_module(source, None)
+    }
+
+    /// Compile one module of a Verilog-A source to canonical HIR/MIR/OptIR.
+    ///
+    /// See [`Self::compile_module`] for module selection rules.
+    pub fn compile_canonical_ir_module(
+        &self,
+        source: &str,
+        module_name: Option<&str>,
+    ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
+        let mut pp = self.configured_preprocessor();
+        let preprocessed = pp
+            .preprocess_source(source)
+            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+        self.compile_canonical_ir_preprocessed(&preprocessed, module_name)
+    }
+
     /// Compile already-preprocessed Verilog-A source.
     fn compile_preprocessed(
         &self,
@@ -220,6 +260,105 @@ impl VerilogACompiler {
         let model = CodeGenerator::new().generate_module(&analyzed, module_name)?;
 
         Ok(model)
+    }
+
+    /// Compile already-preprocessed Verilog-A source to canonical IR.
+    fn compile_canonical_ir_preprocessed(
+        &self,
+        source: &str,
+        module_name: Option<&str>,
+    ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
+        self.compile_canonical_ir_preprocessed_with_metadata("<input>", source, module_name)
+    }
+
+    /// Compile already-preprocessed Verilog-A source to canonical IR with
+    /// caller-provided source package metadata.
+    fn compile_canonical_ir_preprocessed_with_metadata(
+        &self,
+        source_package: &str,
+        source: &str,
+        module_name: Option<&str>,
+    ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
+        // Phase 1: Lexical analysis
+        let source_map = SourceMap::new();
+        let source_id = source_map.add_source(source_package, source);
+        let tokens = Lexer::new(source, source_id).collect_tokens()?;
+
+        // Phase 2: Parsing
+        let source_file = Parser::new(&tokens).parse()?;
+
+        // Phase 3: Semantic analysis
+        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+        let module = self.select_analyzed_module(&analyzed, module_name)?;
+
+        // Phase 4: Canonical HIR/MIR/OptIR lowering
+        let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
+        let hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
+        let mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
+        let opt = canonical_ir::OptModel::from_mir(&mir).map_err(Self::canonical_ir_error)?;
+
+        canonical_ir::CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+            .map_err(Self::canonical_ir_error)
+    }
+
+    /// Resolve which analyzed module to compile.
+    fn select_analyzed_module<'a>(
+        &self,
+        analyzed: &'a semantic::AnalyzedFile,
+        module_name: Option<&str>,
+    ) -> CompileResult<&'a semantic::AnalyzedModule> {
+        // The modules map iterates in arbitrary order; list candidates in
+        // declaration order so diagnostics are deterministic.
+        let declared: Vec<&str> = analyzed
+            .source
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ast::Item::Module(module) => Some(module.name.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        match module_name {
+            Some(name) => analyzed.modules.get(name).ok_or_else(|| {
+                let candidates = if declared.is_empty() {
+                    "none".to_string()
+                } else {
+                    declared.join(", ")
+                };
+                CompileError::ModuleSelection(format!(
+                    "module '{}' not found; the file declares: {}",
+                    name, candidates
+                ))
+            }),
+            None => match declared.as_slice() {
+                [] => Err(CompileError::ModuleSelection(
+                    "no modules found in source".into(),
+                )),
+                [name] => analyzed.modules.get(*name).ok_or_else(|| {
+                    error::CodeGenError::new(error::CodeGenErrorKind::Internal(format!(
+                        "module '{}' was parsed but not analyzed",
+                        name
+                    )))
+                    .into()
+                }),
+                names => Err(CompileError::ModuleSelection(format!(
+                    "the file declares multiple modules: {}; select one by name",
+                    names.join(", ")
+                ))),
+            },
+        }
+    }
+
+    fn canonical_ir_error(diagnostics: Vec<canonical_ir::IrDiagnostic>) -> CompileError {
+        let details = diagnostics
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ");
+        CompileError::CodeGen(error::CodeGenError::new(error::CodeGenErrorKind::Internal(
+            format!("canonical IR validation failed: {details}"),
+        )))
     }
 
     /// Compile a source file from disk with preprocessing and dependency metadata.
@@ -263,6 +402,44 @@ impl VerilogACompiler {
         let model = self.compile_preprocessed(&preprocessed, module_name)?;
         Ok(CompiledFile {
             model,
+            dependencies,
+        })
+    }
+
+    /// Compile one module of a source file from disk to canonical IR with
+    /// preprocessing and dependency metadata.
+    ///
+    /// See [`Self::compile_module`] for the module selection rules.
+    pub fn compile_file_canonical_ir_with_metadata(
+        &self,
+        path: &std::path::Path,
+        module_name: Option<&str>,
+    ) -> CompileResult<CanonicalIrFile> {
+        let mut pp = self.configured_preprocessor();
+
+        let preprocessed = pp
+            .preprocess_file(path)
+            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+        let dependencies = pp.take_dependencies();
+
+        if std::env::var("RSPICE_DEBUG_PP").is_ok() {
+            let debug_path = path.with_extension("pp.va");
+            let _ = std::fs::write(&debug_path, &preprocessed);
+            eprintln!(
+                "DEBUG: Preprocessed output written to {}",
+                debug_path.display()
+            );
+        }
+
+        let source_package = path.display().to_string();
+        let artifact = self.compile_canonical_ir_preprocessed_with_metadata(
+            &source_package,
+            &preprocessed,
+            module_name,
+        )?;
+
+        Ok(CanonicalIrFile {
+            artifact,
             dependencies,
         })
     }

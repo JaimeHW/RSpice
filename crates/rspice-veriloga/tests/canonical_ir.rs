@@ -18,7 +18,8 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
 use rspice_veriloga::types::ValueType;
-use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap};
+use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn analyze_fixture(
     source: &str,
@@ -143,6 +144,22 @@ endmodule
 "#
 }
 
+fn multi_module_source() -> &'static str {
+    r#"
+module first_res(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+
+module second_res(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ 2.0 * V(p, n);
+endmodule
+"#
+}
+
 fn dynamic_array_source() -> &'static str {
     r#"
 module dyn_array(p, n);
@@ -247,6 +264,87 @@ module ground_positive_branch(p);
     analog V(res) <+ 1.0;
 endmodule
 "#
+}
+
+#[test]
+fn compiler_can_emit_canonical_ir_without_bytecode_runtime() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(tiny_resistor_source())
+        .expect("compile canonical IR");
+
+    assert_eq!(artifact.hir.module_name.as_str(), "tiny_res");
+    assert_eq!(artifact.mir.equations.len(), 1);
+    assert!(artifact.dump_text().contains("canonical-veriloga-ir"));
+}
+
+#[test]
+fn compiler_can_emit_canonical_ir_for_selected_module() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir_module(multi_module_source(), Some("second_res"))
+        .expect("compile selected module");
+
+    assert_eq!(artifact.hir.module_name.as_str(), "second_res");
+    assert_eq!(artifact.mir.module_name.as_str(), "second_res");
+}
+
+#[test]
+fn compiler_rejects_ambiguous_canonical_ir_module_selection() {
+    let err = VerilogACompiler::default()
+        .compile_canonical_ir(multi_module_source())
+        .expect_err("multi-module source requires a module name");
+    let message = err.to_string();
+
+    assert!(
+        message.contains("multiple modules")
+            || (message.contains("first_res") && message.contains("second_res")),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn canonical_ir_compile_preserves_parse_errors() {
+    let err = VerilogACompiler::default()
+        .compile_canonical_ir("module broken(")
+        .expect_err("invalid source must fail");
+
+    assert!(
+        matches!(err, rspice_veriloga::CompileError::Parser(_)),
+        "expected parser error, got {err:?}"
+    );
+}
+
+#[test]
+fn compiler_can_emit_file_canonical_ir_with_metadata() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("rspice-canonical-ir-{unique}.va"));
+    std::fs::write(&path, tiny_resistor_source()).expect("write fixture");
+    let canonical_path = path.canonicalize().expect("canonical fixture path");
+
+    let compiled = VerilogACompiler::default()
+        .compile_file_canonical_ir_with_metadata(&path, None)
+        .expect("compile canonical IR from file");
+
+    assert!(compiled.artifact.validate().is_ok());
+    assert_eq!(compiled.dependencies, vec![canonical_path]);
+    assert_eq!(
+        compiled.artifact.metadata.source_package.as_str(),
+        path.to_string_lossy()
+    );
+    assert_eq!(
+        compiled.artifact.hir.source_package.as_str(),
+        path.to_string_lossy()
+    );
+    assert!(
+        compiled
+            .artifact
+            .dump_text()
+            .contains(&format!("source_package={}", path.to_string_lossy()))
+    );
+
+    std::fs::remove_file(path).expect("remove fixture");
 }
 
 #[test]
