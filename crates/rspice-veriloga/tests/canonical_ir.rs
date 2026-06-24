@@ -715,6 +715,43 @@ fn artifact_validation_rejects_newton_schedule_mismatch() {
 }
 
 #[test]
+fn artifact_validation_rejects_missing_canonical_opt_instance_schedule() {
+    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
+    opt.schedules
+        .retain(|schedule| schedule.invalidation != InvalidationClass::InstanceStatic);
+    opt.schedules[0].id = ScheduleId::new(0);
+    assert!(opt.validate().is_ok());
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("missing canonical OptIR schedule must fail artifact validation");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact
+            && diagnostic.message.contains("OptIR lineage")
+            && diagnostic.message.contains("schedules")
+    }));
+}
+
+#[test]
+fn artifact_validation_rejects_unexpected_opt_values() {
+    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
+    opt.values.push(OptValue {
+        id: ValueId::new(0),
+        value_type: OptValueType::Real,
+    });
+    assert!(opt.validate().is_ok());
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("unexpected OptIR value must fail artifact validation");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact
+            && diagnostic.message.contains("OptIR lineage")
+            && diagnostic.message.contains("values")
+    }));
+}
+
+#[test]
 fn artifact_validation_rejects_invalid_child_ir() {
     let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
     mir.equations[0].active_domains.clear();

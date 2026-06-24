@@ -208,6 +208,7 @@ fn artifact_diagnostics(
     validate_hir_mir_expressions(&mut diagnostics, hir, mir);
     validate_hir_mir_contributions(&mut diagnostics, hir, mir);
     validate_mir_opt_newton_schedule(&mut diagnostics, mir, opt);
+    validate_mir_opt_canonical_lineage(&mut diagnostics, mir, opt);
 
     diagnostics
 }
@@ -468,6 +469,46 @@ fn validate_mir_opt_newton_schedule(
                 index, equation.id
             ))),
         }
+    }
+}
+
+fn validate_mir_opt_canonical_lineage(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    mir: &MirModel,
+    opt: &OptModel,
+) {
+    let Ok(expected) = OptModel::from_mir(mir) else {
+        return;
+    };
+
+    if opt.module_name != expected.module_name {
+        diagnostics.push(artifact_error(format!(
+            "OptIR lineage module_name '{}' must match canonical '{}'",
+            opt.module_name, expected.module_name
+        )));
+    }
+
+    if opt.equation_count != expected.equation_count {
+        diagnostics.push(artifact_error(format!(
+            "OptIR lineage equation_count {} must match canonical {}",
+            opt.equation_count, expected.equation_count
+        )));
+    }
+
+    if opt.values != expected.values {
+        diagnostics.push(artifact_error(format!(
+            "OptIR lineage values must match canonical MIR lowering: expected {}, found {}",
+            expected.values.len(),
+            opt.values.len()
+        )));
+    }
+
+    if opt.schedules != expected.schedules {
+        diagnostics.push(artifact_error(format!(
+            "OptIR lineage schedules must match canonical MIR lowering: expected {}, found {}",
+            expected.schedules.len(),
+            opt.schedules.len()
+        )));
     }
 }
 
