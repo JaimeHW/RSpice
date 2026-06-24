@@ -7,7 +7,7 @@
 pub mod ids;
 
 pub use ids::{
-    ArrayId, BranchId, BranchUnknownId, ContributionId, DisciplineId, EquationId, ExprId,
-    ModuleId, NodeId, NoiseSourceId, ParamId, PortId, RegionId, ScheduleId, SourceId, StateId,
-    SymbolId, ValueId, VariableId,
+    ArrayId, BranchId, BranchUnknownId, ContributionId, DisciplineId, EquationId, ExprId, ModuleId,
+    NodeId, NoiseSourceId, ParamId, PortId, RegionId, ScheduleId, SourceId, StateId, SymbolId,
+    ValueId, VariableId,
 };

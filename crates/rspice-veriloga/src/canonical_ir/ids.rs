@@ -18,13 +18,17 @@ macro_rules! id_type {
             }
 
             pub const fn next(self) -> Self {
-                Self(self.0 + 1)
+                match self.0.checked_add(1) {
+                    Some(index) => Self(index),
+                    None => panic!("canonical IR id overflow"),
+                }
             }
         }
 
         impl From<usize> for $name {
             fn from(value: usize) -> Self {
-                Self(value as u32)
+                let index = u32::try_from(value).expect("canonical IR id index exceeds u32::MAX");
+                Self(index)
             }
         }
 
