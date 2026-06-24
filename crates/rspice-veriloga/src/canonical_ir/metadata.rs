@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
+/// Stable deterministic digest for canonical IR metadata.
+///
+/// This uses a fixed 64-bit FNV-1a-style hash to make metadata reproducible
+/// across runs and platforms. It is not a cryptographic digest and must not be
+/// used for trust, authentication, or collision-resistant identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StableDigest(u64);
 

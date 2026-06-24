@@ -3,7 +3,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceSpanRef {
-    pub source: u32,
+    pub source_file_id: u32,
     pub start: u32,
     pub end: u32,
 }
@@ -11,7 +11,7 @@ pub struct SourceSpanRef {
 impl From<crate::source::Span> for SourceSpanRef {
     fn from(value: crate::source::Span) -> Self {
         Self {
-            source: value.source.raw(),
+            source_file_id: value.source.raw(),
             start: value.start,
             end: value.end,
         }
@@ -43,7 +43,7 @@ pub struct IrDiagnostic {
     pub severity: DiagnosticSeverity,
     pub phase: CompilerPhase,
     pub message: String,
-    pub span: SourceSpanRef,
+    pub span: Option<SourceSpanRef>,
 }
 
 impl IrDiagnostic {
@@ -52,23 +52,35 @@ impl IrDiagnostic {
             severity: DiagnosticSeverity::Error,
             phase,
             message: message.into(),
-            span,
+            span: Some(span),
+        }
+    }
+
+    pub fn global_error(phase: CompilerPhase, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Error,
+            phase,
+            message: message.into(),
+            span: None,
         }
     }
 }
 
 impl fmt::Display for IrDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:?} {:?} at {}:{}-{}: {}",
-            self.severity,
-            self.phase,
-            self.span.source,
-            self.span.start,
-            self.span.end,
-            self.message
-        )
+        if let Some(span) = self.span {
+            write!(
+                f,
+                "{:?} {:?} at {}:{}-{}: {}",
+                self.severity, self.phase, span.source_file_id, span.start, span.end, self.message
+            )
+        } else {
+            write!(
+                f,
+                "{:?} {:?} at global: {}",
+                self.severity, self.phase, self.message
+            )
+        }
     }
 }
 

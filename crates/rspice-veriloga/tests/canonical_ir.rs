@@ -54,6 +54,16 @@ fn from_usize_panics_when_index_exceeds_u32_max() {
 
 #[test]
 fn metadata_digest_is_stable_and_hex_encoded() {
+    let vectors = [
+        ("", "cbf29ce484222325"),
+        ("a", "af63dc4c8601ec8c"),
+        ("module tiny; endmodule", "b6b5ff4fe150c2db"),
+    ];
+
+    for (text, expected) in vectors {
+        assert_eq!(StableDigest::from_text(text).as_hex(), expected);
+    }
+
     let digest = StableDigest::from_text("module tiny; endmodule");
     assert_eq!(digest.as_hex().len(), 16);
     assert_eq!(digest, StableDigest::from_text("module tiny; endmodule"));
@@ -67,18 +77,34 @@ fn metadata_digest_is_stable_and_hex_encoded() {
 
 #[test]
 fn diagnostics_are_phase_aware_and_source_spanned() {
-    let diagnostic = IrDiagnostic::error(
-        CompilerPhase::MirValidation,
-        "missing equation row",
-        SourceSpanRef {
-            source: 0,
-            start: 12,
-            end: 20,
-        },
-    );
+    let span = SourceSpanRef {
+        source_file_id: 0,
+        start: 12,
+        end: 20,
+    };
+    let diagnostic =
+        IrDiagnostic::error(CompilerPhase::MirValidation, "missing equation row", span);
 
     assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
     assert_eq!(diagnostic.phase, CompilerPhase::MirValidation);
     assert_eq!(diagnostic.message, "missing equation row");
-    assert!(diagnostic.to_string().contains("MirValidation"));
+    assert_eq!(diagnostic.span, Some(span));
+
+    let rendered = diagnostic.to_string();
+    assert!(rendered.contains("MirValidation"));
+    assert!(rendered.contains("0:12-20"));
+}
+
+#[test]
+fn diagnostics_can_be_global_without_source_span() {
+    let diagnostic = IrDiagnostic::global_error(CompilerPhase::Artifact, "schedule has cycle");
+
+    assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+    assert_eq!(diagnostic.phase, CompilerPhase::Artifact);
+    assert_eq!(diagnostic.message, "schedule has cycle");
+    assert_eq!(diagnostic.span, None);
+
+    let rendered = diagnostic.to_string();
+    assert!(rendered.contains("Artifact"));
+    assert!(rendered.contains("global"));
 }
