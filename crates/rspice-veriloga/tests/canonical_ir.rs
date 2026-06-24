@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 
+use rspice_veriloga::canonical_ir::{
+    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, IrDiagnostic, SourceSpanRef, StableDigest,
+};
 use rspice_veriloga::canonical_ir::{ModuleId, ParamId, PortId, SourceId};
 
 #[test]
@@ -47,4 +50,35 @@ fn next_panics_on_overflow() {
 #[should_panic(expected = "canonical IR id index exceeds u32::MAX")]
 fn from_usize_panics_when_index_exceeds_u32_max() {
     let _ = ModuleId::from(u32::MAX as usize + 1);
+}
+
+#[test]
+fn metadata_digest_is_stable_and_hex_encoded() {
+    let digest = StableDigest::from_text("module tiny; endmodule");
+    assert_eq!(digest.as_hex().len(), 16);
+    assert_eq!(digest, StableDigest::from_text("module tiny; endmodule"));
+    assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
+
+    let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
+    assert_eq!(metadata.schema_version, 1);
+    assert_eq!(metadata.source_package.as_str(), "fixture");
+    assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
+}
+
+#[test]
+fn diagnostics_are_phase_aware_and_source_spanned() {
+    let diagnostic = IrDiagnostic::error(
+        CompilerPhase::MirValidation,
+        "missing equation row",
+        SourceSpanRef {
+            source: 0,
+            start: 12,
+            end: 20,
+        },
+    );
+
+    assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+    assert_eq!(diagnostic.phase, CompilerPhase::MirValidation);
+    assert_eq!(diagnostic.message, "missing equation row");
+    assert!(diagnostic.to_string().contains("MirValidation"));
 }
