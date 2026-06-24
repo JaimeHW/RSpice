@@ -9,6 +9,7 @@ pub mod hir;
 pub mod ids;
 pub mod metadata;
 pub mod mir;
+pub mod opt;
 
 pub use diagnostic::{
     CompilerPhase, DiagnosticSeverity, IrDiagnostic, IrValidationResult, SourceSpanRef,
@@ -28,3 +29,4 @@ pub use mir::{
     MirAnalysisDomain, MirBranch, MirBranchRef, MirEquation, MirEquationKind, MirModel, MirNode,
     MirParameterSlot, MirStateSlot,
 };
+pub use opt::{InvalidationClass, OptModel, OptOp, OptSchedule, OptValue, OptValueType};

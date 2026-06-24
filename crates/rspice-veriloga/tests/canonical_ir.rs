@@ -6,13 +6,14 @@ use rspice_veriloga::ast::{
     AnalogOperator, BranchAccess, Expression, LaplaceKind, NumberLit, PortDirection,
 };
 use rspice_veriloga::canonical_ir::{
-    BranchId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId, PortId, SourceId,
-    StateId, VariableId,
+    BranchId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId, PortId, ScheduleId,
+    SourceId, StateId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
     CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirExprKind,
-    HirLaplaceKind, HirLoop, HirModel, HirStatement, IrDiagnostic, MirAnalysisDomain,
-    MirEquationKind, MirModel, MirStateSlot, SourceSpanRef, StableDigest,
+    HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic,
+    MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptModel, OptOp, OptSchedule,
+    SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -63,6 +64,24 @@ fn mir_validation_messages(mir: &MirModel) -> Vec<String> {
 
 fn assert_mir_validation_message(mir: &MirModel, expected_substring: &str) {
     let messages = mir_validation_messages(mir);
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains(expected_substring)),
+        "expected diagnostic containing {expected_substring:?}, got {messages:?}"
+    );
+}
+
+fn opt_validation_messages(opt: &OptModel) -> Vec<String> {
+    opt.validate()
+        .expect_err("malformed OptIR must fail validation")
+        .into_iter()
+        .map(|diagnostic| diagnostic.message)
+        .collect()
+}
+
+fn assert_opt_validation_message(opt: &OptModel, expected_substring: &str) {
+    let messages = opt_validation_messages(opt);
     assert!(
         messages
             .iter()
@@ -352,6 +371,118 @@ fn mir_lowering_makes_contributions_explicit_equations() {
             .contains(&MirAnalysisDomain::Dc)
     );
     assert!(mir.validate().is_ok());
+}
+
+#[test]
+fn opt_lowering_builds_newton_schedule_from_mir_equations() {
+    let mir = lower_tiny_resistor_mir();
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+
+    assert_eq!(opt.module_name.as_str(), "tiny_res");
+
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+
+    assert_eq!(newton.ops.len(), 1);
+    assert_eq!(
+        newton.ops[0],
+        OptOp::EvaluateEquation {
+            equation: EquationId::new(0)
+        }
+    );
+    assert!(opt.validate().is_ok());
+}
+
+#[test]
+fn opt_validation_rejects_missing_newton_schedule() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.schedules
+        .retain(|schedule| schedule.invalidation != InvalidationClass::NewtonIteration);
+
+    assert_opt_validation_message(&opt, "exactly one NewtonIteration schedule");
+}
+
+#[test]
+fn opt_validation_rejects_non_dense_schedule_id() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.schedules[0].id = ScheduleId::new(9);
+
+    assert_opt_validation_message(&opt, "OptIR schedule IDs must be dense");
+}
+
+#[test]
+fn opt_validation_rejects_equation_op_out_of_range() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    let newton = opt
+        .schedules
+        .iter_mut()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    newton.ops[0] = OptOp::EvaluateEquation {
+        equation: EquationId::new(opt.equation_count),
+    };
+
+    assert_opt_validation_message(&opt, "is out of range for 1 equations");
+}
+
+#[test]
+fn opt_validation_rejects_duplicate_equation_op_in_schedule() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    let newton = opt
+        .schedules
+        .iter_mut()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    newton.ops.push(OptOp::EvaluateEquation {
+        equation: EquationId::new(0),
+    });
+
+    assert_opt_validation_message(&opt, "duplicate equation EquationId(0)");
+}
+
+#[test]
+fn opt_validation_rejects_duplicate_invalidation_schedule() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.schedules.push(OptSchedule {
+        id: ScheduleId::from(opt.schedules.len()),
+        invalidation: InvalidationClass::InstanceStatic,
+        ops: Vec::new(),
+    });
+
+    assert_opt_validation_message(&opt, "duplicate schedule for invalidation InstanceStatic");
+}
+
+#[test]
+fn opt_validation_rejects_empty_module_name() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.module_name = "".into();
+
+    assert_opt_validation_message(&opt, "OptIR module name must not be empty");
+}
+
+#[test]
+fn opt_lowering_adds_instance_static_schedule_before_newton_for_parameters() {
+    let mir = lower_tiny_resistor_mir();
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+
+    assert_eq!(opt.schedules.len(), 2);
+    assert_eq!(
+        opt.schedules[0].invalidation,
+        InvalidationClass::InstanceStatic
+    );
+    assert_eq!(
+        opt.schedules[1].invalidation,
+        InvalidationClass::NewtonIteration
+    );
 }
 
 #[test]
