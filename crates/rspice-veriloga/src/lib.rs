@@ -421,10 +421,7 @@ impl VerilogACompiler {
             .preprocess_file(path)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
         let dependencies = pp.take_dependencies();
-        let source_package_path = dependencies
-            .first()
-            .cloned()
-            .unwrap_or_else(|| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+        let source_package_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
         if std::env::var("RSPICE_DEBUG_PP").is_ok() {
             let debug_path = path.with_extension("pp.va");
@@ -435,8 +432,8 @@ impl VerilogACompiler {
             );
         }
 
-        // Keep canonical IR metadata aligned with the canonical root path
-        // reported by preprocessing dependencies.
+        // Keep canonical IR metadata aligned with the root file, not the
+        // lexicographic dependency order used by the preprocessor.
         let source_package = source_package_path.display().to_string();
         let artifact = self.compile_canonical_ir_preprocessed_with_metadata(
             &source_package,

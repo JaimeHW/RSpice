@@ -271,6 +271,10 @@ struct TempSourceFile {
     path: std::path::PathBuf,
 }
 
+struct TempSourceDir {
+    path: std::path::PathBuf,
+}
+
 impl TempSourceFile {
     fn new(contents: &str) -> Self {
         let unique = SystemTime::now()
@@ -288,9 +292,34 @@ impl TempSourceFile {
     }
 }
 
+impl TempSourceDir {
+    fn new() -> Self {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rspice-canonical-ir-dir-{unique}"));
+        std::fs::create_dir(&path).expect("create fixture dir");
+
+        Self { path }
+    }
+
+    fn write_file(&self, name: &str, contents: &str) -> std::path::PathBuf {
+        let path = self.path.join(name);
+        std::fs::write(&path, contents).expect("write fixture");
+        path
+    }
+}
+
 impl Drop for TempSourceFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+impl Drop for TempSourceDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
@@ -368,6 +397,44 @@ fn compiler_can_emit_file_canonical_ir_with_metadata() {
             .dump_text()
             .contains(&format!("source_package={canonical_path_text}"))
     );
+}
+
+#[test]
+fn file_canonical_ir_metadata_uses_root_path_when_include_sorts_first() {
+    let fixture = TempSourceDir::new();
+    let include_path = fixture.write_file("aaa_include.va", "`define ROOT_GAIN 1.0\n");
+    let root_path = fixture.write_file(
+        "zzz_root.va",
+        r#"
+`include "aaa_include.va"
+module root_with_include(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ `ROOT_GAIN * V(p, n);
+endmodule
+"#,
+    );
+    let canonical_include_path = include_path.canonicalize().expect("canonical include path");
+    let canonical_root_path = root_path.canonicalize().expect("canonical root path");
+    let canonical_root_path_text = canonical_root_path.display().to_string();
+
+    let compiled = VerilogACompiler::default()
+        .compile_file_canonical_ir_with_metadata(&root_path, None)
+        .expect("compile canonical IR from file");
+
+    assert_eq!(
+        compiled.dependencies,
+        vec![canonical_include_path, canonical_root_path]
+    );
+    assert_eq!(
+        compiled.artifact.metadata.source_package.as_str(),
+        canonical_root_path_text
+    );
+    assert_eq!(
+        compiled.artifact.hir.source_package.as_str(),
+        canonical_root_path_text
+    );
+    assert!(compiled.artifact.validate().is_ok());
 }
 
 #[test]
