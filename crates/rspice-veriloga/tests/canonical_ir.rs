@@ -10,10 +10,10 @@ use rspice_veriloga::canonical_ir::{
     SourceId, StateId, ValueId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
-    CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind,
-    HirExprKind, HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic,
-    MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptModel, OptOp, OptSchedule,
-    OptValue, OptValueType, SourceSpanRef, StableDigest,
+    CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirAnalogOperator,
+    HirContributionKind, HirExprKind, HirLaplaceKind, HirLoop, HirModel, HirStatement,
+    InvalidationClass, IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot,
+    OptModel, OptOp, OptSchedule, OptValue, OptValueType, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -974,15 +974,17 @@ fn artifact_validate_rejects_stale_digest_and_dump_recomputes_digest() {
 
 #[test]
 fn artifact_digest_encoding_distinguishes_delimited_alias_lists() {
-    let (metadata, mut hir, mut mir, opt) = lower_tiny_resistor_parts();
+    let (metadata, mut hir, _, _) = lower_tiny_resistor_parts();
     hir.parameters[0].aliases = vec!["a,b".into()];
-    mir.parameters[0].aliases = vec!["a,b".into()];
+    let mir = MirModel::from_hir(&hir).expect("lower comma alias MIR");
+    let opt = OptModel::from_mir(&mir).expect("lower comma alias OptIR");
     let comma_alias = CanonicalIrArtifact::from_parts(metadata.clone(), hir, mir, opt)
         .expect("build comma alias artifact");
 
-    let (_, mut hir, mut mir, opt) = lower_tiny_resistor_parts();
+    let (_, mut hir, _, _) = lower_tiny_resistor_parts();
     hir.parameters[0].aliases = vec!["a".into(), "b".into()];
-    mir.parameters[0].aliases = vec!["a".into(), "b".into()];
+    let mir = MirModel::from_hir(&hir).expect("lower split alias MIR");
+    let opt = OptModel::from_mir(&mir).expect("lower split alias OptIR");
     let split_alias = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
         .expect("build split alias artifact");
 
@@ -1550,6 +1552,94 @@ fn hir_lowering_preserves_laplace_operand_groups() {
 }
 
 #[test]
+fn hir_lowering_preserves_typed_analog_operator_slots() {
+    let span = Span::dummy();
+    let number = |value: f64, raw: &str| {
+        Expression::Number(NumberLit {
+            value,
+            raw: raw.into(),
+            span,
+        })
+    };
+    let analyzed = AnalyzedModule {
+        name: "typed_ops".into(),
+        ports: vec![
+            AnalyzedPort {
+                name: "p".into(),
+                direction: PortDirection::Inout,
+                discipline: "electrical".into(),
+                nature_potential: Some("voltage".into()),
+                nature_flow: Some("current".into()),
+            },
+            AnalyzedPort {
+                name: "n".into(),
+                direction: PortDirection::Inout,
+                discipline: "electrical".into(),
+                nature_potential: Some("voltage".into()),
+                nature_flow: Some("current".into()),
+            },
+        ],
+        parameters: Vec::new(),
+        param_aliases: Vec::new(),
+        variables: Vec::new(),
+        branches: Vec::new(),
+        contributions: vec![AnalyzedContribution {
+            branch: "p,n".into(),
+            is_current: true,
+            indirect: false,
+            expression: Expression::AnalogOperator(AnalogOperator::IdtMod {
+                expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                    access: "V".into(),
+                    pos: "p".into(),
+                    neg: Some("n".into()),
+                    span,
+                })),
+                ic: None,
+                modulus: Some(Box::new(number(6.28, "6.28"))),
+                offset: None,
+                abstol: Some(Box::new(number(1e-9, "1e-9"))),
+                span,
+            }),
+            expr_type: ValueType::Real,
+            span,
+        }],
+        statements: Vec::new(),
+        internal_nodes: Vec::new(),
+        ground_nodes: Vec::new(),
+        arrays: HashMap::new(),
+        symbol_table: SymbolTable::new(),
+    };
+    let metadata = CanonicalMetadata::for_source("fixture", "typed_ops");
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let contribution_expr = &hir.contributions[0].expression;
+    let HirExprKind::AnalogOperator { op } =
+        &hir.expressions[usize::from(contribution_expr.id)].kind
+    else {
+        panic!("expected top-level contribution expression to preserve analog operator");
+    };
+
+    let HirAnalogOperator::IdtMod {
+        expr,
+        ic,
+        modulus,
+        offset,
+        abstol,
+    } = op
+    else {
+        panic!("expected idtmod operator payload");
+    };
+    assert!(matches!(
+        hir.expressions[usize::from(*expr)].kind,
+        HirExprKind::BranchAccess { .. }
+    ));
+    assert!(ic.is_none());
+    assert!(modulus.is_some());
+    assert!(offset.is_none());
+    assert!(abstol.is_some());
+}
+
+#[test]
 fn hir_lowering_preserves_dynamic_array_assignment_target_and_index() {
     let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
@@ -1649,6 +1739,88 @@ fn hir_validation_rejects_expression_arena_invariants() {
     };
     *left = root_id;
     assert_validation_message(&non_postorder_child, "violates expression postorder");
+}
+
+#[test]
+fn hir_validation_rejects_unknown_identifier_expression() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let root_id = hir.contributions[0].expression.id;
+    let HirExprKind::Binary { right, .. } = hir.expressions[usize::from(root_id)].kind else {
+        panic!("expected contribution expression to be binary");
+    };
+    let HirExprKind::Identifier { name } = &mut hir.expressions[usize::from(right)].kind else {
+        panic!("expected binary rhs to be an identifier");
+    };
+    *name = "__missing".into();
+
+    assert_validation_message(&hir, "unknown identifier '__missing'");
+}
+
+#[test]
+fn hir_validation_rejects_alias_identifier_expression() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    hir.parameters[0].aliases.push("res".into());
+    let root_id = hir.contributions[0].expression.id;
+    let HirExprKind::Binary { right, .. } = hir.expressions[usize::from(root_id)].kind else {
+        panic!("expected contribution expression to be binary");
+    };
+    let HirExprKind::Identifier { name } = &mut hir.expressions[usize::from(right)].kind else {
+        panic!("expected binary rhs to be an identifier");
+    };
+    *name = "res".into();
+
+    assert_validation_message(&hir, "unknown identifier 'res'");
+}
+
+#[test]
+fn mir_validation_rejects_unknown_identifier_expression() {
+    let mut mir = lower_tiny_resistor_mir();
+    let root_id = mir.equations[0].expression.id;
+    let HirExprKind::Binary { right, .. } = mir.expressions[usize::from(root_id)].kind else {
+        panic!("expected equation expression to be binary");
+    };
+    let HirExprKind::Identifier { name } = &mut mir.expressions[usize::from(right)].kind else {
+        panic!("expected binary rhs to be an identifier");
+    };
+    *name = "__missing".into();
+
+    assert_mir_validation_message(&mir, "unknown identifier '__missing'");
+}
+
+#[test]
+fn mir_validation_rejects_value_symbol_table_violations() {
+    let mir = lower_tiny_resistor_mir();
+
+    let mut duplicate = mir.clone();
+    duplicate.value_symbols.push("r".into());
+    assert_mir_validation_message(&duplicate, "duplicate value symbol 'r'");
+
+    let mut unsorted = mir;
+    unsorted.value_symbols.push("a".into());
+    assert_mir_validation_message(&unsorted, "value symbols must be sorted");
+}
+
+#[test]
+fn mir_validation_rejects_alias_identifier_expression() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    hir.parameters[0].aliases.push("res".into());
+    let mut mir = MirModel::from_hir(&hir).expect("lower alias MIR");
+    let root_id = mir.equations[0].expression.id;
+    let HirExprKind::Binary { right, .. } = mir.expressions[usize::from(root_id)].kind else {
+        panic!("expected equation expression to be binary");
+    };
+    let HirExprKind::Identifier { name } = &mut mir.expressions[usize::from(right)].kind else {
+        panic!("expected binary rhs to be an identifier");
+    };
+    *name = "res".into();
+
+    assert_mir_validation_message(&mir, "unknown identifier 'res'");
 }
 
 #[test]

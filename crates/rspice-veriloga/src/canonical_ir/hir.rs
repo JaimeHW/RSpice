@@ -3,7 +3,8 @@ use smol_str::SmolStr;
 use std::collections::HashSet;
 
 use crate::ast::{
-    AnalogOperator, BranchAccess, Expression, LaplaceKind, NoiseSource, PortDirection, ZiKind,
+    AnalogOperator, BranchAccess, CrossDirection, Expression, LaplaceKind, NoiseSource,
+    PortDirection, ZiKind,
 };
 use crate::semantic::{AnalyzedModule, AnalyzedStatement};
 use crate::types::{ParameterRange, ValueType};
@@ -115,6 +116,72 @@ pub enum HirZiKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirCrossDirection {
+    Rising,
+    Falling,
+    Both,
+}
+
+impl From<CrossDirection> for HirCrossDirection {
+    fn from(direction: CrossDirection) -> Self {
+        match direction {
+            CrossDirection::Rising => Self::Rising,
+            CrossDirection::Falling => Self::Falling,
+            CrossDirection::Both => Self::Both,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirAnalogOperator {
+    Ddt {
+        expr: ExprId,
+        abstol: Option<ExprId>,
+    },
+    Idt {
+        expr: ExprId,
+        ic: Option<ExprId>,
+        assert: Option<ExprId>,
+        abstol: Option<ExprId>,
+    },
+    IdtMod {
+        expr: ExprId,
+        ic: Option<ExprId>,
+        modulus: Option<ExprId>,
+        offset: Option<ExprId>,
+        abstol: Option<ExprId>,
+    },
+    Ddx {
+        expr: ExprId,
+        probe: ExprId,
+    },
+    Limexp {
+        expr: ExprId,
+    },
+    Absdelay {
+        expr: ExprId,
+        delay: ExprId,
+        max_delay: Option<ExprId>,
+    },
+    Transition {
+        expr: ExprId,
+        delay: Option<ExprId>,
+        rise: Option<ExprId>,
+        fall: Option<ExprId>,
+        tolerance: Option<ExprId>,
+    },
+    Slew {
+        expr: ExprId,
+        max_rise: Option<ExprId>,
+        max_fall: Option<ExprId>,
+    },
+    LastCrossing {
+        expr: ExprId,
+        edge: Option<HirCrossDirection>,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number {
@@ -166,8 +233,7 @@ pub enum HirExprKind {
         elements: Vec<ExprId>,
     },
     AnalogOperator {
-        operator: SmolStr,
-        operands: Vec<ExprId>,
+        op: HirAnalogOperator,
     },
     Laplace {
         expr: ExprId,
@@ -468,6 +534,7 @@ impl HirModel {
     fn validate_expressions(&self, diagnostics: &mut Vec<IrDiagnostic>) {
         let known_nodes = self.known_node_names();
         let declared_branches = self.declared_branch_names();
+        let value_symbols = self.known_value_symbol_names();
 
         for (expected, expression) in self.expressions.iter().enumerate() {
             let expected = u32::try_from(expected).expect("HIR expression count exceeds u32::MAX");
@@ -486,6 +553,7 @@ impl HirModel {
                 expression,
                 &known_nodes,
                 &declared_branches,
+                &value_symbols,
             );
         }
     }
@@ -496,11 +564,13 @@ impl HirModel {
         expression: &HirExpression,
         known_nodes: &HashSet<SmolStr>,
         declared_branches: &HashSet<SmolStr>,
+        value_symbols: &HashSet<SmolStr>,
     ) {
         match &expression.kind {
-            HirExprKind::Number { .. }
-            | HirExprKind::StringLiteral { .. }
-            | HirExprKind::Identifier { .. } => {}
+            HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => {}
+            HirExprKind::Identifier { name } => {
+                self.validate_identifier(diagnostics, expression, name, value_symbols);
+            }
             HirExprKind::BranchAccess { pos, neg, .. } => {
                 self.validate_branch_access_node(diagnostics, expression, pos, known_nodes);
                 if let Some(neg) = neg {
@@ -541,8 +611,8 @@ impl HirModel {
             HirExprKind::ArrayLiteral { elements } => {
                 self.validate_expression_child_list(diagnostics, expression, "element", elements);
             }
-            HirExprKind::AnalogOperator { operands, .. } => {
-                self.validate_expression_child_list(diagnostics, expression, "operand", operands);
+            HirExprKind::AnalogOperator { op } => {
+                self.validate_analog_operator_children(diagnostics, expression, op);
             }
             HirExprKind::Laplace { expr, kind } => {
                 self.validate_expression_child(diagnostics, expression, "expr", *expr);
@@ -555,6 +625,22 @@ impl HirModel {
             HirExprKind::NoiseSource { operands, .. } => {
                 self.validate_expression_child_list(diagnostics, expression, "operand", operands);
             }
+        }
+    }
+
+    fn validate_identifier(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        name: &SmolStr,
+        value_symbols: &HashSet<SmolStr>,
+    ) {
+        if !value_symbols.contains(name) {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!("HIR unknown identifier '{}'", name),
+                expression.span,
+            ));
         }
     }
 
@@ -571,6 +657,110 @@ impl HirModel {
                 format!("HIR unknown branch access node '{}'", node),
                 expression.span,
             ));
+        }
+    }
+
+    fn validate_analog_operator_children(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        op: &HirAnalogOperator,
+    ) {
+        match op {
+            HirAnalogOperator::Ddt { expr, abstol } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_optional_expression_child(diagnostics, expression, "abstol", *abstol);
+            }
+            HirAnalogOperator::Idt {
+                expr,
+                ic,
+                assert,
+                abstol,
+            } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_optional_expression_child(diagnostics, expression, "ic", *ic);
+                self.validate_optional_expression_child(diagnostics, expression, "assert", *assert);
+                self.validate_optional_expression_child(diagnostics, expression, "abstol", *abstol);
+            }
+            HirAnalogOperator::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+                abstol,
+            } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_optional_expression_child(diagnostics, expression, "ic", *ic);
+                self.validate_optional_expression_child(
+                    diagnostics,
+                    expression,
+                    "modulus",
+                    *modulus,
+                );
+                self.validate_optional_expression_child(diagnostics, expression, "offset", *offset);
+                self.validate_optional_expression_child(diagnostics, expression, "abstol", *abstol);
+            }
+            HirAnalogOperator::Ddx { expr, probe } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_expression_child(diagnostics, expression, "probe", *probe);
+            }
+            HirAnalogOperator::Limexp { expr } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+            }
+            HirAnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+            } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_expression_child(diagnostics, expression, "delay", *delay);
+                self.validate_optional_expression_child(
+                    diagnostics,
+                    expression,
+                    "max_delay",
+                    *max_delay,
+                );
+            }
+            HirAnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                tolerance,
+            } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_optional_expression_child(diagnostics, expression, "delay", *delay);
+                self.validate_optional_expression_child(diagnostics, expression, "rise", *rise);
+                self.validate_optional_expression_child(diagnostics, expression, "fall", *fall);
+                self.validate_optional_expression_child(
+                    diagnostics,
+                    expression,
+                    "tolerance",
+                    *tolerance,
+                );
+            }
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_optional_expression_child(
+                    diagnostics,
+                    expression,
+                    "max_rise",
+                    *max_rise,
+                );
+                self.validate_optional_expression_child(
+                    diagnostics,
+                    expression,
+                    "max_fall",
+                    *max_fall,
+                );
+            }
+            HirAnalogOperator::LastCrossing { expr, .. } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+            }
         }
     }
 
@@ -669,6 +859,18 @@ impl HirModel {
                     denominator,
                 );
             }
+        }
+    }
+
+    fn validate_optional_expression_child(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        label: &str,
+        child: Option<ExprId>,
+    ) {
+        if let Some(child) = child {
+            self.validate_expression_child(diagnostics, expression, label, child);
         }
     }
 
@@ -1052,6 +1254,19 @@ impl HirModel {
         known
     }
 
+    pub(crate) fn known_value_symbol_names(&self) -> HashSet<SmolStr> {
+        let mut known = HashSet::new();
+        for parameter in &self.parameters {
+            known.insert(parameter.name.clone());
+        }
+        known.extend(self.variables.iter().map(|variable| variable.name.clone()));
+        known.extend(self.arrays.iter().map(|array| array.name.clone()));
+        known.extend(self.ports.iter().map(|port| port.name.clone()));
+        known.extend(self.internal_nodes.iter().map(|node| node.name.clone()));
+        known.extend(self.ground_nodes.iter().cloned());
+        known
+    }
+
     fn declared_branch_names(&self) -> HashSet<SmolStr> {
         self.branches
             .iter()
@@ -1327,33 +1542,28 @@ impl HirLowerer {
         }
     }
 
-    fn lower_optional_expr(&mut self, expression: &Option<Box<Expression>>) -> Vec<ExprId> {
-        expression
-            .iter()
-            .map(|expr| self.lower_expr(expr).id)
-            .collect()
+    fn lower_optional_expr_id(&mut self, expression: &Option<Box<Expression>>) -> Option<ExprId> {
+        expression.as_ref().map(|expr| self.lower_expr(expr).id)
     }
 
     fn lower_analog_operator(&mut self, operator: &AnalogOperator) -> HirExprKind {
-        let (operator_name, operands) = match operator {
-            AnalogOperator::Ddt { expr, abstol, .. } => {
-                let mut operands = vec![self.lower_expr(expr).id];
-                operands.extend(self.lower_optional_expr(abstol));
-                ("Ddt", operands)
-            }
+        let op = match operator {
+            AnalogOperator::Ddt { expr, abstol, .. } => HirAnalogOperator::Ddt {
+                expr: self.lower_expr(expr).id,
+                abstol: self.lower_optional_expr_id(abstol),
+            },
             AnalogOperator::Idt {
                 expr,
                 ic,
                 assert_val,
                 abstol,
                 ..
-            } => {
-                let mut operands = vec![self.lower_expr(expr).id];
-                operands.extend(self.lower_optional_expr(ic));
-                operands.extend(self.lower_optional_expr(assert_val));
-                operands.extend(self.lower_optional_expr(abstol));
-                ("Idt", operands)
-            }
+            } => HirAnalogOperator::Idt {
+                expr: self.lower_expr(expr).id,
+                ic: self.lower_optional_expr_id(ic),
+                assert: self.lower_optional_expr_id(assert_val),
+                abstol: self.lower_optional_expr_id(abstol),
+            },
             AnalogOperator::IdtMod {
                 expr,
                 ic,
@@ -1361,32 +1571,30 @@ impl HirLowerer {
                 offset,
                 abstol,
                 ..
-            } => {
-                let mut operands = vec![self.lower_expr(expr).id];
-                operands.extend(self.lower_optional_expr(ic));
-                operands.extend(self.lower_optional_expr(modulus));
-                operands.extend(self.lower_optional_expr(offset));
-                operands.extend(self.lower_optional_expr(abstol));
-                ("IdtMod", operands)
-            }
-            AnalogOperator::Ddx { expr, probe, .. } => {
-                let operands = vec![
-                    self.lower_expr(expr).id,
-                    self.lower_branch_access_expr(probe),
-                ];
-                ("Ddx", operands)
-            }
-            AnalogOperator::Limexp { expr, .. } => ("Limexp", vec![self.lower_expr(expr).id]),
+            } => HirAnalogOperator::IdtMod {
+                expr: self.lower_expr(expr).id,
+                ic: self.lower_optional_expr_id(ic),
+                modulus: self.lower_optional_expr_id(modulus),
+                offset: self.lower_optional_expr_id(offset),
+                abstol: self.lower_optional_expr_id(abstol),
+            },
+            AnalogOperator::Ddx { expr, probe, .. } => HirAnalogOperator::Ddx {
+                expr: self.lower_expr(expr).id,
+                probe: self.lower_branch_access_expr(probe),
+            },
+            AnalogOperator::Limexp { expr, .. } => HirAnalogOperator::Limexp {
+                expr: self.lower_expr(expr).id,
+            },
             AnalogOperator::Absdelay {
                 expr,
                 delay,
                 max_delay,
                 ..
-            } => {
-                let mut operands = vec![self.lower_expr(expr).id, self.lower_expr(delay).id];
-                operands.extend(self.lower_optional_expr(max_delay));
-                ("Absdelay", operands)
-            }
+            } => HirAnalogOperator::Absdelay {
+                expr: self.lower_expr(expr).id,
+                delay: self.lower_expr(delay).id,
+                max_delay: self.lower_optional_expr_id(max_delay),
+            },
             AnalogOperator::Transition {
                 expr,
                 delay,
@@ -1394,35 +1602,27 @@ impl HirLowerer {
                 fall,
                 tolerance,
                 ..
-            } => {
-                let mut operands = vec![self.lower_expr(expr).id];
-                operands.extend(self.lower_optional_expr(delay));
-                operands.extend(self.lower_optional_expr(rise));
-                operands.extend(self.lower_optional_expr(fall));
-                operands.extend(self.lower_optional_expr(tolerance));
-                ("Transition", operands)
-            }
+            } => HirAnalogOperator::Transition {
+                expr: self.lower_expr(expr).id,
+                delay: self.lower_optional_expr_id(delay),
+                rise: self.lower_optional_expr_id(rise),
+                fall: self.lower_optional_expr_id(fall),
+                tolerance: self.lower_optional_expr_id(tolerance),
+            },
             AnalogOperator::Slew {
                 expr,
                 max_rise,
                 max_fall,
                 ..
-            } => {
-                let mut operands = vec![self.lower_expr(expr).id];
-                operands.extend(self.lower_optional_expr(max_rise));
-                operands.extend(self.lower_optional_expr(max_fall));
-                ("Slew", operands)
-            }
-            AnalogOperator::LastCrossing { expr, edge, .. } => {
-                let operator_name = match edge {
-                    Some(direction) => SmolStr::from(format!("LastCrossing::{direction:?}")),
-                    None => "LastCrossing".into(),
-                };
-                return HirExprKind::AnalogOperator {
-                    operator: operator_name,
-                    operands: vec![self.lower_expr(expr).id],
-                };
-            }
+            } => HirAnalogOperator::Slew {
+                expr: self.lower_expr(expr).id,
+                max_rise: self.lower_optional_expr_id(max_rise),
+                max_fall: self.lower_optional_expr_id(max_fall),
+            },
+            AnalogOperator::LastCrossing { expr, edge, .. } => HirAnalogOperator::LastCrossing {
+                expr: self.lower_expr(expr).id,
+                edge: edge.map(HirCrossDirection::from),
+            },
             AnalogOperator::Laplace { kind, expr, .. } => {
                 return HirExprKind::Laplace {
                     expr: self.lower_expr(expr).id,
@@ -1437,10 +1637,7 @@ impl HirLowerer {
             }
         };
 
-        HirExprKind::AnalogOperator {
-            operator: operator_name.into(),
-            operands,
-        }
+        HirExprKind::AnalogOperator { op }
     }
 
     fn lower_laplace_kind(&mut self, kind: &LaplaceKind) -> HirLaplaceKind {

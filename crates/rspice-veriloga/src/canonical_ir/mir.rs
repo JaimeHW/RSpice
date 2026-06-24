@@ -3,8 +3,8 @@ use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
 use super::hir::{
-    CanonicalValueType, HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirModel,
-    HirParamRange,
+    CanonicalValueType, HirAnalogOperator, HirContributionKind, HirExprKind, HirExprRef,
+    HirExpression, HirModel, HirParamRange,
 };
 use super::{
     BranchId, CompilerPhase, ContributionId, EquationId, ExprId, IrDiagnostic, IrValidationResult,
@@ -88,6 +88,7 @@ pub struct MirModel {
     pub state_slots: Vec<MirStateSlot>,
     pub equations: Vec<MirEquation>,
     pub expressions: Vec<HirExpression>,
+    pub value_symbols: Vec<SmolStr>,
     pub ground_nodes: Vec<SmolStr>,
 }
 
@@ -176,6 +177,7 @@ impl MirModel {
             state_slots: Vec::new(),
             equations,
             expressions: hir.expressions.clone(),
+            value_symbols: sorted_value_symbols(hir),
             ground_nodes: hir.ground_nodes.clone(),
         };
 
@@ -212,8 +214,10 @@ impl MirModel {
             &self.expressions,
             &self.nodes,
             &self.branches,
+            &self.value_symbols,
             &self.ground_nodes,
         );
+        validate_value_symbols(&mut diagnostics, &self.value_symbols);
         validate_parameter_names_and_aliases(&mut diagnostics, &self.parameters);
         validate_parameter_default_exprs(&mut diagnostics, &self.parameters, &self.expressions);
         validate_state_slot_owners(&mut diagnostics, &self.state_slots, self.equations.len());
@@ -256,6 +260,12 @@ fn node_ids_by_name(nodes: &[MirNode]) -> HashMap<SmolStr, NodeId> {
         .iter()
         .map(|node| (node.name.clone(), node.id))
         .collect()
+}
+
+fn sorted_value_symbols(hir: &HirModel) -> Vec<SmolStr> {
+    let mut symbols: Vec<_> = hir.known_value_symbol_names().into_iter().collect();
+    symbols.sort();
+    symbols
 }
 
 fn resolve_node_id(name: &SmolStr, node_ids_by_name: &HashMap<SmolStr, NodeId>) -> Option<NodeId> {
@@ -614,16 +624,19 @@ fn validate_expressions(
     expressions: &[HirExpression],
     nodes: &[MirNode],
     branches: &[MirBranch],
+    value_symbols: &[SmolStr],
     ground_nodes: &[SmolStr],
 ) {
     let node_names: HashSet<_> = nodes.iter().map(|node| node.name.clone()).collect();
     let branch_names: HashSet<_> = branches.iter().map(|branch| branch.name.clone()).collect();
+    let value_symbols: HashSet<_> = value_symbols.iter().cloned().collect();
 
     for expression in expressions {
         match &expression.kind {
-            HirExprKind::Number { .. }
-            | HirExprKind::StringLiteral { .. }
-            | HirExprKind::Identifier { .. } => {}
+            HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => {}
+            HirExprKind::Identifier { name } => {
+                validate_identifier(diagnostics, expression, name, &value_symbols);
+            }
             HirExprKind::BranchAccess { pos, neg, .. } => {
                 validate_branch_access_node(
                     diagnostics,
@@ -706,8 +719,10 @@ fn validate_expressions(
                     elements,
                 );
             }
-            HirExprKind::AnalogOperator { operands, .. }
-            | HirExprKind::NoiseSource { operands, .. } => {
+            HirExprKind::AnalogOperator { op } => {
+                validate_analog_operator_children(diagnostics, expressions, expression, op);
+            }
+            HirExprKind::NoiseSource { operands, .. } => {
                 validate_expression_child_list(
                     diagnostics,
                     expressions,
@@ -864,6 +879,166 @@ fn validate_expressions(
     }
 }
 
+fn validate_identifier(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expression: &HirExpression,
+    name: &SmolStr,
+    value_symbols: &HashSet<SmolStr>,
+) {
+    if !value_symbols.contains(name) {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!("MIR unknown identifier '{}'", name),
+            expression.span,
+        ));
+    }
+}
+
+fn validate_analog_operator_children(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expressions: &[HirExpression],
+    expression: &HirExpression,
+    op: &HirAnalogOperator,
+) {
+    match op {
+        HirAnalogOperator::Ddt { expr, abstol } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "abstol",
+                *abstol,
+            );
+        }
+        HirAnalogOperator::Idt {
+            expr,
+            ic,
+            assert,
+            abstol,
+        } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+            validate_optional_expression_child(diagnostics, expressions, expression, "ic", *ic);
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "assert",
+                *assert,
+            );
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "abstol",
+                *abstol,
+            );
+        }
+        HirAnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+        } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+            validate_optional_expression_child(diagnostics, expressions, expression, "ic", *ic);
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "modulus",
+                *modulus,
+            );
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "offset",
+                *offset,
+            );
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "abstol",
+                *abstol,
+            );
+        }
+        HirAnalogOperator::Ddx { expr, probe } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+            validate_expression_child(diagnostics, expressions, expression, "probe", *probe);
+        }
+        HirAnalogOperator::Limexp { expr } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+        }
+        HirAnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+        } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+            validate_expression_child(diagnostics, expressions, expression, "delay", *delay);
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "max_delay",
+                *max_delay,
+            );
+        }
+        HirAnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+        } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "delay",
+                *delay,
+            );
+            validate_optional_expression_child(diagnostics, expressions, expression, "rise", *rise);
+            validate_optional_expression_child(diagnostics, expressions, expression, "fall", *fall);
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "tolerance",
+                *tolerance,
+            );
+        }
+        HirAnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+        } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "max_rise",
+                *max_rise,
+            );
+            validate_optional_expression_child(
+                diagnostics,
+                expressions,
+                expression,
+                "max_fall",
+                *max_fall,
+            );
+        }
+        HirAnalogOperator::LastCrossing { expr, .. } => {
+            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+        }
+    }
+}
+
 fn validate_branch_access_node(
     diagnostics: &mut Vec<IrDiagnostic>,
     expression: &HirExpression,
@@ -880,6 +1055,18 @@ fn validate_branch_access_node(
         format!("MIR unknown branch access node '{}'", node),
         expression.span,
     ));
+}
+
+fn validate_optional_expression_child(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expressions: &[HirExpression],
+    expression: &HirExpression,
+    label: &str,
+    child: Option<ExprId>,
+) {
+    if let Some(child) = child {
+        validate_expression_child(diagnostics, expressions, expression, label, child);
+    }
 }
 
 fn validate_expression_child_list(
@@ -961,6 +1148,36 @@ fn validate_node_names(diagnostics: &mut Vec<IrDiagnostic>, nodes: &[MirNode]) {
                 format!("MIR duplicate node name '{}'", node.name),
             ));
         }
+    }
+}
+
+fn validate_value_symbols(diagnostics: &mut Vec<IrDiagnostic>, value_symbols: &[SmolStr]) {
+    let mut names = HashSet::new();
+    let mut previous: Option<&SmolStr> = None;
+
+    for symbol in value_symbols {
+        if symbol.is_empty() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                "MIR value symbol names must not be empty",
+            ));
+        } else if !names.insert(symbol.clone()) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!("MIR duplicate value symbol '{}'", symbol),
+            ));
+        }
+
+        if let Some(previous) = previous
+            && previous > symbol
+        {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                "MIR value symbols must be sorted",
+            ));
+        }
+
+        previous = Some(symbol);
     }
 }
 

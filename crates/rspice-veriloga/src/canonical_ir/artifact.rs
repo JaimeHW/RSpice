@@ -3,13 +3,13 @@ use smol_str::SmolStr;
 use std::fmt::Write;
 
 use super::{
-    CanonicalMetadata, CanonicalValueType, CompilerPhase, HirArray, HirAssignment, HirBranch,
-    HirContribution, HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirInternalNode,
-    HirLaplaceKind, HirLoop, HirModel, HirParamRange, HirParameter, HirPort, HirStatement,
-    HirVariable, HirZiKind, InvalidationClass, IrDiagnostic, IrValidationResult, MirAnalysisDomain,
-    MirBranch, MirBranchRef, MirEquation, MirEquationKind, MirModel, MirNode, MirParameterSlot,
-    MirStateSlot, OptModel, OptOp, OptSchedule, OptValue, OptValueType, SourceSpanRef,
-    StableDigest,
+    CanonicalMetadata, CanonicalValueType, CompilerPhase, HirAnalogOperator, HirArray,
+    HirAssignment, HirBranch, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
+    HirExprRef, HirExpression, HirInternalNode, HirLaplaceKind, HirLoop, HirModel, HirParamRange,
+    HirParameter, HirPort, HirStatement, HirVariable, HirZiKind, InvalidationClass, IrDiagnostic,
+    IrValidationResult, MirAnalysisDomain, MirBranch, MirBranchRef, MirEquation, MirEquationKind,
+    MirModel, MirNode, MirParameterSlot, MirStateSlot, OptModel, OptOp, OptSchedule, OptValue,
+    OptValueType, SourceSpanRef, StableDigest,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -203,6 +203,7 @@ fn artifact_diagnostics(
 
     validate_hir_mir_nodes(&mut diagnostics, hir, mir);
     validate_hir_mir_ground_nodes(&mut diagnostics, hir, mir);
+    validate_hir_mir_value_symbols(&mut diagnostics, hir, mir);
     validate_hir_mir_parameters(&mut diagnostics, hir, mir);
     validate_hir_mir_branches(&mut diagnostics, hir, mir);
     validate_hir_mir_expressions(&mut diagnostics, hir, mir);
@@ -269,6 +270,23 @@ fn validate_hir_mir_ground_nodes(
             "HIR/MIR ground nodes must match: hir={} mir={}",
             join_smol(&hir.ground_nodes),
             join_smol(&mir.ground_nodes)
+        )));
+    }
+}
+
+fn validate_hir_mir_value_symbols(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    hir: &HirModel,
+    mir: &MirModel,
+) {
+    let mut expected: Vec<_> = hir.known_value_symbol_names().into_iter().collect();
+    expected.sort();
+
+    if expected != mir.value_symbols {
+        diagnostics.push(artifact_error(format!(
+            "HIR/MIR value symbols must match: hir={} mir={}",
+            join_smol(&expected),
+            join_smol(&mir.value_symbols)
         )));
     }
 }
@@ -657,6 +675,7 @@ fn mir_summary(mir: &MirModel) -> String {
     for state_slot in &mir.state_slots {
         write_mir_state_slot(&mut out, state_slot);
     }
+    writeln!(out, "value_symbols={}", join_smol(&mir.value_symbols)).expect("write to string");
     writeln!(out, "ground_nodes={}", join_smol(&mir.ground_nodes)).expect("write to string");
     for expression in &mir.expressions {
         write_hir_expression(&mut out, expression);
@@ -996,13 +1015,7 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
         HirExprKind::ArrayLiteral { elements } => {
             format!("array_literal elements:{}", join_expr_ids(elements))
         }
-        HirExprKind::AnalogOperator { operator, operands } => {
-            format!(
-                "analog_operator operator:{} operands:{}",
-                enc_str(operator),
-                join_expr_ids(operands)
-            )
-        }
+        HirExprKind::AnalogOperator { op } => analog_operator_label(op),
         HirExprKind::Laplace { expr, kind } => {
             format!("laplace expr:{} {}", expr.index(), laplace_kind_label(kind))
         }
@@ -1018,6 +1031,93 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
             enc_str(source),
             join_expr_ids(operands),
             option_smol(name.as_ref())
+        ),
+    }
+}
+
+fn analog_operator_label(op: &HirAnalogOperator) -> String {
+    match op {
+        HirAnalogOperator::Ddt { expr, abstol } => {
+            format!(
+                "analog_operator ddt expr:{} abstol:{}",
+                expr.index(),
+                option_expr_id(*abstol)
+            )
+        }
+        HirAnalogOperator::Idt {
+            expr,
+            ic,
+            assert,
+            abstol,
+        } => format!(
+            "analog_operator idt expr:{} ic:{} assert:{} abstol:{}",
+            expr.index(),
+            option_expr_id(*ic),
+            option_expr_id(*assert),
+            option_expr_id(*abstol)
+        ),
+        HirAnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+        } => format!(
+            "analog_operator idtmod expr:{} ic:{} modulus:{} offset:{} abstol:{}",
+            expr.index(),
+            option_expr_id(*ic),
+            option_expr_id(*modulus),
+            option_expr_id(*offset),
+            option_expr_id(*abstol)
+        ),
+        HirAnalogOperator::Ddx { expr, probe } => {
+            format!(
+                "analog_operator ddx expr:{} probe:{}",
+                expr.index(),
+                probe.index()
+            )
+        }
+        HirAnalogOperator::Limexp { expr } => {
+            format!("analog_operator limexp expr:{}", expr.index())
+        }
+        HirAnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+        } => format!(
+            "analog_operator absdelay expr:{} delay:{} max_delay:{}",
+            expr.index(),
+            delay.index(),
+            option_expr_id(*max_delay)
+        ),
+        HirAnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+        } => format!(
+            "analog_operator transition expr:{} delay:{} rise:{} fall:{} tolerance:{}",
+            expr.index(),
+            option_expr_id(*delay),
+            option_expr_id(*rise),
+            option_expr_id(*fall),
+            option_expr_id(*tolerance)
+        ),
+        HirAnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+        } => format!(
+            "analog_operator slew expr:{} max_rise:{} max_fall:{}",
+            expr.index(),
+            option_expr_id(*max_rise),
+            option_expr_id(*max_fall)
+        ),
+        HirAnalogOperator::LastCrossing { expr, edge } => format!(
+            "analog_operator last_crossing expr:{} edge:{}",
+            expr.index(),
+            option_cross_direction(*edge)
         ),
     }
 }
@@ -1152,6 +1252,21 @@ fn option_id(value: Option<u32>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn option_expr_id(value: Option<super::ExprId>) -> String {
+    value
+        .map(|value| value.index().to_string())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn option_cross_direction(value: Option<HirCrossDirection>) -> &'static str {
+    match value {
+        Some(HirCrossDirection::Rising) => "rising",
+        Some(HirCrossDirection::Falling) => "falling",
+        Some(HirCrossDirection::Both) => "both",
+        None => "-",
+    }
 }
 
 fn option_f64(value: Option<f64>) -> String {
