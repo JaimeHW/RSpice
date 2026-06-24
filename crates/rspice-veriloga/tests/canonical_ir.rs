@@ -6,11 +6,13 @@ use rspice_veriloga::ast::{
     AnalogOperator, BranchAccess, Expression, LaplaceKind, NumberLit, PortDirection,
 };
 use rspice_veriloga::canonical_ir::{
-    BranchId, ContributionId, ExprId, ModuleId, NodeId, ParamId, PortId, SourceId, VariableId,
+    BranchId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId, PortId, SourceId,
+    VariableId,
 };
 use rspice_veriloga::canonical_ir::{
     CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirExprKind,
-    HirLaplaceKind, HirLoop, HirModel, HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
+    HirLaplaceKind, HirLoop, HirModel, HirStatement, IrDiagnostic, MirAnalysisDomain,
+    MirEquationKind, MirModel, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -49,6 +51,32 @@ fn assert_validation_message(hir: &HirModel, expected_substring: &str) {
             .any(|message| message.contains(expected_substring)),
         "expected diagnostic containing {expected_substring:?}, got {messages:?}"
     );
+}
+
+fn mir_validation_messages(mir: &MirModel) -> Vec<String> {
+    mir.validate()
+        .expect_err("malformed MIR must fail validation")
+        .into_iter()
+        .map(|diagnostic| diagnostic.message)
+        .collect()
+}
+
+fn assert_mir_validation_message(mir: &MirModel, expected_substring: &str) {
+    let messages = mir_validation_messages(mir);
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains(expected_substring)),
+        "expected diagnostic containing {expected_substring:?}, got {messages:?}"
+    );
+}
+
+fn lower_tiny_resistor_mir() -> MirModel {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    MirModel::from_hir(&hir).expect("lower MIR")
 }
 
 fn contribution_branch_access_id(hir: &HirModel) -> ExprId {
@@ -261,6 +289,89 @@ fn hir_lowering_preserves_analyzed_module_surface() {
     assert_eq!(hir.contributions.len(), 1);
     assert_eq!(hir.contributions[0].kind, HirContributionKind::Current);
     assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn mir_lowering_makes_contributions_explicit_equations() {
+    let mir = lower_tiny_resistor_mir();
+
+    assert_eq!(mir.module_name.as_str(), "tiny_res");
+    assert_eq!(mir.nodes.len(), 2);
+    assert_eq!(mir.nodes[0].name.as_str(), "p");
+    assert_eq!(mir.nodes[0].id, NodeId::new(0));
+    assert!(mir.nodes[0].is_external);
+    assert_eq!(mir.nodes[1].name.as_str(), "n");
+    assert_eq!(mir.nodes[1].id, NodeId::new(1));
+    assert!(mir.nodes[1].is_external);
+
+    assert_eq!(mir.equations.len(), 1);
+    assert_eq!(mir.equations[0].id, EquationId::new(0));
+    assert_eq!(mir.equations[0].contribution, ContributionId::new(0));
+    assert_eq!(mir.equations[0].kind, MirEquationKind::Current);
+    assert!(
+        mir.equations[0]
+            .active_domains
+            .contains(&MirAnalysisDomain::Dc)
+    );
+    assert!(mir.validate().is_ok());
+}
+
+#[test]
+fn mir_validation_rejects_empty_node_set() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.nodes.clear();
+
+    assert_mir_validation_message(&mir, "MIR model must have at least one node");
+}
+
+#[test]
+fn mir_validation_rejects_non_dense_node_and_equation_ids() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.nodes[1].id = NodeId::new(9);
+    mir.equations[0].id = EquationId::new(3);
+
+    let messages = mir_validation_messages(&mir);
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("MIR node IDs must be dense")),
+        "expected dense node diagnostic, got {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("MIR equation IDs must be dense")),
+        "expected dense equation diagnostic, got {messages:?}"
+    );
+}
+
+#[test]
+fn mir_validation_rejects_equation_with_empty_active_domains() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].active_domains.clear();
+
+    assert_mir_validation_message(&mir, "must have at least one active domain");
+}
+
+#[test]
+fn mir_validation_rejects_equation_contribution_out_of_range() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].contribution = ContributionId::new(42);
+
+    assert_mir_validation_message(&mir, "contribution ContributionId(42) is out of range");
+}
+
+#[test]
+fn mir_validation_rejects_parameter_alias_name_collision() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.parameters[0].aliases.push("other".into());
+    let mut other = mir.parameters[0].clone();
+    other.id = ParamId::new(1);
+    other.name = "other".into();
+    other.aliases.clear();
+    mir.parameters.push(other);
+
+    assert_mir_validation_message(&mir, "parameter alias 'other' collides with parameter name");
 }
 
 #[test]
@@ -680,6 +791,26 @@ fn hir_lowering_preserves_internal_node_metadata() {
     assert_eq!(hir.internal_nodes[0].discipline.as_str(), "electrical");
     assert_eq!(hir.internal_nodes[0].index, 0);
     assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn mir_lowering_appends_internal_nodes_after_external_ports() {
+    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.nodes.len(), 3);
+    assert_eq!(mir.nodes[0].id, NodeId::new(0));
+    assert_eq!(mir.nodes[0].name.as_str(), "p");
+    assert!(mir.nodes[0].is_external);
+    assert_eq!(mir.nodes[1].id, NodeId::new(1));
+    assert_eq!(mir.nodes[1].name.as_str(), "n");
+    assert!(mir.nodes[1].is_external);
+    assert_eq!(mir.nodes[2].id, NodeId::new(2));
+    assert_eq!(mir.nodes[2].name.as_str(), "mid");
+    assert!(!mir.nodes[2].is_external);
+    assert!(mir.validate().is_ok());
 }
 
 #[test]

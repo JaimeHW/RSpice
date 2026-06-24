@@ -8,6 +8,7 @@ pub mod diagnostic;
 pub mod hir;
 pub mod ids;
 pub mod metadata;
+pub mod mir;
 
 pub use diagnostic::{
     CompilerPhase, DiagnosticSeverity, IrDiagnostic, IrValidationResult, SourceSpanRef,
@@ -23,3 +24,7 @@ pub use ids::{
     ValueId, VariableId,
 };
 pub use metadata::{CanonicalMetadata, StableDigest};
+pub use mir::{
+    MirAnalysisDomain, MirEquation, MirEquationKind, MirModel, MirNode, MirParameterSlot,
+    MirStateSlot,
+};
