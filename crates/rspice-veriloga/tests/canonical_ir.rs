@@ -170,6 +170,18 @@ endmodule
 "#
 }
 
+fn ground_alias_source() -> &'static str {
+    r#"
+module ground_alias(p);
+    inout p;
+    electrical p;
+    electrical mid;
+    ground earth;
+    analog I(mid, earth) <+ V(mid);
+endmodule
+"#
+}
+
 #[test]
 fn typed_ids_are_dense_copyable_and_displayable() {
     let module = ModuleId::new(7);
@@ -537,6 +549,134 @@ fn mir_validation_rejects_empty_module_name() {
     mir.module_name = "".into();
 
     assert_mir_validation_message(&mir, "MIR module name must not be empty");
+}
+
+#[test]
+fn mir_lowering_preserves_branch_table_for_named_accesses() {
+    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mut mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.branches.len(), 1);
+    assert_eq!(mir.branches[0].id, BranchId::new(0));
+    assert_eq!(mir.branches[0].name.as_str(), "res");
+    assert_eq!(mir.branches[0].pos_node, NodeId::new(0));
+    assert_eq!(mir.branches[0].neg_node, Some(NodeId::new(1)));
+    assert_eq!(mir.branches[0].discipline.as_str(), "electrical");
+
+    let root_id = mir.equations[0].expression.id;
+    mir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
+        access: "V".into(),
+        name: "res".into(),
+    };
+    mir.equations[0].expression.kind = "branch_access".into();
+
+    assert!(mir.expressions.iter().any(|expression| matches!(
+        &expression.kind,
+        HirExprKind::NamedBranchAccess { name, .. } if name.as_str() == "res"
+    )));
+    assert!(mir.validate().is_ok());
+}
+
+#[test]
+fn mir_lowering_canonicalizes_ground_alias_branch_labels() {
+    let analyzed = analyze_fixture(ground_alias_source(), "ground_alias").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", ground_alias_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.nodes.len(), 2);
+    assert_eq!(mir.equations[0].branch.pos_node, NodeId::new(1));
+    assert_eq!(mir.equations[0].branch.neg_node, None);
+    assert_eq!(mir.equations[0].branch.label.as_str(), "mid,0");
+    assert!(mir.validate().is_ok());
+}
+
+#[test]
+fn mir_validation_rejects_expression_child_out_of_range() {
+    let mut mir = lower_tiny_resistor_mir();
+    let root_id = mir.equations[0].expression.id;
+    let dangling_id = ExprId::from(mir.expressions.len());
+    let HirExprKind::Binary { left, .. } = &mut mir.expressions[usize::from(root_id)].kind else {
+        panic!("expected MIR equation expression to be binary");
+    };
+    *left = dangling_id;
+
+    assert_mir_validation_message(&mir, "child left ExprId");
+}
+
+#[test]
+fn mir_validation_rejects_expression_child_postorder_violation() {
+    let mut mir = lower_tiny_resistor_mir();
+    let root_id = mir.equations[0].expression.id;
+    let HirExprKind::Binary { left, .. } = &mut mir.expressions[usize::from(root_id)].kind else {
+        panic!("expected MIR equation expression to be binary");
+    };
+    *left = root_id;
+
+    assert_mir_validation_message(&mir, "violates expression postorder");
+}
+
+#[test]
+fn mir_validation_rejects_expression_branch_access_missing_node() {
+    let mut mir = lower_tiny_resistor_mir();
+    let root_id = mir.equations[0].expression.id;
+    let HirExprKind::Binary { left, .. } = &mir.expressions[usize::from(root_id)].kind else {
+        panic!("expected MIR equation expression to be binary");
+    };
+    let branch_access_id = *left;
+    let HirExprKind::BranchAccess { pos, .. } =
+        &mut mir.expressions[usize::from(branch_access_id)].kind
+    else {
+        panic!("expected branch access expression");
+    };
+    *pos = "missing".into();
+
+    assert_mir_validation_message(&mir, "unknown branch access node 'missing'");
+}
+
+#[test]
+fn mir_validation_rejects_expression_named_branch_access_missing_branch() {
+    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mut mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    let root_id = mir.equations[0].expression.id;
+    mir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
+        access: "V".into(),
+        name: "missing".into(),
+    };
+    mir.equations[0].expression.kind = "branch_access".into();
+
+    assert_mir_validation_message(&mir, "unknown named branch access 'missing'");
+}
+
+#[test]
+fn mir_validation_rejects_state_slot_name_violations() {
+    let mut empty_name = lower_tiny_resistor_mir();
+    empty_name.state_slots.push(MirStateSlot {
+        id: StateId::new(0),
+        name: "".into(),
+        owner: EquationId::new(0),
+    });
+    assert_mir_validation_message(&empty_name, "state slot StateId(0) name must not be empty");
+
+    let mut duplicate_name = lower_tiny_resistor_mir();
+    duplicate_name.state_slots.push(MirStateSlot {
+        id: StateId::new(0),
+        name: "state".into(),
+        owner: EquationId::new(0),
+    });
+    duplicate_name.state_slots.push(MirStateSlot {
+        id: StateId::new(1),
+        name: "state".into(),
+        owner: EquationId::new(0),
+    });
+    assert_mir_validation_message(&duplicate_name, "duplicate state slot name 'state'");
 }
 
 #[test]

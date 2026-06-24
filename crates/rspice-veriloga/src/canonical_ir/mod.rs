@@ -25,6 +25,6 @@ pub use ids::{
 };
 pub use metadata::{CanonicalMetadata, StableDigest};
 pub use mir::{
-    MirAnalysisDomain, MirBranchRef, MirEquation, MirEquationKind, MirModel, MirNode,
+    MirAnalysisDomain, MirBranch, MirBranchRef, MirEquation, MirEquationKind, MirModel, MirNode,
     MirParameterSlot, MirStateSlot,
 };

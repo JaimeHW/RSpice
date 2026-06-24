@@ -7,8 +7,8 @@ use super::hir::{
     HirParamRange,
 };
 use super::{
-    CompilerPhase, ContributionId, EquationId, IrDiagnostic, IrValidationResult, NodeId, ParamId,
-    SourceSpanRef, StateId,
+    BranchId, CompilerPhase, ContributionId, EquationId, ExprId, IrDiagnostic, IrValidationResult,
+    NodeId, ParamId, SourceSpanRef, StateId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -60,6 +60,15 @@ pub struct MirBranchRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MirBranch {
+    pub id: BranchId,
+    pub name: SmolStr,
+    pub pos_node: NodeId,
+    pub neg_node: Option<NodeId>,
+    pub discipline: SmolStr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MirEquation {
     pub id: EquationId,
     pub contribution: ContributionId,
@@ -75,9 +84,11 @@ pub struct MirModel {
     pub module_name: SmolStr,
     pub nodes: Vec<MirNode>,
     pub parameters: Vec<MirParameterSlot>,
+    pub branches: Vec<MirBranch>,
     pub state_slots: Vec<MirStateSlot>,
     pub equations: Vec<MirEquation>,
     pub expressions: Vec<HirExpression>,
+    pub ground_nodes: Vec<SmolStr>,
 }
 
 impl MirModel {
@@ -122,6 +133,31 @@ impl MirModel {
             .collect();
 
         let node_ids_by_name = node_ids_by_name(&nodes);
+        let branches = hir
+            .branches
+            .iter()
+            .map(|branch| {
+                let pos_node = resolve_node_id(&branch.pos_node, &node_ids_by_name)
+                    .expect("validated HIR branch pos node must resolve to MIR node");
+                let neg_node =
+                    if branch.neg_node.is_empty() || is_ground_name(&branch.neg_node, hir) {
+                        None
+                    } else {
+                        Some(
+                            resolve_node_id(&branch.neg_node, &node_ids_by_name)
+                                .expect("validated HIR branch neg node must resolve to MIR node"),
+                        )
+                    };
+
+                MirBranch {
+                    id: branch.id,
+                    name: branch.name.clone(),
+                    pos_node,
+                    neg_node,
+                    discipline: branch.discipline.clone(),
+                }
+            })
+            .collect();
         let equations = hir
             .contributions
             .iter()
@@ -141,9 +177,11 @@ impl MirModel {
             module_name: hir.module_name.clone(),
             nodes,
             parameters,
+            branches,
             state_slots: Vec::new(),
             equations,
             expressions: hir.expressions.clone(),
+            ground_nodes: hir.ground_nodes.clone(),
         };
 
         mir.validate().map(|()| mir)
@@ -168,10 +206,19 @@ impl MirModel {
 
         validate_dense_node_ids(&mut diagnostics, &self.nodes);
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
+        validate_dense_branch_ids(&mut diagnostics, &self.branches);
         validate_dense_state_slot_ids(&mut diagnostics, &self.state_slots);
         validate_dense_equation_ids(&mut diagnostics, &self.equations);
         validate_dense_expression_ids(&mut diagnostics, &self.expressions);
         validate_node_names(&mut diagnostics, &self.nodes);
+        validate_branches(&mut diagnostics, &self.branches, &self.nodes);
+        validate_expressions(
+            &mut diagnostics,
+            &self.expressions,
+            &self.nodes,
+            &self.branches,
+            &self.ground_nodes,
+        );
         validate_parameter_names_and_aliases(&mut diagnostics, &self.parameters);
         validate_parameter_default_exprs(&mut diagnostics, &self.parameters, &self.expressions);
         validate_state_slot_owners(&mut diagnostics, &self.state_slots, self.equations.len());
@@ -216,6 +263,10 @@ fn node_ids_by_name(nodes: &[MirNode]) -> HashMap<SmolStr, NodeId> {
         .collect()
 }
 
+fn resolve_node_id(name: &SmolStr, node_ids_by_name: &HashMap<SmolStr, NodeId>) -> Option<NodeId> {
+    node_ids_by_name.get(name).copied()
+}
+
 fn resolve_branch_ref(
     branch_label: &SmolStr,
     hir: &HirModel,
@@ -254,7 +305,9 @@ fn resolve_branch_ref(
                 .get(name)
                 .expect("validated HIR branch neg node must resolve to MIR node")
         });
-    let label = if hir
+    let label = if neg_node.is_none() && neg_name.is_some() {
+        format!("{pos_name},0").into()
+    } else if hir
         .branches
         .iter()
         .any(|branch| branch.name == *branch_label)
@@ -348,6 +401,21 @@ fn validate_dense_equation_ids(diagnostics: &mut Vec<IrDiagnostic>, equations: &
     }
 }
 
+fn validate_dense_branch_ids(diagnostics: &mut Vec<IrDiagnostic>, branches: &[MirBranch]) {
+    for (expected, branch) in branches.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("MIR branch count exceeds u32::MAX");
+        if branch.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch IDs must be dense: expected BranchId({}) at index {}, found {}",
+                    expected, expected, branch.id
+                ),
+            ));
+        }
+    }
+}
+
 fn validate_dense_expression_ids(
     diagnostics: &mut Vec<IrDiagnostic>,
     expressions: &[HirExpression],
@@ -363,6 +431,379 @@ fn validate_dense_expression_ids(
                 ),
             ));
         }
+    }
+}
+
+fn validate_branches(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    branches: &[MirBranch],
+    nodes: &[MirNode],
+) {
+    let mut names = HashSet::new();
+
+    for branch in branches {
+        if branch.name.is_empty() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                "MIR branch name must not be empty",
+            ));
+        } else if !names.insert(branch.name.clone()) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!("MIR duplicate branch name '{}'", branch.name),
+            ));
+        }
+
+        if usize::from(branch.pos_node) >= nodes.len() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch '{}' pos_node {} is out of range for {} nodes",
+                    branch.name,
+                    branch.pos_node,
+                    nodes.len()
+                ),
+            ));
+        }
+
+        if let Some(neg_node) = branch.neg_node {
+            if usize::from(neg_node) >= nodes.len() {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::MirValidation,
+                    format!(
+                        "MIR branch '{}' neg_node {} is out of range for {} nodes",
+                        branch.name,
+                        neg_node,
+                        nodes.len()
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn validate_expressions(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expressions: &[HirExpression],
+    nodes: &[MirNode],
+    branches: &[MirBranch],
+    ground_nodes: &[SmolStr],
+) {
+    let node_names: HashSet<_> = nodes.iter().map(|node| node.name.clone()).collect();
+    let branch_names: HashSet<_> = branches.iter().map(|branch| branch.name.clone()).collect();
+
+    for expression in expressions {
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::Identifier { .. } => {}
+            HirExprKind::BranchAccess { pos, neg, .. } => {
+                validate_branch_access_node(
+                    diagnostics,
+                    expression,
+                    pos,
+                    &node_names,
+                    ground_nodes,
+                );
+                if let Some(neg) = neg {
+                    validate_branch_access_node(
+                        diagnostics,
+                        expression,
+                        neg,
+                        &node_names,
+                        ground_nodes,
+                    );
+                }
+            }
+            HirExprKind::NamedBranchAccess { name, .. } => {
+                if !branch_names.contains(name) {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::MirValidation,
+                        format!("MIR unknown named branch access '{}'", name),
+                        expression.span,
+                    ));
+                }
+            }
+            HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+                validate_expression_child_list(diagnostics, expressions, expression, "arg", args);
+            }
+            HirExprKind::Binary { left, right, .. } => {
+                validate_expression_child(diagnostics, expressions, expression, "left", *left);
+                validate_expression_child(diagnostics, expressions, expression, "right", *right);
+            }
+            HirExprKind::Unary { operand, .. } => {
+                validate_expression_child(
+                    diagnostics,
+                    expressions,
+                    expression,
+                    "operand",
+                    *operand,
+                );
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                validate_expression_child(
+                    diagnostics,
+                    expressions,
+                    expression,
+                    "condition",
+                    *condition,
+                );
+                validate_expression_child(
+                    diagnostics,
+                    expressions,
+                    expression,
+                    "then_expr",
+                    *then_expr,
+                );
+                validate_expression_child(
+                    diagnostics,
+                    expressions,
+                    expression,
+                    "else_expr",
+                    *else_expr,
+                );
+            }
+            HirExprKind::ArrayAccess { index, .. } => {
+                validate_expression_child(diagnostics, expressions, expression, "index", *index);
+            }
+            HirExprKind::ArrayLiteral { elements } => {
+                validate_expression_child_list(
+                    diagnostics,
+                    expressions,
+                    expression,
+                    "element",
+                    elements,
+                );
+            }
+            HirExprKind::AnalogOperator { operands, .. }
+            | HirExprKind::NoiseSource { operands, .. } => {
+                validate_expression_child_list(
+                    diagnostics,
+                    expressions,
+                    expression,
+                    "operand",
+                    operands,
+                );
+            }
+            HirExprKind::Laplace { expr, kind } => {
+                validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+                match kind {
+                    super::hir::HirLaplaceKind::ZeroPole { zeros, poles } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "zeros",
+                            zeros,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "poles",
+                            poles,
+                        );
+                    }
+                    super::hir::HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "zeros",
+                            zeros,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "denominator",
+                            denominator,
+                        );
+                    }
+                    super::hir::HirLaplaceKind::NumeratorPole { numerator, poles } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "numerator",
+                            numerator,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "poles",
+                            poles,
+                        );
+                    }
+                    super::hir::HirLaplaceKind::NumeratorDenominator {
+                        numerator,
+                        denominator,
+                    } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "numerator",
+                            numerator,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "denominator",
+                            denominator,
+                        );
+                    }
+                }
+            }
+            HirExprKind::Zi { expr, kind } => {
+                validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
+                match kind {
+                    super::hir::HirZiKind::ZeroPole { zeros, poles } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "zeros",
+                            zeros,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "poles",
+                            poles,
+                        );
+                    }
+                    super::hir::HirZiKind::ZeroDenominator { zeros, denominator } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "zeros",
+                            zeros,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "denominator",
+                            denominator,
+                        );
+                    }
+                    super::hir::HirZiKind::NumeratorPole { numerator, poles } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "numerator",
+                            numerator,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "poles",
+                            poles,
+                        );
+                    }
+                    super::hir::HirZiKind::NumeratorDenominator {
+                        numerator,
+                        denominator,
+                    } => {
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "numerator",
+                            numerator,
+                        );
+                        validate_expression_child_list(
+                            diagnostics,
+                            expressions,
+                            expression,
+                            "denominator",
+                            denominator,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn validate_branch_access_node(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expression: &HirExpression,
+    node: &SmolStr,
+    node_names: &HashSet<SmolStr>,
+    ground_nodes: &[SmolStr],
+) {
+    if node_names.contains(node) || node.as_str() == "0" || ground_nodes.contains(node) {
+        return;
+    }
+
+    diagnostics.push(IrDiagnostic::error(
+        CompilerPhase::MirValidation,
+        format!("MIR unknown branch access node '{}'", node),
+        expression.span,
+    ));
+}
+
+fn validate_expression_child_list(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expressions: &[HirExpression],
+    expression: &HirExpression,
+    label: &str,
+    children: &[ExprId],
+) {
+    for (index, child) in children.iter().copied().enumerate() {
+        validate_expression_child(
+            diagnostics,
+            expressions,
+            expression,
+            &format!("{label}[{index}]"),
+            child,
+        );
+    }
+}
+
+fn validate_expression_child(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expressions: &[HirExpression],
+    expression: &HirExpression,
+    label: &str,
+    child: ExprId,
+) {
+    if usize::from(child) >= expressions.len() {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR expression {} child {} {} is outside expression arena length {}",
+                expression.id,
+                label,
+                child,
+                expressions.len()
+            ),
+            expression.span,
+        ));
+        return;
+    }
+
+    if child.index() >= expression.id.index() {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR expression {} child {} {} violates expression postorder",
+                expression.id, label, child
+            ),
+            expression.span,
+        ));
     }
 }
 
@@ -486,7 +927,21 @@ fn validate_state_slot_owners(
     state_slots: &[MirStateSlot],
     equation_count: usize,
 ) {
+    let mut names = HashSet::new();
+
     for state_slot in state_slots {
+        if state_slot.name.is_empty() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!("MIR state slot {} name must not be empty", state_slot.id),
+            ));
+        } else if !names.insert(state_slot.name.clone()) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!("MIR duplicate state slot name '{}'", state_slot.name),
+            ));
+        }
+
         if usize::from(state_slot.owner) >= equation_count {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,
