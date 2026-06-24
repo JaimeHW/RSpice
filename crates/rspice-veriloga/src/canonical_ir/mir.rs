@@ -55,7 +55,7 @@ pub struct MirStateSlot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MirBranchRef {
     pub label: SmolStr,
-    pub pos_node: NodeId,
+    pub pos_node: Option<NodeId>,
     pub neg_node: Option<NodeId>,
 }
 
@@ -63,7 +63,7 @@ pub struct MirBranchRef {
 pub struct MirBranch {
     pub id: BranchId,
     pub name: SmolStr,
-    pub pos_node: NodeId,
+    pub pos_node: Option<NodeId>,
     pub neg_node: Option<NodeId>,
     pub discipline: SmolStr,
 }
@@ -137,17 +137,12 @@ impl MirModel {
             .branches
             .iter()
             .map(|branch| {
-                let pos_node = resolve_node_id(&branch.pos_node, &node_ids_by_name)
-                    .expect("validated HIR branch pos node must resolve to MIR node");
-                let neg_node =
-                    if branch.neg_node.is_empty() || is_ground_name(&branch.neg_node, hir) {
-                        None
-                    } else {
-                        Some(
-                            resolve_node_id(&branch.neg_node, &node_ids_by_name)
-                                .expect("validated HIR branch neg node must resolve to MIR node"),
-                        )
-                    };
+                let pos_node = resolve_optional_endpoint(&branch.pos_node, hir, &node_ids_by_name);
+                let neg_node = if branch.neg_node.is_empty() {
+                    None
+                } else {
+                    resolve_optional_endpoint(&branch.neg_node, hir, &node_ids_by_name)
+                };
 
                 MirBranch {
                     id: branch.id,
@@ -294,37 +289,51 @@ fn resolve_branch_ref(
             }
         });
 
-    let pos_node = *node_ids_by_name
-        .get(&pos_name)
-        .expect("validated HIR branch pos node must resolve to MIR node");
+    let pos_node = resolve_optional_endpoint(&pos_name, hir, node_ids_by_name);
     let neg_node = neg_name
         .as_ref()
-        .filter(|name| !is_ground_name(name, hir))
-        .map(|name| {
-            *node_ids_by_name
-                .get(name)
-                .expect("validated HIR branch neg node must resolve to MIR node")
-        });
-    let label = if neg_node.is_none() && neg_name.is_some() {
-        format!("{pos_name},0").into()
-    } else if hir
-        .branches
-        .iter()
-        .any(|branch| branch.name == *branch_label)
-    {
-        match neg_name {
-            Some(neg_name) => format!("{pos_name},{neg_name}").into(),
-            None => pos_name.clone(),
-        }
-    } else {
-        branch_label.clone()
-    };
+        .and_then(|name| resolve_optional_endpoint(name, hir, node_ids_by_name));
+    let label = canonical_branch_label(pos_node, neg_node, node_ids_by_name);
 
     MirBranchRef {
         label,
         pos_node,
         neg_node,
     }
+}
+
+fn resolve_optional_endpoint(
+    name: &SmolStr,
+    hir: &HirModel,
+    node_ids_by_name: &HashMap<SmolStr, NodeId>,
+) -> Option<NodeId> {
+    if is_ground_name(name, hir) {
+        None
+    } else {
+        Some(
+            resolve_node_id(name, node_ids_by_name)
+                .expect("validated HIR branch endpoint must resolve to MIR node or ground"),
+        )
+    }
+}
+
+fn canonical_branch_label(
+    pos_node: Option<NodeId>,
+    neg_node: Option<NodeId>,
+    node_ids_by_name: &HashMap<SmolStr, NodeId>,
+) -> SmolStr {
+    let name_by_id: HashMap<_, _> = node_ids_by_name
+        .iter()
+        .map(|(name, id)| (*id, name.as_str()))
+        .collect();
+    let endpoint_name = |node: Option<NodeId>| match node {
+        Some(node) => *name_by_id
+            .get(&node)
+            .expect("canonical branch endpoint must resolve to MIR node name"),
+        None => "0",
+    };
+
+    format!("{},{}", endpoint_name(pos_node), endpoint_name(neg_node)).into()
 }
 
 fn is_ground_name(name: &str, hir: &HirModel) -> bool {
@@ -454,16 +463,28 @@ fn validate_branches(
             ));
         }
 
-        if usize::from(branch.pos_node) >= nodes.len() {
+        if branch.pos_node.is_none() && branch.neg_node.is_none() {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,
                 format!(
-                    "MIR branch '{}' pos_node {} is out of range for {} nodes",
-                    branch.name,
-                    branch.pos_node,
-                    nodes.len()
+                    "MIR branch '{}' must have at least one concrete endpoint",
+                    branch.name
                 ),
             ));
+        }
+
+        if let Some(pos_node) = branch.pos_node {
+            if usize::from(pos_node) >= nodes.len() {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::MirValidation,
+                    format!(
+                        "MIR branch '{}' pos_node {} is out of range for {} nodes",
+                        branch.name,
+                        pos_node,
+                        nodes.len()
+                    ),
+                ));
+            }
         }
 
         if let Some(neg_node) = branch.neg_node {
@@ -479,6 +500,112 @@ fn validate_branches(
                 ));
             }
         }
+    }
+}
+
+fn validate_endpoint_node<'a>(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    label: &str,
+    endpoint: Option<NodeId>,
+    nodes: &'a [MirNode],
+    span: SourceSpanRef,
+) -> Option<Option<&'a str>> {
+    match endpoint {
+        Some(node) => {
+            let Some(name) = node_name(nodes, node) else {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::MirValidation,
+                    format!(
+                        "MIR {} {} is out of range for {} nodes",
+                        label,
+                        node,
+                        nodes.len()
+                    ),
+                    span,
+                ));
+                return None;
+            };
+            Some(Some(name))
+        }
+        None => Some(None),
+    }
+}
+
+fn canonical_label_from_endpoint_names(pos_name: Option<&str>, neg_name: Option<&str>) -> String {
+    format!("{},{}", pos_name.unwrap_or("0"), neg_name.unwrap_or("0"))
+}
+
+fn validate_branch_ref(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    equation: &MirEquation,
+    nodes: &[MirNode],
+) {
+    if equation.branch.pos_node.is_none() && equation.branch.neg_node.is_none() {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR equation {} branch must have at least one concrete endpoint",
+                equation.id
+            ),
+            equation.span,
+        ));
+        return;
+    }
+
+    let Some(pos_name) = validate_endpoint_node(
+        diagnostics,
+        &format!("equation {} branch pos_node", equation.id),
+        equation.branch.pos_node,
+        nodes,
+        equation.span,
+    ) else {
+        return;
+    };
+    let Some(neg_name) = validate_endpoint_node(
+        diagnostics,
+        &format!("equation {} branch neg_node", equation.id),
+        equation.branch.neg_node,
+        nodes,
+        equation.span,
+    ) else {
+        return;
+    };
+
+    let canonical_label = canonical_label_from_endpoint_names(pos_name, neg_name);
+
+    if equation.branch.label.as_str() != canonical_label {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR equation {} branch label '{}' does not match endpoints {}",
+                equation.id, equation.branch.label, canonical_label
+            ),
+            equation.span,
+        ));
+    }
+}
+
+fn node_name(nodes: &[MirNode], id: NodeId) -> Option<&str> {
+    nodes.get(usize::from(id)).map(|node| node.name.as_str())
+}
+
+fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
+    match kind {
+        HirExprKind::Number { .. } => "number",
+        HirExprKind::StringLiteral { .. } => "string",
+        HirExprKind::Identifier { .. } => "identifier",
+        HirExprKind::SystemFunction { .. } => "system_function",
+        HirExprKind::Binary { .. } => "binary",
+        HirExprKind::Unary { .. } => "unary",
+        HirExprKind::Conditional { .. } => "conditional",
+        HirExprKind::Call { .. } => "call",
+        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
+        HirExprKind::ArrayAccess { .. } => "array_access",
+        HirExprKind::ArrayLiteral { .. } => "array_literal",
+        HirExprKind::AnalogOperator { .. }
+        | HirExprKind::Laplace { .. }
+        | HirExprKind::Zi { .. } => "analog_operator",
+        HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }
 
@@ -1038,94 +1165,5 @@ fn validate_expr_ref(
             ),
             expr_ref.span,
         ));
-    }
-}
-
-fn validate_branch_ref(
-    diagnostics: &mut Vec<IrDiagnostic>,
-    equation: &MirEquation,
-    nodes: &[MirNode],
-) {
-    let Some(pos_name) = node_name(nodes, equation.branch.pos_node) else {
-        diagnostics.push(IrDiagnostic::error(
-            CompilerPhase::MirValidation,
-            format!(
-                "MIR equation {} branch pos_node {} is out of range for {} nodes",
-                equation.id,
-                equation.branch.pos_node,
-                nodes.len()
-            ),
-            equation.span,
-        ));
-        return;
-    };
-
-    let neg_name = match equation.branch.neg_node {
-        Some(neg_node) => {
-            let Some(name) = node_name(nodes, neg_node) else {
-                diagnostics.push(IrDiagnostic::error(
-                    CompilerPhase::MirValidation,
-                    format!(
-                        "MIR equation {} branch neg_node {} is out of range for {} nodes",
-                        equation.id,
-                        neg_node,
-                        nodes.len()
-                    ),
-                    equation.span,
-                ));
-                return;
-            };
-            Some(name)
-        }
-        None => None,
-    };
-
-    let canonical_label = match neg_name {
-        Some(neg_name) => format!("{pos_name},{neg_name}"),
-        None => pos_name.to_string(),
-    };
-    let label_matches = if equation.branch.neg_node.is_none() {
-        let zero_label = format!("{pos_name},0");
-        let gnd_label = format!("{pos_name},gnd");
-        equation.branch.label.as_str() == canonical_label
-            || equation.branch.label.as_str() == zero_label
-            || equation.branch.label.as_str() == gnd_label
-    } else {
-        equation.branch.label.as_str() == canonical_label
-    };
-
-    if !label_matches {
-        diagnostics.push(IrDiagnostic::error(
-            CompilerPhase::MirValidation,
-            format!(
-                "MIR equation {} branch label '{}' does not match endpoints {}",
-                equation.id, equation.branch.label, canonical_label
-            ),
-            equation.span,
-        ));
-    }
-}
-
-fn node_name(nodes: &[MirNode], id: NodeId) -> Option<&str> {
-    nodes.get(usize::from(id)).map(|node| node.name.as_str())
-}
-
-fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
-    match kind {
-        HirExprKind::Number { .. } => "number",
-        HirExprKind::StringLiteral { .. } => "string",
-        HirExprKind::Identifier { .. } => "identifier",
-        HirExprKind::SystemFunction { .. } => "system_function",
-        HirExprKind::Binary { .. } => "binary",
-        HirExprKind::Unary { .. } => "unary",
-        HirExprKind::Conditional { .. } => "conditional",
-        HirExprKind::Call { .. } => "call",
-        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
-        HirExprKind::ArrayAccess { .. } => "array_access",
-        HirExprKind::ArrayLiteral { .. } => "array_literal",
-        HirExprKind::AnalogOperator { .. }
-        | HirExprKind::Laplace { .. }
-        | HirExprKind::Zi { .. } => "analog_operator",
-        HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }

@@ -182,6 +182,29 @@ endmodule
 "#
 }
 
+fn ground_positive_source() -> &'static str {
+    r#"
+module ground_positive(p);
+    inout p;
+    electrical p;
+    ground earth;
+    analog I(earth, p) <+ V(p);
+endmodule
+"#
+}
+
+fn ground_positive_named_branch_source() -> &'static str {
+    r#"
+module ground_positive_branch(p);
+    inout p;
+    electrical p;
+    ground earth;
+    branch (earth, p) res;
+    analog V(res) <+ 1.0;
+endmodule
+"#
+}
+
 #[test]
 fn typed_ids_are_dense_copyable_and_displayable() {
     let module = ModuleId::new(7);
@@ -321,7 +344,7 @@ fn mir_lowering_makes_contributions_explicit_equations() {
     assert_eq!(mir.equations[0].contribution, ContributionId::new(0));
     assert_eq!(mir.equations[0].kind, MirEquationKind::Current);
     assert_eq!(mir.equations[0].branch.label.as_str(), "p,n");
-    assert_eq!(mir.equations[0].branch.pos_node, NodeId::new(0));
+    assert_eq!(mir.equations[0].branch.pos_node, Some(NodeId::new(0)));
     assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(1)));
     assert!(
         mir.equations[0]
@@ -491,14 +514,14 @@ fn mir_lowering_resolves_named_branch_endpoints() {
     let mir = MirModel::from_hir(&hir).expect("lower MIR");
 
     assert_eq!(mir.equations[0].branch.label.as_str(), "p,n");
-    assert_eq!(mir.equations[0].branch.pos_node, NodeId::new(0));
+    assert_eq!(mir.equations[0].branch.pos_node, Some(NodeId::new(0)));
     assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(1)));
 }
 
 #[test]
 fn mir_validation_rejects_branch_participation_out_of_range() {
     let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].branch.pos_node = NodeId::new(99);
+    mir.equations[0].branch.pos_node = Some(NodeId::new(99));
 
     assert_mir_validation_message(&mir, "branch pos_node NodeId(99) is out of range");
 }
@@ -562,7 +585,7 @@ fn mir_lowering_preserves_branch_table_for_named_accesses() {
     assert_eq!(mir.branches.len(), 1);
     assert_eq!(mir.branches[0].id, BranchId::new(0));
     assert_eq!(mir.branches[0].name.as_str(), "res");
-    assert_eq!(mir.branches[0].pos_node, NodeId::new(0));
+    assert_eq!(mir.branches[0].pos_node, Some(NodeId::new(0)));
     assert_eq!(mir.branches[0].neg_node, Some(NodeId::new(1)));
     assert_eq!(mir.branches[0].discipline.as_str(), "electrical");
 
@@ -588,10 +611,64 @@ fn mir_lowering_canonicalizes_ground_alias_branch_labels() {
     let mir = MirModel::from_hir(&hir).expect("lower MIR");
 
     assert_eq!(mir.nodes.len(), 2);
-    assert_eq!(mir.equations[0].branch.pos_node, NodeId::new(1));
+    assert_eq!(mir.equations[0].branch.pos_node, Some(NodeId::new(1)));
     assert_eq!(mir.equations[0].branch.neg_node, None);
     assert_eq!(mir.equations[0].branch.label.as_str(), "mid,0");
     assert!(mir.validate().is_ok());
+}
+
+#[test]
+fn mir_lowering_supports_ground_positive_contribution() {
+    let analyzed =
+        analyze_fixture(ground_positive_source(), "ground_positive").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", ground_positive_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR without panicking");
+
+    assert_eq!(mir.nodes.len(), 1);
+    assert_eq!(mir.equations[0].branch.pos_node, None);
+    assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(0)));
+    assert_eq!(mir.equations[0].branch.label.as_str(), "0,p");
+    assert!(mir.validate().is_ok());
+}
+
+#[test]
+fn mir_lowering_supports_ground_positive_named_branch() {
+    let analyzed = analyze_fixture(
+        ground_positive_named_branch_source(),
+        "ground_positive_branch",
+    )
+    .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", ground_positive_named_branch_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR without panicking");
+
+    assert_eq!(mir.branches.len(), 1);
+    assert_eq!(mir.branches[0].pos_node, None);
+    assert_eq!(mir.branches[0].neg_node, Some(NodeId::new(0)));
+    assert_eq!(mir.equations[0].branch.pos_node, None);
+    assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(0)));
+    assert_eq!(mir.equations[0].branch.label.as_str(), "0,p");
+    assert!(mir.validate().is_ok());
+}
+
+#[test]
+fn mir_validation_rejects_ground_ground_branch_participation() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].branch.pos_node = None;
+    mir.equations[0].branch.neg_node = None;
+    mir.equations[0].branch.label = "0,0".into();
+
+    assert_mir_validation_message(&mir, "must have at least one concrete endpoint");
+}
+
+#[test]
+fn mir_validation_rejects_noncanonical_grounded_branch_label() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].branch.neg_node = None;
+    mir.equations[0].branch.label = "p,gnd".into();
+
+    assert_mir_validation_message(&mir, "branch label 'p,gnd' does not match endpoints p,0");
 }
 
 #[test]
