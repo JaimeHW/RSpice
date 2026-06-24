@@ -7,12 +7,12 @@ use rspice_veriloga::ast::{
 };
 use rspice_veriloga::canonical_ir::{
     BranchId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId, PortId, SourceId,
-    VariableId,
+    StateId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
     CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirExprKind,
     HirLaplaceKind, HirLoop, HirModel, HirStatement, IrDiagnostic, MirAnalysisDomain,
-    MirEquationKind, MirModel, SourceSpanRef, StableDigest,
+    MirEquationKind, MirModel, MirStateSlot, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -308,6 +308,9 @@ fn mir_lowering_makes_contributions_explicit_equations() {
     assert_eq!(mir.equations[0].id, EquationId::new(0));
     assert_eq!(mir.equations[0].contribution, ContributionId::new(0));
     assert_eq!(mir.equations[0].kind, MirEquationKind::Current);
+    assert_eq!(mir.equations[0].branch.label.as_str(), "p,n");
+    assert_eq!(mir.equations[0].branch.pos_node, NodeId::new(0));
+    assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(1)));
     assert!(
         mir.equations[0]
             .active_domains
@@ -358,7 +361,26 @@ fn mir_validation_rejects_equation_contribution_out_of_range() {
     let mut mir = lower_tiny_resistor_mir();
     mir.equations[0].contribution = ContributionId::new(42);
 
-    assert_mir_validation_message(&mir, "contribution ContributionId(42) is out of range");
+    assert_mir_validation_message(
+        &mir,
+        "contribution ContributionId(42) must match equation id EquationId(0)",
+    );
+}
+
+#[test]
+fn mir_validation_rejects_duplicate_contribution_refs() {
+    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mut mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.equations.len(), 2);
+    mir.equations[1].contribution = ContributionId::new(0);
+
+    assert_mir_validation_message(
+        &mir,
+        "contribution ContributionId(0) must match equation id EquationId(1)",
+    );
 }
 
 #[test]
@@ -372,6 +394,149 @@ fn mir_validation_rejects_parameter_alias_name_collision() {
     mir.parameters.push(other);
 
     assert_mir_validation_message(&mir, "parameter alias 'other' collides with parameter name");
+}
+
+#[test]
+fn mir_lowering_preserves_equation_expression_arena() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.expressions, hir.expressions);
+    assert_eq!(mir.equations[0].expression, hir.contributions[0].expression);
+
+    let HirExprKind::Binary { op, left, right } =
+        &mir.expressions[usize::from(mir.equations[0].expression.id)].kind
+    else {
+        panic!("expected MIR equation expression to resolve to binary");
+    };
+    assert_eq!(op.as_str(), "Div");
+    assert!(matches!(
+        mir.expressions[usize::from(*left)].kind,
+        HirExprKind::BranchAccess { .. }
+    ));
+    assert!(matches!(
+        mir.expressions[usize::from(*right)].kind,
+        HirExprKind::Identifier { .. }
+    ));
+}
+
+#[test]
+fn mir_validation_rejects_equation_expression_ref_out_of_range() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].expression.id = ExprId::from(mir.expressions.len());
+
+    assert_mir_validation_message(&mir, "equation 0 expression id ExprId");
+}
+
+#[test]
+fn mir_validation_rejects_equation_expression_kind_mismatch() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].expression.kind = "identifier".into();
+
+    assert_mir_validation_message(
+        &mir,
+        "equation 0 expression kind 'identifier' does not match 'binary'",
+    );
+}
+
+#[test]
+fn mir_lowering_preserves_parameter_semantics() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.parameters.len(), 1);
+    assert_eq!(mir.parameters[0].value_type, hir.parameters[0].value_type);
+    assert_eq!(mir.parameters[0].default, Some(1000.0));
+    assert_eq!(
+        mir.parameters[0].default_expr,
+        hir.parameters[0].default_expr
+    );
+    assert_eq!(mir.parameters[0].range, hir.parameters[0].range);
+}
+
+#[test]
+fn mir_validation_rejects_parameter_default_expr_out_of_range() {
+    let mut mir = lower_tiny_resistor_mir();
+    let default_expr = mir.parameters[0]
+        .default_expr
+        .as_mut()
+        .expect("tiny resistor parameter default expr");
+    default_expr.id = ExprId::from(mir.expressions.len());
+
+    assert_mir_validation_message(&mir, "parameter 'r' default id ExprId");
+}
+
+#[test]
+fn mir_lowering_resolves_named_branch_endpoints() {
+    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.equations[0].branch.label.as_str(), "p,n");
+    assert_eq!(mir.equations[0].branch.pos_node, NodeId::new(0));
+    assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(1)));
+}
+
+#[test]
+fn mir_validation_rejects_branch_participation_out_of_range() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].branch.pos_node = NodeId::new(99);
+
+    assert_mir_validation_message(&mir, "branch pos_node NodeId(99) is out of range");
+}
+
+#[test]
+fn mir_validation_rejects_branch_label_endpoint_mismatch() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].branch.label = "n,p".into();
+
+    assert_mir_validation_message(&mir, "branch label 'n,p' does not match endpoints p,n");
+}
+
+#[test]
+fn mir_validation_rejects_state_slot_owner_out_of_range() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.state_slots.push(MirStateSlot {
+        id: StateId::new(0),
+        name: "hidden_state".into(),
+        owner: EquationId::new(7),
+    });
+
+    assert_mir_validation_message(&mir, "owner EquationId(7) is out of range");
+}
+
+#[test]
+fn mir_validation_rejects_external_node_after_internal_node() {
+    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mut mir = MirModel::from_hir(&hir).expect("lower MIR");
+    mir.nodes[1].is_external = false;
+    mir.nodes[2].is_external = true;
+
+    assert_mir_validation_message(&mir, "external nodes must precede internal nodes");
+}
+
+#[test]
+fn mir_validation_rejects_duplicate_active_domains() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.equations[0].active_domains.push(MirAnalysisDomain::Dc);
+
+    assert_mir_validation_message(&mir, "duplicate active domain Dc");
+}
+
+#[test]
+fn mir_validation_rejects_empty_module_name() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.module_name = "".into();
+
+    assert_mir_validation_message(&mir, "MIR module name must not be empty");
 }
 
 #[test]

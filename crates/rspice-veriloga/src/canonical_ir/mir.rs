@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use super::hir::{HirContributionKind, HirModel};
+use super::hir::{
+    CanonicalValueType, HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirModel,
+    HirParamRange,
+};
 use super::{
     CompilerPhase, ContributionId, EquationId, IrDiagnostic, IrValidationResult, NodeId, ParamId,
     SourceSpanRef, StateId,
@@ -35,7 +38,10 @@ pub struct MirNode {
 pub struct MirParameterSlot {
     pub id: ParamId,
     pub name: SmolStr,
+    pub value_type: CanonicalValueType,
     pub default: Option<f64>,
+    pub default_expr: Option<HirExprRef>,
+    pub range: Option<HirParamRange>,
     pub aliases: Vec<SmolStr>,
 }
 
@@ -43,15 +49,23 @@ pub struct MirParameterSlot {
 pub struct MirStateSlot {
     pub id: StateId,
     pub name: SmolStr,
-    pub owner: ContributionId,
+    pub owner: EquationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MirBranchRef {
+    pub label: SmolStr,
+    pub pos_node: NodeId,
+    pub neg_node: Option<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MirEquation {
     pub id: EquationId,
     pub contribution: ContributionId,
-    pub branch: SmolStr,
+    pub branch: MirBranchRef,
     pub kind: MirEquationKind,
+    pub expression: HirExprRef,
     pub active_domains: Vec<MirAnalysisDomain>,
     pub span: SourceSpanRef,
 }
@@ -63,6 +77,7 @@ pub struct MirModel {
     pub parameters: Vec<MirParameterSlot>,
     pub state_slots: Vec<MirStateSlot>,
     pub equations: Vec<MirEquation>,
+    pub expressions: Vec<HirExpression>,
 }
 
 impl MirModel {
@@ -98,11 +113,15 @@ impl MirModel {
             .map(|parameter| MirParameterSlot {
                 id: parameter.id,
                 name: parameter.name.clone(),
+                value_type: parameter.value_type,
                 default: parameter.default,
+                default_expr: parameter.default_expr.clone(),
+                range: parameter.range.clone(),
                 aliases: parameter.aliases.clone(),
             })
             .collect();
 
+        let node_ids_by_name = node_ids_by_name(&nodes);
         let equations = hir
             .contributions
             .iter()
@@ -110,8 +129,9 @@ impl MirModel {
             .map(|(index, contribution)| MirEquation {
                 id: EquationId::from(index),
                 contribution: contribution.id,
-                branch: contribution.branch.clone(),
+                branch: resolve_branch_ref(&contribution.branch, hir, &node_ids_by_name),
                 kind: MirEquationKind::from(contribution.kind),
+                expression: contribution.expression.clone(),
                 active_domains: default_active_domains(),
                 span: contribution.span,
             })
@@ -123,6 +143,7 @@ impl MirModel {
             parameters,
             state_slots: Vec::new(),
             equations,
+            expressions: hir.expressions.clone(),
         };
 
         mir.validate().map(|()| mir)
@@ -130,6 +151,13 @@ impl MirModel {
 
     pub fn validate(&self) -> IrValidationResult {
         let mut diagnostics = Vec::new();
+
+        if self.module_name.is_empty() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                "MIR module name must not be empty",
+            ));
+        }
 
         if self.nodes.is_empty() {
             diagnostics.push(IrDiagnostic::global_error(
@@ -142,10 +170,17 @@ impl MirModel {
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_state_slot_ids(&mut diagnostics, &self.state_slots);
         validate_dense_equation_ids(&mut diagnostics, &self.equations);
+        validate_dense_expression_ids(&mut diagnostics, &self.expressions);
         validate_node_names(&mut diagnostics, &self.nodes);
         validate_parameter_names_and_aliases(&mut diagnostics, &self.parameters);
+        validate_parameter_default_exprs(&mut diagnostics, &self.parameters, &self.expressions);
         validate_state_slot_owners(&mut diagnostics, &self.state_slots, self.equations.len());
-        validate_equations(&mut diagnostics, &self.equations);
+        validate_equations(
+            &mut diagnostics,
+            &self.equations,
+            &self.expressions,
+            &self.nodes,
+        );
 
         if diagnostics.is_empty() {
             Ok(())
@@ -172,6 +207,79 @@ fn default_active_domains() -> Vec<MirAnalysisDomain> {
         MirAnalysisDomain::Transient,
         MirAnalysisDomain::OperatingPoint,
     ]
+}
+
+fn node_ids_by_name(nodes: &[MirNode]) -> HashMap<SmolStr, NodeId> {
+    nodes
+        .iter()
+        .map(|node| (node.name.clone(), node.id))
+        .collect()
+}
+
+fn resolve_branch_ref(
+    branch_label: &SmolStr,
+    hir: &HirModel,
+    node_ids_by_name: &HashMap<SmolStr, NodeId>,
+) -> MirBranchRef {
+    let (pos_name, neg_name) = hir
+        .branches
+        .iter()
+        .find(|branch| branch.name == *branch_label)
+        .map(|branch| {
+            (
+                branch.pos_node.clone(),
+                if branch.neg_node.is_empty() {
+                    None
+                } else {
+                    Some(branch.neg_node.clone())
+                },
+            )
+        })
+        .unwrap_or_else(|| {
+            if let Some((pos, neg)) = branch_label.split_once(',') {
+                (pos.into(), Some(neg.into()))
+            } else {
+                (branch_label.clone(), None)
+            }
+        });
+
+    let pos_node = *node_ids_by_name
+        .get(&pos_name)
+        .expect("validated HIR branch pos node must resolve to MIR node");
+    let neg_node = neg_name
+        .as_ref()
+        .filter(|name| !is_ground_name(name, hir))
+        .map(|name| {
+            *node_ids_by_name
+                .get(name)
+                .expect("validated HIR branch neg node must resolve to MIR node")
+        });
+    let label = if hir
+        .branches
+        .iter()
+        .any(|branch| branch.name == *branch_label)
+    {
+        match neg_name {
+            Some(neg_name) => format!("{pos_name},{neg_name}").into(),
+            None => pos_name.clone(),
+        }
+    } else {
+        branch_label.clone()
+    };
+
+    MirBranchRef {
+        label,
+        pos_node,
+        neg_node,
+    }
+}
+
+fn is_ground_name(name: &str, hir: &HirModel) -> bool {
+    name == "0"
+        || hir
+            .ground_nodes
+            .iter()
+            .any(|ground| ground.as_str() == name)
 }
 
 fn validate_dense_node_ids(diagnostics: &mut Vec<IrDiagnostic>, nodes: &[MirNode]) {
@@ -240,10 +348,40 @@ fn validate_dense_equation_ids(diagnostics: &mut Vec<IrDiagnostic>, equations: &
     }
 }
 
+fn validate_dense_expression_ids(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expressions: &[HirExpression],
+) {
+    for (expected, expression) in expressions.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("MIR expression count exceeds u32::MAX");
+        if expression.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR expression IDs must be dense: expected ExprId({}) at index {}, found {}",
+                    expected, expected, expression.id
+                ),
+            ));
+        }
+    }
+}
+
 fn validate_node_names(diagnostics: &mut Vec<IrDiagnostic>, nodes: &[MirNode]) {
     let mut names = HashSet::new();
+    let mut saw_internal = false;
 
     for node in nodes {
+        if node.is_external {
+            if saw_internal {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::MirValidation,
+                    "MIR external nodes must precede internal nodes",
+                ));
+            }
+        } else {
+            saw_internal = true;
+        }
+
         if node.name.is_empty() {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,
@@ -326,6 +464,23 @@ fn validate_parameter_names_and_aliases(
     }
 }
 
+fn validate_parameter_default_exprs(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    parameters: &[MirParameterSlot],
+    expressions: &[HirExpression],
+) {
+    for parameter in parameters {
+        if let Some(default_expr) = &parameter.default_expr {
+            validate_expr_ref(
+                diagnostics,
+                &format!("parameter '{}' default", parameter.name),
+                default_expr,
+                expressions,
+            );
+        }
+    }
+}
+
 fn validate_state_slot_owners(
     diagnostics: &mut Vec<IrDiagnostic>,
     state_slots: &[MirStateSlot],
@@ -344,20 +499,31 @@ fn validate_state_slot_owners(
     }
 }
 
-fn validate_equations(diagnostics: &mut Vec<IrDiagnostic>, equations: &[MirEquation]) {
+fn validate_equations(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    equations: &[MirEquation],
+    expressions: &[HirExpression],
+    nodes: &[MirNode],
+) {
     for equation in equations {
-        if usize::from(equation.contribution) >= equations.len() {
+        if equation.contribution.index() != equation.id.index() {
             diagnostics.push(IrDiagnostic::error(
                 CompilerPhase::MirValidation,
                 format!(
-                    "MIR equation {} contribution {} is out of range for {} equations",
-                    equation.id,
-                    equation.contribution,
-                    equations.len()
+                    "MIR equation {} contribution {} must match equation id {}",
+                    equation.id, equation.contribution, equation.id
                 ),
                 equation.span,
             ));
         }
+
+        validate_expr_ref(
+            diagnostics,
+            &format!("equation {} expression", equation.id.index()),
+            &equation.expression,
+            expressions,
+        );
+        validate_branch_ref(diagnostics, equation, nodes);
 
         if equation.active_domains.is_empty() {
             diagnostics.push(IrDiagnostic::error(
@@ -369,5 +535,142 @@ fn validate_equations(diagnostics: &mut Vec<IrDiagnostic>, equations: &[MirEquat
                 equation.span,
             ));
         }
+
+        let mut domains = HashSet::new();
+        for domain in &equation.active_domains {
+            if !domains.insert(*domain) {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::MirValidation,
+                    format!(
+                        "MIR equation {} has duplicate active domain {:?}",
+                        equation.id, domain
+                    ),
+                    equation.span,
+                ));
+            }
+        }
+    }
+}
+
+fn validate_expr_ref(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    label: &str,
+    expr_ref: &HirExprRef,
+    expressions: &[HirExpression],
+) {
+    let index = usize::from(expr_ref.id);
+    let Some(expression) = expressions.get(index) else {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR expression ref {} id {} is outside expression arena length {}",
+                label,
+                expr_ref.id,
+                expressions.len()
+            ),
+            expr_ref.span,
+        ));
+        return;
+    };
+
+    let actual_kind = hir_expr_kind_label(&expression.kind);
+    if expr_ref.kind.as_str() != actual_kind {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR expression ref {} kind '{}' does not match '{}'",
+                label, expr_ref.kind, actual_kind
+            ),
+            expr_ref.span,
+        ));
+    }
+}
+
+fn validate_branch_ref(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    equation: &MirEquation,
+    nodes: &[MirNode],
+) {
+    let Some(pos_name) = node_name(nodes, equation.branch.pos_node) else {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR equation {} branch pos_node {} is out of range for {} nodes",
+                equation.id,
+                equation.branch.pos_node,
+                nodes.len()
+            ),
+            equation.span,
+        ));
+        return;
+    };
+
+    let neg_name = match equation.branch.neg_node {
+        Some(neg_node) => {
+            let Some(name) = node_name(nodes, neg_node) else {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::MirValidation,
+                    format!(
+                        "MIR equation {} branch neg_node {} is out of range for {} nodes",
+                        equation.id,
+                        neg_node,
+                        nodes.len()
+                    ),
+                    equation.span,
+                ));
+                return;
+            };
+            Some(name)
+        }
+        None => None,
+    };
+
+    let canonical_label = match neg_name {
+        Some(neg_name) => format!("{pos_name},{neg_name}"),
+        None => pos_name.to_string(),
+    };
+    let label_matches = if equation.branch.neg_node.is_none() {
+        let zero_label = format!("{pos_name},0");
+        let gnd_label = format!("{pos_name},gnd");
+        equation.branch.label.as_str() == canonical_label
+            || equation.branch.label.as_str() == zero_label
+            || equation.branch.label.as_str() == gnd_label
+    } else {
+        equation.branch.label.as_str() == canonical_label
+    };
+
+    if !label_matches {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            format!(
+                "MIR equation {} branch label '{}' does not match endpoints {}",
+                equation.id, equation.branch.label, canonical_label
+            ),
+            equation.span,
+        ));
+    }
+}
+
+fn node_name(nodes: &[MirNode], id: NodeId) -> Option<&str> {
+    nodes.get(usize::from(id)).map(|node| node.name.as_str())
+}
+
+fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
+    match kind {
+        HirExprKind::Number { .. } => "number",
+        HirExprKind::StringLiteral { .. } => "string",
+        HirExprKind::Identifier { .. } => "identifier",
+        HirExprKind::SystemFunction { .. } => "system_function",
+        HirExprKind::Binary { .. } => "binary",
+        HirExprKind::Unary { .. } => "unary",
+        HirExprKind::Conditional { .. } => "conditional",
+        HirExprKind::Call { .. } => "call",
+        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
+        HirExprKind::ArrayAccess { .. } => "array_access",
+        HirExprKind::ArrayLiteral { .. } => "array_literal",
+        HirExprKind::AnalogOperator { .. }
+        | HirExprKind::Laplace { .. }
+        | HirExprKind::Zi { .. } => "analog_operator",
+        HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }
