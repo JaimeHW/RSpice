@@ -5,11 +5,16 @@
 //! while this IR is introduced and verified.
 
 pub mod diagnostic;
+pub mod hir;
 pub mod ids;
 pub mod metadata;
 
 pub use diagnostic::{
     CompilerPhase, DiagnosticSeverity, IrDiagnostic, IrValidationResult, SourceSpanRef,
+};
+pub use hir::{
+    CanonicalValueType, HirArray, HirBranch, HirContribution, HirContributionKind, HirExprRef,
+    HirModel, HirParamRange, HirParameter, HirPort, HirStatement, HirVariable,
 };
 pub use ids::{
     ArrayId, BranchId, BranchUnknownId, ContributionId, DisciplineId, EquationId, ExprId, ModuleId,

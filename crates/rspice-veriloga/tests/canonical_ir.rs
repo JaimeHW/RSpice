@@ -2,9 +2,38 @@ use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 
 use rspice_veriloga::canonical_ir::{
-    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, IrDiagnostic, SourceSpanRef, StableDigest,
+    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirModel,
+    IrDiagnostic, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::canonical_ir::{ModuleId, ParamId, PortId, SourceId};
+use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap};
+
+fn analyze_fixture(
+    source: &str,
+    module_name: &str,
+) -> rspice_veriloga::CompileResult<rspice_veriloga::semantic::AnalyzedModule> {
+    let mut source_map = SourceMap::new();
+    let source_id = source_map.add_source_mut("<fixture>", source);
+    let tokens = Lexer::new(source, source_id).collect_tokens()?;
+    let source_file = Parser::new(&tokens).parse()?;
+    let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+    analyzed
+        .modules
+        .get(module_name)
+        .cloned()
+        .ok_or_else(|| rspice_veriloga::CompileError::ModuleSelection(module_name.to_string()))
+}
+
+fn tiny_resistor_source() -> &'static str {
+    r#"
+module tiny_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#
+}
 
 #[test]
 fn typed_ids_are_dense_copyable_and_displayable() {
@@ -107,4 +136,22 @@ fn diagnostics_can_be_global_without_source_span() {
     let rendered = diagnostic.to_string();
     assert!(rendered.contains("Artifact"));
     assert!(rendered.contains("global"));
+}
+
+#[test]
+fn hir_lowering_preserves_analyzed_module_surface() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    assert_eq!(hir.module_name.as_str(), "tiny_res");
+    assert_eq!(hir.ports.len(), 2);
+    assert_eq!(hir.ports[0].name.as_str(), "p");
+    assert_eq!(hir.ports[1].name.as_str(), "n");
+    assert_eq!(hir.parameters.len(), 1);
+    assert_eq!(hir.parameters[0].name.as_str(), "r");
+    assert_eq!(hir.parameters[0].default, Some(1000.0));
+    assert_eq!(hir.contributions.len(), 1);
+    assert_eq!(hir.contributions[0].kind, HirContributionKind::Current);
+    assert!(hir.validate().is_ok());
 }
