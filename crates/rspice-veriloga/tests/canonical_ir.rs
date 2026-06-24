@@ -19,6 +19,7 @@ use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPo
 use rspice_veriloga::source::Span;
 use rspice_veriloga::types::ValueType;
 use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn analyze_fixture(
@@ -266,6 +267,33 @@ endmodule
 "#
 }
 
+struct TempSourceFile {
+    path: std::path::PathBuf,
+}
+
+impl TempSourceFile {
+    fn new(contents: &str) -> Self {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rspice-canonical-ir-{unique}.va"));
+        std::fs::write(&path, contents).expect("write fixture");
+
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempSourceFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 #[test]
 fn compiler_can_emit_canonical_ir_without_bytecode_runtime() {
     let artifact = VerilogACompiler::default()
@@ -292,12 +320,10 @@ fn compiler_rejects_ambiguous_canonical_ir_module_selection() {
     let err = VerilogACompiler::default()
         .compile_canonical_ir(multi_module_source())
         .expect_err("multi-module source requires a module name");
-    let message = err.to_string();
 
-    assert!(
-        message.contains("multiple modules")
-            || (message.contains("first_res") && message.contains("second_res")),
-        "unexpected error: {message}"
+    assert_eq!(
+        err.to_string(),
+        "Module selection error: the file declares multiple modules: first_res, second_res; select one by name"
     );
 }
 
@@ -315,36 +341,33 @@ fn canonical_ir_compile_preserves_parse_errors() {
 
 #[test]
 fn compiler_can_emit_file_canonical_ir_with_metadata() {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("rspice-canonical-ir-{unique}.va"));
-    std::fs::write(&path, tiny_resistor_source()).expect("write fixture");
-    let canonical_path = path.canonicalize().expect("canonical fixture path");
+    let fixture = TempSourceFile::new(tiny_resistor_source());
+    let canonical_path = fixture
+        .path()
+        .canonicalize()
+        .expect("canonical fixture path");
+    let canonical_path_text = canonical_path.display().to_string();
 
     let compiled = VerilogACompiler::default()
-        .compile_file_canonical_ir_with_metadata(&path, None)
+        .compile_file_canonical_ir_with_metadata(fixture.path(), None)
         .expect("compile canonical IR from file");
 
     assert!(compiled.artifact.validate().is_ok());
     assert_eq!(compiled.dependencies, vec![canonical_path]);
     assert_eq!(
         compiled.artifact.metadata.source_package.as_str(),
-        path.to_string_lossy()
+        canonical_path_text
     );
     assert_eq!(
         compiled.artifact.hir.source_package.as_str(),
-        path.to_string_lossy()
+        canonical_path_text
     );
     assert!(
         compiled
             .artifact
             .dump_text()
-            .contains(&format!("source_package={}", path.to_string_lossy()))
+            .contains(&format!("source_package={canonical_path_text}"))
     );
-
-    std::fs::remove_file(path).expect("remove fixture");
 }
 
 #[test]
