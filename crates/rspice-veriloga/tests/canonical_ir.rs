@@ -51,6 +51,15 @@ fn assert_validation_message(hir: &HirModel, expected_substring: &str) {
     );
 }
 
+fn contribution_branch_access_id(hir: &HirModel) -> ExprId {
+    let root_id = hir.contributions[0].expression.id;
+    let HirExprKind::Binary { left, .. } = &hir.expressions[usize::from(root_id)].kind else {
+        panic!("expected contribution expression to be binary");
+    };
+
+    *left
+}
+
 fn tiny_resistor_source() -> &'static str {
     r#"
 module tiny_res(p, n);
@@ -496,6 +505,50 @@ fn hir_validation_rejects_dangling_assignment_index_expression_ref() {
     assignment.index.as_mut().expect("assignment index").id = dangling_id;
 
     assert_validation_message(&hir, "expression ref assignment 'xs' index id ExprId");
+}
+
+#[test]
+fn hir_validation_rejects_unknown_branch_access_nodes() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let mut missing_pos = hir.clone();
+    let branch_access_id = contribution_branch_access_id(&missing_pos);
+    let HirExprKind::BranchAccess { pos, .. } =
+        &mut missing_pos.expressions[usize::from(branch_access_id)].kind
+    else {
+        panic!("expected branch access expression");
+    };
+    *pos = "missing".into();
+    assert_validation_message(&missing_pos, "unknown branch access node 'missing'");
+
+    let mut missing_neg = hir;
+    let branch_access_id = contribution_branch_access_id(&missing_neg);
+    let HirExprKind::BranchAccess { neg, .. } =
+        &mut missing_neg.expressions[usize::from(branch_access_id)].kind
+    else {
+        panic!("expected branch access expression");
+    };
+    *neg = Some("missing".into());
+    assert_validation_message(&missing_neg, "unknown branch access node 'missing'");
+}
+
+#[test]
+fn hir_validation_rejects_unknown_named_branch_access() {
+    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let root_id = hir.contributions[0].expression.id;
+
+    hir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
+        access: "V".into(),
+        name: "missing".into(),
+    };
+    hir.contributions[0].expression.kind = "branch_access".into();
+
+    assert_validation_message(&hir, "unknown named branch access 'missing'");
 }
 
 #[test]

@@ -466,6 +466,9 @@ impl HirModel {
     }
 
     fn validate_expressions(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let known_nodes = self.known_node_names();
+        let declared_branches = self.declared_branch_names();
+
         for (expected, expression) in self.expressions.iter().enumerate() {
             let expected = u32::try_from(expected).expect("HIR expression count exceeds u32::MAX");
             if expression.id.index() != expected {
@@ -478,7 +481,12 @@ impl HirModel {
                 ));
             }
 
-            self.validate_expression_children(diagnostics, expression);
+            self.validate_expression_children(
+                diagnostics,
+                expression,
+                &known_nodes,
+                &declared_branches,
+            );
         }
     }
 
@@ -486,13 +494,28 @@ impl HirModel {
         &self,
         diagnostics: &mut Vec<IrDiagnostic>,
         expression: &HirExpression,
+        known_nodes: &HashSet<SmolStr>,
+        declared_branches: &HashSet<SmolStr>,
     ) {
         match &expression.kind {
             HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
-            | HirExprKind::Identifier { .. }
-            | HirExprKind::BranchAccess { .. }
-            | HirExprKind::NamedBranchAccess { .. } => {}
+            | HirExprKind::Identifier { .. } => {}
+            HirExprKind::BranchAccess { pos, neg, .. } => {
+                self.validate_branch_access_node(diagnostics, expression, pos, known_nodes);
+                if let Some(neg) = neg {
+                    self.validate_branch_access_node(diagnostics, expression, neg, known_nodes);
+                }
+            }
+            HirExprKind::NamedBranchAccess { name, .. } => {
+                if !declared_branches.contains(name) {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::HirValidation,
+                        format!("HIR unknown named branch access '{}'", name),
+                        expression.span,
+                    ));
+                }
+            }
             HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
                 self.validate_expression_child_list(diagnostics, expression, "arg", args);
             }
@@ -532,6 +555,22 @@ impl HirModel {
             HirExprKind::NoiseSource { operands, .. } => {
                 self.validate_expression_child_list(diagnostics, expression, "operand", operands);
             }
+        }
+    }
+
+    fn validate_branch_access_node(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        node: &SmolStr,
+        known_nodes: &HashSet<SmolStr>,
+    ) {
+        if !known_nodes.contains(node) {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!("HIR unknown branch access node '{}'", node),
+                expression.span,
+            ));
         }
     }
 
@@ -814,11 +853,7 @@ impl HirModel {
 
     fn validate_contributions(&self, diagnostics: &mut Vec<IrDiagnostic>) {
         let known_nodes = self.known_node_names();
-        let declared_branches: HashSet<_> = self
-            .branches
-            .iter()
-            .map(|branch| branch.name.clone())
-            .collect();
+        let declared_branches = self.declared_branch_names();
 
         for contribution in &self.contributions {
             self.validate_expr_ref(
@@ -1015,6 +1050,14 @@ impl HirModel {
         known.extend(self.internal_nodes.iter().map(|node| node.name.clone()));
         known.extend(self.ground_nodes.iter().cloned());
         known
+    }
+
+    fn declared_branch_names(&self) -> HashSet<SmolStr> {
+        self.branches
+            .iter()
+            .filter(|branch| !branch.name.is_empty())
+            .map(|branch| branch.name.clone())
+            .collect()
     }
 }
 
