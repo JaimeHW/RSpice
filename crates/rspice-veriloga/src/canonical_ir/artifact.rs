@@ -202,6 +202,7 @@ fn artifact_diagnostics(
     }
 
     validate_hir_mir_nodes(&mut diagnostics, hir, mir);
+    validate_hir_mir_ground_nodes(&mut diagnostics, hir, mir);
     validate_hir_mir_parameters(&mut diagnostics, hir, mir);
     validate_hir_mir_branches(&mut diagnostics, hir, mir);
     validate_hir_mir_expressions(&mut diagnostics, hir, mir);
@@ -254,6 +255,20 @@ fn validate_hir_mir_nodes(diagnostics: &mut Vec<IrDiagnostic>, hir: &HirModel, m
                 node_index, internal_node.name, node.name, node.is_external
             )));
         }
+    }
+}
+
+fn validate_hir_mir_ground_nodes(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    hir: &HirModel,
+    mir: &MirModel,
+) {
+    if hir.ground_nodes != mir.ground_nodes {
+        diagnostics.push(artifact_error(format!(
+            "HIR/MIR ground nodes must match: hir={} mir={}",
+            join_smol(&hir.ground_nodes),
+            join_smol(&mir.ground_nodes)
+        )));
     }
 }
 
@@ -748,7 +763,7 @@ fn write_hir_assignment(out: &mut String, label: &str, assignment: &HirAssignmen
         "{}=assignment target={} target_name={} index={} expr={} expr_type={} span={}",
         label,
         assignment.target.index(),
-        assignment.target_name,
+        enc_str(&assignment.target_name),
         expr_ref_label(assignment.index.as_ref()),
         expr_ref_label(Some(&assignment.expr)),
         value_type_label(assignment.expr_type),

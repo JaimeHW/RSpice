@@ -677,6 +677,21 @@ fn artifact_validation_rejects_hir_mir_equation_expression_mismatch() {
 }
 
 #[test]
+fn artifact_validation_rejects_hir_mir_ground_node_mismatch() {
+    let (metadata, hir, mut mir, opt) = lower_fixture_parts(ground_alias_source(), "ground_alias");
+    assert!(mir.validate().is_ok());
+    mir.ground_nodes = vec!["different_ground".into()];
+    assert!(mir.validate().is_ok());
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("HIR/MIR ground node mismatch must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("ground nodes")
+    }));
+}
+
+#[test]
 fn artifact_validation_rejects_newton_schedule_mismatch() {
     let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
