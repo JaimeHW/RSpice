@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 
 use rspice_veriloga::canonical_ir::{
+    BranchId, ContributionId, ModuleId, NodeId, ParamId, PortId, SourceId, VariableId,
+};
+use rspice_veriloga::canonical_ir::{
     CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirModel,
     HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
 };
-use rspice_veriloga::canonical_ir::{ModuleId, NodeId, ParamId, PortId, SourceId, VariableId};
 use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap};
 
 fn analyze_fixture(
@@ -72,6 +74,22 @@ module branch_potential(p, n);
     electrical p, n;
     branch (p, n) res;
     analog V(res) <+ 1.0;
+endmodule
+"#
+}
+
+fn hir_validation_surface_source() -> &'static str {
+    r#"
+module validation_surface(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical mid;
+    parameter real gain = 1.0;
+    branch (p, mid) probe;
+    analog begin
+        I(probe) <+ gain * V(probe);
+        I(mid, n) <+ V(mid, n);
+    end
 endmodule
 "#
 }
@@ -256,14 +274,19 @@ fn hir_lowering_represents_named_branch_potential_contribution() {
 
 #[test]
 fn hir_validation_rejects_malformed_structure() {
-    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let analyzed = analyze_fixture(hir_validation_surface_source(), "validation_surface")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", hir_validation_surface_source());
     let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
 
     hir.ports[1].id = PortId::new(7);
     hir.parameters[0].aliases.push("shared".into());
+    hir.parameters.push(hir.parameters[0].clone());
+    hir.parameters[1].id = ParamId::new(1);
     hir.parameters[1].aliases.push("shared".into());
-    hir.arrays[0].base = VariableId::from(hir.variables.len());
+    hir.branches[0].id = BranchId::new(7);
+    hir.contributions[0].id = ContributionId::new(9);
+    hir.internal_nodes[0].id = NodeId::new(11);
 
     let diagnostics = hir.validate().expect_err("malformed HIR must fail");
     let messages: Vec<_> = diagnostics
@@ -284,6 +307,16 @@ fn hir_validation_rejects_malformed_structure() {
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("array 'xs' base"))
+            .any(|message| message.contains("branch IDs must be dense"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("contribution IDs must be dense"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("internal node IDs must be dense"))
     );
 }

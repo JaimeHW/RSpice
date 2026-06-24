@@ -321,6 +321,9 @@ impl HirModel {
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_variable_ids(&mut diagnostics, &self.variables);
         validate_dense_array_ids(&mut diagnostics, &self.arrays);
+        validate_dense_branch_ids(&mut diagnostics, &self.branches);
+        validate_dense_contribution_ids(&mut diagnostics, &self.contributions);
+        validate_dense_internal_node_ids(&mut diagnostics, &self.internal_nodes);
         self.validate_arrays(&mut diagnostics);
         self.validate_parameter_aliases(&mut diagnostics);
         self.validate_contributions(&mut diagnostics);
@@ -470,6 +473,57 @@ fn validate_dense_array_ids(diagnostics: &mut Vec<IrDiagnostic>, arrays: &[HirAr
                 format!(
                     "HIR array IDs must be dense: expected ArrayId({}) at index {}, found {}",
                     expected, expected, array.id
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_dense_branch_ids(diagnostics: &mut Vec<IrDiagnostic>, branches: &[HirBranch]) {
+    for (expected, branch) in branches.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("HIR branch count exceeds u32::MAX");
+        if branch.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR branch IDs must be dense: expected BranchId({}) at index {}, found {}",
+                    expected, expected, branch.id
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_dense_contribution_ids(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    contributions: &[HirContribution],
+) {
+    for (expected, contribution) in contributions.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("HIR contribution count exceeds u32::MAX");
+        if contribution.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR contribution IDs must be dense: expected ContributionId({}) at index {}, found {}",
+                    expected, expected, contribution.id
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_dense_internal_node_ids(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    internal_nodes: &[HirInternalNode],
+) {
+    for (expected, internal_node) in internal_nodes.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("HIR internal node count exceeds u32::MAX");
+        if internal_node.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR internal node IDs must be dense: expected NodeId({}) at index {}, found {}",
+                    expected, expected, internal_node.id
                 ),
             ));
         }
