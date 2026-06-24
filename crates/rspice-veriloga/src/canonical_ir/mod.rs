@@ -4,6 +4,7 @@
 //! The existing bytecode and Cranelift paths remain legacy runtime paths
 //! while this IR is introduced and verified.
 
+pub mod artifact;
 pub mod diagnostic;
 pub mod hir;
 pub mod ids;
@@ -11,6 +12,7 @@ pub mod metadata;
 pub mod mir;
 pub mod opt;
 
+pub use artifact::CanonicalIrArtifact;
 pub use diagnostic::{
     CompilerPhase, DiagnosticSeverity, IrDiagnostic, IrValidationResult, SourceSpanRef,
 };

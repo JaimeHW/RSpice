@@ -10,8 +10,8 @@ use rspice_veriloga::canonical_ir::{
     SourceId, StateId, ValueId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
-    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirExprKind,
-    HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic,
+    CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind,
+    HirExprKind, HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic,
     MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptModel, OptOp, OptSchedule,
     OptValue, OptValueType, SourceSpanRef, StableDigest,
 };
@@ -98,6 +98,23 @@ fn lower_tiny_resistor_mir() -> MirModel {
     MirModel::from_hir(&hir).expect("lower MIR")
 }
 
+fn lower_fixture_parts(
+    source: &'static str,
+    module_name: &str,
+) -> (CanonicalMetadata, HirModel, MirModel, OptModel) {
+    let analyzed = analyze_fixture(source, module_name).expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+
+    (metadata, hir, mir, opt)
+}
+
+fn lower_tiny_resistor_parts() -> (CanonicalMetadata, HirModel, MirModel, OptModel) {
+    lower_fixture_parts(tiny_resistor_source(), "tiny_res")
+}
+
 fn lower_internal_node_mir() -> MirModel {
     let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
@@ -122,6 +139,17 @@ module tiny_res(p, n);
     electrical p, n;
     parameter real r = 1000.0 from (0:inf);
     analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#
+}
+
+fn tiny_resistor_alt_source() -> &'static str {
+    r#"
+module tiny_res_alt(a, b);
+    inout a, b;
+    electrical a, b;
+    parameter real r = 2000.0 from (0:inf);
+    analog I(a, b) <+ V(a, b) / r;
 endmodule
 "#
 }
@@ -556,6 +584,95 @@ fn opt_lowering_preserves_multi_equation_order_in_newton_schedule() {
         ]
     );
     assert!(opt.validate().is_ok());
+}
+
+#[test]
+fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
+    let (metadata, hir, mir, opt) = lower_tiny_resistor_parts();
+
+    let artifact =
+        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build artifact");
+    let first = artifact.dump_text();
+    let second = artifact.dump_text();
+
+    assert_eq!(first, second);
+    assert!(first.contains("canonical-veriloga-ir"));
+    assert!(first.contains("schema_version=1"));
+    assert!(first.contains("source_package=fixture"));
+    assert!(first.contains("source_digest="));
+    assert!(first.contains("compiler_version="));
+    assert!(first.contains("hir_digest="));
+    assert!(first.contains("mir_digest="));
+    assert!(first.contains("opt_digest="));
+    assert!(first.contains("hir module=tiny_res ports=2 parameters=1 contributions=1"));
+    assert!(first.contains("mir nodes=2 equations=1"));
+    assert!(first.contains("opt schedules=2"));
+}
+
+#[test]
+fn artifact_validation_rejects_mismatched_module_names() {
+    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    mir.module_name = "other_module".into();
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("module name mismatch must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact
+            && diagnostic.message.contains("module names must match")
+    }));
+}
+
+#[test]
+fn artifact_validation_rejects_mismatched_opt_equation_count() {
+    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
+    opt.equation_count = 2;
+    let newton = opt
+        .schedules
+        .iter_mut()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    newton.ops.push(OptOp::EvaluateEquation {
+        equation: EquationId::new(1),
+    });
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("OptIR equation count mismatch must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact
+            && diagnostic
+                .message
+                .contains("OptIR equation count 2 must match MIR equation count 1")
+    }));
+}
+
+#[test]
+fn artifact_validation_rejects_invalid_child_ir() {
+    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    mir.equations[0].active_domains.clear();
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("invalid MIR must fail");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.phase == CompilerPhase::MirValidation)
+    );
+}
+
+#[test]
+fn artifact_digests_distinguish_same_count_ir_content() {
+    let (metadata, hir, mir, opt) = lower_tiny_resistor_parts();
+    let tiny =
+        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build tiny artifact");
+    let (metadata, hir, mir, opt) = lower_fixture_parts(tiny_resistor_alt_source(), "tiny_res_alt");
+    let alt = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build alt artifact");
+
+    assert_ne!(tiny.hir_digest, alt.hir_digest);
+    assert_ne!(tiny.mir_digest, alt.mir_digest);
+    assert_ne!(tiny.opt_digest, alt.opt_digest);
 }
 
 #[test]
