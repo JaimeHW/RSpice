@@ -66,6 +66,7 @@
 //! - Multi-dimensional arrays; array locals in analog functions
 
 pub mod ast;
+pub mod canonical_ir;
 pub mod codegen;
 pub mod disciplines;
 pub mod error;
