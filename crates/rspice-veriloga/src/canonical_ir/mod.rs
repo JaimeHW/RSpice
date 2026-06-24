@@ -14,8 +14,8 @@ pub use diagnostic::{
 };
 pub use hir::{
     CanonicalValueType, HirArray, HirAssignment, HirBranch, HirContribution, HirContributionKind,
-    HirExprKind, HirExprRef, HirExpression, HirInternalNode, HirLoop, HirModel, HirParamRange,
-    HirParameter, HirPort, HirStatement, HirVariable,
+    HirExprKind, HirExprRef, HirExpression, HirInternalNode, HirLaplaceKind, HirLoop, HirModel,
+    HirParamRange, HirParameter, HirPort, HirStatement, HirVariable, HirZiKind,
 };
 pub use ids::{
     ArrayId, BranchId, BranchUnknownId, ContributionId, DisciplineId, EquationId, ExprId, ModuleId,

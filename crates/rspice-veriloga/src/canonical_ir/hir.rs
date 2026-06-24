@@ -75,6 +75,46 @@ pub struct HirExpression {
     pub span: SourceSpanRef,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirLaplaceKind {
+    ZeroPole {
+        zeros: Vec<ExprId>,
+        poles: Vec<ExprId>,
+    },
+    ZeroDenominator {
+        zeros: Vec<ExprId>,
+        denominator: Vec<ExprId>,
+    },
+    NumeratorPole {
+        numerator: Vec<ExprId>,
+        poles: Vec<ExprId>,
+    },
+    NumeratorDenominator {
+        numerator: Vec<ExprId>,
+        denominator: Vec<ExprId>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirZiKind {
+    ZeroPole {
+        zeros: Vec<ExprId>,
+        poles: Vec<ExprId>,
+    },
+    ZeroDenominator {
+        zeros: Vec<ExprId>,
+        denominator: Vec<ExprId>,
+    },
+    NumeratorPole {
+        numerator: Vec<ExprId>,
+        poles: Vec<ExprId>,
+    },
+    NumeratorDenominator {
+        numerator: Vec<ExprId>,
+        denominator: Vec<ExprId>,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number {
@@ -128,6 +168,14 @@ pub enum HirExprKind {
     AnalogOperator {
         operator: SmolStr,
         operands: Vec<ExprId>,
+    },
+    Laplace {
+        expr: ExprId,
+        kind: HirLaplaceKind,
+    },
+    Zi {
+        expr: ExprId,
+        kind: HirZiKind,
     },
     NoiseSource {
         source: SmolStr,
@@ -402,8 +450,11 @@ impl HirModel {
         validate_dense_branch_ids(&mut diagnostics, &self.branches);
         validate_dense_contribution_ids(&mut diagnostics, &self.contributions);
         validate_dense_internal_node_ids(&mut diagnostics, &self.internal_nodes);
+        self.validate_expressions(&mut diagnostics);
         self.validate_arrays(&mut diagnostics);
         self.validate_parameter_aliases(&mut diagnostics);
+        self.validate_parameter_expression_refs(&mut diagnostics);
+        self.validate_branches(&mut diagnostics);
         self.validate_contributions(&mut diagnostics);
         self.validate_statements(&mut diagnostics, &self.statements);
 
@@ -411,6 +462,225 @@ impl HirModel {
             Ok(())
         } else {
             Err(diagnostics)
+        }
+    }
+
+    fn validate_expressions(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        for (expected, expression) in self.expressions.iter().enumerate() {
+            let expected = u32::try_from(expected).expect("HIR expression count exceeds u32::MAX");
+            if expression.id.index() != expected {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR expression IDs must be dense: expected ExprId({}) at index {}, found {}",
+                        expected, expected, expression.id
+                    ),
+                ));
+            }
+
+            self.validate_expression_children(diagnostics, expression);
+        }
+    }
+
+    fn validate_expression_children(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+    ) {
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::Identifier { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => {}
+            HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+                self.validate_expression_child_list(diagnostics, expression, "arg", args);
+            }
+            HirExprKind::Binary { left, right, .. } => {
+                self.validate_expression_child(diagnostics, expression, "left", *left);
+                self.validate_expression_child(diagnostics, expression, "right", *right);
+            }
+            HirExprKind::Unary { operand, .. } => {
+                self.validate_expression_child(diagnostics, expression, "operand", *operand);
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.validate_expression_child(diagnostics, expression, "condition", *condition);
+                self.validate_expression_child(diagnostics, expression, "then_expr", *then_expr);
+                self.validate_expression_child(diagnostics, expression, "else_expr", *else_expr);
+            }
+            HirExprKind::ArrayAccess { index, .. } => {
+                self.validate_expression_child(diagnostics, expression, "index", *index);
+            }
+            HirExprKind::ArrayLiteral { elements } => {
+                self.validate_expression_child_list(diagnostics, expression, "element", elements);
+            }
+            HirExprKind::AnalogOperator { operands, .. } => {
+                self.validate_expression_child_list(diagnostics, expression, "operand", operands);
+            }
+            HirExprKind::Laplace { expr, kind } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_laplace_children(diagnostics, expression, kind);
+            }
+            HirExprKind::Zi { expr, kind } => {
+                self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_zi_children(diagnostics, expression, kind);
+            }
+            HirExprKind::NoiseSource { operands, .. } => {
+                self.validate_expression_child_list(diagnostics, expression, "operand", operands);
+            }
+        }
+    }
+
+    fn validate_laplace_children(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        kind: &HirLaplaceKind,
+    ) {
+        match kind {
+            HirLaplaceKind::ZeroPole { zeros, poles } => {
+                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
+                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
+            }
+            HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
+                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "denominator",
+                    denominator,
+                );
+            }
+            HirLaplaceKind::NumeratorPole { numerator, poles } => {
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "numerator",
+                    numerator,
+                );
+                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
+            }
+            HirLaplaceKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => {
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "numerator",
+                    numerator,
+                );
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "denominator",
+                    denominator,
+                );
+            }
+        }
+    }
+
+    fn validate_zi_children(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        kind: &HirZiKind,
+    ) {
+        match kind {
+            HirZiKind::ZeroPole { zeros, poles } => {
+                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
+                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
+            }
+            HirZiKind::ZeroDenominator { zeros, denominator } => {
+                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "denominator",
+                    denominator,
+                );
+            }
+            HirZiKind::NumeratorPole { numerator, poles } => {
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "numerator",
+                    numerator,
+                );
+                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
+            }
+            HirZiKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => {
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "numerator",
+                    numerator,
+                );
+                self.validate_expression_child_list(
+                    diagnostics,
+                    expression,
+                    "denominator",
+                    denominator,
+                );
+            }
+        }
+    }
+
+    fn validate_expression_child_list(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        label: &str,
+        children: &[ExprId],
+    ) {
+        for (index, child) in children.iter().copied().enumerate() {
+            self.validate_expression_child(
+                diagnostics,
+                expression,
+                &format!("{label}[{index}]"),
+                child,
+            );
+        }
+    }
+
+    fn validate_expression_child(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        label: &str,
+        child: ExprId,
+    ) {
+        if usize::from(child) >= self.expressions.len() {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR expression {} child {} {} is outside expression arena length {}",
+                    expression.id,
+                    label,
+                    child,
+                    self.expressions.len()
+                ),
+                expression.span,
+            ));
+            return;
+        }
+
+        if child.index() >= expression.id.index() {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR expression {} child {} {} violates expression postorder",
+                    expression.id, label, child
+                ),
+                expression.span,
+            ));
         }
     }
 
@@ -444,16 +714,100 @@ impl HirModel {
     }
 
     fn validate_parameter_aliases(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let parameter_names: HashSet<_> = self
+            .parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect();
+        let mut observed_parameter_names = HashSet::new();
         let mut aliases = HashSet::new();
 
         for parameter in &self.parameters {
+            if !observed_parameter_names.insert(parameter.name.clone()) {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!("HIR duplicate parameter name '{}'", parameter.name),
+                ));
+            }
+
             for alias in &parameter.aliases {
+                if alias.is_empty() {
+                    diagnostics.push(IrDiagnostic::global_error(
+                        CompilerPhase::HirValidation,
+                        format!(
+                            "HIR parameter alias for '{}' must not be empty",
+                            parameter.name
+                        ),
+                    ));
+                }
+
+                if parameter_names.contains(alias) {
+                    diagnostics.push(IrDiagnostic::global_error(
+                        CompilerPhase::HirValidation,
+                        format!(
+                            "HIR parameter alias '{}' collides with parameter name",
+                            alias
+                        ),
+                    ));
+                }
+
                 if !aliases.insert(alias.clone()) {
                     diagnostics.push(IrDiagnostic::global_error(
                         CompilerPhase::HirValidation,
                         format!("HIR duplicate parameter alias '{}'", alias),
                     ));
                 }
+            }
+        }
+    }
+
+    fn validate_parameter_expression_refs(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        for parameter in &self.parameters {
+            if let Some(default_expr) = &parameter.default_expr {
+                self.validate_expr_ref(
+                    diagnostics,
+                    &format!("parameter '{}' default", parameter.name),
+                    default_expr,
+                );
+            }
+        }
+    }
+
+    fn validate_branches(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let known_nodes = self.known_node_names();
+        let mut branch_names = HashSet::new();
+
+        for branch in &self.branches {
+            if branch.name.is_empty() {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    "HIR branch name must not be empty",
+                ));
+            } else if !branch_names.insert(branch.name.clone()) {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!("HIR duplicate branch name '{}'", branch.name),
+                ));
+            }
+
+            if !known_nodes.contains(&branch.pos_node) {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR branch '{}' pos_node '{}' is unknown",
+                        branch.name, branch.pos_node
+                    ),
+                ));
+            }
+
+            if !branch.neg_node.is_empty() && !known_nodes.contains(&branch.neg_node) {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR branch '{}' neg_node '{}' is unknown",
+                        branch.name, branch.neg_node
+                    ),
+                ));
             }
         }
     }
@@ -467,6 +821,12 @@ impl HirModel {
             .collect();
 
         for contribution in &self.contributions {
+            self.validate_expr_ref(
+                diagnostics,
+                &format!("contribution {} expression", contribution.id.index()),
+                &contribution.expression,
+            );
+
             if contribution.branch.is_empty() {
                 diagnostics.push(IrDiagnostic::error(
                     CompilerPhase::HirValidation,
@@ -495,6 +855,19 @@ impl HirModel {
         for statement in statements {
             match statement {
                 HirStatement::Assignment(assignment) => {
+                    self.validate_expr_ref(
+                        diagnostics,
+                        &format!("assignment '{}' expression", assignment.target_name),
+                        &assignment.expr,
+                    );
+                    if let Some(index) = &assignment.index {
+                        self.validate_expr_ref(
+                            diagnostics,
+                            &format!("assignment '{}' index", assignment.target_name),
+                            index,
+                        );
+                    }
+
                     let target_index = usize::from(assignment.target);
                     if target_index >= self.variables.len() {
                         diagnostics.push(IrDiagnostic::error(
@@ -512,9 +885,48 @@ impl HirModel {
                     self.validate_assignment_shape(diagnostics, assignment);
                 }
                 HirStatement::Loop(loop_statement) => {
+                    self.validate_expr_ref(
+                        diagnostics,
+                        "loop condition",
+                        &loop_statement.condition,
+                    );
                     self.validate_statements(diagnostics, &loop_statement.body);
                 }
             }
+        }
+    }
+
+    fn validate_expr_ref(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        owner: &str,
+        expr_ref: &HirExprRef,
+    ) {
+        let index = usize::from(expr_ref.id);
+        let Some(expression) = self.expressions.get(index) else {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR expression ref {} id {} is outside expression arena length {}",
+                    owner,
+                    expr_ref.id,
+                    self.expressions.len()
+                ),
+                expr_ref.span,
+            ));
+            return;
+        };
+
+        let actual_kind = hir_expr_kind_label(&expression.kind);
+        if expr_ref.kind.as_str() != actual_kind {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR expression ref {} kind '{}' does not match '{}'",
+                    owner, expr_ref.kind, actual_kind
+                ),
+                expr_ref.span,
+            ));
         }
     }
 
@@ -969,19 +1381,15 @@ impl HirLowerer {
                 };
             }
             AnalogOperator::Laplace { kind, expr, .. } => {
-                let mut operands = vec![self.lower_expr(expr).id];
-                let operator_name = self.lower_laplace_kind(kind, &mut operands);
-                return HirExprKind::AnalogOperator {
-                    operator: operator_name,
-                    operands,
+                return HirExprKind::Laplace {
+                    expr: self.lower_expr(expr).id,
+                    kind: self.lower_laplace_kind(kind),
                 };
             }
             AnalogOperator::Zi { kind, expr, .. } => {
-                let mut operands = vec![self.lower_expr(expr).id];
-                let operator_name = self.lower_zi_kind(kind, &mut operands);
-                return HirExprKind::AnalogOperator {
-                    operator: operator_name,
-                    operands,
+                return HirExprKind::Zi {
+                    expr: self.lower_expr(expr).id,
+                    kind: self.lower_zi_kind(kind),
                 };
             }
         };
@@ -992,62 +1400,54 @@ impl HirLowerer {
         }
     }
 
-    fn lower_laplace_kind(&mut self, kind: &LaplaceKind, operands: &mut Vec<ExprId>) -> SmolStr {
+    fn lower_laplace_kind(&mut self, kind: &LaplaceKind) -> HirLaplaceKind {
         match kind {
-            LaplaceKind::ZeroPole { zeros, poles } => {
-                operands.extend(self.lower_expr_ids(zeros));
-                operands.extend(self.lower_expr_ids(poles));
-                "LaplaceZeroPole"
-            }
+            LaplaceKind::ZeroPole { zeros, poles } => HirLaplaceKind::ZeroPole {
+                zeros: self.lower_expr_ids(zeros),
+                poles: self.lower_expr_ids(poles),
+            },
             LaplaceKind::ZeroDenominator { zeros, denominator } => {
-                operands.extend(self.lower_expr_ids(zeros));
-                operands.extend(self.lower_expr_ids(denominator));
-                "LaplaceZeroDenominator"
+                HirLaplaceKind::ZeroDenominator {
+                    zeros: self.lower_expr_ids(zeros),
+                    denominator: self.lower_expr_ids(denominator),
+                }
             }
-            LaplaceKind::NumeratorPole { numerator, poles } => {
-                operands.extend(self.lower_expr_ids(numerator));
-                operands.extend(self.lower_expr_ids(poles));
-                "LaplaceNumeratorPole"
-            }
+            LaplaceKind::NumeratorPole { numerator, poles } => HirLaplaceKind::NumeratorPole {
+                numerator: self.lower_expr_ids(numerator),
+                poles: self.lower_expr_ids(poles),
+            },
             LaplaceKind::NumeratorDenominator {
                 numerator,
                 denominator,
-            } => {
-                operands.extend(self.lower_expr_ids(numerator));
-                operands.extend(self.lower_expr_ids(denominator));
-                "LaplaceNumeratorDenominator"
-            }
+            } => HirLaplaceKind::NumeratorDenominator {
+                numerator: self.lower_expr_ids(numerator),
+                denominator: self.lower_expr_ids(denominator),
+            },
         }
-        .into()
     }
 
-    fn lower_zi_kind(&mut self, kind: &ZiKind, operands: &mut Vec<ExprId>) -> SmolStr {
+    fn lower_zi_kind(&mut self, kind: &ZiKind) -> HirZiKind {
         match kind {
-            ZiKind::ZeroPole { zeros, poles } => {
-                operands.extend(self.lower_expr_ids(zeros));
-                operands.extend(self.lower_expr_ids(poles));
-                "ZiZeroPole"
-            }
-            ZiKind::ZeroDenominator { zeros, denominator } => {
-                operands.extend(self.lower_expr_ids(zeros));
-                operands.extend(self.lower_expr_ids(denominator));
-                "ZiZeroDenominator"
-            }
-            ZiKind::NumeratorPole { numerator, poles } => {
-                operands.extend(self.lower_expr_ids(numerator));
-                operands.extend(self.lower_expr_ids(poles));
-                "ZiNumeratorPole"
-            }
+            ZiKind::ZeroPole { zeros, poles } => HirZiKind::ZeroPole {
+                zeros: self.lower_expr_ids(zeros),
+                poles: self.lower_expr_ids(poles),
+            },
+            ZiKind::ZeroDenominator { zeros, denominator } => HirZiKind::ZeroDenominator {
+                zeros: self.lower_expr_ids(zeros),
+                denominator: self.lower_expr_ids(denominator),
+            },
+            ZiKind::NumeratorPole { numerator, poles } => HirZiKind::NumeratorPole {
+                numerator: self.lower_expr_ids(numerator),
+                poles: self.lower_expr_ids(poles),
+            },
             ZiKind::NumeratorDenominator {
                 numerator,
                 denominator,
-            } => {
-                operands.extend(self.lower_expr_ids(numerator));
-                operands.extend(self.lower_expr_ids(denominator));
-                "ZiNumeratorDenominator"
-            }
+            } => HirZiKind::NumeratorDenominator {
+                numerator: self.lower_expr_ids(numerator),
+                denominator: self.lower_expr_ids(denominator),
+            },
         }
-        .into()
     }
 
     fn lower_noise_source(&mut self, source: &NoiseSource) -> HirExprKind {
@@ -1083,6 +1483,26 @@ fn contribution_kind(indirect: bool, is_current: bool) -> HirContributionKind {
         HirContributionKind::Current
     } else {
         HirContributionKind::Potential
+    }
+}
+
+fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
+    match kind {
+        HirExprKind::Number { .. } => "number",
+        HirExprKind::StringLiteral { .. } => "string",
+        HirExprKind::Identifier { .. } => "identifier",
+        HirExprKind::SystemFunction { .. } => "system_function",
+        HirExprKind::Binary { .. } => "binary",
+        HirExprKind::Unary { .. } => "unary",
+        HirExprKind::Conditional { .. } => "conditional",
+        HirExprKind::Call { .. } => "call",
+        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
+        HirExprKind::ArrayAccess { .. } => "array_access",
+        HirExprKind::ArrayLiteral { .. } => "array_literal",
+        HirExprKind::AnalogOperator { .. }
+        | HirExprKind::Laplace { .. }
+        | HirExprKind::Zi { .. } => "analog_operator",
+        HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }
 

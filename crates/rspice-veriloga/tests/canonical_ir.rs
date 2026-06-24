@@ -1,13 +1,20 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::hash::Hash;
 
+use rspice_veriloga::ast::{
+    AnalogOperator, BranchAccess, Expression, LaplaceKind, NumberLit, PortDirection,
+};
 use rspice_veriloga::canonical_ir::{
-    BranchId, ContributionId, ModuleId, NodeId, ParamId, PortId, SourceId, VariableId,
+    BranchId, ContributionId, ExprId, ModuleId, NodeId, ParamId, PortId, SourceId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
     CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirExprKind,
-    HirLoop, HirModel, HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
+    HirLaplaceKind, HirLoop, HirModel, HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
 };
+use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
+use rspice_veriloga::source::Span;
+use rspice_veriloga::types::ValueType;
 use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap};
 
 fn analyze_fixture(
@@ -24,6 +31,24 @@ fn analyze_fixture(
         .get(module_name)
         .cloned()
         .ok_or_else(|| rspice_veriloga::CompileError::ModuleSelection(module_name.to_string()))
+}
+
+fn validation_messages(hir: &HirModel) -> Vec<String> {
+    hir.validate()
+        .expect_err("malformed HIR must fail validation")
+        .into_iter()
+        .map(|diagnostic| diagnostic.message)
+        .collect()
+}
+
+fn assert_validation_message(hir: &HirModel, expected_substring: &str) {
+    let messages = validation_messages(hir);
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains(expected_substring)),
+        "expected diagnostic containing {expected_substring:?}, got {messages:?}"
+    );
 }
 
 fn tiny_resistor_source() -> &'static str {
@@ -262,6 +287,101 @@ fn hir_lowering_preserves_expression_tree_structure() {
 }
 
 #[test]
+fn hir_lowering_preserves_laplace_operand_groups() {
+    let span = Span::dummy();
+    let number = |value: f64, raw: &str| {
+        Expression::Number(NumberLit {
+            value,
+            raw: raw.into(),
+            span,
+        })
+    };
+    let analyzed = AnalyzedModule {
+        name: "laplace_filter".into(),
+        ports: vec![
+            AnalyzedPort {
+                name: "p".into(),
+                direction: PortDirection::Inout,
+                discipline: "electrical".into(),
+                nature_potential: Some("voltage".into()),
+                nature_flow: Some("current".into()),
+            },
+            AnalyzedPort {
+                name: "n".into(),
+                direction: PortDirection::Inout,
+                discipline: "electrical".into(),
+                nature_potential: Some("voltage".into()),
+                nature_flow: Some("current".into()),
+            },
+        ],
+        parameters: Vec::new(),
+        param_aliases: Vec::new(),
+        variables: Vec::new(),
+        branches: Vec::new(),
+        contributions: vec![AnalyzedContribution {
+            branch: "p,n".into(),
+            is_current: false,
+            indirect: false,
+            expression: Expression::AnalogOperator(AnalogOperator::Laplace {
+                kind: LaplaceKind::NumeratorDenominator {
+                    numerator: vec![number(1.0, "1.0"), number(2.0, "2.0")],
+                    denominator: vec![number(0.5, "0.5")],
+                },
+                expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                    access: "I".into(),
+                    pos: "p".into(),
+                    neg: Some("n".into()),
+                    span,
+                })),
+                span,
+            }),
+            expr_type: ValueType::Real,
+            span,
+        }],
+        statements: Vec::new(),
+        internal_nodes: Vec::new(),
+        ground_nodes: Vec::new(),
+        arrays: HashMap::new(),
+        symbol_table: SymbolTable::new(),
+    };
+    let metadata = CanonicalMetadata::for_source("fixture", "laplace_filter");
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let contribution_expr = &hir.contributions[0].expression;
+    let HirExprKind::Laplace { expr, kind } =
+        &hir.expressions[usize::from(contribution_expr.id)].kind
+    else {
+        panic!("expected top-level contribution expression to preserve Laplace structure");
+    };
+
+    assert!(matches!(
+        hir.expressions[usize::from(*expr)].kind,
+        HirExprKind::BranchAccess { .. }
+    ));
+
+    let HirLaplaceKind::NumeratorDenominator {
+        numerator,
+        denominator,
+    } = kind
+    else {
+        panic!("expected laplace_nd to preserve numerator and denominator groups");
+    };
+
+    assert_eq!(numerator.len(), 2);
+    assert_eq!(denominator.len(), 1);
+    assert!(
+        numerator
+            .iter()
+            .all(|id| usize::from(*id) < hir.expressions.len())
+    );
+    assert!(
+        denominator
+            .iter()
+            .all(|id| usize::from(*id) < hir.expressions.len())
+    );
+}
+
+#[test]
 fn hir_lowering_preserves_dynamic_array_assignment_target_and_index() {
     let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
@@ -318,6 +438,115 @@ fn hir_validation_rejects_invalid_contribution_references() {
             .message
             .contains("unknown contribution branch 'p,missing'")
     }));
+}
+
+#[test]
+fn hir_validation_rejects_expression_arena_invariants() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let dangling_id = ExprId::from(hir.expressions.len());
+
+    let mut dangling_contribution_ref = hir.clone();
+    dangling_contribution_ref.contributions[0].expression.id = dangling_id;
+    assert_validation_message(
+        &dangling_contribution_ref,
+        "expression ref contribution 0 expression id ExprId",
+    );
+
+    let mut mismatched_ref_kind = hir.clone();
+    mismatched_ref_kind.contributions[0].expression.kind = "identifier".into();
+    assert_validation_message(
+        &mismatched_ref_kind,
+        "expression ref contribution 0 expression kind 'identifier' does not match 'binary'",
+    );
+
+    let mut dangling_binary_child = hir.clone();
+    let root_id = dangling_binary_child.contributions[0].expression.id;
+    let HirExprKind::Binary { left, .. } =
+        &mut dangling_binary_child.expressions[usize::from(root_id)].kind
+    else {
+        panic!("expected contribution expression to be binary");
+    };
+    *left = dangling_id;
+    assert_validation_message(&dangling_binary_child, "child left ExprId");
+
+    let mut non_postorder_child = hir;
+    let root_id = non_postorder_child.contributions[0].expression.id;
+    let HirExprKind::Binary { left, .. } =
+        &mut non_postorder_child.expressions[usize::from(root_id)].kind
+    else {
+        panic!("expected contribution expression to be binary");
+    };
+    *left = root_id;
+    assert_validation_message(&non_postorder_child, "violates expression postorder");
+}
+
+#[test]
+fn hir_validation_rejects_dangling_assignment_index_expression_ref() {
+    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let dangling_id = ExprId::from(hir.expressions.len());
+
+    let HirStatement::Assignment(assignment) = &mut hir.statements[0] else {
+        panic!("expected dynamic array assignment");
+    };
+    assignment.index.as_mut().expect("assignment index").id = dangling_id;
+
+    assert_validation_message(&hir, "expression ref assignment 'xs' index id ExprId");
+}
+
+#[test]
+fn hir_validation_rejects_malformed_branch_declarations() {
+    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let mut empty_name = hir.clone();
+    empty_name.branches[0].name = "".into();
+    assert_validation_message(&empty_name, "branch name must not be empty");
+
+    let mut duplicate_name = hir.clone();
+    let mut duplicate_branch = duplicate_name.branches[0].clone();
+    duplicate_branch.id = BranchId::new(1);
+    duplicate_name.branches.push(duplicate_branch);
+    assert_validation_message(&duplicate_name, "duplicate branch name 'res'");
+
+    let mut unknown_pos = hir.clone();
+    unknown_pos.branches[0].pos_node = "missing".into();
+    assert_validation_message(&unknown_pos, "branch 'res' pos_node 'missing' is unknown");
+
+    let mut unknown_neg = hir;
+    unknown_neg.branches[0].neg_node = "missing".into();
+    assert_validation_message(&unknown_neg, "branch 'res' neg_node 'missing' is unknown");
+}
+
+#[test]
+fn hir_validation_rejects_parameter_alias_namespace_violations() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let mut empty_alias = hir.clone();
+    empty_alias.parameters[0].aliases.push("".into());
+    assert_validation_message(&empty_alias, "parameter alias for 'r' must not be empty");
+
+    let mut alias_name_collision = hir.clone();
+    alias_name_collision.parameters[0].aliases.push("r".into());
+    assert_validation_message(
+        &alias_name_collision,
+        "parameter alias 'r' collides with parameter name",
+    );
+
+    let mut duplicate_parameter_name = hir;
+    let mut duplicate = duplicate_parameter_name.parameters[0].clone();
+    duplicate.id = ParamId::new(1);
+    duplicate.aliases.clear();
+    duplicate_parameter_name.parameters.push(duplicate);
+    assert_validation_message(&duplicate_parameter_name, "duplicate parameter name 'r'");
 }
 
 #[test]
