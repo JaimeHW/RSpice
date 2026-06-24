@@ -143,17 +143,6 @@ endmodule
 "#
 }
 
-fn tiny_resistor_alt_source() -> &'static str {
-    r#"
-module tiny_res_alt(a, b);
-    inout a, b;
-    electrical a, b;
-    parameter real r = 2000.0 from (0:inf);
-    analog I(a, b) <+ V(a, b) / r;
-endmodule
-"#
-}
-
 fn dynamic_array_source() -> &'static str {
     r#"
 module dyn_array(p, n);
@@ -648,6 +637,69 @@ fn artifact_validation_rejects_mismatched_opt_equation_count() {
 }
 
 #[test]
+fn artifact_validation_rejects_metadata_feature_flag_mismatch() {
+    let (mut metadata, hir, mir, opt) = lower_tiny_resistor_parts();
+    metadata.feature_flags.push("artifact-only".into());
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("metadata feature flags mismatch must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("feature_flags")
+    }));
+}
+
+#[test]
+fn artifact_validation_rejects_hir_mir_parameter_mismatch() {
+    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    mir.parameters[0].name = "conductance".into();
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("HIR/MIR parameter mismatch must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("parameter 0")
+    }));
+}
+
+#[test]
+fn artifact_validation_rejects_hir_mir_equation_expression_mismatch() {
+    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    mir.equations[0].expression.span.end += 1;
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("MIR equation expression mismatch must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact
+            && diagnostic.message.contains("equation 0 expression")
+    }));
+}
+
+#[test]
+fn artifact_validation_rejects_newton_schedule_mismatch() {
+    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    let newton = opt
+        .schedules
+        .iter_mut()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    newton.ops.swap(0, 1);
+
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect_err("Newton schedule mismatch must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact
+            && diagnostic.message.contains("NewtonIteration op 0")
+    }));
+}
+
+#[test]
 fn artifact_validation_rejects_invalid_child_ir() {
     let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
     mir.equations[0].active_domains.clear();
@@ -663,16 +715,55 @@ fn artifact_validation_rejects_invalid_child_ir() {
 }
 
 #[test]
+fn artifact_validate_rejects_stale_digest_and_dump_recomputes_digest() {
+    let (metadata, hir, mir, opt) = lower_tiny_resistor_parts();
+    let mut artifact =
+        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build artifact");
+    let expected_digest = artifact.hir_digest.clone();
+    artifact.hir_digest = "bogus".into();
+
+    let diagnostics = artifact.validate().expect_err("stale digest must fail");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::Artifact && diagnostic.message.contains("hir_digest")
+    }));
+    let dump = artifact.dump_text();
+    assert!(dump.contains(&format!("hir_digest={expected_digest}")));
+    assert!(!dump.contains("hir_digest=bogus"));
+}
+
+#[test]
+fn artifact_digest_encoding_distinguishes_delimited_alias_lists() {
+    let (metadata, mut hir, mut mir, opt) = lower_tiny_resistor_parts();
+    hir.parameters[0].aliases = vec!["a,b".into()];
+    mir.parameters[0].aliases = vec!["a,b".into()];
+    let comma_alias = CanonicalIrArtifact::from_parts(metadata.clone(), hir, mir, opt)
+        .expect("build comma alias artifact");
+
+    let (_, mut hir, mut mir, opt) = lower_tiny_resistor_parts();
+    hir.parameters[0].aliases = vec!["a".into(), "b".into()];
+    mir.parameters[0].aliases = vec!["a".into(), "b".into()];
+    let split_alias = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect("build split alias artifact");
+
+    assert_ne!(comma_alias.hir_digest, split_alias.hir_digest);
+    assert_ne!(comma_alias.mir_digest, split_alias.mir_digest);
+}
+
+#[test]
 fn artifact_digests_distinguish_same_count_ir_content() {
     let (metadata, hir, mir, opt) = lower_tiny_resistor_parts();
-    let tiny =
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build tiny artifact");
-    let (metadata, hir, mir, opt) = lower_fixture_parts(tiny_resistor_alt_source(), "tiny_res_alt");
-    let alt = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build alt artifact");
+    let baseline =
+        CanonicalIrArtifact::from_parts(metadata.clone(), hir.clone(), mir.clone(), opt.clone())
+            .expect("build baseline artifact");
+    let mut changed_hir = hir;
+    changed_hir.ports[0].direction = "output".into();
+    let changed = CanonicalIrArtifact::from_parts(metadata, changed_hir, mir, opt)
+        .expect("build changed artifact");
 
-    assert_ne!(tiny.hir_digest, alt.hir_digest);
-    assert_ne!(tiny.mir_digest, alt.mir_digest);
-    assert_ne!(tiny.opt_digest, alt.opt_digest);
+    assert_ne!(baseline.hir_digest, changed.hir_digest);
+    assert_eq!(baseline.mir_digest, changed.mir_digest);
+    assert_eq!(baseline.opt_digest, changed.opt_digest);
 }
 
 #[test]

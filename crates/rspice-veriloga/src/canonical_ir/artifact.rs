@@ -6,9 +6,10 @@ use super::{
     CanonicalMetadata, CanonicalValueType, CompilerPhase, HirArray, HirAssignment, HirBranch,
     HirContribution, HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirInternalNode,
     HirLaplaceKind, HirLoop, HirModel, HirParamRange, HirParameter, HirPort, HirStatement,
-    HirVariable, HirZiKind, InvalidationClass, IrDiagnostic, MirAnalysisDomain, MirBranch,
-    MirBranchRef, MirEquation, MirEquationKind, MirModel, MirNode, MirParameterSlot, MirStateSlot,
-    OptModel, OptOp, OptSchedule, OptValue, OptValueType, SourceSpanRef, StableDigest,
+    HirVariable, HirZiKind, InvalidationClass, IrDiagnostic, IrValidationResult, MirAnalysisDomain,
+    MirBranch, MirBranchRef, MirEquation, MirEquationKind, MirModel, MirNode, MirParameterSlot,
+    MirStateSlot, OptModel, OptOp, OptSchedule, OptValue, OptValueType, SourceSpanRef,
+    StableDigest,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,18 +30,12 @@ impl CanonicalIrArtifact {
         mir: MirModel,
         opt: OptModel,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        hir.validate()?;
-        mir.validate()?;
-        opt.validate()?;
-
-        let diagnostics = artifact_diagnostics(&metadata, &hir, &mir, &opt);
+        let diagnostics = validate_parts(&metadata, &hir, &mir, &opt);
         if !diagnostics.is_empty() {
             return Err(diagnostics);
         }
 
-        let hir_digest = digest_text(&hir_summary(&hir));
-        let mir_digest = digest_text(&mir_summary(&mir));
-        let opt_digest = digest_text(&opt_summary(&opt));
+        let (hir_digest, mir_digest, opt_digest) = phase_digests(&hir, &mir, &opt);
 
         Ok(Self {
             metadata,
@@ -53,17 +48,49 @@ impl CanonicalIrArtifact {
         })
     }
 
+    pub fn validate(&self) -> IrValidationResult {
+        let mut diagnostics = validate_parts(&self.metadata, &self.hir, &self.mir, &self.opt);
+        let (hir_digest, mir_digest, opt_digest) = phase_digests(&self.hir, &self.mir, &self.opt);
+
+        if self.hir_digest != hir_digest {
+            diagnostics.push(artifact_error(format!(
+                "stored hir_digest '{}' is stale; expected '{}'",
+                self.hir_digest, hir_digest
+            )));
+        }
+        if self.mir_digest != mir_digest {
+            diagnostics.push(artifact_error(format!(
+                "stored mir_digest '{}' is stale; expected '{}'",
+                self.mir_digest, mir_digest
+            )));
+        }
+        if self.opt_digest != opt_digest {
+            diagnostics.push(artifact_error(format!(
+                "stored opt_digest '{}' is stale; expected '{}'",
+                self.opt_digest, opt_digest
+            )));
+        }
+
+        if diagnostics.is_empty() {
+            Ok(())
+        } else {
+            Err(diagnostics)
+        }
+    }
+
     pub fn dump_text(&self) -> String {
         let mut out = String::new();
+        let (hir_digest, mir_digest, opt_digest) = phase_digests(&self.hir, &self.mir, &self.opt);
+
         writeln!(out, "canonical-veriloga-ir").expect("write to string");
         writeln!(out, "schema_version={}", self.metadata.schema_version).expect("write to string");
         writeln!(out, "source_package={}", self.metadata.source_package).expect("write to string");
         writeln!(out, "source_digest={}", self.metadata.source_digest).expect("write to string");
         writeln!(out, "compiler_version={}", self.metadata.compiler_version)
             .expect("write to string");
-        writeln!(out, "hir_digest={}", self.hir_digest).expect("write to string");
-        writeln!(out, "mir_digest={}", self.mir_digest).expect("write to string");
-        writeln!(out, "opt_digest={}", self.opt_digest).expect("write to string");
+        writeln!(out, "hir_digest={}", hir_digest).expect("write to string");
+        writeln!(out, "mir_digest={}", mir_digest).expect("write to string");
+        writeln!(out, "opt_digest={}", opt_digest).expect("write to string");
         writeln!(
             out,
             "hir module={} ports={} parameters={} contributions={}",
@@ -90,6 +117,28 @@ impl CanonicalIrArtifact {
         .expect("write to string");
         out
     }
+}
+
+fn validate_parts(
+    metadata: &CanonicalMetadata,
+    hir: &HirModel,
+    mir: &MirModel,
+    opt: &OptModel,
+) -> Vec<IrDiagnostic> {
+    let mut diagnostics = Vec::new();
+
+    if let Err(mut child) = hir.validate() {
+        diagnostics.append(&mut child);
+    }
+    if let Err(mut child) = mir.validate() {
+        diagnostics.append(&mut child);
+    }
+    if let Err(mut child) = opt.validate() {
+        diagnostics.append(&mut child);
+    }
+
+    diagnostics.extend(artifact_diagnostics(metadata, hir, mir, opt));
+    diagnostics
 }
 
 fn artifact_diagnostics(
@@ -128,6 +177,14 @@ fn artifact_diagnostics(
         )));
     }
 
+    if metadata.feature_flags != hir.feature_flags {
+        diagnostics.push(artifact_error(format!(
+            "metadata feature_flags must match HIR feature_flags: metadata={} hir={}",
+            join_smol(&metadata.feature_flags),
+            join_smol(&hir.feature_flags)
+        )));
+    }
+
     if hir.module_name != mir.module_name || hir.module_name != opt.module_name {
         diagnostics.push(artifact_error(format!(
             "HIR/MIR/OptIR module names must match: hir='{}' mir='{}' opt='{}'",
@@ -144,7 +201,332 @@ fn artifact_diagnostics(
         )));
     }
 
+    validate_hir_mir_nodes(&mut diagnostics, hir, mir);
+    validate_hir_mir_parameters(&mut diagnostics, hir, mir);
+    validate_hir_mir_branches(&mut diagnostics, hir, mir);
+    validate_hir_mir_expressions(&mut diagnostics, hir, mir);
+    validate_hir_mir_contributions(&mut diagnostics, hir, mir);
+    validate_mir_opt_newton_schedule(&mut diagnostics, mir, opt);
+
     diagnostics
+}
+
+fn validate_hir_mir_nodes(diagnostics: &mut Vec<IrDiagnostic>, hir: &HirModel, mir: &MirModel) {
+    let expected_node_count = hir.ports.len() + hir.internal_nodes.len();
+    if mir.nodes.len() != expected_node_count {
+        diagnostics.push(artifact_error(format!(
+            "MIR node count {} must match HIR ports plus internal nodes {}",
+            mir.nodes.len(),
+            expected_node_count
+        )));
+    }
+
+    for (index, port) in hir.ports.iter().enumerate() {
+        let Some(node) = mir.nodes.get(index) else {
+            diagnostics.push(artifact_error(format!(
+                "MIR missing external node for HIR port {} '{}'",
+                index, port.name
+            )));
+            continue;
+        };
+
+        if node.name != port.name || !node.is_external {
+            diagnostics.push(artifact_error(format!(
+                "MIR node {} must match HIR port '{}': found name='{}' is_external={}",
+                index, port.name, node.name, node.is_external
+            )));
+        }
+    }
+
+    for (internal_index, internal_node) in hir.internal_nodes.iter().enumerate() {
+        let node_index = hir.ports.len() + internal_index;
+        let Some(node) = mir.nodes.get(node_index) else {
+            diagnostics.push(artifact_error(format!(
+                "MIR missing internal node for HIR internal node {} '{}'",
+                internal_index, internal_node.name
+            )));
+            continue;
+        };
+
+        if node.name != internal_node.name || node.is_external {
+            diagnostics.push(artifact_error(format!(
+                "MIR node {} must match HIR internal node '{}': found name='{}' is_external={}",
+                node_index, internal_node.name, node.name, node.is_external
+            )));
+        }
+    }
+}
+
+fn validate_hir_mir_parameters(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    hir: &HirModel,
+    mir: &MirModel,
+) {
+    if hir.parameters.len() != mir.parameters.len() {
+        diagnostics.push(artifact_error(format!(
+            "MIR parameter count {} must match HIR parameter count {}",
+            mir.parameters.len(),
+            hir.parameters.len()
+        )));
+    }
+
+    for (index, (hir_parameter, mir_parameter)) in
+        hir.parameters.iter().zip(mir.parameters.iter()).enumerate()
+    {
+        if hir_parameter.id != mir_parameter.id
+            || hir_parameter.name != mir_parameter.name
+            || hir_parameter.value_type != mir_parameter.value_type
+            || hir_parameter.default != mir_parameter.default
+            || hir_parameter.default_expr != mir_parameter.default_expr
+            || hir_parameter.range != mir_parameter.range
+            || hir_parameter.aliases != mir_parameter.aliases
+        {
+            diagnostics.push(artifact_error(format!(
+                "HIR/MIR parameter {} must match exactly",
+                index
+            )));
+        }
+    }
+}
+
+fn validate_hir_mir_branches(diagnostics: &mut Vec<IrDiagnostic>, hir: &HirModel, mir: &MirModel) {
+    if hir.branches.len() != mir.branches.len() {
+        diagnostics.push(artifact_error(format!(
+            "MIR branch count {} must match HIR branch count {}",
+            mir.branches.len(),
+            hir.branches.len()
+        )));
+    }
+
+    for (index, (hir_branch, mir_branch)) in
+        hir.branches.iter().zip(mir.branches.iter()).enumerate()
+    {
+        let expected_pos = resolve_hir_endpoint(&hir_branch.pos_node, hir, mir);
+        let expected_neg = if hir_branch.neg_node.is_empty() {
+            None
+        } else {
+            resolve_hir_endpoint(&hir_branch.neg_node, hir, mir)
+        };
+
+        if hir_branch.id != mir_branch.id
+            || hir_branch.name != mir_branch.name
+            || hir_branch.discipline != mir_branch.discipline
+            || expected_pos != mir_branch.pos_node
+            || expected_neg != mir_branch.neg_node
+        {
+            diagnostics.push(artifact_error(format!(
+                "HIR/MIR branch {} must match declaration endpoints and metadata",
+                index
+            )));
+        }
+    }
+}
+
+fn validate_hir_mir_expressions(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    hir: &HirModel,
+    mir: &MirModel,
+) {
+    if hir.expressions.len() != mir.expressions.len() {
+        diagnostics.push(artifact_error(format!(
+            "MIR expression arena length {} must match HIR expression arena length {}",
+            mir.expressions.len(),
+            hir.expressions.len()
+        )));
+    }
+
+    for (index, (hir_expression, mir_expression)) in hir
+        .expressions
+        .iter()
+        .zip(mir.expressions.iter())
+        .enumerate()
+    {
+        if hir_expression != mir_expression {
+            diagnostics.push(artifact_error(format!(
+                "HIR/MIR expression {} must match exactly",
+                index
+            )));
+        }
+    }
+}
+
+fn validate_hir_mir_contributions(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    hir: &HirModel,
+    mir: &MirModel,
+) {
+    if hir.contributions.len() != mir.equations.len() {
+        diagnostics.push(artifact_error(format!(
+            "MIR equation count {} must match HIR contribution count {}",
+            mir.equations.len(),
+            hir.contributions.len()
+        )));
+    }
+
+    for (index, (contribution, equation)) in hir
+        .contributions
+        .iter()
+        .zip(mir.equations.iter())
+        .enumerate()
+    {
+        let expected_branch = expected_branch_ref(&contribution.branch, hir, mir);
+        if equation.contribution != contribution.id {
+            diagnostics.push(artifact_error(format!(
+                "MIR equation {} contribution {} must match HIR contribution {}",
+                index, equation.contribution, contribution.id
+            )));
+        }
+        if equation.kind != MirEquationKind::from(contribution.kind) {
+            diagnostics.push(artifact_error(format!(
+                "MIR equation {} kind must match HIR contribution kind",
+                index
+            )));
+        }
+        if equation.expression != contribution.expression {
+            diagnostics.push(artifact_error(format!(
+                "MIR equation {} expression must match HIR contribution expression",
+                index
+            )));
+        }
+        if equation.span != contribution.span {
+            diagnostics.push(artifact_error(format!(
+                "MIR equation {} span must match HIR contribution span",
+                index
+            )));
+        }
+        if equation.branch != expected_branch {
+            diagnostics.push(artifact_error(format!(
+                "MIR equation {} branch must match HIR contribution branch '{}'",
+                index, contribution.branch
+            )));
+        }
+    }
+}
+
+fn validate_mir_opt_newton_schedule(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    mir: &MirModel,
+    opt: &OptModel,
+) {
+    let newton_schedules: Vec<_> = opt
+        .schedules
+        .iter()
+        .filter(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .collect();
+
+    let Some(schedule) = newton_schedules.first().copied() else {
+        diagnostics.push(artifact_error(
+            "OptIR must contain one NewtonIteration schedule for artifact consistency",
+        ));
+        return;
+    };
+
+    if newton_schedules.len() != 1 {
+        diagnostics.push(artifact_error(format!(
+            "OptIR must contain exactly one NewtonIteration schedule for artifact consistency, found {}",
+            newton_schedules.len()
+        )));
+    }
+
+    if schedule.ops.len() != mir.equations.len() {
+        diagnostics.push(artifact_error(format!(
+            "OptIR NewtonIteration op count {} must match MIR equation count {}",
+            schedule.ops.len(),
+            mir.equations.len()
+        )));
+    }
+
+    for (index, equation) in mir.equations.iter().enumerate() {
+        let expected = OptOp::EvaluateEquation {
+            equation: equation.id,
+        };
+        match schedule.ops.get(index) {
+            Some(op) if *op == expected => {}
+            Some(op) => diagnostics.push(artifact_error(format!(
+                "OptIR NewtonIteration op {} must evaluate MIR equation {}, found {}",
+                index,
+                equation.id,
+                opt_op_label(op)
+            ))),
+            None => diagnostics.push(artifact_error(format!(
+                "OptIR NewtonIteration missing op {} for MIR equation {}",
+                index, equation.id
+            ))),
+        }
+    }
+}
+
+fn resolve_hir_endpoint(name: &SmolStr, hir: &HirModel, mir: &MirModel) -> Option<super::NodeId> {
+    if is_ground_name(name, hir) {
+        return None;
+    }
+
+    mir.nodes
+        .iter()
+        .find(|node| node.name == *name)
+        .map(|node| node.id)
+}
+
+fn expected_branch_ref(branch: &SmolStr, hir: &HirModel, mir: &MirModel) -> MirBranchRef {
+    let (pos_name, neg_name) = hir
+        .branches
+        .iter()
+        .find(|declared| declared.name == *branch)
+        .map(|declared| {
+            (
+                declared.pos_node.clone(),
+                if declared.neg_node.is_empty() {
+                    None
+                } else {
+                    Some(declared.neg_node.clone())
+                },
+            )
+        })
+        .unwrap_or_else(|| {
+            if let Some((pos, neg)) = branch.split_once(',') {
+                (pos.into(), Some(neg.into()))
+            } else {
+                (branch.clone(), None)
+            }
+        });
+
+    let pos_node = resolve_hir_endpoint(&pos_name, hir, mir);
+    let neg_node = neg_name
+        .as_ref()
+        .and_then(|name| resolve_hir_endpoint(name, hir, mir));
+    let label = canonical_branch_label(pos_node, neg_node, mir);
+
+    MirBranchRef {
+        label,
+        pos_node,
+        neg_node,
+    }
+}
+
+fn canonical_branch_label(
+    pos_node: Option<super::NodeId>,
+    neg_node: Option<super::NodeId>,
+    mir: &MirModel,
+) -> SmolStr {
+    let endpoint_name = |node: Option<super::NodeId>| match node {
+        Some(node) => mir
+            .nodes
+            .iter()
+            .find(|candidate| candidate.id == node)
+            .map(|node| node.name.as_str())
+            .unwrap_or("?"),
+        None => "0",
+    };
+
+    format!("{},{}", endpoint_name(pos_node), endpoint_name(neg_node)).into()
+}
+
+fn is_ground_name(name: &str, hir: &HirModel) -> bool {
+    name == "0"
+        || hir
+            .ground_nodes
+            .iter()
+            .any(|ground| ground.as_str() == name)
 }
 
 fn artifact_error(message: impl Into<String>) -> IrDiagnostic {
@@ -155,15 +537,23 @@ fn digest_text(text: &str) -> SmolStr {
     StableDigest::from_text(text).as_hex().into()
 }
 
+fn phase_digests(hir: &HirModel, mir: &MirModel, opt: &OptModel) -> (SmolStr, SmolStr, SmolStr) {
+    (
+        digest_text(&hir_summary(hir)),
+        digest_text(&mir_summary(mir)),
+        digest_text(&opt_summary(opt)),
+    )
+}
+
 fn hir_summary(hir: &HirModel) -> String {
     let mut out = String::new();
     writeln!(out, "hir").expect("write to string");
     writeln!(out, "module_id={}", hir.module_id.index()).expect("write to string");
-    writeln!(out, "module_name={}", hir.module_name).expect("write to string");
+    writeln!(out, "module_name={}", enc_str(&hir.module_name)).expect("write to string");
     writeln!(out, "schema_version={}", hir.schema_version).expect("write to string");
-    writeln!(out, "source_package={}", hir.source_package).expect("write to string");
-    writeln!(out, "source_digest={}", hir.source_digest).expect("write to string");
-    writeln!(out, "compiler_version={}", hir.compiler_version).expect("write to string");
+    writeln!(out, "source_package={}", enc_str(&hir.source_package)).expect("write to string");
+    writeln!(out, "source_digest={}", enc_str(&hir.source_digest)).expect("write to string");
+    writeln!(out, "compiler_version={}", enc_str(&hir.compiler_version)).expect("write to string");
     writeln!(out, "feature_flags={}", join_smol(&hir.feature_flags)).expect("write to string");
 
     for port in &hir.ports {
@@ -198,7 +588,7 @@ fn hir_summary(hir: &HirModel) -> String {
 fn mir_summary(mir: &MirModel) -> String {
     let mut out = String::new();
     writeln!(out, "mir").expect("write to string");
-    writeln!(out, "module_name={}", mir.module_name).expect("write to string");
+    writeln!(out, "module_name={}", enc_str(&mir.module_name)).expect("write to string");
     for node in &mir.nodes {
         write_mir_node(&mut out, node);
     }
@@ -224,7 +614,7 @@ fn mir_summary(mir: &MirModel) -> String {
 fn opt_summary(opt: &OptModel) -> String {
     let mut out = String::new();
     writeln!(out, "opt").expect("write to string");
-    writeln!(out, "module_name={}", opt.module_name).expect("write to string");
+    writeln!(out, "module_name={}", enc_str(&opt.module_name)).expect("write to string");
     writeln!(out, "equation_count={}", opt.equation_count).expect("write to string");
     for value in &opt.values {
         write_opt_value(&mut out, value);
@@ -240,9 +630,9 @@ fn write_hir_port(out: &mut String, port: &HirPort) {
         out,
         "port id={} name={} direction={} discipline={} nature_potential={} nature_flow={}",
         port.id.index(),
-        port.name,
-        port.direction,
-        port.discipline,
+        enc_str(&port.name),
+        enc_str(&port.direction),
+        enc_str(&port.discipline),
         option_smol(port.nature_potential.as_ref()),
         option_smol(port.nature_flow.as_ref())
     )
@@ -254,7 +644,7 @@ fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
         out,
         "parameter id={} name={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
-        parameter.name,
+        enc_str(&parameter.name),
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
@@ -269,7 +659,7 @@ fn write_hir_variable(out: &mut String, variable: &HirVariable) {
         out,
         "variable id={} name={} type={} is_state={}",
         variable.id.index(),
-        variable.name,
+        enc_str(&variable.name),
         value_type_label(variable.value_type),
         variable.is_state
     )
@@ -281,7 +671,7 @@ fn write_hir_array(out: &mut String, array: &HirArray) {
         out,
         "array id={} name={} base={} lower={} len={}",
         array.id.index(),
-        array.name,
+        enc_str(&array.name),
         array.base.index(),
         array.lower,
         array.len
@@ -294,10 +684,10 @@ fn write_hir_branch(out: &mut String, branch: &HirBranch) {
         out,
         "branch id={} name={} pos={} neg={} discipline={}",
         branch.id.index(),
-        branch.name,
-        branch.pos_node,
-        branch.neg_node,
-        branch.discipline
+        enc_str(&branch.name),
+        enc_str(&branch.pos_node),
+        enc_str(&branch.neg_node),
+        enc_str(&branch.discipline)
     )
     .expect("write to string");
 }
@@ -307,8 +697,8 @@ fn write_hir_internal_node(out: &mut String, node: &HirInternalNode) {
         out,
         "internal_node id={} name={} discipline={} index={}",
         node.id.index(),
-        node.name,
-        node.discipline,
+        enc_str(&node.name),
+        enc_str(&node.discipline),
         node.index
     )
     .expect("write to string");
@@ -319,7 +709,7 @@ fn write_hir_contribution(out: &mut String, contribution: &HirContribution) {
         out,
         "contribution id={} branch={} kind={} expression={} expr_type={} span={}",
         contribution.id.index(),
-        contribution.branch,
+        enc_str(&contribution.branch),
         contribution_kind_label(contribution.kind),
         expr_ref_label(Some(&contribution.expression)),
         value_type_label(contribution.expr_type),
@@ -385,7 +775,7 @@ fn write_mir_node(out: &mut String, node: &MirNode) {
         out,
         "node id={} name={} is_external={}",
         node.id.index(),
-        node.name,
+        enc_str(&node.name),
         node.is_external
     )
     .expect("write to string");
@@ -396,7 +786,7 @@ fn write_mir_parameter(out: &mut String, parameter: &MirParameterSlot) {
         out,
         "parameter id={} name={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
-        parameter.name,
+        enc_str(&parameter.name),
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
@@ -411,10 +801,10 @@ fn write_mir_branch(out: &mut String, branch: &MirBranch) {
         out,
         "branch id={} name={} pos={} neg={} discipline={}",
         branch.id.index(),
-        branch.name,
+        enc_str(&branch.name),
         option_id(branch.pos_node.map(|id| id.index())),
         option_id(branch.neg_node.map(|id| id.index())),
-        branch.discipline
+        enc_str(&branch.discipline)
     )
     .expect("write to string");
 }
@@ -424,7 +814,7 @@ fn write_mir_state_slot(out: &mut String, state_slot: &MirStateSlot) {
         out,
         "state_slot id={} name={} owner={}",
         state_slot.id.index(),
-        state_slot.name,
+        enc_str(&state_slot.name),
         state_slot.owner.index()
     )
     .expect("write to string");
@@ -461,12 +851,7 @@ fn write_opt_schedule(out: &mut String, schedule: &OptSchedule) {
         "schedule id={} invalidation={} ops={}",
         schedule.id.index(),
         invalidation_label(schedule.invalidation),
-        schedule
-            .ops
-            .iter()
-            .map(opt_op_label)
-            .collect::<Vec<_>>()
-            .join(",")
+        enc_list(schedule.ops.iter().map(opt_op_label).collect())
     )
     .expect("write to string");
 }
@@ -474,7 +859,7 @@ fn write_opt_schedule(out: &mut String, schedule: &OptSchedule) {
 fn branch_ref_label(branch: &MirBranchRef) -> String {
     format!(
         "label:{} pos:{} neg:{}",
-        branch.label,
+        enc_str(&branch.label),
         option_id(branch.pos_node.map(|id| id.index())),
         option_id(branch.neg_node.map(|id| id.index()))
     )
@@ -485,7 +870,7 @@ fn expr_ref_label(expr: Option<&HirExprRef>) -> String {
         format!(
             "id:{} kind:{} span:{}",
             expr.id.index(),
-            expr.kind,
+            enc_str(&expr.kind),
             span_label(expr.span)
         )
     })
@@ -495,23 +880,27 @@ fn expr_ref_label(expr: Option<&HirExprRef>) -> String {
 fn hir_expr_kind_label(kind: &HirExprKind) -> String {
     match kind {
         HirExprKind::Number { value, raw } => {
-            format!("number value:{} raw:{}", f64_label(*value), raw)
+            format!("number value:{} raw:{}", f64_label(*value), enc_str(raw))
         }
-        HirExprKind::StringLiteral { value } => format!("string value:{}", value),
-        HirExprKind::Identifier { name } => format!("identifier name:{}", name),
+        HirExprKind::StringLiteral { value } => format!("string value:{}", enc_str(value)),
+        HirExprKind::Identifier { name } => format!("identifier name:{}", enc_str(name)),
         HirExprKind::SystemFunction { name, args } => {
-            format!("system_function name:{} args:{}", name, join_expr_ids(args))
+            format!(
+                "system_function name:{} args:{}",
+                enc_str(name),
+                join_expr_ids(args)
+            )
         }
         HirExprKind::Binary { op, left, right } => {
             format!(
                 "binary op:{} left:{} right:{}",
-                op,
+                enc_str(op),
                 left.index(),
                 right.index()
             )
         }
         HirExprKind::Unary { op, operand } => {
-            format!("unary op:{} operand:{}", op, operand.index())
+            format!("unary op:{} operand:{}", enc_str(op), operand.index())
         }
         HirExprKind::Conditional {
             condition,
@@ -524,21 +913,29 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
             else_expr.index()
         ),
         HirExprKind::Call { name, args } => {
-            format!("call name:{} args:{}", name, join_expr_ids(args))
+            format!("call name:{} args:{}", enc_str(name), join_expr_ids(args))
         }
         HirExprKind::BranchAccess { access, pos, neg } => {
             format!(
                 "branch_access access:{} pos:{} neg:{}",
-                access,
-                pos,
+                enc_str(access),
+                enc_str(pos),
                 option_smol(neg.as_ref())
             )
         }
         HirExprKind::NamedBranchAccess { access, name } => {
-            format!("named_branch_access access:{} name:{}", access, name)
+            format!(
+                "named_branch_access access:{} name:{}",
+                enc_str(access),
+                enc_str(name)
+            )
         }
         HirExprKind::ArrayAccess { array, index } => {
-            format!("array_access array:{} index:{}", array, index.index())
+            format!(
+                "array_access array:{} index:{}",
+                enc_str(array),
+                index.index()
+            )
         }
         HirExprKind::ArrayLiteral { elements } => {
             format!("array_literal elements:{}", join_expr_ids(elements))
@@ -546,7 +943,7 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
         HirExprKind::AnalogOperator { operator, operands } => {
             format!(
                 "analog_operator operator:{} operands:{}",
-                operator,
+                enc_str(operator),
                 join_expr_ids(operands)
             )
         }
@@ -562,7 +959,7 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
             name,
         } => format!(
             "noise_source source:{} operands:{} name:{}",
-            source,
+            enc_str(source),
             join_expr_ids(operands),
             option_smol(name.as_ref())
         ),
@@ -638,12 +1035,13 @@ fn range_label(range: Option<&HirParamRange>) -> String {
                 option_f64(range.max),
                 range.min_exclusive,
                 range.max_exclusive,
-                range
-                    .exclude
-                    .iter()
-                    .map(|value| f64_label(*value))
-                    .collect::<Vec<_>>()
-                    .join(",")
+                enc_list(
+                    range
+                        .exclude
+                        .iter()
+                        .map(|value| f64_label(*value))
+                        .collect::<Vec<_>>()
+                )
             )
         })
         .unwrap_or_else(|| "-".to_string())
@@ -653,32 +1051,45 @@ fn span_label(span: SourceSpanRef) -> String {
     format!("{}:{}-{}", span.source_file_id, span.start, span.end)
 }
 
-fn join_smol(values: &[SmolStr]) -> String {
-    values
+fn enc_str(value: &str) -> String {
+    format!("s:{}:{}", value.len(), value)
+}
+
+fn enc_list(values: Vec<String>) -> String {
+    let body = values
         .iter()
-        .map(|value| value.as_str())
+        .map(|value| enc_str(value))
         .collect::<Vec<_>>()
-        .join(",")
+        .concat();
+    format!("list:{}:[{}]", values.len(), body)
+}
+
+fn join_smol(values: &[SmolStr]) -> String {
+    enc_list(values.iter().map(|value| value.to_string()).collect())
 }
 
 fn join_expr_ids(values: &[super::ExprId]) -> String {
-    values
-        .iter()
-        .map(|value| value.index().to_string())
-        .collect::<Vec<_>>()
-        .join(",")
+    enc_list(
+        values
+            .iter()
+            .map(|value| value.index().to_string())
+            .collect(),
+    )
 }
 
 fn join_domains(values: &[MirAnalysisDomain]) -> String {
-    values
-        .iter()
-        .map(|value| analysis_domain_label(*value))
-        .collect::<Vec<_>>()
-        .join(",")
+    enc_list(
+        values
+            .iter()
+            .map(|value| analysis_domain_label(*value).to_string())
+            .collect(),
+    )
 }
 
-fn option_smol(value: Option<&SmolStr>) -> &str {
-    value.map(|value| value.as_str()).unwrap_or("-")
+fn option_smol(value: Option<&SmolStr>) -> String {
+    value
+        .map(|value| enc_str(value))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn option_id(value: Option<u32>) -> String {
