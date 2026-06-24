@@ -7,13 +7,13 @@ use rspice_veriloga::ast::{
 };
 use rspice_veriloga::canonical_ir::{
     BranchId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId, PortId, ScheduleId,
-    SourceId, StateId, VariableId,
+    SourceId, StateId, ValueId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
     CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirExprKind,
     HirLaplaceKind, HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic,
     MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, OptModel, OptOp, OptSchedule,
-    SourceSpanRef, StableDigest,
+    OptValue, OptValueType, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -93,6 +93,14 @@ fn assert_opt_validation_message(opt: &OptModel, expected_substring: &str) {
 fn lower_tiny_resistor_mir() -> MirModel {
     let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    MirModel::from_hir(&hir).expect("lower MIR")
+}
+
+fn lower_internal_node_mir() -> MirModel {
+    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
 
     MirModel::from_hir(&hir).expect("lower MIR")
@@ -416,6 +424,29 @@ fn opt_validation_rejects_non_dense_schedule_id() {
 }
 
 #[test]
+fn opt_validation_rejects_non_dense_value_id() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values.push(OptValue {
+        id: ValueId::new(1),
+        value_type: OptValueType::Real,
+    });
+
+    assert_opt_validation_message(&opt, "OptIR value IDs must be dense");
+}
+
+#[test]
+fn opt_validation_rejects_schedules_out_of_invalidation_order() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.schedules.swap(0, 1);
+    opt.schedules[0].id = ScheduleId::new(0);
+    opt.schedules[1].id = ScheduleId::new(1);
+
+    assert_opt_validation_message(&opt, "schedule order");
+}
+
+#[test]
 fn opt_validation_rejects_equation_op_out_of_range() {
     let mir = lower_tiny_resistor_mir();
     let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
@@ -482,6 +513,62 @@ fn opt_lowering_adds_instance_static_schedule_before_newton_for_parameters() {
     assert_eq!(
         opt.schedules[1].invalidation,
         InvalidationClass::NewtonIteration
+    );
+}
+
+#[test]
+fn opt_lowering_omits_instance_static_schedule_without_parameters() {
+    let mir = lower_internal_node_mir();
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+
+    assert!(
+        opt.schedules
+            .iter()
+            .all(|schedule| schedule.invalidation != InvalidationClass::InstanceStatic)
+    );
+    assert_eq!(opt.schedules.len(), 1);
+    assert_eq!(
+        opt.schedules[0].invalidation,
+        InvalidationClass::NewtonIteration
+    );
+    assert!(opt.validate().is_ok());
+}
+
+#[test]
+fn opt_lowering_preserves_multi_equation_order_in_newton_schedule() {
+    let mir = lower_internal_node_mir();
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+
+    assert_eq!(
+        newton.ops,
+        vec![
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0)
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(1)
+            }
+        ]
+    );
+    assert!(opt.validate().is_ok());
+}
+
+#[test]
+fn opt_lowering_rejects_invalid_mir_before_building_schedules() {
+    let mut mir = lower_tiny_resistor_mir();
+    mir.module_name = "".into();
+
+    let diagnostics = OptModel::from_mir(&mir).expect_err("invalid MIR must fail before OptIR");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.phase == CompilerPhase::MirValidation)
     );
 }
 

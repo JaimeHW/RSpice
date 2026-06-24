@@ -146,8 +146,22 @@ fn validate_schedules(
 ) {
     let mut invalidations = HashSet::new();
     let mut newton_count = 0;
+    let mut previous_invalidation = None;
 
     for schedule in schedules {
+        if let Some(previous) = previous_invalidation {
+            if invalidation_rank(previous) > invalidation_rank(schedule.invalidation) {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::OptValidation,
+                    format!(
+                        "OptIR schedule order must follow invalidation order: {:?} appears before {:?}",
+                        previous, schedule.invalidation
+                    ),
+                ));
+            }
+        }
+        previous_invalidation = Some(schedule.invalidation);
+
         if !invalidations.insert(schedule.invalidation) {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::OptValidation,
@@ -174,6 +188,19 @@ fn validate_schedules(
                 newton_count
             ),
         ));
+    }
+}
+
+fn invalidation_rank(invalidation: InvalidationClass) -> u8 {
+    match invalidation {
+        InvalidationClass::InstanceStatic => 0,
+        InvalidationClass::TemperatureStatic => 1,
+        InvalidationClass::TimestepStatic => 2,
+        InvalidationClass::OperatingPointStatic => 3,
+        InvalidationClass::NewtonIteration => 4,
+        InvalidationClass::AcFrequency => 5,
+        InvalidationClass::NoiseFrequency => 6,
+        InvalidationClass::OperatingPointReport => 7,
     }
 }
 
