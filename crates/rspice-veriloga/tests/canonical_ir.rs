@@ -5,7 +5,7 @@ use rspice_veriloga::canonical_ir::{
     BranchId, ContributionId, ModuleId, NodeId, ParamId, PortId, SourceId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
-    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirModel,
+    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirLoop, HirModel,
     HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap};
@@ -319,4 +319,58 @@ fn hir_validation_rejects_malformed_structure() {
             .iter()
             .any(|message| message.contains("internal node IDs must be dense"))
     );
+}
+
+#[test]
+fn hir_validation_rejects_malformed_array_contribution_and_statement_paths() {
+    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let variable_count = hir.variables.len();
+
+    hir.arrays[0].base = VariableId::from(variable_count);
+    hir.contributions[0].branch = "".into();
+
+    let mut invalid_assignment = hir
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            HirStatement::Assignment(assignment) => Some(assignment.clone()),
+            HirStatement::Loop(_) => None,
+        })
+        .expect("assignment statement");
+    invalid_assignment.target = VariableId::from(variable_count);
+
+    let mut nested_invalid_assignment = invalid_assignment.clone();
+    nested_invalid_assignment.target = VariableId::from(variable_count + 1);
+    let nested_loop = HirStatement::Loop(HirLoop {
+        condition: nested_invalid_assignment.expr.clone(),
+        body: vec![HirStatement::Assignment(nested_invalid_assignment)],
+        span: invalid_assignment.span,
+    });
+    hir.statements = vec![HirStatement::Assignment(invalid_assignment), nested_loop];
+
+    let diagnostics = hir.validate().expect_err("malformed HIR must fail");
+    let messages: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("array 'xs' base"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("contribution branch name must not be empty"))
+    );
+    assert!(messages.iter().any(|message| {
+        message.contains(&format!("assignment target VariableId({variable_count})"))
+    }));
+    assert!(messages.iter().any(|message| message.contains(&format!(
+        "assignment target VariableId({})",
+        variable_count + 1
+    ))));
 }
