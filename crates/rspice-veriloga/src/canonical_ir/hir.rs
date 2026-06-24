@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use std::collections::HashSet;
 
 use crate::ast::{Expression, PortDirection};
 use crate::semantic::{AnalyzedModule, AnalyzedStatement};
@@ -7,7 +8,7 @@ use crate::types::{ParameterRange, ValueType};
 
 use super::{
     ArrayId, BranchId, CanonicalMetadata, CompilerPhase, ContributionId, IrDiagnostic,
-    IrValidationResult, ModuleId, ParamId, PortId, SourceSpanRef, VariableId,
+    IrValidationResult, ModuleId, NodeId, ParamId, PortId, SourceSpanRef, VariableId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,7 +107,7 @@ pub struct HirVariable {
 pub struct HirArray {
     pub id: ArrayId,
     pub name: SmolStr,
-    pub base: usize,
+    pub base: VariableId,
     pub lower: i64,
     pub len: usize,
 }
@@ -118,6 +119,14 @@ pub struct HirBranch {
     pub pos_node: SmolStr,
     pub neg_node: SmolStr,
     pub discipline: SmolStr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirInternalNode {
+    pub id: NodeId,
+    pub name: SmolStr,
+    pub discipline: SmolStr,
+    pub index: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,14 +147,26 @@ pub struct HirContribution {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HirStatement {
-    pub kind: SmolStr,
+pub struct HirAssignment {
+    pub target: VariableId,
+    pub target_name: SmolStr,
+    pub index: Option<HirExprRef>,
+    pub expr: HirExprRef,
+    pub expr_type: CanonicalValueType,
     pub span: SourceSpanRef,
-    pub target: Option<SmolStr>,
-    pub expression: Option<HirExprRef>,
-    pub expr_type: Option<CanonicalValueType>,
-    pub condition: Option<HirExprRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirLoop {
+    pub condition: HirExprRef,
     pub body: Vec<HirStatement>,
+    pub span: SourceSpanRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirStatement {
+    Assignment(HirAssignment),
+    Loop(HirLoop),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -164,7 +185,7 @@ pub struct HirModel {
     pub branches: Vec<HirBranch>,
     pub contributions: Vec<HirContribution>,
     pub statements: Vec<HirStatement>,
-    pub internal_nodes: Vec<SmolStr>,
+    pub internal_nodes: Vec<HirInternalNode>,
     pub ground_nodes: Vec<SmolStr>,
 }
 
@@ -199,7 +220,7 @@ impl HirModel {
             .map(|(index, (name, array))| HirArray {
                 id: ArrayId::from(index),
                 name: name.clone(),
-                base: array.base,
+                base: VariableId::from(array.base),
                 lower: array.lower,
                 len: array.len,
             })
@@ -268,7 +289,12 @@ impl HirModel {
             internal_nodes: module
                 .internal_nodes
                 .iter()
-                .map(|node| node.name.clone())
+                .map(|node| HirInternalNode {
+                    id: NodeId::from(node.index),
+                    name: node.name.clone(),
+                    discipline: node.discipline.clone(),
+                    index: u32::try_from(node.index).expect("internal node index exceeds u32::MAX"),
+                })
                 .collect(),
             ground_nodes: module.ground_nodes.clone(),
         }
@@ -291,34 +317,180 @@ impl HirModel {
             ));
         }
 
+        validate_dense_port_ids(&mut diagnostics, &self.ports);
+        validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
+        validate_dense_variable_ids(&mut diagnostics, &self.variables);
+        validate_dense_array_ids(&mut diagnostics, &self.arrays);
+        self.validate_arrays(&mut diagnostics);
+        self.validate_parameter_aliases(&mut diagnostics);
+        self.validate_contributions(&mut diagnostics);
+        self.validate_statements(&mut diagnostics, &self.statements);
+
         if diagnostics.is_empty() {
             Ok(())
         } else {
             Err(diagnostics)
         }
     }
+
+    fn validate_arrays(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let variable_count = self.variables.len();
+
+        for array in &self.arrays {
+            let base = usize::from(array.base);
+            let Some(end) = base.checked_add(array.len) else {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR array '{}' base overflows variable index space",
+                        array.name
+                    ),
+                ));
+                continue;
+            };
+
+            if base >= variable_count || end > variable_count {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR array '{}' base {} with len {} exceeds variable count {}",
+                        array.name, array.base, array.len, variable_count
+                    ),
+                ));
+            }
+        }
+    }
+
+    fn validate_parameter_aliases(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let mut aliases = HashSet::new();
+
+        for parameter in &self.parameters {
+            for alias in &parameter.aliases {
+                if !aliases.insert(alias.clone()) {
+                    diagnostics.push(IrDiagnostic::global_error(
+                        CompilerPhase::HirValidation,
+                        format!("HIR duplicate parameter alias '{}'", alias),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn validate_contributions(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        for contribution in &self.contributions {
+            if contribution.branch.is_empty() {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::HirValidation,
+                    "HIR contribution branch name must not be empty",
+                    contribution.span,
+                ));
+            }
+        }
+    }
+
+    fn validate_statements(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        statements: &[HirStatement],
+    ) {
+        for statement in statements {
+            match statement {
+                HirStatement::Assignment(assignment) => {
+                    if usize::from(assignment.target) >= self.variables.len() {
+                        diagnostics.push(IrDiagnostic::error(
+                            CompilerPhase::HirValidation,
+                            format!(
+                                "HIR assignment target {} is outside variable count {}",
+                                assignment.target,
+                                self.variables.len()
+                            ),
+                            assignment.span,
+                        ));
+                    }
+                }
+                HirStatement::Loop(loop_statement) => {
+                    self.validate_statements(diagnostics, &loop_statement.body);
+                }
+            }
+        }
+    }
+}
+
+fn validate_dense_port_ids(diagnostics: &mut Vec<IrDiagnostic>, ports: &[HirPort]) {
+    for (expected, port) in ports.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("HIR port count exceeds u32::MAX");
+        if port.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR port IDs must be dense: expected PortId({}) at index {}, found {}",
+                    expected, expected, port.id
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_dense_parameter_ids(diagnostics: &mut Vec<IrDiagnostic>, parameters: &[HirParameter]) {
+    for (expected, parameter) in parameters.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("HIR parameter count exceeds u32::MAX");
+        if parameter.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR parameter IDs must be dense: expected ParamId({}) at index {}, found {}",
+                    expected, expected, parameter.id
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_dense_variable_ids(diagnostics: &mut Vec<IrDiagnostic>, variables: &[HirVariable]) {
+    for (expected, variable) in variables.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("HIR variable count exceeds u32::MAX");
+        if variable.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR variable IDs must be dense: expected VariableId({}) at index {}, found {}",
+                    expected, expected, variable.id
+                ),
+            ));
+        }
+    }
+}
+
+fn validate_dense_array_ids(diagnostics: &mut Vec<IrDiagnostic>, arrays: &[HirArray]) {
+    for (expected, array) in arrays.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("HIR array count exceeds u32::MAX");
+        if array.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR array IDs must be dense: expected ArrayId({}) at index {}, found {}",
+                    expected, expected, array.id
+                ),
+            ));
+        }
+    }
 }
 
 fn lower_statement(statement: &AnalyzedStatement) -> HirStatement {
     match statement {
-        AnalyzedStatement::Assignment(assignment) => HirStatement {
-            kind: "assignment".into(),
+        AnalyzedStatement::Assignment(assignment) => HirStatement::Assignment(HirAssignment {
+            target: VariableId::from(assignment.var_index),
+            target_name: assignment.target.clone(),
+            index: assignment.index.as_ref().map(HirExprRef::from_expr),
+            expr: HirExprRef::from_expr(&assignment.expression),
+            expr_type: CanonicalValueType::from(assignment.expr_type),
             span: SourceSpanRef::from(assignment.span),
-            target: Some(assignment.target.clone()),
-            expression: Some(HirExprRef::from_expr(&assignment.expression)),
-            expr_type: Some(CanonicalValueType::from(assignment.expr_type)),
-            condition: None,
-            body: Vec::new(),
-        },
-        AnalyzedStatement::Loop(loop_statement) => HirStatement {
-            kind: "loop".into(),
-            span: SourceSpanRef::from(loop_statement.span),
-            target: None,
-            expression: None,
-            expr_type: None,
-            condition: Some(HirExprRef::from_expr(&loop_statement.condition)),
+        }),
+        AnalyzedStatement::Loop(loop_statement) => HirStatement::Loop(HirLoop {
+            condition: HirExprRef::from_expr(&loop_statement.condition),
             body: loop_statement.body.iter().map(lower_statement).collect(),
-        },
+            span: SourceSpanRef::from(loop_statement.span),
+        }),
     }
 }
 

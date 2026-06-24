@@ -3,9 +3,9 @@ use std::hash::Hash;
 
 use rspice_veriloga::canonical_ir::{
     CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirModel,
-    IrDiagnostic, SourceSpanRef, StableDigest,
+    HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
 };
-use rspice_veriloga::canonical_ir::{ModuleId, ParamId, PortId, SourceId};
+use rspice_veriloga::canonical_ir::{ModuleId, NodeId, ParamId, PortId, SourceId, VariableId};
 use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap};
 
 fn analyze_fixture(
@@ -31,6 +31,47 @@ module tiny_res(p, n);
     electrical p, n;
     parameter real r = 1000.0 from (0:inf);
     analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#
+}
+
+fn dynamic_array_source() -> &'static str {
+    r#"
+module dyn_array(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer pick = 1;
+    parameter real scale = 2.0;
+    real xs[0:3];
+    analog begin
+        xs[pick] = scale;
+        I(p, n) <+ xs[pick] * V(p, n);
+    end
+endmodule
+"#
+}
+
+fn internal_node_source() -> &'static str {
+    r#"
+module has_mid(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical mid;
+    analog begin
+        I(p, mid) <+ V(p, mid);
+        I(mid, n) <+ V(mid, n);
+    end
+endmodule
+"#
+}
+
+fn named_branch_potential_source() -> &'static str {
+    r#"
+module branch_potential(p, n);
+    inout p, n;
+    electrical p, n;
+    branch (p, n) res;
+    analog V(res) <+ 1.0;
 endmodule
 "#
 }
@@ -154,4 +195,95 @@ fn hir_lowering_preserves_analyzed_module_surface() {
     assert_eq!(hir.contributions.len(), 1);
     assert_eq!(hir.contributions[0].kind, HirContributionKind::Current);
     assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn hir_lowering_preserves_dynamic_array_assignment_target_and_index() {
+    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let array = analyzed.arrays.get("xs").expect("array layout");
+
+    let assignment = hir
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            HirStatement::Assignment(assignment) if assignment.target_name.as_str() == "xs" => {
+                Some(assignment)
+            }
+            _ => None,
+        })
+        .expect("dynamic array assignment");
+
+    assert_eq!(assignment.target, VariableId::from(array.base));
+    assert_eq!(assignment.target_name.as_str(), "xs");
+    assert_eq!(
+        assignment.index.as_ref().map(|expr| expr.kind.as_str()),
+        Some("identifier")
+    );
+    assert_eq!(assignment.expr.kind.as_str(), "identifier");
+    assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn hir_lowering_preserves_internal_node_metadata() {
+    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    assert_eq!(hir.internal_nodes.len(), 1);
+    assert_eq!(hir.internal_nodes[0].id, NodeId::new(0));
+    assert_eq!(hir.internal_nodes[0].name.as_str(), "mid");
+    assert_eq!(hir.internal_nodes[0].discipline.as_str(), "electrical");
+    assert_eq!(hir.internal_nodes[0].index, 0);
+    assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn hir_lowering_represents_named_branch_potential_contribution() {
+    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    assert_eq!(hir.branches.len(), 1);
+    assert_eq!(hir.branches[0].name.as_str(), "res");
+    assert_eq!(hir.contributions.len(), 1);
+    assert_eq!(hir.contributions[0].branch.as_str(), "p,n");
+    assert_eq!(hir.contributions[0].kind, HirContributionKind::Potential);
+    assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn hir_validation_rejects_malformed_structure() {
+    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    hir.ports[1].id = PortId::new(7);
+    hir.parameters[0].aliases.push("shared".into());
+    hir.parameters[1].aliases.push("shared".into());
+    hir.arrays[0].base = VariableId::from(hir.variables.len());
+
+    let diagnostics = hir.validate().expect_err("malformed HIR must fail");
+    let messages: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("port IDs must be dense"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("duplicate parameter alias 'shared'"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("array 'xs' base"))
+    );
 }
