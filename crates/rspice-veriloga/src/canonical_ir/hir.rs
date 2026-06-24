@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashSet;
 
-use crate::ast::{Expression, PortDirection};
+use crate::ast::{
+    AnalogOperator, BranchAccess, Expression, LaplaceKind, NoiseSource, PortDirection, ZiKind,
+};
 use crate::semantic::{AnalyzedModule, AnalyzedStatement};
 use crate::types::{ParameterRange, ValueType};
 
 use super::{
-    ArrayId, BranchId, CanonicalMetadata, CompilerPhase, ContributionId, IrDiagnostic,
+    ArrayId, BranchId, CanonicalMetadata, CompilerPhase, ContributionId, ExprId, IrDiagnostic,
     IrValidationResult, ModuleId, NodeId, ParamId, PortId, SourceSpanRef, VariableId,
 };
 
@@ -61,17 +63,77 @@ impl HirParamRange {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirExprRef {
+    pub id: ExprId,
     pub kind: SmolStr,
     pub span: SourceSpanRef,
 }
 
-impl HirExprRef {
-    pub fn from_expr(expr: &Expression) -> Self {
-        Self {
-            kind: expression_kind(expr),
-            span: SourceSpanRef::from(expr.span()),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HirExpression {
+    pub id: ExprId,
+    pub kind: HirExprKind,
+    pub span: SourceSpanRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum HirExprKind {
+    Number {
+        value: f64,
+        raw: SmolStr,
+    },
+    StringLiteral {
+        value: SmolStr,
+    },
+    Identifier {
+        name: SmolStr,
+    },
+    SystemFunction {
+        name: SmolStr,
+        args: Vec<ExprId>,
+    },
+    Binary {
+        op: SmolStr,
+        left: ExprId,
+        right: ExprId,
+    },
+    Unary {
+        op: SmolStr,
+        operand: ExprId,
+    },
+    Conditional {
+        condition: ExprId,
+        then_expr: ExprId,
+        else_expr: ExprId,
+    },
+    Call {
+        name: SmolStr,
+        args: Vec<ExprId>,
+    },
+    BranchAccess {
+        access: SmolStr,
+        pos: SmolStr,
+        neg: Option<SmolStr>,
+    },
+    NamedBranchAccess {
+        access: SmolStr,
+        name: SmolStr,
+    },
+    ArrayAccess {
+        array: SmolStr,
+        index: ExprId,
+    },
+    ArrayLiteral {
+        elements: Vec<ExprId>,
+    },
+    AnalogOperator {
+        operator: SmolStr,
+        operands: Vec<ExprId>,
+    },
+    NoiseSource {
+        source: SmolStr,
+        operands: Vec<ExprId>,
+        name: Option<SmolStr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,7 +171,7 @@ pub struct HirArray {
     pub name: SmolStr,
     pub base: VariableId,
     pub lower: i64,
-    pub len: usize,
+    pub len: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,12 +247,14 @@ pub struct HirModel {
     pub branches: Vec<HirBranch>,
     pub contributions: Vec<HirContribution>,
     pub statements: Vec<HirStatement>,
+    pub expressions: Vec<HirExpression>,
     pub internal_nodes: Vec<HirInternalNode>,
     pub ground_nodes: Vec<SmolStr>,
 }
 
 impl HirModel {
     pub fn from_analyzed_module(metadata: &CanonicalMetadata, module: &AnalyzedModule) -> Self {
+        let mut lowerer = HirLowerer::new();
         let mut parameters: Vec<_> = module
             .parameters
             .iter()
@@ -200,7 +264,10 @@ impl HirModel {
                 name: parameter.name.clone(),
                 value_type: CanonicalValueType::from(parameter.value_type),
                 default: parameter.default,
-                default_expr: parameter.default_expr.as_ref().map(HirExprRef::from_expr),
+                default_expr: parameter
+                    .default_expr
+                    .as_ref()
+                    .map(|expr| lowerer.lower_expr(expr)),
                 range: parameter.range.as_ref().map(HirParamRange::from_range),
                 aliases: Vec::new(),
             })
@@ -222,9 +289,31 @@ impl HirModel {
                 name: name.clone(),
                 base: VariableId::from(array.base),
                 lower: array.lower,
-                len: array.len,
+                len: u32::try_from(array.len).expect("array length exceeds u32::MAX"),
             })
             .collect();
+
+        let contributions = module
+            .contributions
+            .iter()
+            .enumerate()
+            .map(|(index, contribution)| HirContribution {
+                id: ContributionId::from(index),
+                branch: contribution.branch.clone(),
+                kind: contribution_kind(contribution.indirect, contribution.is_current),
+                expression: lowerer.lower_expr(&contribution.expression),
+                expr_type: CanonicalValueType::from(contribution.expr_type),
+                span: SourceSpanRef::from(contribution.span),
+            })
+            .collect();
+
+        let statements = module
+            .statements
+            .iter()
+            .map(|statement| lower_statement(&mut lowerer, statement))
+            .collect();
+
+        let expressions = lowerer.expressions;
 
         Self {
             module_id: ModuleId::new(0),
@@ -272,20 +361,9 @@ impl HirModel {
                     discipline: branch.discipline.clone(),
                 })
                 .collect(),
-            contributions: module
-                .contributions
-                .iter()
-                .enumerate()
-                .map(|(index, contribution)| HirContribution {
-                    id: ContributionId::from(index),
-                    branch: contribution.branch.clone(),
-                    kind: contribution_kind(contribution.indirect, contribution.is_current),
-                    expression: HirExprRef::from_expr(&contribution.expression),
-                    expr_type: CanonicalValueType::from(contribution.expr_type),
-                    span: SourceSpanRef::from(contribution.span),
-                })
-                .collect(),
-            statements: module.statements.iter().map(lower_statement).collect(),
+            contributions,
+            statements,
+            expressions,
             internal_nodes: module
                 .internal_nodes
                 .iter()
@@ -341,7 +419,8 @@ impl HirModel {
 
         for array in &self.arrays {
             let base = usize::from(array.base);
-            let Some(end) = base.checked_add(array.len) else {
+            let len = usize::try_from(array.len).expect("HIR array len exceeds usize::MAX");
+            let Some(end) = base.checked_add(len) else {
                 diagnostics.push(IrDiagnostic::global_error(
                     CompilerPhase::HirValidation,
                     format!(
@@ -357,7 +436,7 @@ impl HirModel {
                     CompilerPhase::HirValidation,
                     format!(
                         "HIR array '{}' base {} with len {} exceeds variable count {}",
-                        array.name, array.base, array.len, variable_count
+                        array.name, array.base, len, variable_count
                     ),
                 ));
             }
@@ -380,11 +459,28 @@ impl HirModel {
     }
 
     fn validate_contributions(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let known_nodes = self.known_node_names();
+        let declared_branches: HashSet<_> = self
+            .branches
+            .iter()
+            .map(|branch| branch.name.clone())
+            .collect();
+
         for contribution in &self.contributions {
             if contribution.branch.is_empty() {
                 diagnostics.push(IrDiagnostic::error(
                     CompilerPhase::HirValidation,
                     "HIR contribution branch name must not be empty",
+                    contribution.span,
+                ));
+            } else if !is_valid_contribution_branch(
+                contribution.branch.as_str(),
+                &known_nodes,
+                &declared_branches,
+            ) {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::HirValidation,
+                    format!("HIR unknown contribution branch '{}'", contribution.branch),
                     contribution.span,
                 ));
             }
@@ -399,7 +495,8 @@ impl HirModel {
         for statement in statements {
             match statement {
                 HirStatement::Assignment(assignment) => {
-                    if usize::from(assignment.target) >= self.variables.len() {
+                    let target_index = usize::from(assignment.target);
+                    if target_index >= self.variables.len() {
                         diagnostics.push(IrDiagnostic::error(
                             CompilerPhase::HirValidation,
                             format!(
@@ -409,13 +506,103 @@ impl HirModel {
                             ),
                             assignment.span,
                         ));
+                        continue;
                     }
+
+                    self.validate_assignment_shape(diagnostics, assignment);
                 }
                 HirStatement::Loop(loop_statement) => {
                     self.validate_statements(diagnostics, &loop_statement.body);
                 }
             }
         }
+    }
+
+    fn validate_assignment_shape(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        assignment: &HirAssignment,
+    ) {
+        let target_variable = &self.variables[usize::from(assignment.target)];
+        let array_by_name = self
+            .arrays
+            .iter()
+            .find(|array| array.name == assignment.target_name);
+        let array_by_base = self
+            .arrays
+            .iter()
+            .find(|array| array.base == assignment.target);
+
+        if assignment.index.is_some() {
+            if let Some(array) = array_by_name {
+                if assignment.target != array.base {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::HirValidation,
+                        format!(
+                            "HIR indexed assignment '{}' target {} must match array base {}",
+                            assignment.target_name, assignment.target, array.base
+                        ),
+                        assignment.span,
+                    ));
+                }
+            } else if let Some(array) = array_by_base {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR indexed assignment target name '{}' does not match array '{}'",
+                        assignment.target_name, array.name
+                    ),
+                    assignment.span,
+                ));
+            } else {
+                if assignment.target_name != target_variable.name {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::HirValidation,
+                        format!(
+                            "HIR assignment target name '{}' does not match variable '{}'",
+                            assignment.target_name, target_variable.name
+                        ),
+                        assignment.span,
+                    ));
+                }
+
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR scalar assignment '{}' must not have an index",
+                        assignment.target_name
+                    ),
+                    assignment.span,
+                ));
+            }
+        } else if let Some(array) = array_by_name {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR array assignment '{}' must include an index",
+                    array.name
+                ),
+                assignment.span,
+            ));
+        } else if assignment.target_name != target_variable.name {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR assignment target name '{}' does not match variable '{}'",
+                    assignment.target_name, target_variable.name
+                ),
+                assignment.span,
+            ));
+        }
+    }
+
+    fn known_node_names(&self) -> HashSet<SmolStr> {
+        let mut known = HashSet::new();
+        known.insert("0".into());
+        known.extend(self.ports.iter().map(|port| port.name.clone()));
+        known.extend(self.internal_nodes.iter().map(|node| node.name.clone()));
+        known.extend(self.ground_nodes.iter().cloned());
+        known
     }
 }
 
@@ -527,24 +714,365 @@ fn validate_dense_internal_node_ids(
                 ),
             ));
         }
+
+        if internal_node.index != internal_node.id.index() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR internal node index {} does not match id {}",
+                    internal_node.index, internal_node.id
+                ),
+            ));
+        }
     }
 }
 
-fn lower_statement(statement: &AnalyzedStatement) -> HirStatement {
+fn is_valid_contribution_branch(
+    branch: &str,
+    known_nodes: &HashSet<SmolStr>,
+    declared_branches: &HashSet<SmolStr>,
+) -> bool {
+    if declared_branches.contains(branch) {
+        return true;
+    }
+
+    if let Some((pos, neg)) = branch.split_once(',') {
+        return known_nodes.contains(pos) && known_nodes.contains(neg);
+    }
+
+    known_nodes.contains(branch)
+}
+
+fn lower_statement(lowerer: &mut HirLowerer, statement: &AnalyzedStatement) -> HirStatement {
     match statement {
         AnalyzedStatement::Assignment(assignment) => HirStatement::Assignment(HirAssignment {
             target: VariableId::from(assignment.var_index),
             target_name: assignment.target.clone(),
-            index: assignment.index.as_ref().map(HirExprRef::from_expr),
-            expr: HirExprRef::from_expr(&assignment.expression),
+            index: assignment
+                .index
+                .as_ref()
+                .map(|expr| lowerer.lower_expr(expr)),
+            expr: lowerer.lower_expr(&assignment.expression),
             expr_type: CanonicalValueType::from(assignment.expr_type),
             span: SourceSpanRef::from(assignment.span),
         }),
         AnalyzedStatement::Loop(loop_statement) => HirStatement::Loop(HirLoop {
-            condition: HirExprRef::from_expr(&loop_statement.condition),
-            body: loop_statement.body.iter().map(lower_statement).collect(),
+            condition: lowerer.lower_expr(&loop_statement.condition),
+            body: loop_statement
+                .body
+                .iter()
+                .map(|statement| lower_statement(lowerer, statement))
+                .collect(),
             span: SourceSpanRef::from(loop_statement.span),
         }),
+    }
+}
+
+#[derive(Debug, Default)]
+struct HirLowerer {
+    expressions: Vec<HirExpression>,
+}
+
+impl HirLowerer {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn lower_expr(&mut self, expr: &Expression) -> HirExprRef {
+        let kind_label = expression_kind(expr);
+        let span = SourceSpanRef::from(expr.span());
+        let kind = self.lower_expr_kind(expr);
+        let id = ExprId::from(self.expressions.len());
+
+        self.expressions.push(HirExpression { id, kind, span });
+
+        HirExprRef {
+            id,
+            kind: kind_label,
+            span,
+        }
+    }
+
+    fn lower_expr_kind(&mut self, expr: &Expression) -> HirExprKind {
+        match expr {
+            Expression::Number(number) => HirExprKind::Number {
+                value: number.value,
+                raw: number.raw.clone(),
+            },
+            Expression::StringLit(string) => HirExprKind::StringLiteral {
+                value: string.value.clone(),
+            },
+            Expression::Identifier(identifier) => HirExprKind::Identifier {
+                name: identifier.name.clone(),
+            },
+            Expression::SystemFunction(function) => HirExprKind::SystemFunction {
+                name: function.name.clone(),
+                args: self.lower_expr_ids(&function.args),
+            },
+            Expression::Binary(binary) => HirExprKind::Binary {
+                op: format!("{:?}", binary.op).into(),
+                left: self.lower_expr(&binary.left).id,
+                right: self.lower_expr(&binary.right).id,
+            },
+            Expression::Unary(unary) => HirExprKind::Unary {
+                op: format!("{:?}", unary.op).into(),
+                operand: self.lower_expr(&unary.operand).id,
+            },
+            Expression::Conditional(conditional) => HirExprKind::Conditional {
+                condition: self.lower_expr(&conditional.condition).id,
+                then_expr: self.lower_expr(&conditional.then_expr).id,
+                else_expr: self.lower_expr(&conditional.else_expr).id,
+            },
+            Expression::Call(call) => HirExprKind::Call {
+                name: call.name.clone(),
+                args: self.lower_expr_ids(&call.args),
+            },
+            Expression::BranchAccess(access) => self.lower_branch_access_kind(access),
+            Expression::ArrayAccess(array) => HirExprKind::ArrayAccess {
+                array: array.array.clone(),
+                index: self.lower_expr(&array.index).id,
+            },
+            Expression::ArrayLiteral(array) => HirExprKind::ArrayLiteral {
+                elements: self.lower_expr_ids(&array.elements),
+            },
+            Expression::AnalogOperator(operator) => self.lower_analog_operator(operator),
+            Expression::NoiseSource(source) => self.lower_noise_source(source),
+        }
+    }
+
+    fn lower_expr_ids(&mut self, expressions: &[Expression]) -> Vec<ExprId> {
+        expressions
+            .iter()
+            .map(|expr| self.lower_expr(expr).id)
+            .collect()
+    }
+
+    fn lower_branch_access_expr(&mut self, access: &BranchAccess) -> ExprId {
+        let id = ExprId::from(self.expressions.len());
+        let span = SourceSpanRef::from(access.span());
+        let kind = self.lower_branch_access_kind(access);
+
+        self.expressions.push(HirExpression { id, kind, span });
+        id
+    }
+
+    fn lower_branch_access_kind(&self, access: &BranchAccess) -> HirExprKind {
+        match access {
+            BranchAccess::Nodes {
+                access, pos, neg, ..
+            } => HirExprKind::BranchAccess {
+                access: access.clone(),
+                pos: pos.clone(),
+                neg: neg.clone(),
+            },
+            BranchAccess::Branch { access, name, .. } => HirExprKind::NamedBranchAccess {
+                access: access.clone(),
+                name: name.clone(),
+            },
+        }
+    }
+
+    fn lower_optional_expr(&mut self, expression: &Option<Box<Expression>>) -> Vec<ExprId> {
+        expression
+            .iter()
+            .map(|expr| self.lower_expr(expr).id)
+            .collect()
+    }
+
+    fn lower_analog_operator(&mut self, operator: &AnalogOperator) -> HirExprKind {
+        let (operator_name, operands) = match operator {
+            AnalogOperator::Ddt { expr, abstol, .. } => {
+                let mut operands = vec![self.lower_expr(expr).id];
+                operands.extend(self.lower_optional_expr(abstol));
+                ("Ddt", operands)
+            }
+            AnalogOperator::Idt {
+                expr,
+                ic,
+                assert_val,
+                abstol,
+                ..
+            } => {
+                let mut operands = vec![self.lower_expr(expr).id];
+                operands.extend(self.lower_optional_expr(ic));
+                operands.extend(self.lower_optional_expr(assert_val));
+                operands.extend(self.lower_optional_expr(abstol));
+                ("Idt", operands)
+            }
+            AnalogOperator::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+                abstol,
+                ..
+            } => {
+                let mut operands = vec![self.lower_expr(expr).id];
+                operands.extend(self.lower_optional_expr(ic));
+                operands.extend(self.lower_optional_expr(modulus));
+                operands.extend(self.lower_optional_expr(offset));
+                operands.extend(self.lower_optional_expr(abstol));
+                ("IdtMod", operands)
+            }
+            AnalogOperator::Ddx { expr, probe, .. } => {
+                let operands = vec![
+                    self.lower_expr(expr).id,
+                    self.lower_branch_access_expr(probe),
+                ];
+                ("Ddx", operands)
+            }
+            AnalogOperator::Limexp { expr, .. } => ("Limexp", vec![self.lower_expr(expr).id]),
+            AnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+                ..
+            } => {
+                let mut operands = vec![self.lower_expr(expr).id, self.lower_expr(delay).id];
+                operands.extend(self.lower_optional_expr(max_delay));
+                ("Absdelay", operands)
+            }
+            AnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                tolerance,
+                ..
+            } => {
+                let mut operands = vec![self.lower_expr(expr).id];
+                operands.extend(self.lower_optional_expr(delay));
+                operands.extend(self.lower_optional_expr(rise));
+                operands.extend(self.lower_optional_expr(fall));
+                operands.extend(self.lower_optional_expr(tolerance));
+                ("Transition", operands)
+            }
+            AnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+                ..
+            } => {
+                let mut operands = vec![self.lower_expr(expr).id];
+                operands.extend(self.lower_optional_expr(max_rise));
+                operands.extend(self.lower_optional_expr(max_fall));
+                ("Slew", operands)
+            }
+            AnalogOperator::LastCrossing { expr, edge, .. } => {
+                let operator_name = match edge {
+                    Some(direction) => SmolStr::from(format!("LastCrossing::{direction:?}")),
+                    None => "LastCrossing".into(),
+                };
+                return HirExprKind::AnalogOperator {
+                    operator: operator_name,
+                    operands: vec![self.lower_expr(expr).id],
+                };
+            }
+            AnalogOperator::Laplace { kind, expr, .. } => {
+                let mut operands = vec![self.lower_expr(expr).id];
+                let operator_name = self.lower_laplace_kind(kind, &mut operands);
+                return HirExprKind::AnalogOperator {
+                    operator: operator_name,
+                    operands,
+                };
+            }
+            AnalogOperator::Zi { kind, expr, .. } => {
+                let mut operands = vec![self.lower_expr(expr).id];
+                let operator_name = self.lower_zi_kind(kind, &mut operands);
+                return HirExprKind::AnalogOperator {
+                    operator: operator_name,
+                    operands,
+                };
+            }
+        };
+
+        HirExprKind::AnalogOperator {
+            operator: operator_name.into(),
+            operands,
+        }
+    }
+
+    fn lower_laplace_kind(&mut self, kind: &LaplaceKind, operands: &mut Vec<ExprId>) -> SmolStr {
+        match kind {
+            LaplaceKind::ZeroPole { zeros, poles } => {
+                operands.extend(self.lower_expr_ids(zeros));
+                operands.extend(self.lower_expr_ids(poles));
+                "LaplaceZeroPole"
+            }
+            LaplaceKind::ZeroDenominator { zeros, denominator } => {
+                operands.extend(self.lower_expr_ids(zeros));
+                operands.extend(self.lower_expr_ids(denominator));
+                "LaplaceZeroDenominator"
+            }
+            LaplaceKind::NumeratorPole { numerator, poles } => {
+                operands.extend(self.lower_expr_ids(numerator));
+                operands.extend(self.lower_expr_ids(poles));
+                "LaplaceNumeratorPole"
+            }
+            LaplaceKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => {
+                operands.extend(self.lower_expr_ids(numerator));
+                operands.extend(self.lower_expr_ids(denominator));
+                "LaplaceNumeratorDenominator"
+            }
+        }
+        .into()
+    }
+
+    fn lower_zi_kind(&mut self, kind: &ZiKind, operands: &mut Vec<ExprId>) -> SmolStr {
+        match kind {
+            ZiKind::ZeroPole { zeros, poles } => {
+                operands.extend(self.lower_expr_ids(zeros));
+                operands.extend(self.lower_expr_ids(poles));
+                "ZiZeroPole"
+            }
+            ZiKind::ZeroDenominator { zeros, denominator } => {
+                operands.extend(self.lower_expr_ids(zeros));
+                operands.extend(self.lower_expr_ids(denominator));
+                "ZiZeroDenominator"
+            }
+            ZiKind::NumeratorPole { numerator, poles } => {
+                operands.extend(self.lower_expr_ids(numerator));
+                operands.extend(self.lower_expr_ids(poles));
+                "ZiNumeratorPole"
+            }
+            ZiKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => {
+                operands.extend(self.lower_expr_ids(numerator));
+                operands.extend(self.lower_expr_ids(denominator));
+                "ZiNumeratorDenominator"
+            }
+        }
+        .into()
+    }
+
+    fn lower_noise_source(&mut self, source: &NoiseSource) -> HirExprKind {
+        match source {
+            NoiseSource::White { power, name, .. } => HirExprKind::NoiseSource {
+                source: "White".into(),
+                operands: vec![self.lower_expr(power).id],
+                name: name.clone(),
+            },
+            NoiseSource::Flicker {
+                power,
+                exponent,
+                name,
+                ..
+            } => HirExprKind::NoiseSource {
+                source: "Flicker".into(),
+                operands: vec![self.lower_expr(power).id, self.lower_expr(exponent).id],
+                name: name.clone(),
+            },
+            NoiseSource::Table { data, name, .. } => HirExprKind::NoiseSource {
+                source: "Table".into(),
+                operands: self.lower_expr_ids(data),
+                name: name.clone(),
+            },
+        }
     }
 }
 

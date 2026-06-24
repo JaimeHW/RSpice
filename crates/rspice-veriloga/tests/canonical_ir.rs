@@ -5,8 +5,8 @@ use rspice_veriloga::canonical_ir::{
     BranchId, ContributionId, ModuleId, NodeId, ParamId, PortId, SourceId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
-    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirLoop, HirModel,
-    HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
+    CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirContributionKind, HirExprKind,
+    HirLoop, HirModel, HirStatement, IrDiagnostic, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap};
 
@@ -48,6 +48,20 @@ module dyn_array(p, n);
     analog begin
         xs[pick] = scale;
         I(p, n) <+ xs[pick] * V(p, n);
+    end
+endmodule
+"#
+}
+
+fn scalar_assignment_source() -> &'static str {
+    r#"
+module scalar_assign(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    analog begin
+        x = 1.0;
+        I(p, n) <+ x * V(p, n);
     end
 endmodule
 "#
@@ -216,11 +230,44 @@ fn hir_lowering_preserves_analyzed_module_surface() {
 }
 
 #[test]
+fn hir_lowering_preserves_expression_tree_structure() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let contribution_expr = &hir.contributions[0].expression;
+
+    assert_eq!(
+        hir.expressions[usize::from(contribution_expr.id)].id,
+        contribution_expr.id
+    );
+    let HirExprKind::Binary { op, left, right } =
+        &hir.expressions[usize::from(contribution_expr.id)].kind
+    else {
+        panic!("expected top-level contribution expression to be binary");
+    };
+    assert_eq!(op.as_str(), "Div");
+
+    let HirExprKind::BranchAccess { access, pos, neg } = &hir.expressions[usize::from(*left)].kind
+    else {
+        panic!("expected binary lhs to preserve branch access");
+    };
+    assert_eq!(access.as_str(), "V");
+    assert_eq!(pos.as_str(), "p");
+    assert_eq!(neg.as_deref(), Some("n"));
+
+    let HirExprKind::Identifier { name } = &hir.expressions[usize::from(*right)].kind else {
+        panic!("expected binary rhs to preserve identifier");
+    };
+    assert_eq!(name.as_str(), "r");
+}
+
+#[test]
 fn hir_lowering_preserves_dynamic_array_assignment_target_and_index() {
     let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
     let array = analyzed.arrays.get("xs").expect("array layout");
+    let array_len: u32 = hir.arrays[0].len;
 
     let assignment = hir
         .statements
@@ -233,6 +280,7 @@ fn hir_lowering_preserves_dynamic_array_assignment_target_and_index() {
         })
         .expect("dynamic array assignment");
 
+    assert_eq!(array_len, 4);
     assert_eq!(assignment.target, VariableId::from(array.base));
     assert_eq!(assignment.target_name.as_str(), "xs");
     assert_eq!(
@@ -241,6 +289,101 @@ fn hir_lowering_preserves_dynamic_array_assignment_target_and_index() {
     );
     assert_eq!(assignment.expr.kind.as_str(), "identifier");
     assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn hir_validation_rejects_invalid_contribution_references() {
+    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let mut missing_branch = hir.clone();
+    missing_branch.contributions[0].branch = "missing".into();
+    let diagnostics = missing_branch
+        .validate()
+        .expect_err("missing branch must fail validation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("unknown contribution branch 'missing'")
+    }));
+
+    let mut missing_node = hir;
+    missing_node.contributions[0].branch = "p,missing".into();
+    let diagnostics = missing_node
+        .validate()
+        .expect_err("missing node pair must fail validation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("unknown contribution branch 'p,missing'")
+    }));
+}
+
+#[test]
+fn hir_validation_rejects_assignment_target_name_and_shape_mismatches() {
+    let analyzed =
+        analyze_fixture(scalar_assignment_source(), "scalar_assign").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", scalar_assignment_source());
+    let mut scalar_hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let HirStatement::Assignment(scalar_assignment) = &mut scalar_hir.statements[0] else {
+        panic!("expected scalar assignment");
+    };
+    scalar_assignment.target_name = "not_x".into();
+    scalar_assignment.index = Some(scalar_assignment.expr.clone());
+
+    let diagnostics = scalar_hir
+        .validate()
+        .expect_err("scalar assignment mismatches must fail validation");
+    let messages: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("target name 'not_x' does not match variable 'x'"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("scalar assignment 'not_x' must not have an index"))
+    );
+
+    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let mut array_hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let HirStatement::Assignment(array_assignment) = &mut array_hir.statements[0] else {
+        panic!("expected array assignment");
+    };
+    array_assignment.target_name = "xs[0]".into();
+
+    let diagnostics = array_hir
+        .validate()
+        .expect_err("array assignment name mismatch must fail validation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("indexed assignment target name 'xs[0]' does not match array 'xs'")
+    }));
+
+    let mut missing_index_hir = HirModel::from_analyzed_module(
+        &CanonicalMetadata::for_source("fixture", dynamic_array_source()),
+        &analyzed,
+    );
+    let HirStatement::Assignment(array_assignment) = &mut missing_index_hir.statements[0] else {
+        panic!("expected array assignment");
+    };
+    array_assignment.index = None;
+
+    let diagnostics = missing_index_hir
+        .validate()
+        .expect_err("array assignment without index must fail validation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("array assignment 'xs' must include an index")
+    }));
 }
 
 #[test]
@@ -287,6 +430,7 @@ fn hir_validation_rejects_malformed_structure() {
     hir.branches[0].id = BranchId::new(7);
     hir.contributions[0].id = ContributionId::new(9);
     hir.internal_nodes[0].id = NodeId::new(11);
+    hir.internal_nodes[0].index = 17;
 
     let diagnostics = hir.validate().expect_err("malformed HIR must fail");
     let messages: Vec<_> = diagnostics
@@ -318,6 +462,11 @@ fn hir_validation_rejects_malformed_structure() {
         messages
             .iter()
             .any(|message| message.contains("internal node IDs must be dense"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("internal node index 17 does not match id NodeId(11)"))
     );
 }
 
