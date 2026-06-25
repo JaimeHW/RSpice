@@ -7,8 +7,8 @@ use super::hir::{
     HirExpression, HirModel, HirParamRange,
 };
 use super::{
-    BranchId, CompilerPhase, ContributionId, EquationId, ExprId, IrDiagnostic, IrValidationResult,
-    NodeId, ParamId, SourceSpanRef, StateId,
+    BranchId, BranchUnknownId, CompilerPhase, ContributionId, EquationId, ExprId, IrDiagnostic,
+    IrValidationResult, NodeId, ParamId, SourceSpanRef, StateId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -55,6 +55,7 @@ pub struct MirStateSlot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MirBranchRef {
     pub label: SmolStr,
+    pub declared_name: Option<SmolStr>,
     pub pos_node: Option<NodeId>,
     pub neg_node: Option<NodeId>,
 }
@@ -66,6 +67,15 @@ pub struct MirBranch {
     pub pos_node: Option<NodeId>,
     pub neg_node: Option<NodeId>,
     pub discipline: SmolStr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MirBranchUnknown {
+    pub id: BranchUnknownId,
+    pub equation: EquationId,
+    pub declared_name: Option<SmolStr>,
+    pub pos_node: Option<NodeId>,
+    pub neg_node: Option<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +95,7 @@ pub struct MirModel {
     pub nodes: Vec<MirNode>,
     pub parameters: Vec<MirParameterSlot>,
     pub branches: Vec<MirBranch>,
+    pub branch_unknowns: Vec<MirBranchUnknown>,
     pub state_slots: Vec<MirStateSlot>,
     pub equations: Vec<MirEquation>,
     pub expressions: Vec<HirExpression>,
@@ -154,26 +165,33 @@ impl MirModel {
                 }
             })
             .collect();
-        let equations = hir
+        let equations: Vec<MirEquation> = hir
             .contributions
             .iter()
             .enumerate()
             .map(|(index, contribution)| MirEquation {
                 id: EquationId::from(index),
                 contribution: contribution.id,
-                branch: resolve_branch_ref(&contribution.branch, hir, &node_ids_by_name),
+                branch: resolve_branch_ref(
+                    &contribution.branch,
+                    contribution.declared_branch.as_ref(),
+                    hir,
+                    &node_ids_by_name,
+                ),
                 kind: MirEquationKind::from(contribution.kind),
                 expression: contribution.expression.clone(),
                 active_domains: default_active_domains(),
                 span: contribution.span,
             })
             .collect();
+        let branch_unknowns = collect_branch_unknowns(&equations);
 
         let mir = Self {
             module_name: hir.module_name.clone(),
             nodes,
             parameters,
             branches,
+            branch_unknowns,
             state_slots: Vec::new(),
             equations,
             expressions: hir.expressions.clone(),
@@ -204,11 +222,18 @@ impl MirModel {
         validate_dense_node_ids(&mut diagnostics, &self.nodes);
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_branch_ids(&mut diagnostics, &self.branches);
+        validate_dense_branch_unknown_ids(&mut diagnostics, &self.branch_unknowns);
         validate_dense_state_slot_ids(&mut diagnostics, &self.state_slots);
         validate_dense_equation_ids(&mut diagnostics, &self.equations);
         validate_dense_expression_ids(&mut diagnostics, &self.expressions);
         validate_node_names(&mut diagnostics, &self.nodes);
         validate_branches(&mut diagnostics, &self.branches, &self.nodes);
+        validate_branch_unknowns(
+            &mut diagnostics,
+            &self.branch_unknowns,
+            &self.equations,
+            &self.nodes,
+        );
         validate_expressions(
             &mut diagnostics,
             &self.expressions,
@@ -255,6 +280,21 @@ fn default_active_domains() -> Vec<MirAnalysisDomain> {
     ]
 }
 
+fn collect_branch_unknowns(equations: &[MirEquation]) -> Vec<MirBranchUnknown> {
+    equations
+        .iter()
+        .filter(|equation| equation.kind == MirEquationKind::Potential)
+        .enumerate()
+        .map(|(index, equation)| MirBranchUnknown {
+            id: BranchUnknownId::from(index),
+            equation: equation.id,
+            declared_name: equation.branch.declared_name.clone(),
+            pos_node: equation.branch.pos_node,
+            neg_node: equation.branch.neg_node,
+        })
+        .collect()
+}
+
 fn node_ids_by_name(nodes: &[MirNode]) -> HashMap<SmolStr, NodeId> {
     nodes
         .iter()
@@ -274,14 +314,24 @@ fn resolve_node_id(name: &SmolStr, node_ids_by_name: &HashMap<SmolStr, NodeId>) 
 
 fn resolve_branch_ref(
     branch_label: &SmolStr,
+    declared_branch: Option<&SmolStr>,
     hir: &HirModel,
     node_ids_by_name: &HashMap<SmolStr, NodeId>,
 ) -> MirBranchRef {
+    let mut declared_name = declared_branch.cloned();
     let (pos_name, neg_name) = hir
         .branches
         .iter()
-        .find(|branch| branch.name == *branch_label)
+        .find(|branch| {
+            declared_branch.is_some_and(|declared| branch.name.as_str() == declared.as_str())
+        })
+        .or_else(|| {
+            hir.branches
+                .iter()
+                .find(|branch| branch.name == *branch_label)
+        })
         .map(|branch| {
+            declared_name = Some(branch.name.clone());
             (
                 branch.pos_node.clone(),
                 if branch.neg_node.is_empty() {
@@ -307,6 +357,7 @@ fn resolve_branch_ref(
 
     MirBranchRef {
         label,
+        declared_name,
         pos_node,
         neg_node,
     }
@@ -435,6 +486,24 @@ fn validate_dense_branch_ids(diagnostics: &mut Vec<IrDiagnostic>, branches: &[Mi
     }
 }
 
+fn validate_dense_branch_unknown_ids(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    branch_unknowns: &[MirBranchUnknown],
+) {
+    for (expected, unknown) in branch_unknowns.iter().enumerate() {
+        let expected = u32::try_from(expected).expect("MIR branch unknown count exceeds u32::MAX");
+        if unknown.id.index() != expected {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown IDs must be dense: expected BranchUnknownId({}) at index {}, found {}",
+                    expected, expected, unknown.id
+                ),
+            ));
+        }
+    }
+}
+
 fn validate_dense_expression_ids(
     diagnostics: &mut Vec<IrDiagnostic>,
     expressions: &[HirExpression],
@@ -504,6 +573,112 @@ fn validate_branches(
                     format!(
                         "MIR branch '{}' neg_node {} is out of range for {} nodes",
                         branch.name,
+                        neg_node,
+                        nodes.len()
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn validate_branch_unknowns(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    branch_unknowns: &[MirBranchUnknown],
+    equations: &[MirEquation],
+    nodes: &[MirNode],
+) {
+    let mut equations_seen = HashSet::new();
+    for unknown in branch_unknowns {
+        if !equations_seen.insert(unknown.equation) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR duplicate branch unknown for equation {}",
+                    unknown.equation
+                ),
+            ));
+        }
+
+        let Some(equation) = equations.get(usize::from(unknown.equation)) else {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} equation {} is out of range for {} equations",
+                    unknown.id,
+                    unknown.equation,
+                    equations.len()
+                ),
+            ));
+            continue;
+        };
+        if equation.id != unknown.equation {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} equation {} does not match equation table entry {}",
+                    unknown.id, unknown.equation, equation.id
+                ),
+            ));
+        }
+        if equation.kind != MirEquationKind::Potential {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} must reference a potential equation, found {:?}",
+                    unknown.id, equation.kind
+                ),
+            ));
+        }
+        if unknown.pos_node != equation.branch.pos_node
+            || unknown.neg_node != equation.branch.neg_node
+        {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} endpoints do not match equation {} branch endpoints",
+                    unknown.id, unknown.equation
+                ),
+            ));
+        }
+        if unknown.declared_name != equation.branch.declared_name {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} declared name does not match equation {} branch",
+                    unknown.id, unknown.equation
+                ),
+            ));
+        }
+        if unknown.pos_node.is_none() && unknown.neg_node.is_none() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} must have a concrete endpoint",
+                    unknown.id
+                ),
+            ));
+        }
+        if let Some(pos_node) = unknown.pos_node {
+            if usize::from(pos_node) >= nodes.len() {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::MirValidation,
+                    format!(
+                        "MIR branch unknown {} pos_node {} is out of range for {} nodes",
+                        unknown.id,
+                        pos_node,
+                        nodes.len()
+                    ),
+                ));
+            }
+        }
+        if let Some(neg_node) = unknown.neg_node {
+            if usize::from(neg_node) >= nodes.len() {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::MirValidation,
+                    format!(
+                        "MIR branch unknown {} neg_node {} is out of range for {} nodes",
+                        unknown.id,
                         neg_node,
                         nodes.len()
                     ),

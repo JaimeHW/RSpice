@@ -316,6 +316,7 @@ pub enum HirContributionKind {
 pub struct HirContribution {
     pub id: ContributionId,
     pub branch: SmolStr,
+    pub declared_branch: Option<SmolStr>,
     pub kind: HirContributionKind,
     pub expression: HirExprRef,
     pub expr_type: CanonicalValueType,
@@ -368,7 +369,12 @@ pub struct HirModel {
 
 impl HirModel {
     pub fn from_analyzed_module(metadata: &CanonicalMetadata, module: &AnalyzedModule) -> Self {
-        let mut lowerer = HirLowerer::new();
+        let branch_names = module
+            .branches
+            .iter()
+            .map(|branch| branch.name.clone())
+            .collect();
+        let mut lowerer = HirLowerer::new(branch_names);
         let mut parameters: Vec<_> = module
             .parameters
             .iter()
@@ -414,6 +420,7 @@ impl HirModel {
             .map(|(index, contribution)| HirContribution {
                 id: ContributionId::from(index),
                 branch: contribution.branch.clone(),
+                declared_branch: contribution.declared_branch.clone(),
                 kind: contribution_kind(contribution.indirect, contribution.is_current),
                 expression: lowerer.lower_expr(&contribution.expression),
                 expr_type: CanonicalValueType::from(contribution.expr_type),
@@ -1441,11 +1448,15 @@ fn lower_statement(lowerer: &mut HirLowerer, statement: &AnalyzedStatement) -> H
 #[derive(Debug, Default)]
 struct HirLowerer {
     expressions: Vec<HirExpression>,
+    declared_branches: HashSet<SmolStr>,
 }
 
 impl HirLowerer {
-    fn new() -> Self {
-        Self::default()
+    fn new(declared_branches: HashSet<SmolStr>) -> Self {
+        Self {
+            expressions: Vec::new(),
+            declared_branches,
+        }
     }
 
     fn lower_expr(&mut self, expr: &Expression) -> HirExprRef {
@@ -1528,6 +1539,14 @@ impl HirLowerer {
 
     fn lower_branch_access_kind(&self, access: &BranchAccess) -> HirExprKind {
         match access {
+            BranchAccess::Nodes {
+                access, pos, neg, ..
+            } if neg.is_none() && self.declared_branches.contains(pos) => {
+                HirExprKind::NamedBranchAccess {
+                    access: access.clone(),
+                    name: pos.clone(),
+                }
+            }
             BranchAccess::Nodes {
                 access, pos, neg, ..
             } => HirExprKind::BranchAccess {

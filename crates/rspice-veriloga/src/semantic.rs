@@ -335,6 +335,7 @@ pub struct AnalyzedBranch {
 #[derive(Debug, Clone)]
 pub struct AnalyzedContribution {
     pub branch: SmolStr,
+    pub declared_branch: Option<SmolStr>,
     pub is_current: bool,
     /// Indirect (implicit-equation) contribution: `expression` holds the
     /// constraint residual `lhs - rhs` that the unknown source drives to
@@ -1830,7 +1831,7 @@ impl SemanticAnalyzer {
             )));
         }
 
-        let (branch_name, is_current) =
+        let (branch_name, is_current, declared_branch) =
             self.resolve_contribution_target(&contrib.target, module, contrib.span)?;
 
         let expression = self.lower_expression(&contrib.value)?;
@@ -1851,6 +1852,7 @@ impl SemanticAnalyzer {
 
         module.contributions.push(AnalyzedContribution {
             branch: branch_name,
+            declared_branch,
             is_current,
             indirect: false,
             expression,
@@ -1880,7 +1882,7 @@ impl SemanticAnalyzer {
             )));
         }
 
-        let (branch_name, is_current) =
+        let (branch_name, is_current, declared_branch) =
             self.resolve_contribution_target(&stmt.branch, module, stmt.span)?;
 
         let lhs = self.lower_expression(&stmt.lhs)?;
@@ -1919,6 +1921,7 @@ impl SemanticAnalyzer {
 
         module.contributions.push(AnalyzedContribution {
             branch: branch_name,
+            declared_branch,
             is_current,
             indirect: true,
             expression,
@@ -2040,7 +2043,7 @@ impl SemanticAnalyzer {
         target: &BranchAccess,
         module: &AnalyzedModule,
         span: Span,
-    ) -> CompileResult<(SmolStr, bool)> {
+    ) -> CompileResult<(SmolStr, bool, Option<SmolStr>)> {
         match target {
             BranchAccess::Nodes {
                 access, pos, neg, ..
@@ -2057,7 +2060,11 @@ impl SemanticAnalyzer {
                     } else {
                         format!("{},{}", branch.pos_node, branch.neg_node)
                     };
-                    Ok((SmolStr::from(branch_str), is_current))
+                    Ok((
+                        SmolStr::from(branch_str),
+                        is_current,
+                        Some(branch.name.clone()),
+                    ))
                 } else {
                     self.validate_node(pos, span)?;
                     if let Some(n) = neg {
@@ -2069,7 +2076,7 @@ impl SemanticAnalyzer {
                     } else {
                         pos.to_string()
                     };
-                    Ok((branch.into(), is_current))
+                    Ok((branch.into(), is_current, None))
                 }
             }
             BranchAccess::Branch { name, access, .. } => {
@@ -2081,7 +2088,11 @@ impl SemanticAnalyzer {
                         } else {
                             format!("{},{}", branch.pos_node, branch.neg_node)
                         };
-                        Ok((SmolStr::from(branch_str), is_current))
+                        Ok((
+                            SmolStr::from(branch_str),
+                            is_current,
+                            Some(branch.name.clone()),
+                        ))
                     }
                     None => Err(CompileError::Semantic(SemanticError::new(
                         SemanticErrorKind::InvalidBranch(format!("undeclared branch '{}'", name)),

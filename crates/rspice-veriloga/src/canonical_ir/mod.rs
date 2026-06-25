@@ -29,7 +29,7 @@ pub use ids::{
 };
 pub use metadata::{CanonicalMetadata, StableDigest};
 pub use mir::{
-    MirAnalysisDomain, MirBranch, MirBranchRef, MirEquation, MirEquationKind, MirModel, MirNode,
-    MirParameterSlot, MirStateSlot,
+    MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind,
+    MirModel, MirNode, MirParameterSlot, MirStateSlot,
 };
 pub use opt::{InvalidationClass, OptModel, OptOp, OptSchedule, OptValue, OptValueType};

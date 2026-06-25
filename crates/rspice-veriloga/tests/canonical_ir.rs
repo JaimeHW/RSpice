@@ -6,8 +6,8 @@ use rspice_veriloga::ast::{
     AnalogOperator, BranchAccess, Expression, LaplaceKind, NumberLit, PortDirection,
 };
 use rspice_veriloga::canonical_ir::{
-    BranchId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId, PortId, ScheduleId,
-    SourceId, StateId, ValueId, VariableId,
+    BranchId, BranchUnknownId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId,
+    PortId, ScheduleId, SourceId, StateId, ValueId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirAnalogOperator,
@@ -212,6 +212,21 @@ module branch_potential(p, n);
     electrical p, n;
     branch (p, n) res;
     analog V(res) <+ 1.0;
+endmodule
+"#
+}
+
+fn named_branch_access_source() -> &'static str {
+    r#"
+module named_branch_access(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical x;
+    branch (x) probe;
+    analog begin
+        I(probe) <+ V(probe);
+        I(p, n) <+ I(probe);
+    end
 endmodule
 "#
 }
@@ -576,6 +591,7 @@ fn mir_lowering_makes_contributions_explicit_equations() {
     assert_eq!(mir.equations[0].contribution, ContributionId::new(0));
     assert_eq!(mir.equations[0].kind, MirEquationKind::Current);
     assert_eq!(mir.equations[0].branch.label.as_str(), "p,n");
+    assert_eq!(mir.equations[0].branch.declared_name.as_deref(), None);
     assert_eq!(mir.equations[0].branch.pos_node, Some(NodeId::new(0)));
     assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(1)));
     assert!(
@@ -1187,6 +1203,115 @@ fn mir_lowering_resolves_named_branch_endpoints() {
 }
 
 #[test]
+fn mir_lowering_promotes_potential_contributions_to_branch_unknowns() {
+    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    assert_eq!(mir.branch_unknowns.len(), 1);
+    assert_eq!(mir.branch_unknowns[0].id, BranchUnknownId::new(0));
+    assert_eq!(mir.branch_unknowns[0].equation, EquationId::new(0));
+    assert_eq!(mir.branch_unknowns[0].declared_name.as_deref(), Some("res"));
+    assert_eq!(mir.branch_unknowns[0].pos_node, Some(NodeId::new(0)));
+    assert_eq!(mir.branch_unknowns[0].neg_node, Some(NodeId::new(1)));
+}
+
+#[test]
+fn mir_validation_rejects_non_dense_branch_unknown_id() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    mir.branch_unknowns[0].id = BranchUnknownId::new(7);
+
+    assert_mir_validation_message(&mir, "MIR branch unknown IDs must be dense");
+}
+
+#[test]
+fn mir_validation_rejects_duplicate_branch_unknown_equation() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let mut duplicate = mir.branch_unknowns[0].clone();
+    duplicate.id = BranchUnknownId::new(1);
+    mir.branch_unknowns.push(duplicate);
+
+    assert_mir_validation_message(&mir, "duplicate branch unknown for equation EquationId(0)");
+}
+
+#[test]
+fn mir_validation_rejects_branch_unknown_for_non_potential_equation() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    mir.equations[0].kind = MirEquationKind::Current;
+
+    assert_mir_validation_message(
+        &mir,
+        "branch unknown BranchUnknownId(0) must reference a potential equation",
+    );
+}
+
+#[test]
+fn mir_validation_rejects_branch_unknown_equation_table_mismatch() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    mir.equations[0].id = EquationId::new(7);
+
+    assert_mir_validation_message(
+        &mir,
+        "branch unknown BranchUnknownId(0) equation EquationId(0) does not match equation table entry EquationId(7)",
+    );
+}
+
+#[test]
+fn mir_validation_rejects_branch_unknown_declared_name_mismatch() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    mir.branch_unknowns[0].declared_name = Some("other".into());
+
+    assert_mir_validation_message(
+        &mir,
+        "branch unknown BranchUnknownId(0) declared name does not match equation EquationId(0) branch",
+    );
+}
+
+#[test]
+fn mir_validation_rejects_branch_unknown_endpoint_mismatch() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    mir.branch_unknowns[0].neg_node = None;
+
+    assert_mir_validation_message(
+        &mir,
+        "branch unknown BranchUnknownId(0) endpoints do not match equation EquationId(0) branch endpoints",
+    );
+}
+
+#[test]
+fn mir_validation_rejects_branch_unknown_pos_node_out_of_range() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    mir.branch_unknowns[0].pos_node = Some(NodeId::new(99));
+
+    assert_mir_validation_message(
+        &mir,
+        "branch unknown BranchUnknownId(0) pos_node NodeId(99) is out of range",
+    );
+}
+
+#[test]
+fn mir_validation_rejects_branch_unknown_without_concrete_endpoint() {
+    let (_, _, mut mir, _) =
+        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    mir.branch_unknowns[0].pos_node = None;
+    mir.branch_unknowns[0].neg_node = None;
+
+    assert_mir_validation_message(
+        &mir,
+        "branch unknown BranchUnknownId(0) must have a concrete endpoint",
+    );
+}
+
+#[test]
 fn mir_validation_rejects_branch_participation_out_of_range() {
     let mut mir = lower_tiny_resistor_mir();
     mir.equations[0].branch.pos_node = Some(NodeId::new(99));
@@ -1490,6 +1615,7 @@ fn hir_lowering_preserves_laplace_operand_groups() {
         branches: Vec::new(),
         contributions: vec![AnalyzedContribution {
             branch: "p,n".into(),
+            declared_branch: None,
             is_current: false,
             indirect: false,
             expression: Expression::AnalogOperator(AnalogOperator::Laplace {
@@ -1585,6 +1711,7 @@ fn hir_lowering_preserves_typed_analog_operator_slots() {
         branches: Vec::new(),
         contributions: vec![AnalyzedContribution {
             branch: "p,n".into(),
+            declared_branch: None,
             is_current: true,
             indirect: false,
             expression: Expression::AnalogOperator(AnalogOperator::IdtMod {
@@ -2045,6 +2172,26 @@ fn hir_lowering_represents_named_branch_potential_contribution() {
     assert_eq!(hir.contributions.len(), 1);
     assert_eq!(hir.contributions[0].branch.as_str(), "p,n");
     assert_eq!(hir.contributions[0].kind, HirContributionKind::Potential);
+    assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn hir_lowering_canonicalizes_single_argument_named_branch_accesses() {
+    let analyzed = analyze_fixture(named_branch_access_source(), "named_branch_access")
+        .expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", named_branch_access_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    assert!(hir.expressions.iter().any(|expression| matches!(
+        &expression.kind,
+        HirExprKind::NamedBranchAccess { access, name }
+            if access.as_str() == "I" && name.as_str() == "probe"
+    )));
+    assert!(hir.expressions.iter().any(|expression| matches!(
+        &expression.kind,
+        HirExprKind::NamedBranchAccess { access, name }
+            if access.as_str() == "V" && name.as_str() == "probe"
+    )));
     assert!(hir.validate().is_ok());
 }
 

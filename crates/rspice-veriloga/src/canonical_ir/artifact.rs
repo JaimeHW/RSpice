@@ -7,9 +7,9 @@ use super::{
     HirAssignment, HirBranch, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
     HirExprRef, HirExpression, HirInternalNode, HirLaplaceKind, HirLoop, HirModel, HirParamRange,
     HirParameter, HirPort, HirStatement, HirVariable, HirZiKind, InvalidationClass, IrDiagnostic,
-    IrValidationResult, MirAnalysisDomain, MirBranch, MirBranchRef, MirEquation, MirEquationKind,
-    MirModel, MirNode, MirParameterSlot, MirStateSlot, OptModel, OptOp, OptSchedule, OptValue,
-    OptValueType, SourceSpanRef, StableDigest,
+    IrValidationResult, MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation,
+    MirEquationKind, MirModel, MirNode, MirParameterSlot, MirStateSlot, OptModel, OptOp,
+    OptSchedule, OptValue, OptValueType, SourceSpanRef, StableDigest,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -403,7 +403,7 @@ fn validate_hir_mir_contributions(
         .zip(mir.equations.iter())
         .enumerate()
     {
-        let expected_branch = expected_branch_ref(&contribution.branch, hir, mir);
+        let expected_branch = expected_branch_ref(contribution, hir, mir);
         if equation.contribution != contribution.id {
             diagnostics.push(artifact_error(format!(
                 "MIR equation {} contribution {} must match HIR contribution {}",
@@ -541,12 +541,29 @@ fn resolve_hir_endpoint(name: &SmolStr, hir: &HirModel, mir: &MirModel) -> Optio
         .map(|node| node.id)
 }
 
-fn expected_branch_ref(branch: &SmolStr, hir: &HirModel, mir: &MirModel) -> MirBranchRef {
+fn expected_branch_ref(
+    contribution: &HirContribution,
+    hir: &HirModel,
+    mir: &MirModel,
+) -> MirBranchRef {
+    let branch = &contribution.branch;
+    let mut declared_name = contribution.declared_branch.clone();
     let (pos_name, neg_name) = hir
         .branches
         .iter()
-        .find(|declared| declared.name == *branch)
+        .find(|declared| {
+            contribution
+                .declared_branch
+                .as_ref()
+                .is_some_and(|name| declared.name.as_str() == name.as_str())
+        })
+        .or_else(|| {
+            hir.branches
+                .iter()
+                .find(|declared| declared.name == *branch)
+        })
         .map(|declared| {
+            declared_name = Some(declared.name.clone());
             (
                 declared.pos_node.clone(),
                 if declared.neg_node.is_empty() {
@@ -572,6 +589,7 @@ fn expected_branch_ref(branch: &SmolStr, hir: &HirModel, mir: &MirModel) -> MirB
 
     MirBranchRef {
         label,
+        declared_name,
         pos_node,
         neg_node,
     }
@@ -671,6 +689,9 @@ fn mir_summary(mir: &MirModel) -> String {
     }
     for branch in &mir.branches {
         write_mir_branch(&mut out, branch);
+    }
+    for branch_unknown in &mir.branch_unknowns {
+        write_mir_branch_unknown(&mut out, branch_unknown);
     }
     for state_slot in &mir.state_slots {
         write_mir_state_slot(&mut out, state_slot);
@@ -782,9 +803,14 @@ fn write_hir_internal_node(out: &mut String, node: &HirInternalNode) {
 fn write_hir_contribution(out: &mut String, contribution: &HirContribution) {
     writeln!(
         out,
-        "contribution id={} branch={} kind={} expression={} expr_type={} span={}",
+        "contribution id={} branch={} declared={} kind={} expression={} expr_type={} span={}",
         contribution.id.index(),
         enc_str(&contribution.branch),
+        contribution
+            .declared_branch
+            .as_deref()
+            .map(enc_str)
+            .unwrap_or_else(|| "-".to_string()),
         contribution_kind_label(contribution.kind),
         expr_ref_label(Some(&contribution.expression)),
         value_type_label(contribution.expr_type),
@@ -884,6 +910,19 @@ fn write_mir_branch(out: &mut String, branch: &MirBranch) {
     .expect("write to string");
 }
 
+fn write_mir_branch_unknown(out: &mut String, branch_unknown: &MirBranchUnknown) {
+    writeln!(
+        out,
+        "branch_unknown id={} equation={} declared_name={} pos={} neg={}",
+        branch_unknown.id.index(),
+        branch_unknown.equation.index(),
+        option_smol(branch_unknown.declared_name.as_ref()),
+        option_id(branch_unknown.pos_node.map(|id| id.index())),
+        option_id(branch_unknown.neg_node.map(|id| id.index()))
+    )
+    .expect("write to string");
+}
+
 fn write_mir_state_slot(out: &mut String, state_slot: &MirStateSlot) {
     writeln!(
         out,
@@ -933,8 +972,13 @@ fn write_opt_schedule(out: &mut String, schedule: &OptSchedule) {
 
 fn branch_ref_label(branch: &MirBranchRef) -> String {
     format!(
-        "label:{} pos:{} neg:{}",
+        "label:{} declared:{} pos:{} neg:{}",
         enc_str(&branch.label),
+        branch
+            .declared_name
+            .as_deref()
+            .map(enc_str)
+            .unwrap_or_else(|| "-".to_string()),
         option_id(branch.pos_node.map(|id| id.index())),
         option_id(branch.neg_node.map(|id| id.index()))
     )
