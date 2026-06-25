@@ -1,0 +1,6 @@
+module generated_cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-6 from (0:inf);
+    analog I(p, n) <+ ddt(c * V(p, n));
+endmodule

@@ -167,6 +167,58 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n");
+    out.push_str("\n");
+    out.push_str(
+        "    pub fn set_timepoint(&mut self, time: crate::Value, timestep: crate::Value) {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, time, timestep);\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.set_timepoint(time, timestep),"
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push_str("\n");
+    out.push_str("    pub fn accept_timestep(&mut self) {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.accept_timestep(),"
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push_str("\n");
+    out.push_str(
+        "    pub fn stamp_reactive(&mut self, ctx: &super::GeneratedEvalContext<'_>, stamper: &mut super::GeneratedReactiveStamper<'_>) {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (ctx, stamper, self);\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry cannot be stamped\")\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.stamp_reactive(ctx, stamper),"
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
     out.push_str("}\n\n");
 
     out.push_str("pub const BUILTIN_NAMES: &[&str] = &[\n");

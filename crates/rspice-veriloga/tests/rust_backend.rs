@@ -277,6 +277,56 @@ endmodule
     assert_generated_rust_compiles(&generated);
 }
 
+#[test]
+fn rust_backend_lowers_ddt_current_into_stateful_stamp_and_reactive_stamp() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(capacitor_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile capacitor");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(state.contains("DDT_STATE_COUNT: usize = 1"), "{state}");
+    assert!(state.contains("ddt_state_current"), "{state}");
+    assert!(state.contains("set_timepoint"), "{state}");
+    assert!(state.contains("accept_timestep"), "{state}");
+    assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(stamp.contains("ddt_jacobian"), "{stamp}");
+    assert!(stamp.contains("pub fn stamp_reactive"), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_reactive"), "{stamp}");
+    assert!(!stamp.contains("Bytecode"), "{stamp}");
+    assert!(!stamp.contains("Interpreter"), "{stamp}");
+}
+
+#[test]
+fn generated_ddt_current_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(capacitor_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile capacitor");
+
+    assert_generated_rust_compiles(&generated);
+}
+
 fn assert_generated_rust_compiles(generated: &GeneratedRustDevice) {
     let temp = temp_dir("rspice-rust-backend-compile");
 
@@ -316,6 +366,21 @@ pub mod runtime {{
             *self.touched += value + derivatives.iter().map(|(_, value)| *value).sum::<f64>();
         }}
     }}
+
+    pub struct GeneratedReactiveStamper<'a> {{
+        pub touched: &'a mut f64,
+    }}
+
+    impl<'a> GeneratedReactiveStamper<'a> {{
+        pub fn stamp_current_reactive(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            derivatives: &[(usize, f64)],
+        ) {{
+            *self.touched += derivatives.iter().map(|(_, value)| *value).sum::<f64>();
+        }}
+    }}
 }}
 
 #[path = "{}"]
@@ -347,28 +412,6 @@ pub mod generated_device;
     );
 
     let _ = std::fs::remove_dir_all(temp);
-}
-
-#[test]
-fn rust_backend_rejects_stateful_operator_until_supported() {
-    let src = r#"
-module cap(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter real c = 1e-12;
-    analog I(p, n) <+ ddt(c * V(p, n));
-endmodule
-"#;
-    let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(src)
-        .expect("canonical IR");
-    let err = RustTranspiler::default()
-        .transpile(&artifact)
-        .expect_err("ddt unsupported in first slice");
-
-    let rendered = err.to_string();
-    assert!(rendered.contains("cap"), "{rendered}");
-    assert!(rendered.contains("stateful"), "{rendered}");
 }
 
 #[test]
@@ -453,6 +496,17 @@ module tiny_res(p, n);
     electrical p, n;
     parameter real r = 1000.0 from (0:inf);
     analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#
+}
+
+fn capacitor_source() -> &'static str {
+    r#"
+module cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from (0:inf);
+    analog I(p, n) <+ ddt(c * V(p, n));
 endmodule
 "#
 }

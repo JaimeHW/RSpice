@@ -414,6 +414,18 @@ impl CircuitData {
         }
     }
 
+    /// Prepare build-time generated Verilog-A devices for a transient timepoint.
+    #[cfg(feature = "veriloga-builtins")]
+    pub fn prepare_generated_veriloga_timepoint(&mut self, time: Value, dt: Value) {
+        self.generated_veriloga_devices.set_timepoint(time, dt);
+    }
+
+    /// Commit build-time generated Verilog-A integrator state after acceptance.
+    #[cfg(feature = "veriloga-builtins")]
+    pub fn accept_generated_veriloga_timestep(&mut self) {
+        self.generated_veriloga_devices.accept_timestep();
+    }
+
     /// Prepare Verilog-A devices for a transient timepoint evaluation
     ///
     /// Sets the simulation time, integration timestep, and analysis type so

@@ -11,21 +11,37 @@ pub struct LoweredExpr {
     pub lines: Vec<String>,
     pub value: String,
     pub derivatives: Vec<String>,
+    pub has_reactive: bool,
+    pub reactive_value: String,
+    pub reactive_derivatives: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct LoweredVariable {
     pub value: String,
     pub derivatives: Vec<String>,
+    pub has_reactive: bool,
+    pub reactive_value: String,
+    pub reactive_derivatives: Vec<String>,
 }
 
-pub fn lower_equation_expr(
-    artifact: &CanonicalIrArtifact,
-    expr: ExprId,
-    prefix: &str,
-    parameter_fields: &HashMap<String, String>,
-) -> Result<LoweredExpr, RustBackendError> {
-    lower_equation_expr_with_variables(artifact, expr, prefix, parameter_fields, &HashMap::new())
+#[derive(Debug, Clone, Default)]
+pub struct DdtSlots {
+    slots: HashMap<ExprId, usize>,
+}
+
+impl DdtSlots {
+    pub fn new(slots: HashMap<ExprId, usize>) -> Self {
+        Self { slots }
+    }
+
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    fn slot_for(&self, expr: ExprId) -> Option<usize> {
+        self.slots.get(&expr).copied()
+    }
 }
 
 pub fn lower_equation_expr_with_variables(
@@ -34,12 +50,54 @@ pub fn lower_equation_expr_with_variables(
     prefix: &str,
     parameter_fields: &HashMap<String, String>,
     variables: &HashMap<String, LoweredVariable>,
+    ddt_slots: &DdtSlots,
+) -> Result<LoweredExpr, RustBackendError> {
+    lower_expr_with_variables(
+        artifact,
+        expr,
+        prefix,
+        parameter_fields,
+        variables,
+        ddt_slots,
+        ExprMode::Transient,
+    )
+}
+
+pub fn lower_reactive_expr_with_variables(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    prefix: &str,
+    parameter_fields: &HashMap<String, String>,
+    variables: &HashMap<String, LoweredVariable>,
+    ddt_slots: &DdtSlots,
+) -> Result<LoweredExpr, RustBackendError> {
+    lower_expr_with_variables(
+        artifact,
+        expr,
+        prefix,
+        parameter_fields,
+        variables,
+        ddt_slots,
+        ExprMode::Reactive,
+    )
+}
+
+fn lower_expr_with_variables(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    prefix: &str,
+    parameter_fields: &HashMap<String, String>,
+    variables: &HashMap<String, LoweredVariable>,
+    ddt_slots: &DdtSlots,
+    mode: ExprMode,
 ) -> Result<LoweredExpr, RustBackendError> {
     let mut emitter = ExprEmitter {
         artifact,
         prefix,
         parameter_fields,
         variables,
+        ddt_slots,
+        mode,
         emitted: HashMap::new(),
         lines: Vec::new(),
     };
@@ -48,13 +106,25 @@ pub fn lower_equation_expr_with_variables(
         lines: emitter.lines,
         value: value.value,
         derivatives: value.derivatives,
+        has_reactive: value.has_reactive,
+        reactive_value: value.reactive_value,
+        reactive_derivatives: value.reactive_derivatives,
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExprMode {
+    Transient,
+    Reactive,
 }
 
 #[derive(Debug, Clone)]
 struct ExprValue {
     value: String,
     derivatives: Vec<String>,
+    has_reactive: bool,
+    reactive_value: String,
+    reactive_derivatives: Vec<String>,
 }
 
 struct ExprEmitter<'a> {
@@ -62,6 +132,8 @@ struct ExprEmitter<'a> {
     prefix: &'a str,
     parameter_fields: &'a HashMap<String, String>,
     variables: &'a HashMap<String, LoweredVariable>,
+    ddt_slots: &'a DdtSlots,
+    mode: ExprMode,
     emitted: HashMap<ExprId, ExprValue>,
     lines: Vec<String>,
 }
@@ -102,6 +174,17 @@ impl ExprEmitter<'_> {
                 let value = binary_value(op.as_str(), &left.value, &right.value)
                     .map_err(|_| self.unsupported(format!("binary operator {op}")))?;
                 self.emit_value(&base, value)
+            }
+            HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
+                self.lower_ddt_value(id, args.as_slice(), &base)?
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Ddt { expr, abstol },
+            } => {
+                if abstol.is_some() {
+                    return Err(self.unsupported("ddt abstol argument"));
+                }
+                self.lower_ddt_value(id, &[*expr], &base)?
             }
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Limexp { expr },
@@ -171,6 +254,71 @@ impl ExprEmitter<'_> {
                 binary_derivatives(op.as_str(), left, right)
                     .map_err(|_| self.unsupported(format!("binary operator {op}")))?
             }
+            HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
+                self.ddt_derivatives(id, args.as_slice())?
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Ddt { expr, abstol },
+            } => {
+                if abstol.is_some() {
+                    return Err(self.unsupported("ddt abstol argument"));
+                }
+                self.ddt_derivatives(id, &[*expr])?
+            }
+            _ => unreachable!("unsupported expression kinds returned earlier"),
+        };
+
+        let reactive = match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => {
+                ReactiveValue::none(zero_derivatives(node_count))
+            }
+            HirExprKind::Identifier { name } => {
+                if let Some(variable) = self.variables.get(name.as_str()) {
+                    ReactiveValue {
+                        has_reactive: variable.has_reactive,
+                        value: variable.reactive_value.clone(),
+                        derivatives: variable.reactive_derivatives.clone(),
+                    }
+                } else {
+                    ReactiveValue::none(zero_derivatives(node_count))
+                }
+            }
+            HirExprKind::Unary { op, operand } => {
+                let operand = self
+                    .emitted
+                    .get(operand)
+                    .expect("operand must be emitted before unary reactive derivative");
+                reactive_unary(op.as_str(), operand)
+                    .map_err(|_| self.unsupported(format!("unary operator {op}")))?
+            }
+            HirExprKind::Binary { op, left, right } => {
+                let left = self
+                    .emitted
+                    .get(left)
+                    .expect("left operand must be emitted before binary reactive derivative");
+                let right = self
+                    .emitted
+                    .get(right)
+                    .expect("right operand must be emitted before binary reactive derivative");
+                reactive_binary(op.as_str(), left, right)
+                    .map_err(|_| self.unsupported(format!("binary operator {op}")))?
+            }
+            HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
+                self.ddt_reactive_value(args.as_slice())?
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Ddt { expr, abstol },
+            } => {
+                if abstol.is_some() {
+                    return Err(self.unsupported("ddt abstol argument"));
+                }
+                self.ddt_reactive_value(&[*expr])?
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Limexp { .. },
+            } => unreachable!("limexp rejected before reactive lowering"),
             _ => unreachable!("unsupported expression kinds returned earlier"),
         };
 
@@ -182,9 +330,28 @@ impl ExprEmitter<'_> {
             derivative_vars.push(derivative_var);
         }
 
+        let (reactive_value, reactive_derivatives) = if reactive.has_reactive {
+            let value_var = format!("{base}_q");
+            self.lines
+                .push(format!("let {value_var}: f64 = {};", reactive.value));
+            let mut derivative_vars = Vec::with_capacity(reactive.derivatives.len());
+            for (index, derivative) in reactive.derivatives.into_iter().enumerate() {
+                let derivative_var = format!("{base}_q_d_n{index}");
+                self.lines
+                    .push(format!("let {derivative_var}: f64 = {derivative};"));
+                derivative_vars.push(derivative_var);
+            }
+            (value_var, derivative_vars)
+        } else {
+            ("0.0".to_string(), zero_derivatives(node_count))
+        };
+
         let lowered = ExprValue {
             value: value_expr,
             derivatives: derivative_vars,
+            has_reactive: reactive.has_reactive,
+            reactive_value,
+            reactive_derivatives,
         };
         self.emitted.insert(id, lowered.clone());
         Ok(lowered)
@@ -329,6 +496,67 @@ impl ExprEmitter<'_> {
         base.to_string()
     }
 
+    fn lower_ddt_value(
+        &mut self,
+        id: ExprId,
+        args: &[ExprId],
+        base: &str,
+    ) -> Result<String, RustBackendError> {
+        let operand_id = self.ddt_operand(args)?;
+        let operand = self.lower(operand_id)?;
+        match self.mode {
+            ExprMode::Transient => {
+                let slot = self.ddt_slots.slot_for(id).ok_or_else(|| {
+                    self.internal(format!("ddt expression {id} has no generated state slot"))
+                })?;
+                Ok(self.emit_value(base, format!("self.eval_ddt({slot}, {})", operand.value)))
+            }
+            ExprMode::Reactive => Ok(operand.value),
+        }
+    }
+
+    fn ddt_derivatives(
+        &self,
+        _id: ExprId,
+        args: &[ExprId],
+    ) -> Result<Vec<String>, RustBackendError> {
+        let operand_id = self.ddt_operand(args)?;
+        let operand = self
+            .emitted
+            .get(&operand_id)
+            .expect("ddt operand must be emitted before derivative");
+        let derivatives = match self.mode {
+            ExprMode::Transient => operand
+                .derivatives
+                .iter()
+                .map(|derivative| format!("self.ddt_jacobian({derivative})"))
+                .collect(),
+            ExprMode::Reactive => operand.derivatives.clone(),
+        };
+        Ok(derivatives)
+    }
+
+    fn ddt_reactive_value(&self, args: &[ExprId]) -> Result<ReactiveValue, RustBackendError> {
+        let operand_id = self.ddt_operand(args)?;
+        let operand = self
+            .emitted
+            .get(&operand_id)
+            .expect("ddt operand must be emitted before reactive derivative");
+        Ok(ReactiveValue {
+            has_reactive: true,
+            value: operand.value.clone(),
+            derivatives: operand.derivatives.clone(),
+        })
+    }
+
+    fn ddt_operand(&self, args: &[ExprId]) -> Result<ExprId, RustBackendError> {
+        match args {
+            [operand] => Ok(*operand),
+            [_, _] => Err(self.unsupported("ddt abstol argument")),
+            _ => Err(self.unsupported(format!("ddt expects one operand, found {}", args.len()))),
+        }
+    }
+
     fn unsupported(&self, feature: impl Into<String>) -> RustBackendError {
         RustBackendError::unsupported(
             self.artifact.metadata.source_package.as_str(),
@@ -343,6 +571,23 @@ impl ExprEmitter<'_> {
             self.artifact.mir.module_name.as_str(),
             message,
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ReactiveValue {
+    has_reactive: bool,
+    value: String,
+    derivatives: Vec<String>,
+}
+
+impl ReactiveValue {
+    fn none(derivatives: Vec<String>) -> Self {
+        Self {
+            has_reactive: false,
+            value: "0.0".to_string(),
+            derivatives,
+        }
     }
 }
 
@@ -436,6 +681,175 @@ fn binary_derivatives(
             )),
         })
         .collect()
+}
+
+fn reactive_unary(op: &str, operand: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
+    if !operand.has_reactive {
+        return Ok(ReactiveValue::none(zero_derivatives(
+            operand.derivatives.len(),
+        )));
+    }
+    let value = unary_value(op, &operand.reactive_value)?;
+    let derivatives = operand
+        .reactive_derivatives
+        .iter()
+        .map(|derivative| unary_value(op, derivative))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ReactiveValue {
+        has_reactive: true,
+        value,
+        derivatives,
+    })
+}
+
+fn reactive_binary(
+    op: &str,
+    left: &ExprValue,
+    right: &ExprValue,
+) -> Result<ReactiveValue, RustBackendError> {
+    let count = left.derivatives.len();
+    match op {
+        "Add" => reactive_add_sub(left, right, "+"),
+        "Sub" => reactive_add_sub(left, right, "-"),
+        "Mul" => reactive_mul(left, right),
+        "Div" => reactive_div(left, right),
+        _ => Err(RustBackendError::unsupported(
+            "<generated>",
+            "<expr>",
+            format!("binary operator {op}"),
+        )),
+    }
+    .or_else(|err| {
+        if !left.has_reactive && !right.has_reactive {
+            Ok(ReactiveValue::none(zero_derivatives(count)))
+        } else {
+            Err(err)
+        }
+    })
+}
+
+fn reactive_add_sub(
+    left: &ExprValue,
+    right: &ExprValue,
+    op: &str,
+) -> Result<ReactiveValue, RustBackendError> {
+    match (left.has_reactive, right.has_reactive) {
+        (false, false) => Ok(ReactiveValue::none(zero_derivatives(
+            left.derivatives.len(),
+        ))),
+        (true, false) if op == "+" => Ok(ReactiveValue {
+            has_reactive: true,
+            value: left.reactive_value.clone(),
+            derivatives: left.reactive_derivatives.clone(),
+        }),
+        (true, false) => Ok(ReactiveValue {
+            has_reactive: true,
+            value: left.reactive_value.clone(),
+            derivatives: left.reactive_derivatives.clone(),
+        }),
+        (false, true) if op == "+" => Ok(ReactiveValue {
+            has_reactive: true,
+            value: right.reactive_value.clone(),
+            derivatives: right.reactive_derivatives.clone(),
+        }),
+        (false, true) => Ok(ReactiveValue {
+            has_reactive: true,
+            value: format!("(-{})", right.reactive_value),
+            derivatives: right
+                .reactive_derivatives
+                .iter()
+                .map(|derivative| format!("(-{derivative})"))
+                .collect(),
+        }),
+        (true, true) => Ok(ReactiveValue {
+            has_reactive: true,
+            value: format!("({} {op} {})", left.reactive_value, right.reactive_value),
+            derivatives: left
+                .reactive_derivatives
+                .iter()
+                .zip(&right.reactive_derivatives)
+                .map(|(left, right)| format!("({left} {op} {right})"))
+                .collect(),
+        }),
+    }
+}
+
+fn reactive_mul(left: &ExprValue, right: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
+    match (left.has_reactive, right.has_reactive) {
+        (false, false) => Ok(ReactiveValue::none(zero_derivatives(
+            left.derivatives.len(),
+        ))),
+        (true, false) => Ok(ReactiveValue {
+            has_reactive: true,
+            value: format!("({} * {})", left.reactive_value, right.value),
+            derivatives: left
+                .reactive_derivatives
+                .iter()
+                .zip(&right.derivatives)
+                .map(|(left_derivative, right_derivative)| {
+                    format!(
+                        "(({left_derivative} * {right}) + ({left} * {right_derivative}))",
+                        left = left.reactive_value,
+                        right = right.value,
+                    )
+                })
+                .collect(),
+        }),
+        (false, true) => Ok(ReactiveValue {
+            has_reactive: true,
+            value: format!("({} * {})", left.value, right.reactive_value),
+            derivatives: left
+                .derivatives
+                .iter()
+                .zip(&right.reactive_derivatives)
+                .map(|(left_derivative, right_derivative)| {
+                    format!(
+                        "(({left_derivative} * {right}) + ({left} * {right_derivative}))",
+                        left = left.value,
+                        right = right.reactive_value,
+                    )
+                })
+                .collect(),
+        }),
+        (true, true) => Err(RustBackendError::unsupported(
+            "<generated>",
+            "<expr>",
+            "ddt() on both sides of a product",
+        )),
+    }
+}
+
+fn reactive_div(left: &ExprValue, right: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
+    match (left.has_reactive, right.has_reactive) {
+        (false, false) => Ok(ReactiveValue::none(zero_derivatives(
+            left.derivatives.len(),
+        ))),
+        (true, false) => Ok(ReactiveValue {
+            has_reactive: true,
+            value: format!("({} / {})", left.reactive_value, right.value),
+            derivatives: left
+                .reactive_derivatives
+                .iter()
+                .zip(&right.derivatives)
+                .map(|(left_derivative, right_derivative)| {
+                    format!(
+                        "((({left_derivative} * {right}) - ({left} * {right_derivative})) / ({right} * {right}))",
+                        left = left.reactive_value,
+                        right = right.value,
+                    )
+                })
+                .collect(),
+        }),
+        (false, true) | (true, true) => Err(RustBackendError::unsupported(
+            "<generated>",
+            "<expr>",
+            "ddt() in denominator of reactive expression",
+        )),
+    }
+}
+
+fn is_ddt_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("ddt")
 }
 
 fn format_f64(value: f64) -> String {

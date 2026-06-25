@@ -2371,6 +2371,10 @@ impl Engine {
                     if circuit.has_veriloga_devices() {
                         circuit.accept_veriloga_timestep();
                     }
+                    #[cfg(feature = "veriloga-builtins")]
+                    if circuit.has_generated_veriloga_devices() {
+                        circuit.accept_generated_veriloga_timestep();
+                    }
 
                     solution.clone_from(&new_solution);
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
@@ -3155,6 +3159,10 @@ impl Engine {
                     if circuit.has_veriloga_devices() {
                         circuit.accept_veriloga_timestep();
                     }
+                    #[cfg(feature = "veriloga-builtins")]
+                    if circuit.has_generated_veriloga_devices() {
+                        circuit.accept_generated_veriloga_timestep();
+                    }
 
                     solution.clone_from(&new_solution);
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
@@ -3346,6 +3354,10 @@ impl Engine {
             } else {
                 false
             };
+            #[cfg(feature = "veriloga-builtins")]
+            if circuit.has_generated_veriloga_devices() {
+                circuit.accept_generated_veriloga_timestep();
+            }
 
             solution.clone_from(&new_solution);
 

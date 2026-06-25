@@ -1,12 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::{
-    CanonicalIrArtifact, CanonicalValueType, HirExprKind, HirStatement, MirEquationKind,
+    CanonicalIrArtifact, CanonicalValueType, ExprId, HirAnalogOperator, HirExprKind, HirStatement,
+    MirEquationKind,
 };
 
 use super::expr::{
-    LoweredVariable, lower_equation_expr, lower_equation_expr_with_variables,
-    parameter_field_names, unique_identifiers,
+    DdtSlots, LoweredVariable, lower_equation_expr_with_variables,
+    lower_reactive_expr_with_variables, parameter_field_names, unique_identifiers,
 };
 use super::{
     GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames, RustTranspileOptions,
@@ -26,6 +27,7 @@ pub fn generate_device(
     );
     let parameter_fields = parameter_field_names(artifact);
     let variable_fields = variable_local_names(artifact);
+    let ddt_slots = collect_ddt_slots(artifact)?;
 
     Ok(GeneratedRustDevice {
         module_name: artifact.mir.module_name.to_string(),
@@ -39,7 +41,7 @@ pub fn generate_device(
             },
             GeneratedRustFile {
                 relative_path: "state.rs".to_string(),
-                contents: generate_state_file(artifact, &parameter_fields)?,
+                contents: generate_state_file(artifact, &parameter_fields, ddt_slots.len())?,
             },
             GeneratedRustFile {
                 relative_path: "stamp.rs".to_string(),
@@ -48,6 +50,7 @@ pub fn generate_device(
                     options,
                     &parameter_fields,
                     &variable_fields,
+                    &ddt_slots,
                 )?,
             },
         ],
@@ -88,7 +91,12 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
     for expression in &artifact.mir.expressions {
         match &expression.kind {
             HirExprKind::AnalogOperator { op } => match op {
-                crate::canonical_ir::HirAnalogOperator::Limexp { .. } => {
+                HirAnalogOperator::Ddt { abstol, .. } => {
+                    if abstol.is_some() {
+                        return Err(unsupported(artifact, "ddt abstol argument"));
+                    }
+                }
+                HirAnalogOperator::Limexp { .. } => {
                     return Err(unsupported(artifact, "convergence-limited limexp operator"));
                 }
                 _ => {
@@ -108,6 +116,14 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
                         expression.kind
                     ),
                 ));
+            }
+            HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
+                if args.len() != 1 {
+                    return Err(unsupported(
+                        artifact,
+                        format!("ddt expects one operand, found {}", args.len()),
+                    ));
+                }
             }
             HirExprKind::Call { name, .. } if is_stateful_or_effectful_call(name.as_str()) => {
                 return Err(unsupported(
@@ -164,11 +180,249 @@ fn reject_unsupported_statements(
     Ok(())
 }
 
+fn collect_ddt_slots(artifact: &CanonicalIrArtifact) -> Result<DdtSlots, RustBackendError> {
+    let mut collector = DdtSlotCollector {
+        artifact,
+        slots: HashMap::new(),
+        visited: HashSet::new(),
+    };
+
+    for statement in &artifact.hir.statements {
+        match statement {
+            HirStatement::Assignment(assignment) => {
+                collector.collect(assignment.expr.id)?;
+                if let Some(index) = &assignment.index {
+                    collector.collect(index.id)?;
+                }
+            }
+            HirStatement::Loop(_) => {}
+        }
+    }
+    for equation in &artifact.mir.equations {
+        collector.collect(equation.expression.id)?;
+    }
+
+    Ok(DdtSlots::new(collector.slots))
+}
+
+struct DdtSlotCollector<'a> {
+    artifact: &'a CanonicalIrArtifact,
+    slots: HashMap<ExprId, usize>,
+    visited: HashSet<ExprId>,
+}
+
+impl DdtSlotCollector<'_> {
+    fn collect(&mut self, id: ExprId) -> Result<(), RustBackendError> {
+        if !self.visited.insert(id) {
+            return Ok(());
+        }
+
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(id))
+            .ok_or_else(|| {
+                RustBackendError::internal(
+                    self.artifact.metadata.source_package.as_str(),
+                    self.artifact.mir.module_name.as_str(),
+                    format!("expression {id} is outside MIR arena"),
+                )
+            })?;
+
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::Identifier { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => {}
+            HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+                if let HirExprKind::Call { name, args } = &expression.kind
+                    && is_ddt_name(name.as_str())
+                {
+                    if args.len() != 1 {
+                        return Err(unsupported(
+                            self.artifact,
+                            format!("ddt expects one operand, found {}", args.len()),
+                        ));
+                    }
+                    let next_slot = self.slots.len();
+                    self.slots.entry(id).or_insert(next_slot);
+                }
+                for arg in args {
+                    self.collect(*arg)?;
+                }
+            }
+            HirExprKind::Binary { left, right, .. } => {
+                self.collect(*left)?;
+                self.collect(*right)?;
+            }
+            HirExprKind::Unary { operand, .. } => {
+                self.collect(*operand)?;
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.collect(*condition)?;
+                self.collect(*then_expr)?;
+                self.collect(*else_expr)?;
+            }
+            HirExprKind::ArrayAccess { index, .. } => {
+                self.collect(*index)?;
+            }
+            HirExprKind::ArrayLiteral { elements } => {
+                for element in elements {
+                    self.collect(*element)?;
+                }
+            }
+            HirExprKind::AnalogOperator { op } => {
+                self.collect_analog_operator(id, op)?;
+            }
+            HirExprKind::Laplace { expr, kind } => {
+                self.collect(*expr)?;
+                match kind {
+                    crate::canonical_ir::HirLaplaceKind::ZeroPole { zeros, poles }
+                    | crate::canonical_ir::HirLaplaceKind::ZeroDenominator {
+                        zeros,
+                        denominator: poles,
+                    }
+                    | crate::canonical_ir::HirLaplaceKind::NumeratorPole {
+                        numerator: zeros,
+                        poles,
+                    }
+                    | crate::canonical_ir::HirLaplaceKind::NumeratorDenominator {
+                        numerator: zeros,
+                        denominator: poles,
+                    } => {
+                        for child in zeros.iter().chain(poles) {
+                            self.collect(*child)?;
+                        }
+                    }
+                }
+            }
+            HirExprKind::Zi { expr, kind } => {
+                self.collect(*expr)?;
+                match kind {
+                    crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles }
+                    | crate::canonical_ir::HirZiKind::ZeroDenominator {
+                        zeros,
+                        denominator: poles,
+                    }
+                    | crate::canonical_ir::HirZiKind::NumeratorPole {
+                        numerator: zeros,
+                        poles,
+                    }
+                    | crate::canonical_ir::HirZiKind::NumeratorDenominator {
+                        numerator: zeros,
+                        denominator: poles,
+                    } => {
+                        for child in zeros.iter().chain(poles) {
+                            self.collect(*child)?;
+                        }
+                    }
+                }
+            }
+            HirExprKind::NoiseSource { operands, .. } => {
+                for operand in operands {
+                    self.collect(*operand)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_analog_operator(
+        &mut self,
+        id: ExprId,
+        op: &HirAnalogOperator,
+    ) -> Result<(), RustBackendError> {
+        match op {
+            HirAnalogOperator::Ddt { expr, abstol } => {
+                if abstol.is_some() {
+                    return Err(unsupported(self.artifact, "ddt abstol argument"));
+                }
+                let next_slot = self.slots.len();
+                self.slots.entry(id).or_insert(next_slot);
+                self.collect(*expr)?;
+            }
+            HirAnalogOperator::Idt {
+                expr,
+                ic,
+                assert,
+                abstol,
+            } => {
+                self.collect(*expr)?;
+                for child in [*ic, *assert, *abstol].into_iter().flatten() {
+                    self.collect(child)?;
+                }
+            }
+            HirAnalogOperator::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+                abstol,
+            } => {
+                self.collect(*expr)?;
+                for child in [*ic, *modulus, *offset, *abstol].into_iter().flatten() {
+                    self.collect(child)?;
+                }
+            }
+            HirAnalogOperator::Ddx { expr, probe } => {
+                self.collect(*expr)?;
+                self.collect(*probe)?;
+            }
+            HirAnalogOperator::Limexp { expr } => {
+                self.collect(*expr)?;
+            }
+            HirAnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+            } => {
+                self.collect(*expr)?;
+                self.collect(*delay)?;
+                if let Some(max_delay) = max_delay {
+                    self.collect(*max_delay)?;
+                }
+            }
+            HirAnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                tolerance,
+            } => {
+                self.collect(*expr)?;
+                for child in [*delay, *rise, *fall, *tolerance].into_iter().flatten() {
+                    self.collect(child)?;
+                }
+            }
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => {
+                self.collect(*expr)?;
+                for child in [*max_rise, *max_fall].into_iter().flatten() {
+                    self.collect(child)?;
+                }
+            }
+            HirAnalogOperator::LastCrossing { expr, .. } => {
+                self.collect(*expr)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 fn is_stateful_or_effectful_call(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "ddt"
-            | "idt"
+        "idt"
             | "idtmod"
             | "ddx"
             | "absdelay"
@@ -190,6 +444,10 @@ fn is_stateful_or_effectful_call(name: &str) -> bool {
     )
 }
 
+fn is_ddt_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("ddt")
+}
+
 fn generate_mod_file() -> String {
     [
         "pub mod state;",
@@ -204,6 +462,7 @@ fn generate_mod_file() -> String {
 fn generate_state_file(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
+    ddt_state_count: usize,
 ) -> Result<String, RustBackendError> {
     let mut out = String::new();
     out.push_str("#[derive(Debug, Clone)]\n");
@@ -246,17 +505,40 @@ fn generate_state_file(
     out.push_str("pub struct Instance {\n");
     out.push_str(&format!("    pub nodes: [usize; {node_count}],\n"));
     out.push_str("    pub params: Parameters,\n");
+    out.push_str(&format!(
+        "    pub(crate) ddt_state_current: [f64; {ddt_state_count}],\n"
+    ));
+    out.push_str(&format!(
+        "    pub(crate) ddt_state_previous: [f64; {ddt_state_count}],\n"
+    ));
+    out.push_str(&format!(
+        "    pub(crate) ddt_state_initialized: [bool; {ddt_state_count}],\n"
+    ));
+    out.push_str("    pub(crate) time: f64,\n");
+    out.push_str("    pub(crate) timestep: f64,\n");
     out.push_str("}\n\n");
 
     out.push_str("impl Instance {\n");
     out.push_str(&format!(
         "    pub const NODE_COUNT: usize = {node_count};\n\n"
     ));
+    out.push_str(&format!(
+        "    pub const DDT_STATE_COUNT: usize = {ddt_state_count};\n"
+    ));
+    out.push_str("    pub const DDT_EPSILON: f64 = 1.0e-20;\n\n");
     out.push_str("    pub fn new(nodes: &[usize]) -> Self {\n");
     out.push_str("        assert_eq!(nodes.len(), Self::NODE_COUNT, \"generated Verilog-A node count mismatch\");\n");
     out.push_str("        let mut mapped = [0usize; Self::NODE_COUNT];\n");
     out.push_str("        mapped.copy_from_slice(nodes);\n");
-    out.push_str("        Self { nodes: mapped, params: Parameters::default() }\n");
+    out.push_str("        Self {\n");
+    out.push_str("            nodes: mapped,\n");
+    out.push_str("            params: Parameters::default(),\n");
+    out.push_str("            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],\n");
+    out.push_str("            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],\n");
+    out.push_str("            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],\n");
+    out.push_str("            time: 0.0,\n");
+    out.push_str("            timestep: 0.0,\n");
+    out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str(
         "    pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {\n",
@@ -281,6 +563,48 @@ fn generate_state_file(
     ));
     out.push_str("        }\n");
     out.push_str("    }\n");
+    out.push('\n');
+    out.push_str("    #[inline]\n");
+    out.push_str("    pub fn set_timepoint(&mut self, time: f64, timestep: f64) {\n");
+    out.push_str("        self.time = time;\n");
+    out.push_str("        self.timestep = timestep;\n");
+    out.push_str("    }\n\n");
+    out.push_str("    #[inline]\n");
+    out.push_str("    pub fn accept_timestep(&mut self) {\n");
+    out.push_str("        let mut index = 0usize;\n");
+    out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
+    out.push_str("            self.ddt_state_previous[index] = self.ddt_state_current[index];\n");
+    out.push_str("            self.ddt_state_initialized[index] = true;\n");
+    out.push_str("            index += 1;\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n\n");
+    if ddt_state_count > 0 {
+        out.push_str("    #[inline]\n");
+        out.push_str("    pub(crate) fn eval_ddt(&mut self, slot: usize, value: f64) -> f64 {\n");
+        out.push_str("        debug_assert!(slot < Self::DDT_STATE_COUNT, \"generated ddt state slot out of range\");\n");
+        out.push_str("        let previous = if self.ddt_state_initialized[slot] {\n");
+        out.push_str("            self.ddt_state_previous[slot]\n");
+        out.push_str("        } else {\n");
+        out.push_str("            value\n");
+        out.push_str("        };\n");
+        out.push_str("        self.ddt_state_current[slot] = value;\n");
+        out.push_str("        if self.timestep.abs() > Self::DDT_EPSILON {\n");
+        out.push_str("            (value - previous) / self.timestep\n");
+        out.push_str("        } else {\n");
+        out.push_str("            self.ddt_state_previous[slot] = value;\n");
+        out.push_str("            self.ddt_state_initialized[slot] = true;\n");
+        out.push_str("            0.0\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n\n");
+        out.push_str("    #[inline]\n");
+        out.push_str("    pub(crate) fn ddt_jacobian(&self, derivative: f64) -> f64 {\n");
+        out.push_str("        if self.timestep.abs() > Self::DDT_EPSILON {\n");
+        out.push_str("            derivative / self.timestep\n");
+        out.push_str("        } else {\n");
+        out.push_str("            0.0\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+    }
     out.push_str("}\n");
     Ok(out)
 }
@@ -425,32 +749,74 @@ fn generate_stamp_file(
     options: &RustTranspileOptions,
     parameter_fields: &HashMap<String, String>,
     variable_fields: &HashMap<String, String>,
+    ddt_slots: &DdtSlots,
 ) -> Result<String, RustBackendError> {
     let mut out = String::new();
-    out.push_str("#![allow(unused_assignments, unused_parens)]\n\n");
+    out.push_str("#![allow(unused_assignments, unused_parens, unused_variables)]\n\n");
     out.push_str("use super::state::Instance;\n");
     out.push_str(&format!(
-        "use {}::{{GeneratedEvalContext, GeneratedStamper}};\n\n",
+        "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};\n\n",
         options.runtime_path
     ));
     out.push_str("impl Instance {\n");
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
+    emit_stamp_body(
+        artifact,
+        parameter_fields,
+        variable_fields,
+        ddt_slots,
+        false,
+        &mut out,
+    )?;
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
+    );
+    emit_stamp_body(
+        artifact,
+        parameter_fields,
+        variable_fields,
+        ddt_slots,
+        true,
+        &mut out,
+    )?;
+    out.push_str("    }\n");
+    out.push_str("}\n");
+    Ok(out)
+}
 
-    let mut variables = emit_variable_initializers(artifact, variable_fields, &mut out);
+fn emit_stamp_body(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    variable_fields: &HashMap<String, String>,
+    ddt_slots: &DdtSlots,
+    reactive: bool,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let mut variables = emit_variable_initializers(artifact, variable_fields, out);
     emit_assignment_statements(
         artifact,
         parameter_fields,
         variable_fields,
         &mut variables,
-        &mut out,
+        out,
+        ddt_slots,
+        reactive,
     )?;
 
     for (index, equation) in artifact.mir.equations.iter().enumerate() {
         let prefix = format!("eq{index}");
-        let lowered = if variables.is_empty() {
-            lower_equation_expr(artifact, equation.expression.id, &prefix, parameter_fields)?
+        let lowered = if reactive {
+            lower_reactive_expr_with_variables(
+                artifact,
+                equation.expression.id,
+                &prefix,
+                parameter_fields,
+                &variables,
+                ddt_slots,
+            )?
         } else {
             lower_equation_expr_with_variables(
                 artifact,
@@ -458,8 +824,38 @@ fn generate_stamp_file(
                 &prefix,
                 parameter_fields,
                 &variables,
+                ddt_slots,
             )?
         };
+        if reactive {
+            if lowered.has_reactive {
+                for line in lowered.lines {
+                    out.push_str("        ");
+                    out.push_str(&line);
+                    out.push('\n');
+                }
+                out.push_str("        stamper.stamp_current_reactive(\n");
+                out.push_str(&format!(
+                    "            {},\n",
+                    optional_node_expr(equation.branch.pos_node)
+                ));
+                out.push_str(&format!(
+                    "            {},\n",
+                    optional_node_expr(equation.branch.neg_node)
+                ));
+                out.push_str("            &[\n");
+                for node_index in 0..artifact.mir.nodes.len() {
+                    out.push_str(&format!(
+                        "                (self.nodes[{node_index}], {}),\n",
+                        lowered.reactive_derivatives[node_index]
+                    ));
+                }
+                out.push_str("            ],\n");
+                out.push_str("        );\n");
+            }
+            continue;
+        }
+
         for line in lowered.lines {
             out.push_str("        ");
             out.push_str(&line);
@@ -492,10 +888,7 @@ fn generate_stamp_file(
         out.push_str("            ],\n");
         out.push_str("        );\n");
     }
-
-    out.push_str("    }\n");
-    out.push_str("}\n");
-    Ok(out)
+    Ok(())
 }
 
 fn variable_local_names(artifact: &CanonicalIrArtifact) -> HashMap<String, String> {
@@ -518,16 +911,27 @@ fn emit_variable_initializers(
         let local = variable_fields[variable.name.as_str()].clone();
         out.push_str(&format!("        let mut {local}: f64 = 0.0;\n"));
         let mut derivatives = Vec::with_capacity(artifact.mir.nodes.len());
+        let reactive_value = format!("{local}_q");
+        out.push_str(&format!("        let mut {reactive_value}: f64 = 0.0;\n"));
+        let mut reactive_derivatives = Vec::with_capacity(artifact.mir.nodes.len());
         for node_index in 0..artifact.mir.nodes.len() {
             let derivative = format!("{local}_d_n{node_index}");
             out.push_str(&format!("        let mut {derivative}: f64 = 0.0;\n"));
             derivatives.push(derivative);
+            let reactive_derivative = format!("{local}_q_d_n{node_index}");
+            out.push_str(&format!(
+                "        let mut {reactive_derivative}: f64 = 0.0;\n"
+            ));
+            reactive_derivatives.push(reactive_derivative);
         }
         variables.insert(
             variable.name.to_string(),
             LoweredVariable {
                 value: local,
                 derivatives,
+                has_reactive: false,
+                reactive_value,
+                reactive_derivatives,
             },
         );
     }
@@ -543,6 +947,8 @@ fn emit_assignment_statements(
     variable_fields: &HashMap<String, String>,
     variables: &mut HashMap<String, LoweredVariable>,
     out: &mut String,
+    ddt_slots: &DdtSlots,
+    reactive: bool,
 ) -> Result<(), RustBackendError> {
     for (index, statement) in artifact.hir.statements.iter().enumerate() {
         let HirStatement::Assignment(assignment) = statement else {
@@ -553,13 +959,25 @@ fn emit_assignment_statements(
         };
 
         let prefix = format!("assign{index}");
-        let lowered = lower_equation_expr_with_variables(
-            artifact,
-            assignment.expr.id,
-            &prefix,
-            parameter_fields,
-            variables,
-        )?;
+        let lowered = if reactive {
+            lower_reactive_expr_with_variables(
+                artifact,
+                assignment.expr.id,
+                &prefix,
+                parameter_fields,
+                variables,
+                ddt_slots,
+            )?
+        } else {
+            lower_equation_expr_with_variables(
+                artifact,
+                assignment.expr.id,
+                &prefix,
+                parameter_fields,
+                variables,
+                ddt_slots,
+            )?
+        };
         for line in lowered.lines {
             out.push_str("        ");
             out.push_str(&line);
@@ -587,15 +1005,31 @@ fn emit_assignment_statements(
                 "        {target_local}_d_n{node_index} = {derivative};\n"
             ));
         }
+        let target_reactive = format!("{target_local}_q");
+        out.push_str(&format!(
+            "        {target_reactive} = {};\n",
+            lowered.reactive_value
+        ));
+        for (node_index, derivative) in lowered.reactive_derivatives.iter().enumerate() {
+            out.push_str(&format!(
+                "        {target_reactive}_d_n{node_index} = {derivative};\n"
+            ));
+        }
 
         let derivative_locals = (0..artifact.mir.nodes.len())
             .map(|node_index| format!("{target_local}_d_n{node_index}"))
+            .collect();
+        let reactive_derivative_locals = (0..artifact.mir.nodes.len())
+            .map(|node_index| format!("{target_reactive}_d_n{node_index}"))
             .collect();
         variables.insert(
             target.name.to_string(),
             LoweredVariable {
                 value: target_local,
                 derivatives: derivative_locals,
+                has_reactive: lowered.has_reactive,
+                reactive_value: target_reactive,
+                reactive_derivatives: reactive_derivative_locals,
             },
         );
     }

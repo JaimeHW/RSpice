@@ -5,7 +5,7 @@
 //! interpreter concepts.
 
 use crate::Value;
-use crate::solver::StaticMatrix;
+use crate::solver::{ComplexMatrix, StaticMatrix};
 
 pub mod builtins {
     include!(concat!(env!("OUT_DIR"), "/veriloga_builtins/registry.rs"));
@@ -57,6 +57,37 @@ impl BuiltinVerilogADevices {
             device.stamp(matrix, rhs, voltages);
         }
     }
+
+    #[inline]
+    pub fn set_timepoint(&mut self, time: Value, timestep: Value) {
+        for device in &mut self.devices {
+            device.set_timepoint(time, timestep);
+        }
+    }
+
+    #[inline]
+    pub fn accept_timestep(&mut self) {
+        for device in &mut self.devices {
+            device.accept_timestep();
+        }
+    }
+
+    pub fn stamp_ac_real_all(&mut self, matrix: &mut ComplexMatrix, voltages: &[Value]) {
+        for device in &mut self.devices {
+            device.stamp_ac_real(matrix, voltages);
+        }
+    }
+
+    pub fn stamp_reactive_all(
+        &mut self,
+        matrix: &mut ComplexMatrix,
+        voltages: &[Value],
+        omega: Value,
+    ) {
+        for device in &mut self.devices {
+            device.stamp_reactive(matrix, voltages, omega);
+        }
+    }
 }
 
 impl BuiltinVerilogAInstance {
@@ -65,6 +96,30 @@ impl BuiltinVerilogAInstance {
         let ctx = GeneratedEvalContext::new(voltages);
         let mut stamper = GeneratedStamper::new(matrix, rhs, voltages);
         self.kind.stamp(&ctx, &mut stamper);
+    }
+
+    #[inline]
+    pub fn set_timepoint(&mut self, time: Value, timestep: Value) {
+        self.kind.set_timepoint(time, timestep);
+    }
+
+    #[inline]
+    pub fn accept_timestep(&mut self) {
+        self.kind.accept_timestep();
+    }
+
+    #[inline]
+    pub fn stamp_ac_real(&mut self, matrix: &mut ComplexMatrix, voltages: &[Value]) {
+        let ctx = GeneratedEvalContext::new(voltages);
+        let mut stamper = GeneratedStamper::new_ac_real(matrix, voltages);
+        self.kind.stamp(&ctx, &mut stamper);
+    }
+
+    #[inline]
+    pub fn stamp_reactive(&mut self, matrix: &mut ComplexMatrix, voltages: &[Value], omega: Value) {
+        let ctx = GeneratedEvalContext::new(voltages);
+        let mut stamper = GeneratedReactiveStamper::new(matrix, omega);
+        self.kind.stamp_reactive(&ctx, &mut stamper);
     }
 }
 
@@ -160,9 +215,14 @@ impl<'a> GeneratedEvalContext<'a> {
     }
 }
 
+enum GeneratedMatrixTarget<'a> {
+    Static(&'a mut StaticMatrix),
+    AcReal(&'a mut ComplexMatrix),
+}
+
 pub struct GeneratedStamper<'a> {
-    matrix: &'a mut StaticMatrix,
-    rhs: &'a mut [Value],
+    matrix: GeneratedMatrixTarget<'a>,
+    rhs: Option<&'a mut [Value]>,
     voltages: &'a [Value],
 }
 
@@ -170,8 +230,17 @@ impl<'a> GeneratedStamper<'a> {
     #[inline]
     pub fn new(matrix: &'a mut StaticMatrix, rhs: &'a mut [Value], voltages: &'a [Value]) -> Self {
         Self {
-            matrix,
-            rhs,
+            matrix: GeneratedMatrixTarget::Static(matrix),
+            rhs: Some(rhs),
+            voltages,
+        }
+    }
+
+    #[inline]
+    pub fn new_ac_real(matrix: &'a mut ComplexMatrix, voltages: &'a [Value]) -> Self {
+        Self {
+            matrix: GeneratedMatrixTarget::AcReal(matrix),
+            rhs: None,
             voltages,
         }
     }
@@ -211,10 +280,19 @@ impl<'a> GeneratedStamper<'a> {
         let row = row_node - 1;
         for &(col_node, derivative) in derivatives {
             if col_node > 0 {
-                self.matrix.add(row, col_node - 1, row_sign * derivative);
+                match &mut self.matrix {
+                    GeneratedMatrixTarget::Static(matrix) => {
+                        matrix.add(row, col_node - 1, row_sign * derivative);
+                    }
+                    GeneratedMatrixTarget::AcReal(matrix) => {
+                        matrix.add_real(row, col_node - 1, row_sign * derivative);
+                    }
+                }
             }
         }
-        if let Some(slot) = self.rhs.get_mut(row) {
+        if let Some(rhs) = &mut self.rhs
+            && let Some(slot) = rhs.get_mut(row)
+        {
             *slot += -row_sign * equivalent;
         }
     }
@@ -225,6 +303,52 @@ impl<'a> GeneratedStamper<'a> {
             0.0
         } else {
             self.voltages.get(node - 1).copied().unwrap_or(0.0)
+        }
+    }
+}
+
+pub struct GeneratedReactiveStamper<'a> {
+    matrix: &'a mut ComplexMatrix,
+    omega: Value,
+}
+
+impl<'a> GeneratedReactiveStamper<'a> {
+    #[inline]
+    pub fn new(matrix: &'a mut ComplexMatrix, omega: Value) -> Self {
+        Self { matrix, omega }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        derivatives: &[(usize, Value)],
+    ) {
+        if let Some(row) = pos {
+            self.stamp_current_reactive_row(row, 1.0, derivatives);
+        }
+        if let Some(row) = neg {
+            self.stamp_current_reactive_row(row, -1.0, derivatives);
+        }
+    }
+
+    #[inline]
+    fn stamp_current_reactive_row(
+        &mut self,
+        row_node: usize,
+        row_sign: Value,
+        derivatives: &[(usize, Value)],
+    ) {
+        if row_node == 0 {
+            return;
+        }
+        let row = row_node - 1;
+        for &(col_node, derivative) in derivatives {
+            if col_node > 0 {
+                self.matrix
+                    .add_imag(row, col_node - 1, row_sign * self.omega * derivative);
+            }
         }
     }
 }
