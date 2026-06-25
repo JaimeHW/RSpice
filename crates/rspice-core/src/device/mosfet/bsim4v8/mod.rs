@@ -35,7 +35,7 @@
 //!   (`Vasat`/`VACLM`/`VADIBL`/`VADITS`/`VASCBE`), `Ids` with analytic
 //!   `gm`/`gds`/`gmbs`, the substrate current, and GIDL/GISL for both
 //!   `gidlMod` 0 and 1 — see [`eval`].
-//! - CAPMOD=0/1/2 intrinsic charges with CVCHARGEMOD=0/1 where applicable,
+//! - CAPMOD=0/1/2 intrinsic charges with integer CVCHARGEMOD=0/1/2 where applicable,
 //!   the full capacitance matrix, junction depletion charges, CAPMOD=0
 //!   linear overlap charges, CAPMOD=1/2 smoothed overlap charges, and the
 //!   mode-dependent node-charge assembly.
@@ -52,8 +52,8 @@
 //! `rdsMod = 0/1`, and `rgateMod = 0/1/2/3`.
 //!
 //! Rejected at charge-request time (DC is unaffected): unknown `cvchargeMod`
-//! selectors. The `capMod=0/1/2` charge paths are ported; after those
-//! selectors are validated,
+//! selectors beyond `0/1/2`; selectors `1` and `2` share ngspice's nonzero
+//! branch. The `capMod=0/1/2` charge paths are ported; after those selectors are validated,
 //! `xpart < 0` suppresses intrinsic channel charge as ngspice does.
 //!
 //! Noise selectors (`fnoiMod`/`tnoiMod`) and the SOA limits are accepted

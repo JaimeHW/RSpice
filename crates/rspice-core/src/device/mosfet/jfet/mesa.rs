@@ -742,13 +742,30 @@ impl Jfet {
         let eta = p.eta.abs().max(1e-9);
         let etavth = (eta * vt).max(1e-12);
 
-        let mu = p.hfet_mu.max(1e-12);
+        let tdiff = temp_k - p.tnom.max(1.0);
+        let use_hfet2_temp = p.hfet_level == 6;
+        let lambda = if use_hfet2_temp {
+            p.lambda + p.hfet_klambda * tdiff
+        } else {
+            p.lambda
+        };
+        let mu = if use_hfet2_temp {
+            p.hfet_mu - p.hfet_kmu * tdiff
+        } else {
+            p.hfet_mu
+        }
+        .max(1e-12);
         let vs = p.hfet_vs.max(1e-12);
         let l = self.length.max(1e-12);
         let w = self.width.max(1e-12);
         let di = p.hfet_di.max(1e-12);
         let deltad = p.hfet_deltad.max(0.0);
-        let nmax = p.hfet_nmax.max(1e-12);
+        let nmax = if use_hfet2_temp {
+            p.hfet_nmax - p.hfet_knmax * tdiff
+        } else {
+            p.hfet_nmax
+        }
+        .max(1e-12);
         let gamma = p.hfet_gamma.max(1e-9);
         let m = p.hfet_m.max(1e-9);
         let sigma0 = p.sigma0.max(0.0);
@@ -758,7 +775,11 @@ impl Jfet {
         let rdi = p.hfet_rdi.max(0.0);
         let rt = rsi + rdi;
 
-        let vto = pol * p.vto;
+        let vto = if use_hfet2_temp {
+            pol * p.vto - p.hfet_kvto * tdiff
+        } else {
+            pol * p.vto
+        };
 
         let n0 = p.hfet_epsi.max(1e-30) * eta * vt / (2.0 * Q_ELECTRON * (di + deltad).max(1e-30));
         let gchi0 = Q_ELECTRON * w * mu / l;
@@ -774,7 +795,28 @@ impl Jfet {
         let t = (delta * delta + u * u).sqrt();
         let vgte = vt * (2.0 + u + t);
         let b = (vgt / etavth).clamp(-80.0, 80.0).exp();
-        let nsm = 2.0 * n0 * (1.0 + 0.5 * b).ln();
+        let nsn = 2.0 * n0 * (1.0 + 0.5 * b).ln();
+        let eta2_d2_given = p.hfet_eta2.is_finite()
+            && p.hfet_eta2 > 0.0
+            && p.hfet_d2.is_finite()
+            && p.hfet_d2 > 0.0;
+        let nsm = if p.hfet_level == 6 && eta2_d2_given {
+            let eta2 = p.hfet_eta2.max(1e-12);
+            let d2 = p.hfet_d2.max(1e-12);
+            let n02 = p.hfet_epsi.max(1e-30) * eta2 * vt / (2.0 * Q_ELECTRON * d2);
+            let vt2 = if p.hfet_vt2.is_finite() {
+                p.hfet_vt2
+            } else {
+                p.vto
+            };
+            let nsc = n02
+                * ((vgt + vto - vt2) / (eta2 * vt).max(1e-30))
+                    .clamp(-80.0, 80.0)
+                    .exp();
+            nsn * nsc / (nsn + nsc).max(1e-30)
+        } else {
+            nsn
+        };
         if !nsm.is_finite() || nsm < 1e-38 {
             return (0.0, 0.0, 0.0, None);
         }
@@ -805,7 +847,7 @@ impl Jfet {
         let vsate = (isat / gch).abs().max(1e-30);
         let d = (vds_int / vsate).max(0.0).powf(m);
         let e = (1.0 + d).powf(1.0 / m);
-        let delidgch = vds_int * (1.0 + p.lambda * vds_int) / e;
+        let delidgch = vds_int * (1.0 + lambda * vds_int) / e;
         let ids_fwd = gch * delidgch;
 
         let delidvsate = ids_fwd * d / (vsate * (1.0 + d));
@@ -815,14 +857,32 @@ impl Jfet {
             (vds_int / vsate).powf(m - 1.0)
         };
         let delidvds =
-            gch * (1.0 + 2.0 * p.lambda * vds_int) / e - ids_fwd * dmd / (vsate * (1.0 + d));
+            gch * (1.0 + 2.0 * lambda * vds_int) / e - ids_fwd * dmd / (vsate * (1.0 + d));
 
         let a = 1.0 + gchi * rt;
         let delgchgchi = 1.0 / (a * a);
         let delgchins = gchi0;
         let delnsnsm = ns / nsm * (1.0 - c / (1.0 + c));
         let delvgtevgt = 0.5 * (1.0 + u / t.max(1e-30));
-        let delnsmvgt = n0 / etavth / (1.0 / b + 0.5);
+        let delnsnvgt = n0 / etavth / (1.0 / b + 0.5);
+        let delnsmvgt = if p.hfet_level == 6 && eta2_d2_given {
+            let eta2 = p.hfet_eta2.max(1e-12);
+            let d2 = p.hfet_d2.max(1e-12);
+            let n02 = p.hfet_epsi.max(1e-30) * eta2 * vt / (2.0 * Q_ELECTRON * d2);
+            let vt2 = if p.hfet_vt2.is_finite() {
+                p.hfet_vt2
+            } else {
+                p.vto
+            };
+            let nsc = n02
+                * ((vgt + vto - vt2) / (eta2 * vt).max(1e-30))
+                    .clamp(-80.0, 80.0)
+                    .exp();
+            let denom = (nsc + nsn).max(1e-30);
+            nsc * (nsc * delnsnvgt + nsn * nsn / (eta2 * vt).max(1e-30)) / (denom * denom)
+        } else {
+            delnsnvgt
+        };
         let delvsateisat = 1.0 / gch;
         let delisatisatm = isat / isatm.max(1e-30) * (1.0 - g / (1.0 + g));
         let delisatmvgte =

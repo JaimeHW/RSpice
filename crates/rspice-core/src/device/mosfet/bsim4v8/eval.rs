@@ -3,7 +3,7 @@
 //! This module transcribes the evaluation core of `BSIM4load` for the
 //! canonical mode set plus caller-supplied source/drain junction body biases
 //! used by the `rbodyMod=1/2` DC substrate network (`dioMod` 0/1/2, `mobMod`
-//! 0 through 6, `capMod = 0/1/2`, `cvchargeMod = 0/1`):
+//! 0 through 6, `capMod = 0/1/2`, integer `cvchargeMod = 0/1/2/3`):
 //!
 //! - the source/drain junction diode DC model with the `ijth` linearization
 //!   (b4ld.c:700-890) and the reverse-bias trap-assisted tunneling current
@@ -31,7 +31,8 @@
 //! the Rust can be diffed against `b4ld.c` line by line.
 //!
 //! Scope notes:
-//! - unknown `cvchargeMod` charge selectors are not ported;
+//! - unknown `cvchargeMod` charge selectors beyond `0/1/2/3` are not ported;
+//!   nonzero supported selectors share ngspice's nonzero branch;
 //!   requesting charges under them is a typed error (the DC path is
 //!   capMod-independent).
 //! - `gmin` is an explicit argument (ngspice `CKTgmin`): the diode currents
@@ -318,8 +319,8 @@ fn poly_depletion(
 /// charge model (`compute_charges == true`, the `ChargeComputationNeeded`
 /// path of b4ld.c).
 ///
-/// Errors only when charges are requested with an unported charge model
-/// (`capMod` 0 or an unknown `cvchargeMod` selector).
+/// Errors only when charges are requested with an unported `capMod` or
+/// `cvchargeMod` selector.
 #[allow(clippy::too_many_lines)]
 pub fn eval(
     model: &Bsim4v8Model,
@@ -339,10 +340,10 @@ pub fn eval(
                 model.cap_mod
             ));
         }
-        if !(0..=1).contains(&model.cvcharge_mod) {
+        if !model.cvcharge_mod_supported_for_charges() {
             return Err(format!(
-                "BSIM4: CVCHARGEMOD={} charge model is not implemented (only 0 or 1)",
-                model.cvcharge_mod
+                "BSIM4: CVCHARGEMOD={} charge model is not implemented (only integer 0, 1, 2, or 3)",
+                model.cvcharge_mod_value
             ));
         }
     }
@@ -2664,7 +2665,8 @@ pub fn eval(
                     )
                 }
             } else {
-                // VgsteffCV for cvchargeMod = 1 (b4ld.c:3389-3456).
+                // VgsteffCV for nonzero cvchargeMod (ngspice labels the
+                // branch as cvchargeMod = 1; b4ld.c:3389-3456).
                 let t0 = n * vtm;
                 let t1 = p.mstarcv * vgst;
                 let t2 = t1 / t0;

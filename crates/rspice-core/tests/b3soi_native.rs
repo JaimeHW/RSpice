@@ -124,6 +124,325 @@ fn xyce_level10_soimod3_auto_selection_is_instance_length_aware() {
 }
 
 #[test]
+fn xyce_level10_bsimsoi_rejects_unresolved_native_model_params() {
+    let deck = xyce_level10_default_gain_stage().replace("level=10", "level=10 u0={missing_u0}");
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let message = engine()
+        .run_dc_op(&netlist)
+        .expect_err("native BSIMSOI must reject unresolved model parameters")
+        .to_string();
+
+    assert!(
+        message.contains("native BSIMSOI")
+            && message.contains("U0=missing_u0")
+            && message.contains("finite numeric literals"),
+        "unresolved BSIMSOI model parameter should fail closed with a native-model message: {message}"
+    );
+}
+
+#[test]
+fn native_b3soi_rejects_invalid_integer_model_selectors_without_defaulting() {
+    for (level, selector, value) in [
+        (55, "CAPMOD", "3.9"),
+        (56, "CAPMOD", "3.9"),
+        (57, "CAPMOD", "3.9"),
+        (55, "CAPMOD", "4"),
+        (56, "CAPMOD", "4"),
+        (57, "CAPMOD", "4"),
+        (55, "SHMOD", "0.9"),
+        (56, "SHMOD", "0.9"),
+        (57, "SHMOD", "0.9"),
+        (55, "BINUNIT", "1.5"),
+        (56, "BINUNIT", "1.5"),
+        (57, "BINUNIT", "1.5"),
+        (55, "PARAMCHK", "0.9"),
+        (56, "PARAMCHK", "0.9"),
+        (57, "PARAMCHK", "0.9"),
+    ] {
+        let deck = format!(
+            "\
+            * B3SOI invalid integer selector policy\n\
+            m1 d g 0 0 nmos w=4u l=1u\n\
+            vd d 0 1\n\
+            vg g 0 0.8\n\
+            .model nmos nmos level={level} {selector}={value}\n\
+            .op\n\
+            .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let message = match engine().run_dc_op_with_report(&netlist) {
+            Ok(_) => panic!("LEVEL={level} {selector}={value} must not be accepted"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            message.contains("B3SOI") && message.contains(selector),
+            "error should identify the invalid native B3SOI selector LEVEL={level} {selector}={value}: {message}"
+        );
+        assert!(
+            message.contains("finite integer"),
+            "error should explain native B3SOI selectors must be finite integers: {message}"
+        );
+    }
+}
+
+#[test]
+fn xyce_level10_bsimsoi_rejects_invalid_non_mobmod_model_selectors_without_defaulting() {
+    for (soimod, expected_family) in [(0, "B3SOIPD"), (1, "B3SOIDD"), (2, "B3SOIFD")] {
+        let deck = format!(
+            "\
+            * Xyce LEVEL=10 invalid integer selector policy\n\
+            m1 d g 0 0 nmos w=4u l=1u\n\
+            vd d 0 1\n\
+            vg g 0 0.8\n\
+            .model nmos nmos level=10 soimod={soimod} capmod=3.9\n\
+            .op\n\
+            .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let message = match engine().run_dc_op_with_report(&netlist) {
+            Ok(_) => panic!("LEVEL=10 SOIMOD={soimod} CAPMOD=3.9 must not be accepted"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            message.contains(expected_family) && message.contains("CAPMOD"),
+            "error should identify the invalid Xyce LEVEL=10 native {expected_family} selector: {message}"
+        );
+        assert!(
+            message.contains("finite integer"),
+            "error should explain native BSIMSOI selectors must be finite integers: {message}"
+        );
+    }
+}
+
+#[test]
+fn b3soi_mobmod_uses_ngspice_integer_selector_coercion() {
+    for (model_selector, expected_family) in [
+        ("level=55", "B3SOIFD"),
+        ("level=56", "B3SOIDD"),
+        ("level=57", "B3SOIPD"),
+        ("level=10 soimod=2", "B3SOIFD"),
+        ("level=10 soimod=1", "B3SOIDD"),
+        ("level=10 soimod=0", "B3SOIPD"),
+    ] {
+        for (raw_mobmod, coerced_mobmod) in [("1.9", "2"), ("-0.5", "0")] {
+            let deck = |mobmod: &str| {
+                format!(
+                    "\
+                    * ngspice coerces B3SOI MOBMOD with floor(raw + 0.5)\n\
+                    m1 d g 0 0 nmos w=4u l=1u\n\
+                    vd d 0 1\n\
+                    vg g 0 0.8\n\
+                    .model nmos nmos {model_selector} mobmod={mobmod} capmod=2\n\
+                    .op\n\
+                    .end\n"
+                )
+            };
+            let coerced_netlist =
+                Netlist::parse(&deck(coerced_mobmod)).expect("coerced MOBMOD deck parses");
+            let raw_netlist = Netlist::parse(&deck(raw_mobmod)).expect("raw MOBMOD deck parses");
+
+            let (coerced, coerced_report) = engine()
+                .run_dc_op_with_report(&coerced_netlist)
+                .unwrap_or_else(|err| {
+                    panic!("{model_selector} MOBMOD={coerced_mobmod} should run: {err}")
+                });
+            let (raw, raw_report) = engine()
+                .run_dc_op_with_report(&raw_netlist)
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "{model_selector} MOBMOD={raw_mobmod} should coerce to MOBMOD={coerced_mobmod}: {err}"
+                    )
+                });
+
+            let raw_entry = raw_report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+                .expect("raw MOBMOD OP entry");
+            let coerced_entry = coerced_report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+                .expect("coerced MOBMOD OP entry");
+
+            assert_eq!(
+                raw_entry.device_kind, expected_family,
+                "{model_selector} MOBMOD={raw_mobmod} should route to {expected_family}"
+            );
+            assert_eq!(
+                coerced_entry.device_kind, expected_family,
+                "{model_selector} MOBMOD={coerced_mobmod} should route to {expected_family}"
+            );
+            assert_rel(
+                &format!("{model_selector} MOBMOD={raw_mobmod} aliases to {coerced_mobmod} I(VD)"),
+                raw.branch_current_named("vd")
+                    .unwrap_or_else(|| panic!("missing raw VD branch for {model_selector}")),
+                coerced
+                    .branch_current_named("vd")
+                    .unwrap_or_else(|| panic!("missing coerced VD branch for {model_selector}")),
+                1.0e-12,
+            );
+        }
+    }
+}
+
+#[test]
+fn native_b3soi_rejects_invalid_debug_instance_selector_without_rounding() {
+    for (level, debug_value, expected_family) in [
+        (55, "-0.6", "B3SOIFD"),
+        (56, "-0.6", "B3SOIDD"),
+        (57, "-0.6", "B3SOIPD"),
+        (57, "-2", "B3SOIPD"),
+        (56, "2147483648", "B3SOIDD"),
+        (55, "1e309", "B3SOIFD"),
+    ] {
+        let deck = format!(
+            "\
+            * B3SOI invalid DEBUG instance selector policy\n\
+            m1 d g 0 0 nmos w=4u l=1u debug={debug_value}\n\
+            vd d 0 1\n\
+            vg g 0 0.8\n\
+            .model nmos nmos level={level} capmod=2\n\
+            .op\n\
+            .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let message = match engine().run_dc_op_with_report(&netlist) {
+            Ok(_) => panic!("LEVEL={level} DEBUG={debug_value} must not be accepted"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            message.contains(expected_family) && message.contains("DEBUG"),
+            "error should identify the invalid native {expected_family} DEBUG={debug_value}: {message}"
+        );
+        assert!(
+            message.contains("finite integer"),
+            "error should explain native B3SOI DEBUG must be a finite integer: {message}"
+        );
+    }
+}
+
+#[test]
+fn native_b3soi_accepts_ngspice_debug_diagnostic_instances() {
+    for (level, debug_value, expected_family) in [
+        (55, "1", "B3SOIFD"),
+        (56, "1", "B3SOIDD"),
+        (57, "1", "B3SOIPD"),
+        (55, "2147483647", "B3SOIFD"),
+        (56, "2147483647", "B3SOIDD"),
+        (57, "2147483647", "B3SOIPD"),
+    ] {
+        let deck = format!(
+            "\
+            * B3SOI DEBUG=1 is an ngspice-compatible diagnostic mode\n\
+            m1 d g 0 0 nmos w=4u l=1u debug={debug_value}\n\
+            vd d 0 1\n\
+            vg g 0 0.8\n\
+            .model nmos nmos level={level} capmod=2\n\
+            .op\n\
+            .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+
+        engine()
+            .run_dc_op_with_report(&netlist)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "LEVEL={level} {expected_family} DEBUG={debug_value} should be accepted: {error}"
+                )
+            });
+    }
+}
+
+#[test]
+fn native_b3soi_debug_diagnostics_do_not_suppress_dynamic_charge_requirements() {
+    for (level, expected_family) in [(55, "B3SOIFD"), (56, "B3SOIDD"), (57, "B3SOIPD")] {
+        let deck = format!(
+            "\
+            * DEBUG=1 is diagnostic only; it must not suppress charge-analysis support checks\n\
+            m1 out in 0 0 nmos w=4u l=1u debug=1\n\
+            rload out vdd 25k\n\
+            vdd vdd 0 5\n\
+            vin in 0 1.2 ac 1\n\
+            .model nmos nmos level={level} capmod=0\n\
+            .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let message = engine()
+            .run_ac(&netlist, &[1.0e6])
+            .expect_err("DEBUG=1 must not bypass unsupported dynamic charge checks")
+            .to_string();
+
+        assert!(
+            message.contains(expected_family) && message.contains("CAPMOD=0"),
+            "DEBUG=1 dynamic-charge error should identify native {expected_family} CAPMOD=0: {message}"
+        );
+    }
+}
+
+#[test]
+fn xyce_level10_bsimsoi_rejects_invalid_debug_instance_selector_without_rounding() {
+    for (soimod, expected_family) in [(0, "B3SOIPD"), (1, "B3SOIDD"), (2, "B3SOIFD")] {
+        let deck = format!(
+            "\
+            * Xyce LEVEL=10 invalid DEBUG instance selector policy\n\
+            m1 d g 0 0 nmos w=4u l=1u debug=0.6\n\
+            vd d 0 1\n\
+            vg g 0 0.8\n\
+            .model nmos nmos level=10 soimod={soimod} capmod=2\n\
+            .op\n\
+            .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let message = match engine().run_dc_op_with_report(&netlist) {
+            Ok(_) => panic!("LEVEL=10 SOIMOD={soimod} DEBUG=0.6 must not be accepted"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            message.contains(expected_family) && message.contains("DEBUG"),
+            "error should identify the invalid Xyce LEVEL=10 native {expected_family} DEBUG selector: {message}"
+        );
+        assert!(
+            message.contains("finite integer"),
+            "error should explain native B3SOI DEBUG must be a finite integer: {message}"
+        );
+    }
+}
+
+#[test]
+fn parameterized_b3soi_debug_selector_is_validated_after_flattening() {
+    let deck = "\
+        * Subcircuit DEBUG parameter must not bypass native B3SOI selector validation\n\
+        .subckt soi_cell d g s e dbg=0\n\
+        m1 d g s e nmos w=4u l=1u debug={dbg}\n\
+        .ends soi_cell\n\
+        x1 d g 0 0 soi_cell dbg=0.6\n\
+        vd d 0 1\n\
+        vg g 0 0.8\n\
+        .model nmos nmos level=55 capmod=2\n\
+        .op\n\
+        .end\n";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let message = match engine().run_dc_op_with_report(&netlist) {
+        Ok(_) => panic!("flattened DEBUG=0.6 must not be accepted"),
+        Err(error) => error.to_string(),
+    };
+
+    assert!(
+        message.contains("B3SOIFD") && message.contains("DEBUG"),
+        "error should identify the invalid flattened B3SOIFD DEBUG selector: {message}"
+    );
+    assert!(
+        message.contains("finite integer"),
+        "error should explain flattened native B3SOI DEBUG must be a finite integer: {message}"
+    );
+}
+
+#[test]
 fn xyce_level10_rsh_default_squares_matches_xyce710_ngspice46_dc_op() {
     let deck = "\
         * native SOI RSH defaults NRD/NRS to one square\n\
@@ -395,7 +714,7 @@ fn zero_hz_transfer_function_does_not_require_dynamic_charge_support() {
 
 #[test]
 fn debug_minus_one_suppresses_unsupported_b3soi_dynamic_charges_in_ac() {
-    for (level, capmod) in [(55, 2), (56, 2), (57, 0)] {
+    for (level, capmod) in [(55, 0), (56, 0), (57, 0)] {
         let deck = format!(
             "\
             * DEBUG=-1 runs the SOI device quasi-statically without dynamic charge stamps\n\

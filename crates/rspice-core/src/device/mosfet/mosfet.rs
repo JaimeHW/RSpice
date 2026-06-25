@@ -302,6 +302,16 @@ pub struct Mosfet {
 }
 
 impl Mosfet {
+    /// True when this instance uses the Berkeley MOS3 equation core.
+    pub(in crate::device::mosfet::mosfet) fn uses_mos3_core(&self) -> bool {
+        matches!(self.level, 3 | 9)
+    }
+
+    /// Operating-point family label for classic MOSFET-backed devices.
+    pub fn device_kind(&self) -> &'static str {
+        if self.level == 9 { "MOS9" } else { "MOSFET" }
+    }
+
     /// True when this instance runs the legacy BSIM1/BSIM2 equations rather
     /// than the classic level 1/2/3/6 models.
     pub fn uses_legacy_bsim(&self) -> bool {

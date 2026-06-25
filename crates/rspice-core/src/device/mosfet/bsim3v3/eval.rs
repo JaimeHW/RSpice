@@ -1914,7 +1914,7 @@ pub fn eval(
     }
 
     // --- Junction depletion charges and capacitances (b3ld.c:2253-2431),
-    //     acmMod = 0 ---
+    //     ACM=0/1 geometry paths ---
     junction_depletion(model, mt, p, inst, vbs, vbd, &mut charge);
 
     // --- NQS charge-deficit terms (b3ld.c:2477-2493) ---
@@ -2026,7 +2026,8 @@ pub fn eval(
 }
 
 /// Source/drain junction depletion charge + capacitance (b3ld.c:2268-2430,
-/// acmMod = 0). `vbs`/`vbd` are the raw (mode-unswapped) junction voltages.
+/// with ACM=1's devsup.c geometry helper). `vbs`/`vbd` are the raw
+/// (mode-unswapped) junction voltages.
 fn junction_depletion(
     model: &Bsim3v3Model,
     mt: &Bsim3v3ModelTemp,
@@ -2037,25 +2038,9 @@ fn junction_depletion(
     charge: &mut Bsim3v3Charge,
 ) {
     // Zero-bias capacitances split between bottom, field-oxide sidewall and
-    // gate-side sidewall (b3ld.c:2268-2297).
-    let czbd = mt.unit_area_temp_jct_cap * inst.drain_area;
-    let czbs = mt.unit_area_temp_jct_cap * inst.source_area;
-    let (czbdsw, czbdswg);
-    if inst.drain_perimeter < p.weff {
-        czbdswg = mt.unit_length_gate_sidewall_temp_jct_cap * inst.drain_perimeter;
-        czbdsw = 0.0;
-    } else {
-        czbdsw = mt.unit_length_sidewall_temp_jct_cap * (inst.drain_perimeter - p.weff);
-        czbdswg = mt.unit_length_gate_sidewall_temp_jct_cap * p.weff;
-    }
-    let (czbssw, czbsswg);
-    if inst.source_perimeter < p.weff {
-        czbssw = 0.0;
-        czbsswg = mt.unit_length_gate_sidewall_temp_jct_cap * inst.source_perimeter;
-    } else {
-        czbssw = mt.unit_length_sidewall_temp_jct_cap * (inst.source_perimeter - p.weff);
-        czbsswg = mt.unit_length_gate_sidewall_temp_jct_cap * p.weff;
-    }
+    // gate-side sidewall (b3ld.c:2268-2297 plus ACM=1 devsup.c helper).
+    let (czbd, czbdsw, czbdswg, czbs, czbssw, czbsswg) =
+        junction_zero_bias_caps_acm0_or_1(model, mt, p, inst);
 
     let mj = model.bulk_jct_bot_grading_coeff;
     let mjsw = model.bulk_jct_side_grading_coeff;
@@ -2153,5 +2138,41 @@ fn junction_depletion(
             * (czbd * mj / mt.phi_b + czbdsw * mjsw / mt.phi_bsw + czbdswg * mjswg / mt.phi_bswg);
         charge.qbd = vbd * (t0 + 0.5 * t1);
         charge.capbd = t0 + t1;
+    }
+}
+
+fn junction_zero_bias_caps_acm0_or_1(
+    model: &Bsim3v3Model,
+    mt: &Bsim3v3ModelTemp,
+    p: &Bsim3v3SizeDep,
+    inst: &Bsim3v3InstTemp,
+) -> (Value, Value, Value, Value, Value, Value) {
+    if model.acm_mod == 1 {
+        let width = p.width * model.wmlt + model.xw;
+        let area = width * model.wmlt;
+        let perimeter = width;
+        let area_cap = area * mt.unit_area_temp_jct_cap;
+        let side_cap = perimeter * mt.unit_length_sidewall_temp_jct_cap;
+        (area_cap, side_cap, 0.0, area_cap, side_cap, 0.0)
+    } else {
+        let czbd = mt.unit_area_temp_jct_cap * inst.drain_area;
+        let czbs = mt.unit_area_temp_jct_cap * inst.source_area;
+        let (czbdsw, czbdswg);
+        if inst.drain_perimeter < p.weff {
+            czbdswg = mt.unit_length_gate_sidewall_temp_jct_cap * inst.drain_perimeter;
+            czbdsw = 0.0;
+        } else {
+            czbdsw = mt.unit_length_sidewall_temp_jct_cap * (inst.drain_perimeter - p.weff);
+            czbdswg = mt.unit_length_gate_sidewall_temp_jct_cap * p.weff;
+        }
+        let (czbssw, czbsswg);
+        if inst.source_perimeter < p.weff {
+            czbssw = 0.0;
+            czbsswg = mt.unit_length_gate_sidewall_temp_jct_cap * inst.source_perimeter;
+        } else {
+            czbssw = mt.unit_length_sidewall_temp_jct_cap * (inst.source_perimeter - p.weff);
+            czbsswg = mt.unit_length_gate_sidewall_temp_jct_cap * p.weff;
+        }
+        (czbd, czbdsw, czbdswg, czbs, czbssw, czbsswg)
     }
 }

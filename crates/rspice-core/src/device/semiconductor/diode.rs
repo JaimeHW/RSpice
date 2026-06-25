@@ -9,6 +9,7 @@ use crate::{Value, circuit::NodeId};
 const KOVERQ: Value = 1.38064852e-23 / 1.6021766208e-19;
 /// SPICE reference temperature, 27C in Kelvin (ngspice REFTEMP).
 const REFTEMP: Value = 300.15;
+const EPSMIN: Value = 1.0e-28;
 
 /// Pre-computed stamp indices for O(1) matrix access (2-terminal device)
 #[derive(Debug, Clone, Default)]
@@ -38,6 +39,10 @@ pub struct Diode {
     pub bv: Option<Value>,
     /// Reverse current at breakdown knee.
     pub ibv: Value,
+    /// Forward high-injection knee current (IKF/IK).
+    pub forward_knee_current: Value,
+    /// Reverse high-injection knee current (IKR).
+    pub reverse_knee_current: Value,
 
     // Junction capacitance parameters
     /// Zero-bias junction capacitance (CJ0)
@@ -67,7 +72,6 @@ pub struct Diode {
     /// Instance multiplicity (M), kept apart from the folded junction
     /// scaling because dionoise.c rides flicker on `m·KF·|Id/m|^AF`.
     pub multiplicity: Value,
-
     /// Previous iteration voltage (for convergence check)
     prev_vd: Value,
     /// Previous voltage for convergence
@@ -101,6 +105,8 @@ impl Diode {
             rs: 0.568,            // Series resistance
             bv: None,
             ibv: 1e-6,
+            forward_knee_current: 0.0,
+            reverse_knee_current: 0.0,
 
             // Junction capacitance (1N4148-like)
             cj0: 4e-12, // Zero-bias junction capacitance (4pF)
@@ -265,6 +271,12 @@ impl Diode {
         {
             self.ibv = v;
         }
+        if let Some(v) = params.get("IKF").or_else(|| params.get("IK")).copied() {
+            self.forward_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
+        }
+        if let Some(&v) = params.get("IKR") {
+            self.reverse_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
+        }
         if let Some(&v) = params.get("CJO") {
             self.cj0 = v;
         }
@@ -296,6 +308,20 @@ impl Diode {
             self.tnom_c = Some(v);
         }
         self
+    }
+
+    pub(crate) fn remap_nodes(&mut self, old_node_id: NodeId) {
+        fn remap_node_id(id: NodeId, old_id: NodeId) -> NodeId {
+            if id == old_id {
+                0
+            } else if id > old_id {
+                id - 1
+            } else {
+                id
+            }
+        }
+        self.node_anode = remap_node_id(self.node_anode, old_node_id);
+        self.node_cathode = remap_node_id(self.node_cathode, old_node_id);
     }
 
     /// Scale the junction to the operating temperature.
@@ -379,6 +405,8 @@ impl Diode {
     pub fn apply_junction_scaling(&mut self, scale: Value) {
         self.is *= scale;
         self.ibv *= scale;
+        self.forward_knee_current *= scale;
+        self.reverse_knee_current *= scale;
         self.cj0 *= scale;
         if self.rs > 0.0 {
             self.rs /= scale;
@@ -527,16 +555,12 @@ impl Diode {
     /// Shockley diode equation: I = Is * (exp(Vd / (N * Vt)) - 1)
     /// Public for noise analysis (shot noise = 2qI)
     pub fn current(&self, vd: Value) -> Value {
-        let forward = self.forward_current(vd);
-        let breakdown = self.breakdown_current(vd);
-        forward + breakdown
+        self.current_and_conductance(vd).0
     }
 
     /// Diode conductance (derivative of current): gd = Is / (N * Vt) * exp(Vd / (N * Vt))
     fn diode_conductance(&self, vd: Value) -> Value {
-        let forward = self.forward_conductance(vd);
-        let breakdown = self.breakdown_conductance(vd);
-        forward + breakdown
+        self.current_and_conductance(vd).1
     }
 
     /// Junction current and conductance in one evaluation.
@@ -546,11 +570,7 @@ impl Diode {
     /// exp() once. The expression shapes mirror the individual methods
     /// exactly so results stay bit-identical.
     fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        let n_vt = self.n * self.vt;
-        let vd_limited = vd.min(80.0 * self.n * self.vt);
-        let e = (vd_limited / n_vt).exp();
-        let forward_i = self.is * (e - 1.0);
-        let forward_g = (self.is / n_vt) * e;
+        let (forward_i, forward_g) = self.bottom_current_and_conductance(vd);
         let (breakdown_i, breakdown_g) = match self.bv {
             None => (0.0, 0.0),
             Some(bv) => {
@@ -560,42 +580,73 @@ impl Diode {
                 (-self.ibv * be, (self.ibv / scale) * be)
             }
         };
-        (forward_i + breakdown_i, forward_g + breakdown_g)
+        let current = forward_i + breakdown_i;
+        let conductance = forward_g + breakdown_g;
+        self.apply_high_injection_knee(vd, current, conductance)
     }
 
-    fn forward_current(&self, vd: Value) -> Value {
-        // Limit voltage to prevent overflow
-        let vd_limited = vd.min(80.0 * self.n * self.vt);
-        self.is * ((vd_limited / (self.n * self.vt)).exp() - 1.0)
+    fn bottom_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        let n_vt = self.n * self.vt;
+        if vd >= -3.0 * n_vt {
+            let vd_limited = vd.min(80.0 * n_vt);
+            let e = (vd_limited / n_vt).exp();
+            return (self.is * (e - 1.0), (self.is / n_vt) * e);
+        }
+
+        let mut arg = 3.0 * n_vt / (vd * std::f64::consts::E);
+        arg = arg * arg * arg;
+        (-self.is * (1.0 + arg), self.is * 3.0 * arg / vd)
     }
 
-    fn forward_conductance(&self, vd: Value) -> Value {
-        let vd_limited = vd.min(80.0 * self.n * self.vt);
-        (self.is / (self.n * self.vt)) * (vd_limited / (self.n * self.vt)).exp()
+    fn apply_high_injection_knee(
+        &self,
+        vd: Value,
+        current: Value,
+        conductance: Value,
+    ) -> (Value, Value) {
+        let n_vt = self.n * self.vt;
+        if vd >= -3.0 * n_vt {
+            return Self::apply_forward_knee(current, conductance, self.forward_knee_current);
+        }
+        Self::apply_reverse_knee(current, conductance, self.reverse_knee_current)
+    }
+
+    fn apply_forward_knee(
+        current: Value,
+        conductance: Value,
+        knee_current: Value,
+    ) -> (Value, Value) {
+        if !(knee_current > 0.0 && current > 1.0e-18) {
+            return (current, conductance);
+        }
+        let sqrt_knee = (current / knee_current).sqrt();
+        let denominator = 1.0 + 2.0 * sqrt_knee + current / knee_current;
+        let limited_conductance = ((1.0 + sqrt_knee) * conductance
+            - current * conductance / (2.0 * sqrt_knee * knee_current))
+            / denominator;
+        (current / (1.0 + sqrt_knee), limited_conductance)
+    }
+
+    fn apply_reverse_knee(
+        current: Value,
+        conductance: Value,
+        knee_current: Value,
+    ) -> (Value, Value) {
+        if !(knee_current > 0.0 && current < -1.0e-18) {
+            return (current, conductance);
+        }
+        let sqrt_knee = (current / -knee_current).sqrt();
+        let denominator = 1.0 + 2.0 * sqrt_knee - current / knee_current;
+        let limited_conductance = ((1.0 + sqrt_knee) * conductance
+            + current * conductance / (2.0 * sqrt_knee * knee_current))
+            / denominator;
+        (current / (1.0 + sqrt_knee), limited_conductance)
     }
 
     fn breakdown_softness(&self, bv: Value) -> Value {
         let thermal_knee = (self.n * self.vt).abs().max(0.05);
         let scaled_knee = (0.02 * bv.abs()).clamp(0.05, 1.0);
         thermal_knee.max(scaled_knee)
-    }
-
-    fn breakdown_current(&self, vd: Value) -> Value {
-        let Some(bv) = self.bv else {
-            return 0.0;
-        };
-        let scale = self.breakdown_softness(bv);
-        let exponent = ((-vd - bv) / scale).clamp(-80.0, 40.0);
-        -self.ibv * exponent.exp()
-    }
-
-    fn breakdown_conductance(&self, vd: Value) -> Value {
-        let Some(bv) = self.bv else {
-            return 0.0;
-        };
-        let scale = self.breakdown_softness(bv);
-        let exponent = ((-vd - bv) / scale).clamp(-80.0, 40.0);
-        (self.ibv / scale) * exponent.exp()
     }
 }
 

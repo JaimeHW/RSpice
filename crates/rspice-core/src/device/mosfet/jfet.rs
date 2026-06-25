@@ -294,8 +294,18 @@ pub struct JfetParams {
     pub hfet_rgd: Value,
     /// HFET/MESFET gate generation-recombination parameter `GGR`.
     pub hfet_ggr: Value,
+    /// HFET2 gate saturation-current density `JS`.
+    pub hfet_js: Value,
     /// HFET/MESFET gate leakage exponential coefficient `DEL`.
     pub hfet_del: Value,
+    /// HFET2 temperature coefficient for channel-length modulation `KLAMBDA`.
+    pub hfet_klambda: Value,
+    /// HFET2 temperature coefficient for mobility `KMU`.
+    pub hfet_kmu: Value,
+    /// HFET2 temperature coefficient for maximum carrier density `KNMAX`.
+    pub hfet_knmax: Value,
+    /// HFET2 temperature coefficient for threshold voltage `KVTO`.
+    pub hfet_kvto: Value,
     /// HFET1 GATEMOD=1 knee-voltage slope `CK1`.
     pub hfet_ck1: Value,
     /// HFET1 GATEMOD=1 knee-voltage offset `CK2` (V).
@@ -326,6 +336,15 @@ pub struct JfetParams {
     pub hfet_d1: Value,
     /// HFET1 capacitance threshold-shift parameter `VT1`.
     pub hfet_vt1: Value,
+    /// HFET2 second carrier-density branch ideality `ETA2`.
+    /// NaN means the model card did not explicitly give `ETA2`.
+    pub hfet_eta2: Value,
+    /// HFET2 second carrier-density branch depth `D2`.
+    /// NaN means the model card did not explicitly give `D2`.
+    pub hfet_d2: Value,
+    /// HFET2 second carrier-density branch threshold `VT2`.
+    /// NaN means ngspice's default `VT2 = VTO` applies if the branch is enabled.
+    pub hfet_vt2: Value,
     /// HFET1 capacitance partition parameter `P`.
     pub hfet_p: Value,
     /// HFET AC output-conductance shaping coefficient `KAPPA`.
@@ -338,6 +357,8 @@ pub struct JfetParams {
     pub hfet_tf: Value,
     /// HFET drain-source capacitance `CDS`.
     pub hfet_cds: Value,
+    /// HFET2 fringing capacitance `CF`.
+    pub hfet_cf: Value,
     /// MESA/HFET emission constant `ASTAR`.
     pub mesa_astar: Value,
     /// MESA/HFET barrier potential `PHIB` (J).

@@ -182,8 +182,8 @@ impl Mosfet {
         self
     }
 
-    fn with_mos3_defaults(mut self) -> Self {
-        self.level = 3;
+    fn with_mos3_defaults(mut self, level: i32) -> Self {
+        self.level = level;
         self.mos3_eta = 0.0;
         self.mos3_theta = 0.0;
         self.mos3_kappa = 0.2;
@@ -266,7 +266,7 @@ impl Mosfet {
             self.level6_meyer_state(vgs, vds, vbs).1
         } else if self.level == 2 {
             self.level2_model_space_onset_voltage(vgs, vds, vbs)
-        } else if self.level == 3 {
+        } else if self.uses_mos3_core() {
             self.polarity() * self.mos3_state(vgs, vds, vbs).von
         } else {
             self.vth(vbs)
@@ -511,8 +511,9 @@ impl Mosfet {
             self.level = level;
         }
 
-        if self.level == 3 {
-            self = self.with_mos3_defaults();
+        if matches!(self.level, 3 | 9) {
+            let level = self.level;
+            self = self.with_mos3_defaults(level);
         }
         if self.level == 2 {
             // Berkeley MOS2 has distinct model-card defaults from the generic
@@ -856,7 +857,7 @@ impl Mosfet {
         {
             self.mos2_fast_surface_state_density = v;
         }
-        if self.level == 3 {
+        if self.uses_mos3_core() {
             if let Some(v) = params.get("ETA").copied().filter(|v| v.is_finite()) {
                 self.mos3_eta = v;
             }
@@ -1021,8 +1022,8 @@ impl Mosfet {
 
     /// Set SPICE MOS model level.
     pub fn with_level(mut self, level: i32) -> Self {
-        if level == 3 {
-            self = self.with_mos3_defaults();
+        if matches!(level, 3 | 9) {
+            self = self.with_mos3_defaults(level);
         } else {
             self.level = level;
         }

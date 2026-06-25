@@ -33,8 +33,7 @@
 //!   dedicated B3SOI pass; the four node charges (incl. the floating body) feed
 //!   the local-truncation-error step control.
 //! - **Convergence aids**: `B3SOIPDlimit` (per-iterate 0.2 V body-voltage cap)
-//!   and `B3SOIPDSmartVbs` (DC floating-body `Vbs >= 0` clamp), applied each
-//!   Newton iterate; SmartVbs is disabled during transient time-stepping.
+//!   applied each Newton iterate.
 //! - **Builder dispatch** is live for LEVEL=57 NMOS/PMOS and LEVEL=10
 //!   `SOIMOD=0` through the native BSIMSOI routing in `engine/builder.rs`.
 //!
@@ -112,15 +111,14 @@ pub struct B3SoiPd {
     converged_ref: B3SoiPdBias,
     has_history: bool,
     /// Last accepted/limited `vbs` (device polarity) used as the limiter anchor
-    /// for `B3SOIPDlimit`/`B3SOIPDSmartVbs` on the next Newton iterate.
+    /// for `B3SOIPDlimit` on the next Newton iterate.
     vbs_limit_anchor: Value,
     vbd_limit_anchor: Value,
     /// Last accepted/limited self-heating temperature rise used by
     /// `B3SOIPDlimit(delTemp, oldDelTemp, 5.0)`.
     del_temp_limit_anchor: Value,
-    /// DC/operating-point mode: enables the `B3SOIPDSmartVbs` floating-body
-    /// clamp (Vbs >= 0). Cleared during transient where the body may go
-    /// negative. Set by the engine before each analysis phase.
+    /// DC/operating-point mode. Cleared during transient and set by the engine
+    /// before each analysis phase.
     dc_mode: std::cell::Cell<bool>,
     /// Whether the limiter anchor has been seeded (first iterate uses the raw
     /// node solution).
@@ -236,10 +234,8 @@ impl B3SoiPd {
 
     /// Select the analysis mode for the floating-body convergence aids.
     ///
-    /// In DC/operating-point mode the `B3SOIPDSmartVbs` clamp (Vbs >= 0) is
-    /// active; in transient it is disabled so a floating body may swing below
-    /// the source potential. The per-iteration `B3SOIPDlimit` change cap applies
-    /// in both modes (it only protects the Newton path, not the solution).
+    /// The per-iteration `B3SOIPDlimit` change cap applies in both modes (it
+    /// only protects the Newton path, not the solution).
     pub fn set_dc_mode(&self, dc: bool) {
         self.dc_mode.set(dc);
         // A mode switch invalidates the limiter anchor (different state vector).
@@ -262,10 +258,11 @@ impl B3SoiPd {
         self.bypass_active.set(false);
     }
 
-    /// `DEBUG=-1` (ngspice `debugMod < 0`): evaluate charges for probes but
+    /// `DEBUG=-1` (the only negative debug mode accepted by the builder):
+    /// evaluate charges for probes but
     /// contribute no dynamic charges to the matrix, RHS, or LTE.
     pub fn set_debug_mod(&mut self, debug_mod: i32) {
-        self.charges_suppressed = debug_mod < 0;
+        self.charges_suppressed = debug_mod == -1;
     }
 
     /// Whether `DEBUG=-1` suppresses this device's charge contributions.
@@ -735,50 +732,27 @@ impl B3SoiPd {
         }
     }
 
-    /// Floating-body convergence aids `B3SOIPDlimit` + `B3SOIPDSmartVbs`
-    /// (b3soipdld.c:50-99, 664-688), applied per Newton iterate.
+    /// Floating-body convergence aid `B3SOIPDlimit` (b3soipdld.c:50-99,
+    /// 664-688), applied per Newton iterate.
     ///
     /// In the mode-selected (normal/inverse) frame, the body-source (or
     /// body-drain) voltage is clamped to move at most 0.2 V from the previous
-    /// iterate's value and, in DC, floored at 0 for a floating body. This only
-    /// reshapes the Newton path; the converged solution still satisfies KCL.
+    /// iterate's value. This only reshapes the Newton path; the converged
+    /// solution still satisfies KCL.
     ///
     /// Returns whether the per-iteration change cap actually engaged (the
-    /// ngspice `Check` flag; the SmartVbs DC floor intentionally does not set
-    /// it, matching `B3SOIPDSmartVbs`'s `NG_IGNORE(check)`).
+    /// ngspice `Check` flag).
     fn apply_body_limiting(&self, bias: &mut B3SoiPdBias) -> bool {
         if !self.limit_anchor_valid.get() {
-            // First iterate of a phase: accept the raw bias, but still apply the
-            // DC SmartVbs floor so a floating body never starts negative.
-            if self.dc_mode.get() && self.body_mode == BodyMode::Floating {
-                if bias.vds >= 0.0 {
-                    if bias.vbs < 0.0 {
-                        bias.vbs = 0.0;
-                    }
-                } else {
-                    let mut vbd = bias.vbs - bias.vds;
-                    if vbd < 0.0 {
-                        vbd = 0.0;
-                        bias.vbs = vbd + bias.vds;
-                    }
-                }
-            }
+            // First iterate of a phase: accept the raw bias.
             return false;
         }
         let mut check = false;
-        let smart = self.dc_mode.get() && self.body_mode == BodyMode::Floating;
         if bias.vds >= 0.0 {
-            let mut vbs = common::soi_limit(bias.vbs, self.vbs_limit_anchor, 0.2, &mut check);
-            if smart && vbs < 0.0 {
-                vbs = 0.0;
-            }
-            bias.vbs = vbs;
+            bias.vbs = common::soi_limit(bias.vbs, self.vbs_limit_anchor, 0.2, &mut check);
         } else {
             let vbd0 = bias.vbs - bias.vds;
-            let mut vbd = common::soi_limit(vbd0, self.vbd_limit_anchor, 0.2, &mut check);
-            if smart && vbd < 0.0 {
-                vbd = 0.0;
-            }
+            let vbd = common::soi_limit(vbd0, self.vbd_limit_anchor, 0.2, &mut check);
             bias.vbs = vbd + bias.vds;
         }
         if self.self_heating_active() {
@@ -862,7 +836,7 @@ impl NonlinearDevice for B3SoiPd {
         let op = self.op.clone();
         // `cdreq`/`ceq*` must be formed from the same limited bias that produced
         // `op`; recomputing from the raw node vector bypasses the local
-        // B3SOIPDlimit/SmartVbs path that ngspice stamps.
+        // B3SOIPDlimit path that ngspice stamps.
         self.stamp_op(&op, bias, matrix);
     }
 

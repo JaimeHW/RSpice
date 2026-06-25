@@ -3,7 +3,10 @@
 //! Parameter list transcribed from ngspice-46 `b3soidd.c` (`B3SOIDDmPTable`),
 //! defaults from `b3soiddset.c` (`B3SOIDDsetup`, lines 52-873).
 
-use super::super::common::{EPSOX, PI};
+use super::super::common::{
+    B3SOI_BINUNIT_VALUES, B3SOI_CAPMOD_VALUES, B3SOI_MOBMOD_VALUES, B3SOI_PARAMCHK_VALUES,
+    B3SOI_SHMOD_VALUES, EPSOX, PI, mobmod_selector, model_selector,
+};
 use crate::Value;
 use std::collections::HashMap;
 
@@ -252,10 +255,19 @@ impl B3SoiDdModel {
         is_pmos: bool,
         nominal_temp_k: Value,
     ) -> Self {
+        Self::try_from_params(params, is_pmos, nominal_temp_k)
+            .expect("B3SOIDD model selectors are valid")
+    }
+
+    pub fn try_from_params(
+        params: &HashMap<String, Value>,
+        is_pmos: bool,
+        nominal_temp_k: Value,
+    ) -> Result<Self, String> {
         let p = params;
         let mtype: Value = if is_pmos { -1.0 } else { 1.0 };
 
-        let mob_mod = val(p, "MOBMOD", 1.0) as i32;
+        let mob_mod = mobmod_selector(p, 1, B3SOI_MOBMOD_VALUES)?;
         let tox = val(p, "TOX", 100.0e-10);
         let cox = 3.453133e-11 / tox;
 
@@ -298,10 +310,10 @@ impl B3SoiDdModel {
         let mut model = Self {
             mtype,
             mob_mod,
-            cap_mod: val(p, "CAPMOD", 2.0) as i32,
-            sh_mod: val(p, "SHMOD", 0.0) as i32,
-            bin_unit: val(p, "BINUNIT", 1.0) as i32,
-            param_chk: val(p, "PARAMCHK", 0.0) as i32,
+            cap_mod: model_selector(p, "CAPMOD", 2, B3SOI_CAPMOD_VALUES)?,
+            sh_mod: model_selector(p, "SHMOD", 0, B3SOI_SHMOD_VALUES)?,
+            bin_unit: model_selector(p, "BINUNIT", 1, B3SOI_BINUNIT_VALUES)?,
+            param_chk: model_selector(p, "PARAMCHK", 0, B3SOI_PARAMCHK_VALUES)?,
             version: val(p, "VERSION", 2.0),
             tox,
 
@@ -507,7 +519,7 @@ impl B3SoiDdModel {
         };
 
         model.finish_setup();
-        model
+        Ok(model)
     }
 
     /// Derived film/oxide constants (b3soiddset.c lines 970-997).

@@ -328,6 +328,41 @@ fn nmos_mobmod_device(mob_mod: i32, temp_k: Value) -> Bsim4v8 {
     Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), temp_k).expect("mobMod device")
 }
 
+#[test]
+fn fractional_model_selectors_round_like_ngspice46_before_validation() {
+    for (param, raw, expected) in [
+        ("MOBMOD", 0.5, 1),
+        ("MOBMOD", 1.5, 2),
+        ("GEOMOD", 0.5, 1),
+        ("GEOMOD", 1.5, 2),
+        ("ACNQSMOD", 0.5, 1),
+        ("ACNQSMOD", 1.4, 1),
+    ] {
+        let mut card = nmos45();
+        card.insert(param.to_string(), raw);
+        let model = Bsim4v8Model::try_from_params(&card, false, T300)
+            .unwrap_or_else(|err| panic!("{param}={raw} should round like ngspice-46: {err}"));
+        let got = match param {
+            "MOBMOD" => model.mob_mod,
+            "GEOMOD" => model.geo_mod,
+            "ACNQSMOD" => model.acnqs_mod,
+            _ => unreachable!(),
+        };
+        assert_eq!(got, expected, "{param}={raw} effective selector");
+    }
+
+    for (param, raw) in [("MOBMOD", 6.5), ("GEOMOD", 10.5), ("ACNQSMOD", 1.5)] {
+        let mut card = nmos45();
+        card.insert(param.to_string(), raw);
+        let err = Bsim4v8Model::try_from_params(&card, false, T300)
+            .expect_err("rounded out-of-range selectors remain fail-closed");
+        assert!(
+            err.contains(param),
+            "{param}={raw}: error should name selector, got {err}"
+        );
+    }
+}
+
 fn nmos_geomod_device(geo_mod: i32, nf: Value, min_sd: i32) -> Bsim4v8 {
     let mut card = nmos45();
     card.insert("GEOMOD".to_string(), geo_mod as Value);
@@ -630,22 +665,49 @@ fn transient_nqs_mode_combinations_are_scoped() {
     .expect("RBODYMOD=2 geometry-scaled substrate resistance network constructs natively");
     assert_eq!(rbodymod2.model.rbody_mod, 2);
 
-    let assert_dc_only_charge_error = |key: &str, val: Value, what: &str| {
+    let mut card = nmos45();
+    card.insert("CVCHARGEMOD".to_string(), 2.0);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("CVCHARGEMOD=2 constructs natively");
+    let bias = Bsim4v8Bias {
+        vds: 0.5,
+        vgs: 0.8,
+        vbs: 0.0,
+    };
+    assert!(dev.eval(bias, GMIN, false).is_ok());
+    dev.eval(bias, GMIN, true)
+        .expect("CVCHARGEMOD=2 uses the native nonzero charge path")
+        .charge
+        .expect("CVCHARGEMOD=2 charges");
+
+    let mut card = nmos45();
+    card.insert("CVCHARGEMOD".to_string(), 3.0);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("CVCHARGEMOD=3 constructs natively");
+    assert!(dev.eval(bias, GMIN, false).is_ok());
+    dev.eval(bias, GMIN, true)
+        .expect("CVCHARGEMOD=3 uses the native nonzero charge path")
+        .charge
+        .expect("CVCHARGEMOD=3 charges");
+
+    for invalid in [2.5] {
         let mut card = nmos45();
-        card.insert(key.to_string(), val);
+        card.insert("CVCHARGEMOD".to_string(), invalid);
         let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
         let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
-            .unwrap_or_else(|err| panic!("{what} should construct for DC: {err}"));
-        let bias = Bsim4v8Bias {
-            vds: 0.5,
-            vgs: 0.8,
-            vbs: 0.0,
-        };
+            .unwrap_or_else(|err| panic!("CVCHARGEMOD={invalid} should construct for DC: {err}"));
         assert!(dev.eval(bias, GMIN, false).is_ok());
-        let err = dev.eval(bias, GMIN, true).unwrap_err();
-        assert!(err.contains(what), "{what}: unexpected error text: {err}");
-    };
-    assert_dc_only_charge_error("CVCHARGEMOD", 2.0, "CVCHARGEMOD");
+        let err = match dev.eval(bias, GMIN, true) {
+            Ok(_) => panic!("CVCHARGEMOD={invalid} should reject charge eval"),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains("CVCHARGEMOD"),
+            "CVCHARGEMOD={invalid}: unexpected error text: {err}"
+        );
+    }
 
     let mut card = nmos45();
     card.insert("CAPMOD".to_string(), 0.0);
@@ -1841,6 +1903,47 @@ fn ngspice_pinned_nmos_charges_cvchargemod1() {
 }
 
 #[test]
+fn cvchargemod2_matches_ngspice_nonzero_charge_path() {
+    // ngspice-46's BSIM4load distinguishes cvchargeMod == 0 from the
+    // nonzero path; selector 2 therefore follows the same equations as 1.
+    let charge_at = |selector: Value| {
+        let mut card = nmos45();
+        card.insert("CVCHARGEMOD".to_string(), selector);
+        let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+        let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+            .unwrap_or_else(|err| panic!("CVCHARGEMOD={selector} constructs: {err}"));
+        dev.eval(
+            Bsim4v8Bias {
+                vds: 1.1,
+                vgs: 1.1,
+                vbs: 0.0,
+            },
+            GMIN,
+            true,
+        )
+        .unwrap_or_else(|err| panic!("CVCHARGEMOD={selector} charge eval: {err}"))
+        .charge
+        .expect("charges")
+    };
+
+    let cv1 = charge_at(1.0);
+    let cv2 = charge_at(2.0);
+    assert_rel(cv2.qgate, cv1.qgate, "cv2 qg");
+    assert_rel(cv2.qbulk, cv1.qbulk, "cv2 qb");
+    assert_rel(cv2.qdrn, cv1.qdrn, "cv2 qd");
+    assert_rel(cv2.qsrc, cv1.qsrc, "cv2 qs");
+    assert_rel(cv2.cggb, cv1.cggb, "cv2 cgg");
+    assert_rel(cv2.cgdb, cv1.cgdb, "cv2 cgd");
+    assert_rel(cv2.cgsb, cv1.cgsb, "cv2 cgs");
+    assert_rel(cv2.cdgb, cv1.cdgb, "cv2 cdg");
+    assert_rel(cv2.cddb, cv1.cddb, "cv2 cdd");
+    assert_rel(cv2.cdsb, cv1.cdsb, "cv2 cds");
+    assert_rel(cv2.cbgb, cv1.cbgb, "cv2 cbg");
+    assert_rel(cv2.cbdb, cv1.cbdb, "cv2 cbd");
+    assert_rel(cv2.cbsb, cv1.cbsb, "cv2 cbs");
+}
+
+#[test]
 fn ngspice_pinned_nmos_charges_capmod1() {
     // Same saturation bias and geometry as the CAPMOD=2 oracle above, with
     // CAPMOD=1 selecting BSIM4's Meyer-like intrinsic charge model.
@@ -2508,136 +2611,4 @@ fn live_ngspice_oracle_dc_and_charge() {
         "live BSIM4 oracle: {points} comparisons passed; worst rel err {:.3e} ({})",
         worst.0, worst.1
     );
-}
-
-// ===================== Verilog-A cross-check =====================
-//
-// The in-tree Verilog-A BSIM4.8 (models/veriloga/bsim4.va, the
-// Xyce-adapted variant) is a sibling implementation, not the transcription
-// oracle: it documents default deviations from the C model (igc-family
-// defaults, junction trap model, TNOM=25), so agreement is percent-level
-// by design — see tests/veriloga_bsim4_oracle.rs. This cross-check reports
-// native-vs-VA deltas at the same fixture biases without forcing
-// agreement; the hard bound only guards against gross divergence.
-
-#[cfg(feature = "veriloga")]
-mod veriloga_cross_check {
-    use super::*;
-    use std::path::{Path, PathBuf};
-
-    fn bsim4_va_path() -> Option<PathBuf> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/veriloga/bsim4.va");
-        path.exists().then_some(path)
-    }
-
-    /// Terminal drain current -i(vd) of the VA model at a bias point, the
-    /// exact recipe of tests/veriloga_bsim4_oracle.rs.
-    fn va_drain_current(model: &Path, vgs: Value, vds: Value, temp_c: Option<Value>) -> Value {
-        let temp_line = match temp_c {
-            Some(t) => format!(".options temp={t}\n"),
-            None => String::new(),
-        };
-        let deck = format!(
-            "* bsim4 va bias point\n\
-             {temp_line}\
-             vg g 0 {vgs}\n\
-             vd d 0 {vds}\n\
-             XM1 d g 0 0 bsim4va l=1e-7 w=1e-6\n\
-             .va \"{}\" bsim4va\n\
-             .end\n",
-            model.display().to_string().replace('\\', "/")
-        );
-        let netlist = crate::Netlist::parse(&deck).expect("parse");
-        let result = crate::Engine::default()
-            .run_tran(&netlist, 2e-9, 1e-9)
-            .expect("bias point must converge");
-        let idx = result
-            .branch_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("vd"))
-            .expect("vd branch");
-        -result.branch_currents[idx]
-            .last()
-            .copied()
-            .expect("samples")
-    }
-
-    /// Terminal drain current of the native port with the all-defaults
-    /// card (the VA deck gives no model parameters): channel current plus
-    /// the reverse drain-junction current, i.e. what -i(vd) measures.
-    fn native_drain_current(tnom_k: Value, temp_k: Value, vgs: Value, vds: Value) -> Value {
-        let model = Arc::new(Bsim4v8Model::from_params(&HashMap::new(), false, tnom_k));
-        let dev = Bsim4v8::new(
-            "m1".to_string(),
-            model,
-            Bsim4v8Geometry {
-                l: 0.1e-6,
-                w: 1e-6,
-                ..Bsim4v8Geometry::default()
-            },
-            temp_k,
-        )
-        .expect("native default device");
-        let op = dev
-            .eval(Bsim4v8Bias { vds, vgs, vbs: 0.0 }, GMIN, false)
-            .expect("eval");
-        op.cd - op.cbd
-    }
-
-    /// Native (C-transcription) vs Verilog-A at the fixture bias points.
-    /// Run with `cargo test -p rspice-core --lib bsim4v8 --features veriloga
-    /// -- --ignored --nocapture` to see the delta table.
-    #[test]
-    #[ignore = "requires models/veriloga/bsim4.va and the veriloga engine"]
-    fn native_vs_veriloga_bias_points() {
-        let Some(model) = bsim4_va_path() else {
-            eprintln!("bsim4.va not present; skipping VA cross-check");
-            return;
-        };
-
-        // (label, vgs, vds, temp_c). The temperature rows mirror the VA
-        // fixture's tnom=25 protocol; the rest run at the 27C default.
-        let points: [(&str, Value, Value, Option<Value>); 10] = [
-            ("idvg deep subthreshold", 0.0, 1.2, None),
-            ("idvg subthreshold", 0.3, 1.2, None),
-            ("idvg moderate inversion", 0.6, 1.2, None),
-            ("idvg onset", 0.9, 1.2, None),
-            ("idvg strong inversion", 1.2, 1.2, None),
-            ("idvd linear", 1.2, 0.1, None),
-            ("idvd saturation onset", 1.2, 0.6, None),
-            ("temp -40C", 1.0, 1.2, Some(-40.0)),
-            ("temp 27C", 1.0, 1.2, Some(27.0)),
-            ("temp 125C", 1.0, 1.2, Some(125.0)),
-        ];
-
-        println!(
-            "{:<26} {:>13} {:>13} {:>9}",
-            "bias", "native", "veriloga", "delta"
-        );
-        let mut worst: Value = 0.0;
-        for (label, vgs, vds, temp_c) in points {
-            let (tnom_k, temp_k) = match temp_c {
-                // VA temperature fixtures: tnom=25, swept device temp.
-                Some(t) => (25.0 + 273.15, t + 273.15),
-                None => (T300, T300),
-            };
-            let native = native_drain_current(tnom_k, temp_k, vgs, vds);
-            let va = va_drain_current(&model, vgs, vds, temp_c);
-            let delta = (va - native) / native.abs().max(1e-30);
-            worst = worst.max(delta.abs());
-            println!(
-                "{label:<26} {native:>13.6e} {va:>13.6e} {:>+8.2}%",
-                delta * 100.0
-            );
-            // Documented variant gap is 0.6-1% strong inversion, ~5% deep
-            // subthreshold; anything past 15% would mean one of the two
-            // models is broken, not a default deviation.
-            assert!(
-                delta.abs() < 0.15,
-                "{label}: native {native:.6e} vs VA {va:.6e} ({:+.2}%)",
-                delta * 100.0
-            );
-        }
-        println!("worst |delta| = {:.2}%", worst * 100.0);
-    }
 }

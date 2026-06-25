@@ -4,7 +4,6 @@
 
 mod bjt;
 mod diode;
-pub mod mextram504;
 
 pub(crate) use bjt::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
@@ -12,6 +11,3 @@ pub(crate) use bjt::{
 };
 pub use bjt::{Bjt, BjtType};
 pub use diode::Diode;
-pub use mextram504::{
-    Mextram504, Mextram504Model, Mextram504Nodes, Mextram504Op, Mextram504Polarity,
-};

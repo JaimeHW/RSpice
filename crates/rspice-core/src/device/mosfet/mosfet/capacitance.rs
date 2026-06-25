@@ -55,7 +55,7 @@ impl Mosfet {
         match self.level {
             1 | 6 => self.level6_effective_length(),
             2 => self.level2_effective_length(),
-            3 => self.mos3_effective_length(),
+            3 | 9 => self.mos3_effective_length(),
             _ => self.l,
         }
     }
@@ -67,7 +67,7 @@ impl Mosfet {
 
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn classic_meyer_effective_width(&self) -> Value {
-        if self.level == 3 {
+        if self.uses_mos3_core() {
             self.mos3_effective_width()
         } else {
             self.w
@@ -180,7 +180,7 @@ impl Mosfet {
             let eval = self.level2_evaluate(vgs, vds, vbs);
             let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
             (mode, eval.von, eval.vdsat)
-        } else if self.level == 3 {
+        } else if self.uses_mos3_core() {
             let state = self.mos3_state(vgs, vds, vbs);
             let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
             let p = self.polarity();
@@ -230,7 +230,7 @@ impl Mosfet {
     pub fn ac_capacitances(&self) -> (Value, Value, Value) {
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
 
-        if self.level == 3 {
+        if self.uses_mos3_core() {
             let (cgs_int, cgd_int, cgb_int) =
                 self.transient_capacitance_halves_at(self.vgs, self.vds, self.vbs);
             return (

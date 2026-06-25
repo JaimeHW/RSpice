@@ -322,32 +322,35 @@ impl Jfet {
             // GATEMOD=1 gate currents are produced by the channel
             // evaluation (calculate_hfet1_core) and never reach this
             // diode/leakage path; see compute_operating_terms.
-            let (igs_int, ggs, igd_int, ggd) =
-                if self.params.hfet_level >= 2 && self.params.hfet_level < 5 {
-                    let (igs_int, ggs) = self.mesa_gate_branch(vgs_int, temp_source);
-                    let (igd_int, ggd) = self.mesa_gate_branch(vgd_int, temp_drain);
-                    (igs_int, ggs, igd_int, ggd)
-                } else {
-                    let (igs_int, ggs) = self.hfet_gate_branch(
-                        vgs_int,
-                        temp_source,
-                        self.params.hfet_js1s,
-                        self.params.hfet_js2s,
-                        self.params.hfet_m1s,
-                        self.params.hfet_m2s,
-                        self.params.hfet_rgs,
-                    );
-                    let (igd_int, ggd) = self.hfet_gate_branch(
-                        vgd_int,
-                        temp_drain,
-                        self.params.hfet_js1d,
-                        self.params.hfet_js2d,
-                        self.params.hfet_m1d,
-                        self.params.hfet_m2d,
-                        self.params.hfet_rgd,
-                    );
-                    (igs_int, ggs, igd_int, ggd)
-                };
+            let (igs_int, ggs, igd_int, ggd) = if self.params.hfet_level == 6 {
+                let (igs_int, ggs) = self.hfet2_gate_branch(vgs_int, temp_source);
+                let (igd_int, ggd) = self.hfet2_gate_branch(vgd_int, temp_drain);
+                (igs_int, ggs, igd_int, ggd)
+            } else if self.params.hfet_level >= 2 && self.params.hfet_level < 5 {
+                let (igs_int, ggs) = self.mesa_gate_branch(vgs_int, temp_source);
+                let (igd_int, ggd) = self.mesa_gate_branch(vgd_int, temp_drain);
+                (igs_int, ggs, igd_int, ggd)
+            } else {
+                let (igs_int, ggs) = self.hfet_gate_branch(
+                    vgs_int,
+                    temp_source,
+                    self.params.hfet_js1s,
+                    self.params.hfet_js2s,
+                    self.params.hfet_m1s,
+                    self.params.hfet_m2s,
+                    self.params.hfet_rgs,
+                );
+                let (igd_int, ggd) = self.hfet_gate_branch(
+                    vgd_int,
+                    temp_drain,
+                    self.params.hfet_js1d,
+                    self.params.hfet_js2d,
+                    self.params.hfet_m1d,
+                    self.params.hfet_m2d,
+                    self.params.hfet_rgd,
+                );
+                (igs_int, ggs, igd_int, ggd)
+            };
             return (pol * igs_int, pol * igd_int, ggs, ggd);
         }
 
@@ -366,7 +369,11 @@ impl Jfet {
         let w = self.width.max(1e-12);
         let l = self.length.max(1e-12);
         let epsi = p.hfet_epsi.max(1e-30);
-        let cf = 0.5 * epsi * w;
+        let cf = if self.params.hfet_level == 6 {
+            p.hfet_cf.max(0.0)
+        } else {
+            0.5 * epsi * w
+        };
 
         let vgs_int = pol * vgs;
         let vgd_int = pol * vgd;
@@ -389,11 +396,24 @@ impl Jfet {
         let eta = p.eta.abs().max(1e-9);
         let etavth = (eta * vt).max(1e-12);
 
-        let mu = p.hfet_mu.max(1e-12);
+        let tdiff = temp_k - p.tnom.max(1.0);
+        let use_hfet2_temp = p.hfet_level == 6;
+        let mu = if use_hfet2_temp {
+            p.hfet_mu - p.hfet_kmu * tdiff
+        } else {
+            p.hfet_mu
+        }
+        .max(1e-12);
         let vs = p.hfet_vs.max(1e-12);
         let di = p.hfet_di.max(1e-12);
         let deltad = p.hfet_deltad.max(0.0);
-        let nmax = p.hfet_nmax.max(1e-12);
+        let nmax = if use_hfet2_temp {
+            p.hfet_nmax - p.hfet_knmax * tdiff
+        } else {
+            p.hfet_nmax
+        }
+        .max(1e-12);
+        let nominal_nmax = p.hfet_nmax.max(1e-12);
         let gamma = p.hfet_gamma.max(1e-9);
         let sigma0 = p.sigma0.max(0.0);
         let vsigma = p.hfet_vsigma.max(1e-12);
@@ -402,7 +422,12 @@ impl Jfet {
         let rdi = p.hfet_rdi.max(0.0);
         let rt = rsi + rdi;
 
-        let vto = pol * p.vto;
+        let nominal_vto = pol * p.vto;
+        let vto = if use_hfet2_temp {
+            nominal_vto - p.hfet_kvto * tdiff
+        } else {
+            nominal_vto
+        };
         let n0 = epsi * eta * vt / (2.0 * Q_ELECTRON * (di + deltad).max(1e-30));
         let gchi0 = Q_ELECTRON * w * mu / l;
         let imax = (Q_ELECTRON * nmax * vs * w).max(1e-30);
@@ -416,7 +441,28 @@ impl Jfet {
         let t = (p.hfet_delta.max(1e-9).powi(2) + u * u).sqrt();
         let vgte = vt * (2.0 + u + t);
         let b = (vgt / etavth).clamp(-80.0, 80.0).exp();
-        let nsm = 2.0 * n0 * (1.0 + 0.5 * b).ln();
+        let nsn = 2.0 * n0 * (1.0 + 0.5 * b).ln();
+        let eta2_d2_given = p.hfet_eta2.is_finite()
+            && p.hfet_eta2 > 0.0
+            && p.hfet_d2.is_finite()
+            && p.hfet_d2 > 0.0;
+        let nsm = if p.hfet_level == 6 && eta2_d2_given {
+            let eta2 = p.hfet_eta2.max(1e-12);
+            let d2 = p.hfet_d2.max(1e-12);
+            let n02 = epsi * eta2 * vt / (2.0 * Q_ELECTRON * d2);
+            let vt2 = if p.hfet_vt2.is_finite() {
+                p.hfet_vt2
+            } else {
+                p.vto
+            };
+            let nsc = n02
+                * ((vgt + vto - vt2) / (eta2 * vt).max(1e-30))
+                    .clamp(-80.0, 80.0)
+                    .exp();
+            nsn * nsc / (nsn + nsc).max(1e-30)
+        } else {
+            nsn
+        };
         if !nsm.is_finite() || nsm < 1.0e-38 {
             return (cf.max(1e-18), cf.max(1e-18));
         }
@@ -446,7 +492,25 @@ impl Jfet {
         let vsate = (isat / gch).abs().max(1e-30);
 
         let delnsnsm = ns / nsm * (1.0 - c / (1.0 + c));
-        let delnsmvgt = n0 / etavth / (1.0 / b + 0.5);
+        let delnsnvgt = n0 / etavth / (1.0 / b + 0.5);
+        let delnsmvgt = if p.hfet_level == 6 && eta2_d2_given {
+            let eta2 = p.hfet_eta2.max(1e-12);
+            let d2 = p.hfet_d2.max(1e-12);
+            let n02 = epsi * eta2 * vt / (2.0 * Q_ELECTRON * d2);
+            let vt2 = if p.hfet_vt2.is_finite() {
+                p.hfet_vt2
+            } else {
+                p.vto
+            };
+            let nsc = n02
+                * ((vgt + vto - vt2) / (eta2 * vt).max(1e-30))
+                    .clamp(-80.0, 80.0)
+                    .exp();
+            let denom = (nsc + nsn).max(1e-30);
+            nsc * (nsc * delnsnvgt + nsn * nsn / (eta2 * vt).max(1e-30)) / (denom * denom)
+        } else {
+            delnsnvgt
+        };
         let delvgtvgs = 1.0 - vds_int * sigma0 / vsigma * s / ((1.0 + s) * (1.0 + s));
 
         let eta1 = p.hfet_eta1.max(1e-9);
@@ -455,7 +519,7 @@ impl Jfet {
         let vt1 = if p.hfet_vt1.is_finite() {
             p.hfet_vt1
         } else {
-            vto + Q_ELECTRON * nmax * di / epsi
+            nominal_vto + Q_ELECTRON * nominal_nmax * di / epsi
         };
         let cg1 = 1.0
             / (d1 / epsi + temp_eta1 * Self::exp_limited(-(vgs_eff - vt1) / temp_eta1)).max(1e-30);

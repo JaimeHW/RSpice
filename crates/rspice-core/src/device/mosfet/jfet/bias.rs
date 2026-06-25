@@ -265,6 +265,36 @@ impl Jfet {
         (il, gl)
     }
 
+    /// HFET2 gate current branch (`hfet2load.c`): JS Schottky plus GGR term.
+    pub(super) fn hfet2_gate_branch(&self, v_int: Value, temp: Value) -> (Value, Value) {
+        let temp_k = if temp.is_finite() && temp > 0.0 {
+            temp
+        } else {
+            self.params.tnom.max(1.0)
+        };
+        let vt = self.thermal_voltage(temp_k).max(1e-12);
+        let scale = self.hfet_gate_geometry_scale();
+        let js_lw = self.params.hfet_js.max(0.0) * scale;
+        let ggr_lw =
+            self.params.hfet_ggr.max(0.0) * self.gate_generation_scale.clamp(0.0, 1.0) * scale;
+        let vtn = (self.params.n.max(1e-12) * vt).max(1e-12);
+        let exp_gate = Self::exp_limited(v_int / vtn);
+        let arg = -v_int * self.params.hfet_del / vt;
+        let arg_eff = arg.clamp(-80.0, 80.0);
+        let earg = arg_eff.exp();
+
+        let current = js_lw * (exp_gate - 1.0) + ggr_lw * v_int * earg;
+        let conductance = js_lw * exp_gate / vtn + ggr_lw * earg * (1.0 - arg_eff);
+        (
+            if current.is_finite() { current } else { 0.0 },
+            if conductance.is_finite() {
+                conductance.max(0.0)
+            } else {
+                0.0
+            },
+        )
+    }
+
     /// MESA gate branch approximation (`mesaload.c`): ASTAR Schottky + GGR + GMIN.
     pub(super) fn mesa_gate_branch(&self, v_int: Value, temp: Value) -> (Value, Value) {
         const K_BOLTZMANN: Value = 1.380649e-23;

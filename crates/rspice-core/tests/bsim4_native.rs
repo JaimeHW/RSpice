@@ -562,6 +562,351 @@ fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
 
+fn bsim4_nmos_op_id(instance_suffix: &str) -> Result<f64, String> {
+    let deck = format!(
+        "* bsim4 native multiplier op\n\
+         vd d 0 dc 1.1\n\
+         vg g 0 dc 1.1\n\
+         m1 d g 0 0 n45 w=1u l=45n ad=0.1p as=0.1p pd=2.2u ps=2.2u nrd=0 nrs=0 {instance_suffix}\n\
+         {}\n\
+         .op\n\
+         .end\n",
+        models45()
+    );
+    let netlist = Netlist::parse(&deck).expect("BSIM4 multiplier deck parses");
+    let (_, report) = engine()
+        .run_dc_op_with_report(&netlist)
+        .map_err(|error| error.to_string())?;
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("m1 op entry");
+    Ok(entry
+        .params
+        .iter()
+        .find(|(key, _)| *key == "id")
+        .map(|(_, value)| *value)
+        .expect("m1 id op param"))
+}
+
+#[test]
+fn native_bsim4_rejects_non_numeric_model_params_before_defaulting() {
+    let models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        ".model n45 nmos level=54 version=4.8 rdsmod=\"1\"",
+    );
+    let deck = format!(
+        "* bsim4 non-numeric native model param policy\n\
+         vd d 0 dc 1.1\n\
+         vg g 0 dc 0.7\n\
+         m1 d g 0 0 n45 w=1u l=45n\n\
+         {models}\n\
+         .op\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let message = engine()
+        .run_dc_op_with_report(&netlist)
+        .expect_err("non-numeric BSIM4 model parameter must not fall back to the default")
+        .to_string();
+
+    assert!(
+        message.contains("BSIM4") && message.contains("RDSMOD"),
+        "error should identify the non-numeric native BSIM4 model parameter: {message}"
+    );
+    assert!(
+        message.contains("non-numeric") && message.contains("finite numeric literal"),
+        "error should explain native BSIM4 params must be numeric: {message}"
+    );
+}
+
+#[test]
+fn native_bsim4_rejects_invalid_integer_model_selectors_without_defaulting() {
+    for (param, value) in [
+        ("RDSMOD", "2"),
+        ("RGATEMOD", "4"),
+        ("GIDLMOD", "2"),
+        ("MOBMOD", "6.5"),
+        ("GEOMOD", "10.5"),
+        ("ACNQSMOD", "1.5"),
+    ] {
+        let models = if param == "MOBMOD" {
+            models45().replace(
+                "mobmod=0 u0=0.045 ua=5.0e-10 ub=1.3e-18 uc=8.0e-11 ud=1.0e15 eu=1.67",
+                &format!(
+                    "mobmod={value} u0=0.045 ua=5.0e-10 ub=1.3e-18 uc=8.0e-11 ud=1.0e15 eu=1.67"
+                ),
+            )
+        } else {
+            models45().replace(
+                ".model n45 nmos level=54 version=4.8",
+                &format!(".model n45 nmos level=54 version=4.8 {param}={value}"),
+            )
+        };
+        let deck = format!(
+            "* bsim4 invalid integer selector policy\n\
+             vd d 0 dc 1.1\n\
+             vg g 0 dc 0.7\n\
+             m1 d g 0 0 n45 w=1u l=45n\n\
+             {models}\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let message = match engine().run_dc_op_with_report(&netlist) {
+            Ok(_) => {
+                panic!("BSIM4 {param}={value} must reject instead of defaulting/truncating")
+            }
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            message.contains("BSIM4") && message.contains(param),
+            "error should identify invalid BSIM4 selector {param}={value}: {message}"
+        );
+        assert!(
+            message.contains("finite integer"),
+            "error should explain selector integer policy for {param}={value}: {message}"
+        );
+    }
+}
+
+#[test]
+fn native_bsim4_capmod3_and_diomod_neg1_reset_to_defaults_like_ngspice46() {
+    // ngspice-46 warns and resets out-of-range integer CAPMOD to 2.
+    let capmod_models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        ".model n45 nmos level=54 version=4.8 capmod=3",
+    );
+    let capmod_deck = format!(
+        "* bsim4 capmod3 default reset op\n\
+         vd d 0 dc 1.1\n\
+         vg g 0 dc 1.1\n\
+         m1 d g 0 0 n45 w=1u l=45n ad=0.1p as=0.1p pd=2.2u ps=2.2u nrd=0 nrs=0\n\
+         {capmod_models}\n\
+         .op\n\
+         .end\n"
+    );
+    let capmod_netlist = Netlist::parse(&capmod_deck).expect("CAPMOD=3 reset deck parses");
+    let (_, capmod_report) = engine()
+        .run_dc_op_with_report(&capmod_netlist)
+        .expect("CAPMOD=3 should reset to default CAPMOD=2");
+    let capmod_id = capmod_report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("m1 op entry")
+        .params
+        .iter()
+        .find(|(key, _)| *key == "id")
+        .map(|(_, value)| *value)
+        .expect("m1 id op param");
+    let capmod_reference = 1.408_919_35e-3;
+    let capmod_rel = (capmod_id - capmod_reference).abs() / capmod_reference;
+    assert!(
+        capmod_rel < 1.0e-6,
+        "CAPMOD=3 reset id mismatch: rspice={capmod_id:.9e} ngspice={capmod_reference:.9e} rel={capmod_rel:.3e}"
+    );
+
+    // ngspice-46 warns and resets out-of-range integer DIOMOD to 1.
+    let diomod_models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        ".model n45 nmos level=54 version=4.8 diomod=-1",
+    );
+    let diomod_deck = format!(
+        "* bsim4 diomod negative default reset op\n\
+         vs s 0 dc 0\n\
+         vd d 0 dc 0\n\
+         vg g 0 dc 0\n\
+         vb b 0 dc -12\n\
+         m1 d g s b n45 w=1u l=45n ad=0 as=0.1p pd=0 ps=2.2u nrd=0 nrs=0\n\
+         {diomod_models}\n\
+         .op\n\
+         .end\n"
+    );
+    let diomod_netlist = Netlist::parse(&diomod_deck).expect("DIOMOD=-1 reset deck parses");
+    let diomod_result = engine()
+        .run_dc_op(&diomod_netlist)
+        .expect("DIOMOD=-1 should reset to default DIOMOD=1");
+    let body_current = diomod_result
+        .branch_current_named("vb")
+        .unwrap_or_else(|| panic!("missing vb branch in {:?}", diomod_result.branch_names));
+    let diomod_reference = 2.400_299e-11;
+    let diomod_rel = (body_current - diomod_reference).abs() / diomod_reference.abs();
+    assert!(
+        diomod_rel < 1.0e-3,
+        "DIOMOD=-1 reset body branch mismatch: rspice={body_current:.9e} ngspice={diomod_reference:.9e} rel={diomod_rel:.3e}"
+    );
+}
+
+#[test]
+fn native_bsim4_rejects_invalid_integer_instance_selectors_without_truncating() {
+    for (param, value) in [
+        ("GEOMOD", "10.5"),
+        ("GEOMOD", "11"),
+        ("RGEOMOD", "8.5"),
+        ("RGEOMOD", "9"),
+        ("MIN", "1.5"),
+        ("MIN", "2"),
+    ] {
+        let deck = format!(
+            "* bsim4 invalid instance integer selector policy\n\
+             vd d 0 dc 1.1\n\
+             vg g 0 dc 0.7\n\
+             m1 d g 0 0 n45 w=1u l=45n nf=2 {param}={value}\n\
+             {}\n\
+             .op\n\
+             .end\n",
+            models45()
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let message = match engine().run_dc_op_with_report(&netlist) {
+            Ok(_) => {
+                panic!("BSIM4 instance {param}={value} must reject instead of truncating")
+            }
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            message.contains("BSIM4") && message.contains(param),
+            "error should identify invalid BSIM4 instance selector {param}={value}: {message}"
+        );
+        assert!(
+            message.contains("finite integer"),
+            "error should explain instance selector integer policy for {param}={value}: {message}"
+        );
+    }
+}
+
+#[test]
+fn native_bsim4_fractional_instance_selectors_round_like_ngspice46() {
+    let geometry_sensitive_models = |geo_mod: i32| {
+        models45().replace(
+            ".model n45 nmos level=54 version=4.8",
+            &format!(
+                ".model n45 nmos level=54 version=4.8 geomod={geo_mod} \
+                 jss=1e-3 jsd=1e-3 jsws=2e-6 jswd=2e-6 jswgs=2e-6 jswgd=2e-6"
+            ),
+        )
+    };
+    let model_geomod1 = geometry_sensitive_models(1);
+    let model_geomod0 = geometry_sensitive_models(0);
+    let body_branch_current = |models: &str, instance_tail: &str| {
+        let deck = format!(
+            "* bsim4 fractional instance selector rounding\n\
+             vd d 0 dc 0\n\
+             vg g 0 dc 0\n\
+             vb b 0 dc -0.45\n\
+             m1 d g 0 b n45 w=1u l=45n nf=3 {instance_tail}\n\
+             {models}\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let result = engine()
+            .run_dc_op(&netlist)
+            .expect("fractional GEOMOD deck runs natively");
+        let body_branch = result
+            .branch_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("vb"))
+            .unwrap_or_else(|| panic!("missing vb branch in {:?}", result.branch_names));
+        result.branch_currents[body_branch]
+    };
+
+    let geomod0 = body_branch_current(&model_geomod1, "geomod=0");
+    let geomod0_fractional = body_branch_current(&model_geomod1, "geomod=0.4");
+    assert!(
+        (geomod0_fractional - geomod0).abs() < 1e-12,
+        "GEOMOD=0.4 should round to GEOMOD=0 like ngspice-46"
+    );
+
+    let geomod1 = body_branch_current(&model_geomod1, "");
+    let geomod1_fractional = body_branch_current(&model_geomod0, "geomod=0.5");
+    assert!(
+        (geomod1_fractional - geomod1).abs() < 1e-12,
+        "GEOMOD=0.5 should round to GEOMOD=1 like ngspice-46"
+    );
+
+    let rgeo_deck = |tail: &str| {
+        format!(
+            "* bsim4 fractional rgeomod selector rounding\n\
+             vd d 0 dc 1.1\n\
+             vg g 0 dc 1.1\n\
+             vb b 0 dc 0\n\
+             m1 d g 0 b n45 w=1u l=45n nf=3 geomod=1 {tail}\n\
+             {}\n\
+             .op\n\
+             .end\n",
+            models45()
+        )
+    };
+    for name in ["m1.__rd", "m1.__rs"] {
+        let rounded = bsim4_resistor_conductance(&rgeo_deck("rgeomod=1.9"), name);
+        let integer = bsim4_resistor_conductance(&rgeo_deck("rgeomod=2"), name);
+        assert!(
+            (rounded - integer).abs() < 1e-12,
+            "RGEOMOD=1.9 should round to RGEOMOD=2 for {name}: rounded={rounded:.12e} integer={integer:.12e}"
+        );
+    }
+
+    for tail in ["min=0.4", "min=0.5"] {
+        let deck = format!(
+            "* bsim4 fractional min selector rounding\n\
+             vd d 0 dc 0\n\
+             vg g 0 dc 0\n\
+             vb b 0 dc -0.45\n\
+             m1 d g 0 b n45 w=1u l=45n nf=2 geomod=1 {tail}\n\
+             {model_geomod1}\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        engine()
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| panic!("{tail} should round like ngspice-46: {err}"));
+    }
+}
+
+#[test]
+fn native_bsim4_mult_alias_matches_m_multiplier() {
+    let base_id = bsim4_nmos_op_id("").expect("BSIM4 default multiplier op converges");
+    let m_id = bsim4_nmos_op_id("m=3").expect("BSIM4 M=3 op converges");
+    let mult_id = bsim4_nmos_op_id("mult=3").expect("BSIM4 MULT=3 op converges");
+    let rel = (mult_id - m_id).abs() / m_id.abs().max(1e-30);
+    let m_ratio = (m_id - 3.0 * base_id).abs() / m_id.abs().max(1e-30);
+    let mult_ratio = (mult_id - 3.0 * base_id).abs() / mult_id.abs().max(1e-30);
+
+    assert!(
+        rel < 1e-12,
+        "BSIM4 MULT=3 must match M=3: MULT id={mult_id:.9e}, M id={m_id:.9e}, rel={rel:.3e}"
+    );
+    assert!(
+        m_ratio < 1e-12 && mult_ratio < 1e-12,
+        "BSIM4 M/MULT=3 must scale default current by 3: base={base_id:.9e}, M={m_id:.9e}, MULT={mult_id:.9e}"
+    );
+}
+
+#[test]
+fn native_bsim4_rejects_invalid_multiplicity_aliases() {
+    for suffix in [
+        "M=0",
+        "MULT=0",
+        "M=-1",
+        "MULT=-1",
+        "M=3 MULT=0",
+        "MULT=3 M=0",
+    ] {
+        let message =
+            bsim4_nmos_op_id(suffix).expect_err("invalid BSIM4 multiplicity must fail closed");
+        assert!(
+            message.contains("BSIM4") && message.contains("finite"),
+            "unexpected invalid BSIM4 {suffix} error: {message}"
+        );
+    }
+}
+
 fn bsim4_resistor_conductance(deck: &str, name: &str) -> f64 {
     let netlist = Netlist::parse(deck).expect("deck parses");
     let circuit = engine().build_circuit(&netlist).expect("circuit builds");
@@ -898,6 +1243,85 @@ fn inverter_ac_response_with_cvchargemod1_matches_ngspice() {
 }
 
 #[test]
+fn inverter_ac_response_with_cvchargemod2_matches_ngspice_nonzero_path() {
+    // ngspice-46 stores CVCHARGEMOD as an integer selector but BSIM4load
+    // branches only on == 0; selector 2 therefore uses the same nonzero
+    // capacitance path as selector 1.
+    let models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        ".model n45 nmos level=54 version=4.8 cvchargemod=2",
+    );
+    let deck = format!(
+        "* bsim4 cvchargemod2 inverter ac\n\
+         vdd vdd 0 dc 1.1\n\
+         vin in 0 dc 0.45 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {models}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let reference: &[(f64, f64, f64)] = &[
+        (1.000000e6, 2.18108888e+01, 3.14106762e+00),
+        (1.000000e7, 2.18107733e+01, 3.13634232e+00),
+        (1.000000e8, 2.17992373e+01, 3.08913520e+00),
+        (1.000000e9, 2.07774344e+01, 2.65669123e+00),
+        (1.000000e10, 7.37846671e+00, 1.69487478e+00),
+        (1.000000e11, -1.08898361e+01, 1.00262907e+00),
+    ];
+    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    for ((freq, db_ref, ph_ref), result) in reference.iter().zip(&results) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        let db = 20.0 * v.norm().log10();
+        let ph = v.arg();
+        assert!(
+            (db - db_ref).abs() < 1e-3,
+            "CVCHARGEMOD=2 AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
+        );
+        assert!(
+            (ph - ph_ref).abs() < 1e-3,
+            "CVCHARGEMOD=2 AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
+        );
+    }
+}
+
+#[test]
+fn cvchargemod_outside_supported_integer_set_is_rejected_for_ac() {
+    for selector in ["2.5"] {
+        let models = models45().replace(
+            ".model n45 nmos level=54 version=4.8",
+            &format!(".model n45 nmos level=54 version=4.8 cvchargemod={selector}"),
+        );
+        let deck = format!(
+            "* bsim4 unsupported cvchargemod ac\n\
+             vdd vdd 0 dc 1.1\n\
+             vin in 0 dc 0.45 ac 1\n\
+             {}\
+             cl out 0 10f\n\
+             {models}\n\
+             .end\n",
+            inverter_pair("1", "in", "out"),
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let err = engine()
+            .run_ac(&netlist, &[1.0e6])
+            .expect_err("unsupported CVCHARGEMOD should reject AC");
+        let message = err.to_string();
+        assert!(
+            message.contains("CVCHARGEMOD"),
+            "CVCHARGEMOD={selector}: unexpected error: {message}"
+        );
+    }
+}
+
+#[test]
 fn inverter_ac_response_with_cvchargemod1_matches_xyce710() {
     // Same CVCHARGEMOD=1 AC deck as the ngspice oracle above. Xyce 7.10's
     // BSIM4 front accepts the deck as LEVEL=14/54 and maps VERSION=4.8 to
@@ -945,6 +1369,107 @@ fn inverter_ac_response_with_cvchargemod1_matches_xyce710() {
         assert!(
             (phase_deg - phase_deg_ref).abs() < 5e-2,
             "CVCHARGEMOD=1 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
+        );
+    }
+}
+
+#[test]
+fn inverter_ac_response_with_cvchargemod2_matches_xyce710_nonzero_path() {
+    // Xyce 7.10's BSIM4 v4.8.2 source mirrors ngspice here: CVCHARGEMOD=0
+    // takes the voffcv/noff branch, while every nonzero selector takes the
+    // alternate branch. These pins keep selector 2 native and Xyce-compatible.
+    let models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        ".model n45 nmos level=54 version=4.8 cvchargemod=2",
+    );
+    let deck = format!(
+        "* bsim4 cvchargemod2 inverter ac xyce\n\
+         vdd vdd 0 dc 1.1\n\
+         vin in 0 dc 0.45 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {models}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let reference: &[(f64, f64, f64)] = &[
+        (1.000000e6, 1.23181203e+01, 1.79969933e+02),
+        (1.000000e7, 1.23179567e+01, 1.79699333e+02),
+        (1.000000e8, 1.23016247e+01, 1.76995951e+02),
+        (1.000000e9, 1.09375381e+01, 1.52229378e+02),
+        (1.000000e10, 2.33959817e+00, 9.71147197e+01),
+        (1.000000e11, 2.85584192e-01, 5.74469892e+01),
+    ];
+    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        let mag = v.norm();
+        let phase_deg = v.arg().to_degrees();
+        let mag_rel = (mag - mag_ref).abs() / mag_ref;
+        assert!(
+            mag_rel < 1e-3,
+            "CVCHARGEMOD=2 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
+        );
+        assert!(
+            (phase_deg - phase_deg_ref).abs() < 5e-2,
+            "CVCHARGEMOD=2 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
+        );
+    }
+}
+
+#[test]
+fn inverter_ac_response_with_cvchargemod3_matches_xyce710_nonzero_path() {
+    // Xyce 7.10 accepts integer CVCHARGEMOD=3 and evaluates it through the
+    // same nonzero charge branch as selectors 1 and 2.
+    let models = models45().replace(
+        ".model n45 nmos level=54 version=4.8",
+        ".model n45 nmos level=54 version=4.8 cvchargemod=3",
+    );
+    let deck = format!(
+        "* bsim4 cvchargemod3 inverter ac xyce\n\
+         vdd vdd 0 dc 1.1\n\
+         vin in 0 dc 0.45 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {models}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let reference: &[(f64, f64, f64)] = &[
+        (1.000000e6, 1.23181203e+01, 1.79969933e+02),
+        (1.000000e7, 1.23179567e+01, 1.79699333e+02),
+        (1.000000e8, 1.23016247e+01, 1.76995951e+02),
+        (1.000000e9, 1.09375381e+01, 1.52229378e+02),
+        (1.000000e10, 2.33959817e+00, 9.71147197e+01),
+        (1.000000e11, 2.85584192e-01, 5.74469892e+01),
+    ];
+    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        let mag = v.norm();
+        let phase_deg = v.arg().to_degrees();
+        let mag_rel = (mag - mag_ref).abs() / mag_ref;
+        assert!(
+            mag_rel < 1e-3,
+            "CVCHARGEMOD=3 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
+        );
+        assert!(
+            (phase_deg - phase_deg_ref).abs() < 5e-2,
+            "CVCHARGEMOD=3 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
         );
     }
 }

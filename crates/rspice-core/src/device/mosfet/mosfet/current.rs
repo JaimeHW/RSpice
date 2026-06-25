@@ -111,7 +111,7 @@ impl Mosfet {
             return (eval.id, eval.region);
         }
 
-        if self.level == 3 {
+        if self.uses_mos3_core() {
             return self.calculate_id_mos3(vgs, vds, vbs);
         }
 
@@ -224,6 +224,8 @@ impl Mosfet {
     ) -> (Value, MosRegion) {
         if self.level == 6 {
             self.calculate_id_level6(vgs, vds, vbs)
+        } else if self.uses_mos3_core() {
+            self.calculate_id_mos3(vgs, vds, vbs)
         } else if self.level >= 3 {
             self.calculate_id_bsim3(vgs, vds, vbs)
         } else {
@@ -475,7 +477,7 @@ impl Mosfet {
             return (gm, gds, gmb);
         }
 
-        if self.level == 3 {
+        if self.uses_mos3_core() {
             return self.mos3_terminal_small_signal(vgs, vds, vbs);
         }
 

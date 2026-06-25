@@ -7,11 +7,13 @@
 //!
 //! # Mode-selector policy (what errors instead of computing wrong physics)
 //!
-//! ngspice silently *resets* an out-of-range selector to its default; this
-//! port does the same for out-of-range values but rejects, at device
-//! construction ([`super::Bsim4v8::new`]), every in-range selector value
-//! whose physics is not ported. Honoring the card while ignoring the
-//! selector would silently change results, so:
+//! ngspice rounds BSIM4 selector literals with `floor(value + 0.5)` before
+//! validation, and silently *resets* some out-of-range selectors to their
+//! defaults. This port follows reset-to-default only where the default path is
+//! native and oracle-backed (`CAPMOD` and `DIOMOD`); other explicit selectors
+//! must round to the native supported set or fail closed. Honoring the card
+//! while ignoring or rewriting unvalidated selectors would silently change
+//! results, so:
 //!
 //! - `rdsMod=0/1` internal and external bias-dependent S/D resistance are ported.
 //! - `rbodyMod=1/2` distributed substrate networks are ported; `rbodyMod=2`
@@ -28,7 +30,8 @@
 //! - `mobMod=0..6` mobility selectors are ported, including the high-k /
 //!   Synopsys variants.
 //! - `capMod=0/1/2` charge models are ported; `capMod=2` remains the
-//!   default charge-thickness model, with `cvchargeMod=0/1` supported.
+//!   default charge-thickness model, with integer `cvchargeMod=0/1/2/3`
+//!   supported.
 //!   DC is charge-model independent.
 //! - `dioMod=0/1/2` source/drain junction diode selectors are ported.
 //! - `wpemod=1` well-proximity is ported for `SC` and explicit
@@ -81,8 +84,10 @@ pub struct Bsim4v8Model {
     /// +1.0 for NMOS, -1.0 for PMOS (ngspice `BSIM4type`).
     pub mtype: Value,
 
-    // Selectors (b4set.c defaulting; out-of-range values reset like the C).
+    // Selectors (omitted values use b4set.c defaults; explicit values are
+    // validated before construction).
     pub cvcharge_mod: i32,
+    pub cvcharge_mod_value: Value,
     pub cap_mod: i32,
     pub dio_mod: i32,
     pub rds_mod: i32,
@@ -594,19 +599,76 @@ fn binned_from(map: &HashMap<String, Value>, name: &str, src: &Binned) -> Binned
     }
 }
 
-/// Selector defaulting that mirrors b4set.c: out-of-range values are reset
-/// to the default with a warning rather than rejected.
-fn selector(map: &HashMap<String, Value>, key: &str, default: i32, allowed: &[i32]) -> i32 {
-    let v = val(map, key, default as Value) as i32;
-    if allowed.contains(&v) {
-        v
+fn selector_values(allowed: &[i32]) -> String {
+    allowed
+        .iter()
+        .map(i32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn rounded_selector(key: &str, raw: Value, values: &str) -> Result<i32, String> {
+    if !raw.is_finite() {
+        return Err(format!(
+            "BSIM4 selector {key} must be a finite numeric selector (supported values: {values}); got {key}={raw}"
+        ));
+    }
+    let rounded = (raw + 0.5).floor();
+    if !rounded.is_finite() || rounded < i32::MIN as Value || rounded > i32::MAX as Value {
+        return Err(format!(
+            "BSIM4 selector {key}={raw} rounds outside the finite integer range (supported values: {values})"
+        ));
+    }
+    Ok(rounded as i32)
+}
+
+/// Fetch a native selector. Omitted selectors default like b4set.c; explicit
+/// values are rounded with ngspice's `floor(value + 0.5)` rule, then fail
+/// closed unless the effective selector is native.
+fn selector(
+    map: &HashMap<String, Value>,
+    key: &str,
+    default: i32,
+    allowed: &[i32],
+) -> Result<i32, String> {
+    let Some(raw) = map.get(key).copied() else {
+        return Ok(default);
+    };
+    let values = selector_values(allowed);
+    let value = rounded_selector(key, raw, &values)?;
+    if allowed.contains(&value) {
+        Ok(value)
     } else {
-        log::warn!("BSIM4: {key}={v} out of range; reset to default {default}");
-        default
+        Err(format!(
+            "BSIM4 selector {key} must round to a finite integer in the supported set ({values}); got {key}={raw} (effective {value})"
+        ))
+    }
+}
+
+fn selector_reset_to_default(
+    map: &HashMap<String, Value>,
+    key: &str,
+    default: i32,
+    allowed: &[i32],
+) -> Result<i32, String> {
+    let Some(raw) = map.get(key).copied() else {
+        return Ok(default);
+    };
+    let values = selector_values(allowed);
+    let value = rounded_selector(key, raw, &values)?;
+    if allowed.contains(&value) {
+        Ok(value)
+    } else {
+        Ok(default)
     }
 }
 
 impl Bsim4v8Model {
+    pub fn cvcharge_mod_supported_for_charges(&self) -> bool {
+        self.cvcharge_mod_value.trunc() == self.cvcharge_mod_value
+            && (0..=3).contains(&self.cvcharge_mod)
+    }
+
     /// Build a model card from an uppercase-keyed parameter map.
     ///
     /// `is_pmos` selects the device polarity, `nominal_temp_k` supplies the
@@ -617,13 +679,23 @@ impl Bsim4v8Model {
         is_pmos: bool,
         nominal_temp_k: Value,
     ) -> Self {
+        Self::try_from_params(params, is_pmos, nominal_temp_k)
+            .expect("valid BSIM4 v4.8 model parameters")
+    }
+
+    /// Fallible model-card constructor used at user-facing build boundaries.
+    pub fn try_from_params(
+        params: &HashMap<String, Value>,
+        is_pmos: bool,
+        nominal_temp_k: Value,
+    ) -> Result<Self, String> {
         let p = params;
         let mtype: Value = if is_pmos { -1.0 } else { 1.0 };
         let nmos = !is_pmos;
 
-        let mob_mod = selector(p, "MOBMOD", 0, &[0, 1, 2, 3, 4, 5, 6]);
-        let mtrl_mod = selector(p, "MTRLMOD", 0, &[0, 1]);
-        let mtrl_compat_mod = selector(p, "MTRLCOMPATMOD", 0, &[0, 1]);
+        let mob_mod = selector(p, "MOBMOD", 0, &[0, 1, 2, 3, 4, 5, 6])?;
+        let mtrl_mod = selector(p, "MTRLMOD", 0, &[0, 1])?;
+        let mtrl_compat_mod = selector(p, "MTRLCOMPATMOD", 0, &[0, 1])?;
 
         // Oxide stack with the toxe/toxp/dtox or eot/toxp/dtox resolution
         // of b4temp.c:123-160. The mtrlCompatMod=0 TOXP iteration is
@@ -815,32 +887,34 @@ impl Bsim4v8Model {
         let tnom = get(p, "TNOM").map(|t| t + 273.15).unwrap_or(nominal_temp_k);
 
         let dmcg = val(p, "DMCG", 0.0);
+        let cvcharge_mod_value = val(p, "CVCHARGEMOD", 0.0);
 
-        Self {
+        Ok(Self {
             mtype,
-            cvcharge_mod: val(p, "CVCHARGEMOD", 0.0) as i32,
-            cap_mod: selector(p, "CAPMOD", 2, &[0, 1, 2]),
-            dio_mod: selector(p, "DIOMOD", 1, &[0, 1, 2]),
-            rds_mod: selector(p, "RDSMOD", 0, &[0, 1]),
-            trnqs_mod: selector(p, "TRNQSMOD", 0, &[0, 1]),
-            acnqs_mod: selector(p, "ACNQSMOD", 0, &[0, 1]),
+            cvcharge_mod: cvcharge_mod_value as i32,
+            cvcharge_mod_value,
+            cap_mod: selector_reset_to_default(p, "CAPMOD", 2, &[0, 1, 2])?,
+            dio_mod: selector_reset_to_default(p, "DIOMOD", 1, &[0, 1, 2])?,
+            rds_mod: selector(p, "RDSMOD", 0, &[0, 1])?,
+            trnqs_mod: selector(p, "TRNQSMOD", 0, &[0, 1])?,
+            acnqs_mod: selector(p, "ACNQSMOD", 0, &[0, 1])?,
             mob_mod,
-            rbody_mod: selector(p, "RBODYMOD", 0, &[0, 1, 2]),
-            rgate_mod: selector(p, "RGATEMOD", 0, &[0, 1, 2, 3]),
-            per_mod: selector(p, "PERMOD", 1, &[0, 1]),
-            geo_mod: val(p, "GEOMOD", 0.0) as i32,
-            rgeo_mod: selector(p, "RGEOMOD", 0, &[0, 1, 2, 3, 4, 5, 6, 7, 8]),
-            fnoi_mod: selector(p, "FNOIMOD", 1, &[0, 1]),
-            tnoi_mod: selector(p, "TNOIMOD", 0, &[0, 1, 2]),
+            rbody_mod: selector(p, "RBODYMOD", 0, &[0, 1, 2])?,
+            rgate_mod: selector(p, "RGATEMOD", 0, &[0, 1, 2, 3])?,
+            per_mod: selector(p, "PERMOD", 1, &[0, 1])?,
+            geo_mod: selector(p, "GEOMOD", 0, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])?,
+            rgeo_mod: selector(p, "RGEOMOD", 0, &[0, 1, 2, 3, 4, 5, 6, 7, 8])?,
+            fnoi_mod: selector(p, "FNOIMOD", 1, &[0, 1])?,
+            tnoi_mod: selector(p, "TNOIMOD", 0, &[0, 1, 2])?,
             mtrl_mod,
             mtrl_compat_mod,
-            igc_mod: selector(p, "IGCMOD", 0, &[0, 1, 2]),
-            igb_mod: selector(p, "IGBMOD", 0, &[0, 1]),
-            temp_mod: selector(p, "TEMPMOD", 0, &[0, 1, 2, 3]),
-            gidl_mod: val(p, "GIDLMOD", 0.0) as i32,
+            igc_mod: selector(p, "IGCMOD", 0, &[0, 1, 2])?,
+            igb_mod: selector(p, "IGBMOD", 0, &[0, 1])?,
+            temp_mod: selector(p, "TEMPMOD", 0, &[0, 1, 2, 3])?,
+            gidl_mod: selector(p, "GIDLMOD", 0, &[0, 1])?,
             param_chk: val(p, "PARAMCHK", 1.0) as i32,
             bin_unit: val(p, "BINUNIT", 1.0) as i32,
-            wpemod: selector(p, "WPEMOD", 0, &[0, 1]),
+            wpemod: selector(p, "WPEMOD", 0, &[0, 1])?,
             version: get(p, "VERSION")
                 .map(|v| format!("{v}"))
                 .unwrap_or_else(|| "4.8.3".to_string()),
@@ -1327,7 +1401,7 @@ impl Bsim4v8Model {
             vgbr_max: val(p, "VGBR_MAX", 1.0e99),
             vbsr_max: val(p, "VBSR_MAX", 1.0e99),
             vbdr_max: val(p, "VBDR_MAX", 1.0e99),
-        }
+        })
     }
 
     /// Effective oxide relative permittivity used by `BSIM4coxe`.

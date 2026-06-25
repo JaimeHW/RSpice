@@ -1432,7 +1432,7 @@ impl Bjt {
             .copied()
             .filter(|level| level.is_finite())
         {
-            return [4.0, 11.0, 12.0]
+            return [4.0, 9.0, 11.0, 12.0, 13.0]
                 .iter()
                 .any(|expected| (level - expected).abs() <= 1e-9);
         }
