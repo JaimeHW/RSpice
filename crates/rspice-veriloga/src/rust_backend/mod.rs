@@ -1,6 +1,10 @@
 mod error;
+mod files;
+mod names;
 
 pub use error::RustBackendError;
+pub use files::write_generated_device;
+pub use names::{RustDeviceNames, sanitize_identifier};
 
 use crate::canonical_ir::CanonicalIrArtifact;
 
