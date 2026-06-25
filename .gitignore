@@ -27,10 +27,15 @@ Thumbs.db
 # Test outputs
 *.raw
 *.log
+/*.out
+*.osdi
+*.zip
 /rtlinv_*.csv
 /rtlinv_*.json
 /rtlinv_*.cir
 /diagnostics/
+/.codex-tools/
+/tmp/
 design/tools/marks_out.txt
 .agent/
 .worktrees/

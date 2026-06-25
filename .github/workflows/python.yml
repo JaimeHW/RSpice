@@ -30,7 +30,9 @@ jobs:
         python: ["3.9", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: python-${{ matrix.os }}
@@ -81,7 +83,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: wheels-${{ matrix.os }}

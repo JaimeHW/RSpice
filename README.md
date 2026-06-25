@@ -88,7 +88,7 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 | Family | Models |
 | :--- | :--- |
-| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/9/49`, `CAPMOD=2/3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS3/MOS6, legacy BSIM1/BSIM2, and an opt-in simplified fallback for unsupported bulk-MOS levels |
+| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/9/49`, `CAPMOD=2/3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS3/MOS6, and legacy BSIM1/BSIM2; unsupported MOS levels fail closed until native support and validation are added |
 | Bipolar | Gummel-Poon BJT (default / `LEVEL=1`) and native VBIC (`LEVEL=4`, including excess phase); other advanced BJT levels fail explicitly until their native models land |
 | Junction | Diode, JFET level 1 and native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`, default/best-available), an internal Xyce modified-Shockley JFET2 compatibility mode, MES/MESA/HFET-family `Z` devices, GaN HEMT |
 | Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |
@@ -97,6 +97,14 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
 | Mixed-signal | XSPICE-style analog/digital elements, tri-state drivers, A/D–D/A bridges |
 | Verilog-A | Compiled behavioral modules (below) |
+
+CMC compact-model families that ship redistributable Verilog-A sources under
+`models/veriloga/cmc/` are no longer planned as hand-maintained native ports.
+The strategic native path for those devices is generated Rust from the upstream
+Verilog-A source, produced by the planned Verilog-A to Rust transpiler. Any
+historical hand-native CMC experiments should be treated as compatibility or
+reference work only; active CMC device coverage should come from generated
+implementations.
 
 BSIM-class models fail with typed errors when a model card requests unported
 physics such as BSIM4 gate/body resistance networks, NQS, material-mode
@@ -203,7 +211,7 @@ coverage; it is not a substitute for importing the extension in pytest.
 
 ### Verilog-A
 
-`rspice-veriloga` compiles behavioral modules through a parser → semantic analysis → VM pipeline, with optional native code generation via a Cranelift JIT (the `native` feature). Models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
+`rspice-veriloga` compiles behavioral modules through a parser → semantic analysis → VM pipeline, with optional native code generation via a Cranelift JIT (the `native` feature). The CMC-model roadmap extends this front end with a Verilog-A to Rust transpiler so packages under [models/veriloga/cmc/](models/veriloga/cmc/) can become generated native Rust devices instead of hand-written ports. Models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
 
 ## Validation
 

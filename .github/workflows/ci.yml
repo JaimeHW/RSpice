@@ -29,7 +29,9 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Check (warnings denied)
         env:
@@ -52,9 +54,13 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Check
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Unit tests
         run: cargo test -p rspice-core --lib
@@ -65,12 +71,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.94.0
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Check rspice-wasm
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo check -p rspice-wasm --target wasm32-unknown-unknown
+      - name: Check rspice-ui wasm
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check -p rspice-ui --target wasm32-unknown-unknown
 
   python:
     name: Check (Python bindings)
@@ -81,7 +94,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Check rspice-python
         run: cargo check -p rspice-python

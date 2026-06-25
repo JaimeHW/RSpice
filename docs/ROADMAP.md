@@ -30,7 +30,7 @@ Ground rules (carried over from the regression program, non-negotiable):
 |----|------|---------------|------------|
 | WS0 | Validation & benchmark foundations | Every later claim measurable; corpus + oracles + perf rigs in place | — |
 | WS1 | Netlist ingestion & dialect compatibility | Real-world vendor models and PDK decks parse and run | WS0 corpus |
-| WS2 | Compact-model program (Verilog-A first) | Industry CMC models run via the VA pipeline at competitive speed | WS0, parts of WS1 |
+| WS2 | Compact-model program (Verilog-A to generated Rust) | Industry CMC models run as generated native Rust from upstream Verilog-A | WS0, parts of WS1 |
 | WS3 | Performance & scale | Beat ngspice single-thread; scale to 100k+ nodes; parallel sweeps | WS0 benchmarks |
 | WS4 | RF validation & completion | PSS/HB/PAC/PNoise proven against oracles and analytic truth | WS0; WS2 for HBT decks |
 | WS5 | Mixed-signal completion | XSPICE digital event engine finished and validated (or formally descoped) | WS0 |
@@ -78,7 +78,7 @@ measurement infrastructure to define "done."
 | **IHP SG13G2** PDK | **PSP 103.6** MOSFETs + **HICUM/L2** SiGe HBTs (350 GHz fT) — the system test for WS2 and WS4 RF | Apache-2.0 | Same pattern |
 | **Xyce_Regression** (Sandia) | 2000+ netlists with gold outputs; HB/AC/noise/devices breadth | GPL-3 | **Do not vendor** into the source-available tree; CI clones at run time into an external-corpus runner; results compared via our harness |
 | Sandia **XDM** converter | Authoritative PSPICE/HSPICE dialect semantics (reference, not dependency) | GPL-3 | Read-only reference for WS1 dialect tables |
-| CMC standard models (Si2): BSIM-CMG v112, BSIM-IMG, BSIM-BULK, PSP, HICUM L0/L2 v3.1, MEXTRAM, ASM-HEMT, MVSG | Verilog-A sources + each model's QA decks | Public download (form); free research/industry use | `models/cmc/` fetch script + cached mirror; QA decks become WS2 gates |
+| CMC standard models (Si2): BSIM-CMG v112, BSIM-IMG, BSIM-BULK, PSP, HICUM L0/L2, MEXTRAM, ASM-HEMT, MVSG | Verilog-A sources; private official QA decks require CMC membership and are not a planned gate without access | Public download (form); package-specific redistribution terms | Shipped, redistributable Verilog-A packages live under `models/veriloga/cmc/`; OMI remains excluded pending separate review |
 | Berkeley SPICE3f5 test decks | Classic core-engine decks | UC Berkeley | Vendor |
 | **scikit-rf** test files | Touchstone parser/export round-trip corpus | BSD-3 | Vendor subset |
 | Vendor SPICE models (TI, ADI, Infineon, onsemi, Nexperia, Coilcraft) | Real-world ingestion (PSpice/LTspice/HSPICE dialects) | Free download, **not redistributable** | `tools/fetch-compat-corpus` script + private cached mirror; CI-only, never vendored |
@@ -149,36 +149,46 @@ LTspice deck, or a foundry HSPICE PDK and it parses and runs. This is the #1 ado
 
 ---
 
-## WS2 — Compact-model program (Verilog-A first)
+## WS2 — Compact-model program (Verilog-A to generated Rust)
 
-**Goal:** close the modern-silicon model gap (FinFET/FDSOI/PSP/HiSIM/HICUM/Mextram/GaN) without
-hand-porting six 20k-line models. The in-tree VA compiler is the strategic asset — this is the
-OpenVAF/OSDI play, executed in-house.
+**Goal:** close the modern-silicon model gap (FinFET/FDSOI/PSP/HICUM/MEXTRAM/GaN) without
+hand-porting CMC compact models. CMC Verilog-A packages under `models/veriloga/cmc/` are the source
+of truth; the strategic deliverable is a Verilog-A to Rust transpiler that emits native Rust device
+implementations from those sources.
 
 ### M2.1 — VA pipeline industrial qualification
-- Target: compile **`models/veriloga/bsim4.va` (12.6k lines) end-to-end** and match the native
-  BSIM4 implementation: DC ±1e-6 rel, AC/noise/tran within harness tolerances on the bsim4 suite.
+- Target: compile shipped CMC Verilog-A packages under **`models/veriloga/cmc/`** end-to-end,
+  beginning with BSIM-CMG, BSIM-BULK, PSP, HICUM/L2, and Diode CMC, then generate Rust devices
+  that match interpreted Verilog-A and cross-oracle results where available.
+- Policy: no new hand-native CMC model ports. Historical hand-native CMC slices are reference
+  material only; generated Rust from the Verilog-A source is the active implementation path.
 - Required runtime features to audit/complete: `ddx`, `$limit` with pnjlim-equivalent callbacks
   (Newton limiting parity), internal-node collapse, `white_noise/flicker_noise` → noise-analysis
   integration, parameter ranges/defaults, `$param_given`, temperature update path, bias-independent
   precomputation split (setup vs load separation — critical for speed).
-- JIT performance gate: ≤2× native BSIM4 eval time (Cranelift), ≤5× interpreted fallback.
-- Deliverable: `rspice compile-va` produces a cached artifact loadable like a built-in model
-  (OSDI-equivalent contract, documented).
+- Generated-Rust performance gate: ≤2× hand-native BSIM4 eval time for comparable compact-model
+  kernels, with interpreted VM retained as a debugging/reference fallback.
+- Deliverable: `rspice compile-va` can emit or cache a generated Rust artifact loadable like a
+  built-in model (OSDI-equivalent contract, documented).
 
 ### M2.2 — CMC standard models, in priority order
-1. **PSP 103** (IHP PDK MOSFETs validate it; analog/RF foundries use it) — QA decks from Si2.
-2. **HICUM/L2 v3.1** (IHP SiGe HBTs validate it; unlocks the vendored-but-dormant `tests/hicum2`).
-3. **BSIM-CMG v112** (FinFET — table stakes for "advanced-node" claims; QA decks from Si2).
+1. **PSP 103/104** (IHP PDK MOSFETs validate it; analog/RF foundries use it) — generated Rust
+   from CMC Verilog-A, with QA decks from Si2 where available.
+2. **HICUM/L2** (IHP SiGe HBTs validate it; unlocks the vendored-but-dormant `tests/hicum2`) —
+   generated Rust from CMC/Xyce Verilog-A sources, not a new hand-native port.
+3. **BSIM-CMG v112** (FinFET — table stakes for "advanced-node" claims; QA decks from Si2) —
+   generated Rust from `models/veriloga/cmc/BSIM-CMG_112.1.0_04282026`.
 4. **BSIM-IMG** (FDSOI), **BSIM-BULK** (replaces aging BSIM4 lineage), **MEXTRAM 505**,
-   **ASM-HEMT / MVSG** (GaN CMC qualification beyond the in-tree physics-style model).
+   **ASM-HEMT / MVSG** (GaN CMC qualification beyond the in-tree physics-style model) — generated
+   Rust from the shipped CMC Verilog-A packages.
 5. **HiSIM2/HiSIM-HV** via VA if sources obtainable; else native port later (unlocks vendored
    `tests/hisim*`).
-- Each model lands with: CMC QA deck run, gm/gds/caps continuity sweep tests (C∞ checks),
+- Each model lands with: generated Rust source/artifact provenance, CMC QA deck run,
+  gm/gds/caps continuity sweep tests (C∞ checks),
   ngspice/Xyce cross-oracle where they implement it, and activation of the corresponding dormant
   vendored test directory.
 
-### M2.3 — Native-model completion (only where the VA route doesn't cover)
+### M2.3 — Hand-native completion only where the VA/transpiler route does not cover
 - BSIM4 native: stress effects (SA/SB/SD), `mtrlMod=1`, `rgateMod`/`rbodyMod` networks,
   `trnqsMod` NQS, `mobMod` variants — required for foundry cards that set them (sky130 sets
   several). Acceptance: full sky130 + GF180 card sets load with **zero ignored-parameter warnings**
@@ -340,7 +350,7 @@ module subtrees per session.
 |---|---|
 | ngspice regression suite | 113/113 under documented adjudication policy |
 | Foundry PDKs | sky130 + GF180 + IHP SG13G2: corners, MC, RF decks green; zero ignored-parameter warnings |
-| CMC models | PSP, HICUM/L2, BSIM-CMG pass official QA decks via VA pipeline (JIT ≤2× native eval) |
+| CMC models | PSP, HICUM/L2, BSIM-CMG pass shipped frontier decks and public/oracle corpora through the VA-to-Rust pipeline; private official QA decks are an optional gate if access becomes available (generated eval JIT <=2x native eval) |
 | Vendor-model ingestion | ≥90% of top-100 compat corpus parses & matches reference waveforms |
 | Performance | ≥1.0× ngspice-KLU single-thread geomean on macro bench; ≥6×/8-core MC; 100k-node tran ≤4× ngspice |
 | RF | ≥40-deck RF suite green incl. analytic Tier-0 + Xyce cross-oracle |

@@ -79,57 +79,52 @@ at the behavior/format level, validated against ngspice as an external test
 oracle, and does not incorporate ngspice source code.
 
 -------------------------------------------------------------------------------
-2. BSIM4 Verilog-A model (BSD-3-Clause style, UC Berkeley)
+2. Shipped CMC Verilog-A model packages
 -------------------------------------------------------------------------------
 
-models/veriloga/bsim4.va is the BSIM4 version 4.8 compact MOSFET model in
-Verilog-A from the BSIM Group at the University of California, Berkeley.
+models/veriloga/cmc/ contains Compact Model Coalition Verilog-A model packages
+redistributed with their upstream package names, source layout, copyright
+headers, LICENSE files, NOTICE files, manuals, and release notes where
+provided. The package-local license and notice files are part of the
+distribution and must accompany redistributed copies.
 
-  Copyright 2001 Regents of the University of California. All rights reserved.
-  Author: Weidong Liu.
-  Authors: Xuemei Xi, Kanyu M. Cao, Hui Wan, Mansun Chan, Chenming Hu.
-  Project Director: Prof. Chenming Hu.
+The shipped CMC Verilog-A package set currently includes:
+  - 505p5p0_va (MEXTRAM 505.5.0)
+  - ASM-ESD101.1.0_04042025
+  - ASM-HEMT101.6.0_05132026
+  - BSIM_SOI_100.1.1_09152025
+  - BSIM-BULK107.2.1_02112025
+  - BSIM-CMG_112.1.0_04282026
+  - BSIM-IMG_103.0.0_20200102
+  - BSIM-SOI_4.7.0_05192025
+  - diode_cmc_3.0_20250714
+  - hicumL0_v2p1p0_files
+  - hicumL2_v320_files
+  - HiSIM_HV_2.5.1_Release_20230209
+  - HiSIM_SOI_1.5.0_Release_20211008
+  - HiSIM_SOTB_1.3.0_Release_20211116
+  - L_UTSOI_102.9.0_code_package
+  - MOSVAR140
+  - mvsg_cmc_v4.0.0_official
+  - PSP104.1.0_vacode
+  - r2_cmc_v1.0.2
+  - r3_cmc_release1.1.2_2023Jun16
 
-Distributed under the BSIM4 license terms of the Regents of the University
-of California (BSD-3-Clause in current BSIM releases).
+Most of these packages identify their license as Educational Community
+License, Version 2.0. MEXTRAM 505.5.0 ships under its package-local custom
+intellectual-property notice, disclaimer, and license, which permits copying,
+modification, and redistribution subject to its stated conditions, including
+acknowledgment and not charging for the model code itself.
+BSIM-SOI packages ship with package-local UC Berkeley / Analog Devices terms
+that permit copying, modification, and redistribution subject to their stated
+conditions, including retaining notices, disclaimers, and conditions in source
+and binary redistributions and not charging for the UC Berkeley code itself.
 
--------------------------------------------------------------------------------
-3. EKV 2.6 Verilog-A model (Educational Community License 2.0)
--------------------------------------------------------------------------------
-
-models/veriloga/ekv26_mod.va contains the EKV 2.6 compact MOSFET model
-distributed by the Compact Model Coalition under the Educational Community
-License, Version 2.0.
-
-The file header identifies the upstream model and its license. The bundled
-copy is provided as a starter/reference Verilog-A model; retain the header
-and license notice when redistributing or modifying that file.
-
--------------------------------------------------------------------------------
-4. PSP103 / JUNCAP200 Verilog-A models (Apache-2.0 and ECL-2.0)
--------------------------------------------------------------------------------
-
-models/veriloga/psp103/ contains PSP103 and JUNCAP200 compact-model
-Verilog-A sources and upstream release notes. The model headers identify the
-Compact Model Coalition material and license terms, including Apache License
-2.0 and Educational Community License 2.0 notices where applicable.
-
-Retain the upstream headers and bundled release/license notices when
-redistributing or modifying these files.
-
--------------------------------------------------------------------------------
-5. R3_CMC Verilog-A model (Apache-2.0)
--------------------------------------------------------------------------------
-
-models/veriloga/r3_cmc/ contains the R3_CMC compact resistor model and its
-upstream LICENSE.txt and NOTICE.txt files. The model is distributed under the
-Apache License, Version 2.0 by the Compact Model Coalition contributors.
-
-The bundled LICENSE.txt and NOTICE.txt files are part of the attribution
-record for this model and must accompany redistributed copies.
+OMI packages are intentionally excluded from models/veriloga/cmc/ pending
+separate review of their custom terms.
 
 -------------------------------------------------------------------------------
-6. IBM Plex fonts (SIL Open Font License 1.1)
+3. IBM Plex fonts (SIL Open Font License 1.1)
 -------------------------------------------------------------------------------
 
 RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
@@ -143,7 +138,7 @@ RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
   https://scripts.sil.org/OFL
 
 -------------------------------------------------------------------------------
-7. Rust crate dependencies
+4. Rust crate dependencies
 -------------------------------------------------------------------------------
 
 RSpice links against open-source Rust crates. Most are dual-licensed
