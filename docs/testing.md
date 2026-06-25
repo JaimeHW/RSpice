@@ -36,6 +36,16 @@ Because reference tables sample each binary's internally chosen timesteps, two n
 
 Each deck runs in an isolated watchdog-supervised process (`rspice-ngspice-case-runner`), so a hung simulation cannot stall the suite.
 
+### Conformance status and ratchet
+
+The harness rule above means every executed analysis has an oracle; it does not
+mean every vendored deck is currently green. The release-mode full conformance
+run is the accuracy gate, and nightly CI currently parses the aggregate
+113-deck report and allows no more than the recorded failure watermark in
+`.github/workflows/nightly.yml` (`MAX_FAILING=2` at the time this document was
+updated). Treat that value as a ratchet: tighten it when decks are fixed, and do
+not loosen tolerances or remove oracles to make the count pass.
+
 ### Debug builds and the watchdog
 
 The per-deck watchdog budget (30 s by default) is sized for release builds, where every conformance deck finishes inside it. Unoptimized builds run the heavy decks — `fourbitadder`, the 51-stage SOI ring oscillators, `mesa-12` — many times slower than that budget, so in a **debug** build a watchdog abort measures the build profile, not the deck. The harness therefore reports debug-build watchdog timeouts as an explicitly named skip class (`SKIPPED: debug-build watchdog …`, shown with the original diagnostic), and the suite assertions admit exactly that class and nothing else. Release builds — including the nightly conformance run, which is the gauge that gates these decks — keep every timeout a genuine failure. To actually execute a heavy deck in a debug build, raise `RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS`.

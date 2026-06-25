@@ -10,9 +10,16 @@ backlog, not the current product contract. Since the first draft, several
 items have landed or partially landed: `.tf`, `.save`/`.probe`/`.print`
 parsing and output selection, SFFM/AM source functions, TRNOISE white + 1/f
 noise, a CLI S-parameter path over `.ac`, HSPICE-style `.alter`/`.data`, and
-the default KLU-class real linear-solver backend. Remaining bullets below
-should be read as qualification, corpus coverage, and compatibility closure
-unless they explicitly describe an unimplemented surface.
+the default KLU-class real linear-solver backend.
+
+Status note (2026-06-25): canonical Verilog-A IR and the first build-time
+Verilog-A-to-Rust backend have also landed behind `veriloga-builtins`, with a
+generated registry materialized under `crates/rspice-core/src/device/`.
+Treat that as infrastructure and feature-gated qualification work, not completed
+WS2 product support; CMC oracle qualification, default feature selection,
+performance gates, and user-facing artifact contracts remain open. Remaining
+bullets below should be read as qualification, corpus coverage, and
+compatibility closure unless they explicitly describe an unimplemented surface.
 
 Ground rules (carried over from the regression program, non-negotiable):
 

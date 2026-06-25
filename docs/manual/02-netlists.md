@@ -120,5 +120,5 @@ parameter expressions (PDK cards use this heavily).
 | `.if`/`.elseif`/`.else`/`.endif` | Conditional deck regions | this chapter |
 | `.end` | End of deck | — |
 
-Unknown dot-commands are ignored with a log entry rather than failing
+Unknown dot-commands are ignored with a warning diagnostic/log entry rather than failing
 the parse.
