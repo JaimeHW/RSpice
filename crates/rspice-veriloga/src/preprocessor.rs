@@ -278,6 +278,7 @@ impl Preprocessor {
 
     /// Preprocess source string
     pub fn preprocess_source(&mut self, source: &str) -> Result<String, PreprocessorError> {
+        let source = strip_utf8_bom(source);
         // Strip comments first so directives inside comments are inert and
         // trailing comments never leak into directive arguments or macro
         // bodies. Newlines are preserved to keep line numbers stable.
@@ -931,6 +932,10 @@ impl Preprocessor {
 
         args
     }
+}
+
+fn strip_utf8_bom(source: &str) -> &str {
+    source.strip_prefix('\u{feff}').unwrap_or(source)
 }
 
 //=============================================================================

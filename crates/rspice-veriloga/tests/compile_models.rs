@@ -65,3 +65,18 @@ endmodule
     );
     assert_eq!(model.num_terminals, 2);
 }
+
+#[test]
+fn utf8_bom_at_source_start_is_ignored() {
+    let model = compile(
+        "\u{feff}module bom_res(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n);
+endmodule
+",
+    );
+
+    assert_eq!(model.name.as_str(), "bom_res");
+    assert_eq!(model.num_terminals, 2);
+}
