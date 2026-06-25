@@ -3,8 +3,8 @@ use super::{Netlist, SubcircuitDef};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../models/spice/transistor.lib");
-const BUILTIN_DIODE_LIB: &str = include_str!("../../models/spice/diode.lib");
+const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/transistor.lib");
+const BUILTIN_DIODE_LIB: &str = include_str!("../../../../models/spice/diode.lib");
 
 /// Byte range on one physical source line.
 ///
