@@ -73,6 +73,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Check
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Unit tests
         run: cargo test -p rspice-core --lib

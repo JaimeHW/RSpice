@@ -1,5 +1,7 @@
 # MEXTRAM504 Native DC Implementation Plan
 
+> **Superseded on 2026-06-24:** Do not continue this as a hand-native CMC model implementation plan. CMC models with Verilog-A sources under `models/veriloga/cmc/` are now implemented through the Verilog-A to Rust transpiler strategy in `docs/superpowers/plans/2026-06-24-cmc-veriloga-transpiler-strategy.md`. Any hand-native code/tests from this slice should be removed from active code paths; keep only historical notes or external validation data, and target new model coverage at generated Rust from Verilog-A.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add the first native Xyce-primary MEXTRAM 504.12.1 DC path for `.model ... NPN LEVEL=504`, with no Verilog-A runtime fallback.

@@ -29,10 +29,15 @@ Thumbs.db
 *.log
 *.pyc
 __pycache__/
+/*.out
+*.osdi
+*.zip
 /rtlinv_*.csv
 /rtlinv_*.json
 /rtlinv_*.cir
 /diagnostics/
+/.codex-tools/
+/tmp/
 design/tools/marks_out.txt
 .agent/
 .worktrees/

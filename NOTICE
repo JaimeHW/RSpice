@@ -110,38 +110,49 @@ redistribution/export restrictions.
 RSpice does not bundle a BSIM4 Verilog-A source file.
 
 -------------------------------------------------------------------------------
-3. Vendored Verilog-A compact models
+3. Shipped CMC Verilog-A model packages
 -------------------------------------------------------------------------------
 
-RSpice bundles selected upstream Verilog-A compact-model sources under
-models/veriloga/. Each file retains its original copyright and license header.
+models/veriloga/cmc/ contains Compact Model Coalition Verilog-A model packages
+redistributed with their upstream package names, source layout, copyright
+headers, LICENSE files, NOTICE files, manuals, and release notes where
+provided. The package-local license and notice files are part of the
+distribution and must accompany redistributed copies.
 
-  - EKV v2.6 rev.15 MOSFET model (models/veriloga/ekv26_mod.va):
-    EKV MOS model by Matthias Bucher, Christophe Lallement, Christian Enz,
-    Fabien Theodoloz, and Francois Krummenacher, Electronics Laboratories,
-    Swiss Federal Institute of Technology Lausanne (EPFL), Switzerland.
-    The Verilog-A was developed by Wladek Grabinski with modifications by
-    Tiburon Design Automation. The file header states it is licensed under
-    the Educational Community License, Version 2.0:
-      http://opensource.org/licenses/ECL-2.0
+The shipped CMC Verilog-A package set currently includes:
+  - 505p5p0_va (MEXTRAM 505.5.0)
+  - ASM-ESD101.1.0_04042025
+  - ASM-HEMT101.6.0_05132026
+  - BSIM_SOI_100.1.1_09152025
+  - BSIM-BULK107.2.1_02112025
+  - BSIM-CMG_112.1.0_04282026
+  - BSIM-IMG_103.0.0_20200102
+  - BSIM-SOI_4.7.0_05192025
+  - diode_cmc_3.0_20250714
+  - hicumL0_v2p1p0_files
+  - hicumL2_v320_files
+  - HiSIM_HV_2.5.1_Release_20230209
+  - HiSIM_SOI_1.5.0_Release_20211008
+  - HiSIM_SOTB_1.3.0_Release_20211116
+  - L_UTSOI_102.9.0_code_package
+  - MOSVAR140
+  - mvsg_cmc_v4.0.0_official
+  - PSP104.1.0_vacode
+  - r2_cmc_v1.0.2
+  - r3_cmc_release1.1.2_2023Jun16
 
-  - PSP 103.6.0 and JUNCAP200 200.5.0 compact models
-    (models/veriloga/psp103/): Copyright 2004-2017 NXP Semiconductors,
-    2015-2017 Commissariat a l'energie atomique et aux energies alternatives
-    (CEA), 2012-2015 Delft University of Technology, and 2004-2011 Arizona
-    State University. The PSP/JUNCAP source headers state they are licensed
-    under the Educational Community License, Version 2.0:
-      http://opensource.org/licenses/ECL-2.0
-    The bundled release-notes file also states that the release notes are
-    licensed under Creative Commons Attribution 4.0 International.
+Most of these packages identify their license as Educational Community
+License, Version 2.0. MEXTRAM 505.5.0 ships under its package-local custom
+intellectual-property notice, disclaimer, and license, which permits copying,
+modification, and redistribution subject to its stated conditions, including
+acknowledgment and not charging for the model code itself.
+BSIM-SOI packages ship with package-local UC Berkeley / Analog Devices terms
+that permit copying, modification, and redistribution subject to their stated
+conditions, including retaining notices, disclaimers, and conditions in source
+and binary redistributions and not charging for the UC Berkeley code itself.
 
-  - R3_CMC three-terminal resistor compact model (models/veriloga/r3_cmc/):
-    Copyright (c) 2020 Silicon Integration Initiative, Inc. The original
-    R3_CMC files are licensed under the Educational Community License,
-    Version 2.0. The bundled 2023 source/macro files also carry Apache
-    License, Version 2.0 headers for later contributions that incorporate
-    the original R3_CMC model. The R3_CMC standard was developed by the
-    Silicon Integration Initiative's Si2 Compact Model Coalition.
+OMI packages are intentionally excluded from models/veriloga/cmc/ pending
+separate review of their custom terms.
 
 -------------------------------------------------------------------------------
 4. IBM Plex fonts (SIL Open Font License 1.1)

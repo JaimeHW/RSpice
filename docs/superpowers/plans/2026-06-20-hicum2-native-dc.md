@@ -1,22 +1,28 @@
 # HICUM2 Native DC Implementation Plan
 
+> **Superseded on 2026-06-24:** Do not continue this as a hand-native CMC model implementation plan. CMC models with Verilog-A sources under `models/veriloga/cmc/` are now implemented through the Verilog-A to Rust transpiler strategy in `docs/superpowers/plans/2026-06-24-cmc-veriloga-transpiler-strategy.md`. Any hand-native code/tests from this slice should be removed from active code paths; keep only historical notes or external validation data, and target new model coverage at generated Rust from Verilog-A.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the first native HICUM/L2 v2.4 DC path for BJT `.model ... NPN LEVEL=8 VERSION=2.40`, validated against the vendored ngspice HICUM2 QA data.
+**Goal:** Add the first native HICUM/L2 DC path for both Xyce BJT `.model ... NPN LEVEL=234 VERSION=2.34/2.40` and ngspice BJT `.model ... NPN LEVEL=8 VERSION=2.40`, validated first against Xyce and then against matching ngspice HICUM2 QA data.
 
-**Architecture:** HICUM/L2 is not a VBIC or legacy Gummel-Poon selector, so it gets its own native semiconductor device module and circuit storage instead of extending `BjtChargeModel`. The first slice covers the ngspice `npn_1D` forward-Gummel operating-point/DC equations with external collector/base/emitter/substrate pins, no self-heating, no dynamic charge, no noise, and no Verilog-A fallback. Later slices should add the remaining HICUM2 QA families, transient/AC/noise, self-heating, substrate coupling, and PNP once this DC core is stable.
+**Architecture:** HICUM/L2 is not a VBIC or legacy Gummel-Poon selector, so it gets its own native semiconductor device module and circuit storage instead of extending `BjtChargeModel`. Xyce `LEVEL=234` and ngspice `LEVEL=8` are parser/builder aliases for one native HICUM/L2 core; neither may fall back to VBIC, legacy GP, or Verilog-A. The first slice covers forward-Gummel operating-point/DC equations with external collector/base/emitter/substrate pins, no self-heating, no dynamic charge, no noise, and no Verilog-A fallback. Later slices should add the remaining HICUM2 QA families, transient/AC/noise, self-heating, substrate coupling, and PNP once this DC core is stable.
 
-**Tech Stack:** Rust, `rspice-core`, native nonlinear device stamping, ngspice-46 HICUM2 source at `C:/Users/James/Desktop/ngspice-ngspice-037b6578f87524cba74cd5ee5b2f9c1536f76ead/src/spicelib/devices/hicum2`, vendored QA data at `C:/Users/James/Desktop/RSpice/tests/hicum2`, release-only ngspice regression verification.
+**Tech Stack:** Rust, `rspice-core`, native nonlinear device stamping, Xyce 7.10 HICUM L2 source at `C:/Users/James/Downloads/Xyce-7.10.0/Xyce-7.10/utils/ADMS/examples/hicum/hicumL2V2p4p0.va`, Xyce generated source at `C:/Users/James/Downloads/Xyce-7.10.0/Xyce-7.10/src/DeviceModelPKG/ADMS/N_DEV_ADMShicumL2va.C`, Xyce regression decks under `C:/Users/James/Downloads/Xyce_Regression-master/Xyce_Regression-master/Netlists/HICUM`, ngspice-46 HICUM2 source at `C:/Users/James/Desktop/ngspice-46-release/ngspice-46/src/spicelib/devices/hicum2`, vendored QA data at `C:/Users/James/Desktop/RSpice/tests/hicum2`, release-only ngspice regression verification.
 
 ---
 
 ### Context Map
 
 **Current Evidence**
-- `crates/rspice-core/src/engine/builder.rs` rejects BJT model levels outside legacy GP (`LEVEL` absent or `LEVEL=1`) and VBIC (`LEVEL=4/11/12`).
-- `crates/rspice-core/tests/bjt_level_policy.rs` already proves unsupported advanced BJT levels fail closed, but it does not yet contain a HICUM `LEVEL=8 VERSION=2.40` acceptance/oracle test.
+- `crates/rspice-core/src/engine/builder.rs` rejects BJT model levels outside legacy GP (`LEVEL` absent or `LEVEL=1`), VBIC (`LEVEL=4/11/12`), and native MEXTRAM504 (`LEVEL=504`).
+- `crates/rspice-core/tests/bjt_level_policy.rs` proves Xyce self-heated five-terminal HICUM syntax keeps the thermal node and fails closed on `LEVEL=234`, but it does not yet contain the ngspice HICUM2 `LEVEL=8 VERSION=2.40` alias or a native HICUM acceptance/oracle test.
+- `C:/Users/James/Downloads/Xyce_Regression-master/Xyce_Regression-master/Netlists/HICUM/fgum_dc_npn_full_sh.cir` defines the primary Xyce regression selector: `.model mymodel npn level=234 version=2.34`, with five-terminal self-heated syntax `q1 coll base emit subs therm mymodel`.
+- `C:/Users/James/Downloads/Xyce-7.10.0/Xyce-7.10/utils/ADMS/examples/hicum/hicumL2V2p4p0.va` binds Xyce HICUM/L2 to `LEVEL=234` and does not define a `version` model parameter, so RSpice classifies `LEVEL=234` as Xyce HICUM/L2 even when `VERSION` is absent. Native execution can still gate exact compatibility slices later.
+- `C:/Users/James/Downloads/Xyce_Regression-master/Xyce_Regression-master/OutputData/HICUM/fgum_dc_npn_full_sh.cir.prn` is the first Xyce oracle. At `V(base)=0.800000000`, `V(coll)=0.5`, Xyce reports `I(V_COLL)=1.17006327e-03` and `I(V_BASE)=3.17566867e-06`.
 - `tests/hicum2/npn/qaSpec` defines ngspice HICUM2 `nTypeSelectionArguments npn level=8 version=2.40`.
-- `tests/hicum2/npn/reference/fgum_dc_npn_1D.standard` contains the first forward-Gummel oracle. At `V(base)=0.800000000000001`, `V(coll)=0.5`, `V(emit)=0`, `V(subs)=0`, the ngspice reference currents are `I(coll)=7.17540233926327e-05` and `I(base)=1.08044570042777e-08`.
+- `tests/hicum2/npn/reference/fgum_dc_npn_1D.standard` contains the forward-Gummel standard table. Its first `V(base)=0.800000000000001`, `V(coll)=0.5` row is the `-50 C` block (`I(coll)=7.17540233926327e-05`, `I(base)=1.08044570042777e-08`). The `27 C` block at the same bias reports `I(coll)=1.22403029776554e-03`, `I(base)=1.71618335532030e-06`.
+- A direct native `ngspice-46` `level=8` one-point probe at `27 C`, `V(base)=0.800000000000001`, `V(coll)=0.5` reports `I(coll)=1.2230165813114785e-03`, `I(base)=1.7147565201601942e-06`. The first scalar evaluator unit test uses this native-ngspice oracle; the checked-in standard-table difference remains a compatibility follow-up rather than being mislabeled as native ngspice.
 - `tests/hicum2/npn/parameters/npn_1D` is the model card parameter source for the first target.
 
 **Non-Goals For This First Slice**
@@ -24,6 +30,119 @@
 - Do not approximate HICUM with VBIC, legacy GP, or a fitted behavioral source.
 - Do not add a Verilog-A fallback.
 - Do not implement AC, transient charge, noise, self-heating, substrate transit effects, or PNP in this slice.
+
+---
+
+### Task 0: Lock Both HICUM Selector Aliases As HICUM-Specific Fail-Closed Routes
+
+**Files:**
+- Modify: `crates/rspice-core/tests/bjt_level_policy.rs`
+- Modify: `crates/rspice-core/src/engine/builder.rs`
+
+- [x] **Step 1: Write the failing policy test**
+
+Add these tests to `crates/rspice-core/tests/bjt_level_policy.rs` near the other unsupported advanced BJT tests:
+
+```rust
+#[test]
+fn ngspice_hicum2_level8_version240_fails_closed_as_hicum_not_generic_bjt() {
+    let deck = "* ngspice HICUM2 selector alias\n\
+                vc c 0 dc 0.5\n\
+                vb b 0 dc 0.8\n\
+                ve e 0 dc 0\n\
+                vs s 0 dc 0\n\
+                q1 c b e s h1\n\
+                .model h1 NPN (LEVEL=8 VERSION=2.40 C10=9.074e-30 QP0=1.008e-13 IBEIS=1.328e-19 IBCIS=4.603e-17)\n\
+                .op\n\
+                .end\n";
+    let message = run(deck).expect_err("HICUM2 LEVEL=8 VERSION=2.40 must fail closed until native");
+
+    assert!(
+        message.contains("HICUM") && message.contains("LEVEL=8") && message.contains("VERSION=2.40"),
+        "error should identify the ngspice HICUM2 selector alias: {message}"
+    );
+    assert!(
+        message.contains("native") && !message.contains("VBIC"),
+        "HICUM2 must not look like a VBIC or legacy fallback: {message}"
+    );
+}
+
+#[test]
+fn hicum_l2_level_selectors_without_version_still_fail_closed_as_hicum() {
+    for (level, dialect) in [(234, "Xyce"), (8, "ngspice")] {
+        let deck = format!(
+            "* HICUM/L2 selector without explicit version\n\
+             vc c 0 dc 0.5\n\
+             vb b 0 dc 0.8\n\
+             ve e 0 dc 0\n\
+             vs s 0 dc 0\n\
+             q1 c b e s h1\n\
+             .model h1 NPN (LEVEL={level} C10=9.074e-30 QP0=1.008e-13 IBEIS=1.328e-19 IBCIS=4.603e-17)\n\
+             .op\n\
+             .end\n"
+        );
+        let message = run(&deck).expect_err("HICUM/L2 must fail closed until native");
+
+        assert!(
+            message.contains("HICUM")
+                && message.contains(dialect)
+                && message.contains(&format!("LEVEL={level}")),
+            "error should identify the {dialect} HICUM/L2 selector: {message}"
+        );
+        assert!(
+            message.contains("native") && !message.contains("VBIC"),
+            "HICUM/L2 must not look like another BJT fallback: {message}"
+        );
+    }
+}
+```
+
+- [x] **Step 2: Run the RED policy test**
+
+Run:
+
+```powershell
+cargo test -p rspice-core --test bjt_level_policy ngspice_hicum2_level8_version240_fails_closed_as_hicum_not_generic_bjt -- --nocapture
+```
+
+Expected: FAIL because the current error is generic unsupported BJT routing and does not identify the ngspice/Xyce HICUM2 alias.
+
+- [x] **Step 3: Add selector helpers without enabling native routing yet**
+
+In `crates/rspice-core/src/engine/builder.rs`, add helpers:
+
+```rust
+fn is_xyce_hicum_l2_bjt_selector(level: f64, params: &HashMap<String, f64>) -> bool {
+    bjt_level_matches(level, 234.0)
+        && params
+            .get("VERSION")
+            .is_none_or(|version| bjt_level_matches(*version, 2.34) || bjt_level_matches(*version, 2.40))
+}
+
+fn is_ngspice_hicum_l2_bjt_selector(level: f64, params: &HashMap<String, f64>) -> bool {
+    bjt_level_matches(level, 8.0)
+        && params
+            .get("VERSION")
+            .is_none_or(|version| bjt_level_matches(*version, 2.40))
+}
+
+fn is_hicum_l2_bjt_selector(level: f64, params: &HashMap<String, f64>) -> bool {
+    is_xyce_hicum_l2_bjt_selector(level, params) || is_ngspice_hicum_l2_bjt_selector(level, params)
+}
+```
+
+In `validate_bjt_model_level`, before the generic unsupported BJT error, return a HICUM-specific fail-closed error for these selectors. The message must name the selector and say native HICUM/L2 is required before running the card.
+
+- [x] **Step 4: Run the GREEN policy test and the existing BJT policy suite**
+
+Run:
+
+```powershell
+cargo test -p rspice-core --test bjt_level_policy ngspice_hicum2_level8_version240_fails_closed_as_hicum_not_generic_bjt -- --nocapture
+cargo test -p rspice-core --test bjt_level_policy -- --nocapture
+```
+
+Expected: both commands pass.
 
 ---
 
@@ -41,9 +160,9 @@ Create `crates/rspice-core/tests/hicum2_native.rs`:
 ```rust
 //! Engine-level validation for native HICUM/L2 v2.4 (`BJT LEVEL=8`) wiring.
 //!
-//! The first oracle is the vendored ngspice HICUM2 QA forward-Gummel `npn_1D`
-//! point. This test must fail before native HICUM routing exists because
-//! `LEVEL=8` is currently rejected by the BJT level policy.
+//! The first native aliases are Xyce `LEVEL=234 VERSION=2.34/2.40` and ngspice
+//! `LEVEL=8 VERSION=2.40`. This test must fail before native HICUM routing
+//! exists because HICUM/L2 is currently fail-closed.
 
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -136,7 +255,7 @@ Expected: FAIL with an error containing `BJT 'q1'`, `LEVEL=8`, and `no native im
 - Modify: `crates/rspice-core/src/device/semiconductor/mod.rs`
 - Modify: `crates/rspice-core/src/device/mod.rs`
 
-- [ ] **Step 1: Add a compile-failing skeleton test**
+- [x] **Step 1: Add a compile-failing skeleton test**
 
 Add this unit test at the bottom of `crates/rspice-core/src/device/semiconductor/hicum2/params.rs` after creating the file:
 
@@ -172,7 +291,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Add the minimal public module shape**
+- [x] **Step 2: Add the minimal public module shape**
 
 Create `crates/rspice-core/src/device/semiconductor/hicum2.rs`:
 
@@ -269,7 +388,7 @@ fn node_voltage(voltages: &[Value], node: NodeId) -> Value {
 }
 ```
 
-- [ ] **Step 3: Add parameter storage for the first DC slice**
+- [x] **Step 3: Add parameter storage for the first DC slice**
 
 Create `crates/rspice-core/src/device/semiconductor/hicum2/params.rs`:
 
@@ -332,7 +451,7 @@ impl Hicum2Model {
 }
 ```
 
-- [ ] **Step 4: Run the skeleton unit test**
+- [x] **Step 4: Run the skeleton unit test**
 
 Run:
 
@@ -350,7 +469,7 @@ Expected: PASS.
 - Modify: `crates/rspice-core/src/device/semiconductor/hicum2/eval.rs`
 - Test: `crates/rspice-core/src/device/semiconductor/hicum2/eval.rs`
 
-- [ ] **Step 1: Add a direct evaluator unit test**
+- [x] **Step 1: Add a direct evaluator unit test**
 
 Create `crates/rspice-core/src/device/semiconductor/hicum2/eval.rs` with the unit test first:
 
@@ -389,25 +508,25 @@ mod tests {
     }
 
     #[test]
-    fn npn_1d_forward_gummel_dc_point_matches_ngspice46() {
+    fn npn_1d_forward_gummel_dc_point_matches_native_ngspice46() {
         let op = evaluate_dc(&npn_1d_model(), 0.800000000000001, 0.5);
-        assert!((op.ic - 7.17540233926327e-05).abs() / 7.17540233926327e-05 < 5e-4);
-        assert!((op.ib - 1.08044570042777e-08).abs() / 1.08044570042777e-08 < 5e-4);
+        assert!((op.ic - 1.2230165813114785e-03).abs() / 1.2230165813114785e-03 < 5e-5);
+        assert!((op.ib - 1.7147565201601942e-06).abs() / 1.7147565201601942e-06 < 5e-5);
     }
 }
 ```
 
-- [ ] **Step 2: Run the RED evaluator test**
+- [x] **Step 2: Run the RED evaluator test**
 
 Run:
 
 ```powershell
-cargo test -p rspice-core --lib hicum2::eval::tests::npn_1d_forward_gummel_dc_point_matches_ngspice46 -- --nocapture
+cargo test -p rspice-core --lib hicum2::eval::tests::npn_1d_forward_gummel_dc_point_matches_native_ngspice46 -- --nocapture
 ```
 
 Expected: FAIL because the evaluator returns zero currents.
 
-- [ ] **Step 3: Port the required current equations**
+- [x] **Step 3: Port the required current equations**
 
 Replace `evaluate_dc` with a faithful Rust port of the DC current subset from ngspice `hicumL2.cpp` for the `npn_1D` no-self-heating path. The implementation must derive `ic`, `ib`, and finite-difference conductances from the same evaluator so Newton stamping remains consistent:
 
@@ -433,12 +552,12 @@ pub fn evaluate_dc(model: &Hicum2Model, vbe: Value, vce: Value) -> Hicum2Op {
 
 The helper `evaluate_currents` must be a direct port from the ngspice HICUM2 current code, not a fit. When porting, keep source comments that name the corresponding ngspice variables only where they clarify equation mapping.
 
-- [ ] **Step 4: Run the GREEN evaluator test**
+- [x] **Step 4: Run the GREEN evaluator test**
 
 Run:
 
 ```powershell
-cargo test -p rspice-core --lib hicum2::eval::tests::npn_1d_forward_gummel_dc_point_matches_ngspice46 -- --nocapture
+cargo test -p rspice-core --lib hicum2::eval::tests::npn_1d_forward_gummel_dc_point_matches_native_ngspice46 -- --nocapture
 ```
 
 Expected: PASS.
