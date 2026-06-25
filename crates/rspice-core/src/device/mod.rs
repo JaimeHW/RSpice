@@ -33,6 +33,10 @@ pub mod tristate;
 #[cfg(feature = "veriloga")]
 pub mod veriloga;
 
+// Build-time generated Verilog-A built-ins (feature-gated)
+#[cfg(feature = "veriloga-builtins")]
+pub mod veriloga_generated;
+
 // Batch device storage for SIMD acceleration (feature-gated)
 #[cfg(feature = "simd")]
 pub mod batch;
