@@ -1,0 +1,7 @@
+The HiSIM_SOI standard is supported by the members of Silicon Integration Initiative's
+Compact Model Coalition.
+
+CMC Release Date:  November 8, 2021
+Public Release Date:  May 8, 2023
+
+A link to the most recent version of this standard can be found at: http://www.si2.org/cmc

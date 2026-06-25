@@ -1,0 +1,163 @@
+//======================================================================================
+//======================================================================================
+// Filename: DIODE_CMC_parlist.include
+//======================================================================================
+//
+//
+//                        Silicon Integration Initiative (Si2)
+//                      Compact Model Coalition In-Code Statement
+//
+//    Software is distributed as is, completely without warranty or service support.  NXP
+//    Semiconductors, Hiroshima University, and Silicon Integration Initiative, Inc. (Si2),
+//    along with their employees are not liable for the condition or performance of the software.
+//
+//    NXP Semiconductors, Hiroshima University, and Si2 own the copyright and grant users
+//    a perpetual, irrevocable, worldwide, non-exclusive, royalty-free license with respect to the
+//    software as set forth below.
+//
+//    NXP Semiconductors, Hiroshima University, and Si2 hereby disclaim all implied
+//    warranties.
+//
+//    NXP Semiconductors, Hiroshima University, and Si2 grant the users the right to modify,
+//    copy, and redistribute the software and documentation, both within the user's organization
+//    and externally, subject to the following restrictions
+//
+//      1. The users agree not to charge for the NXP Semiconductors, Hiroshima University,
+//      and Si2 -developed code itself but may charge for additions, extensions, or support.
+//
+//      2. In any product based on the software, the users agree to acknowledge NXP
+//      Semiconductors, Hiroshima University, and Si2 that developed the software.  This
+//      acknowledgment shall appear in the product documentation.
+//
+//      3. Redistributions to others of source code and documentation must retain the copyright
+//      notice, disclaimer, and list of conditions.
+//
+//      4. Redistributions to others in binary form must reproduce the copyright notice,
+//      disclaimer, and list of conditions in the documentation and/or other materials provided
+//      with the distribution.
+//
+//                                                     CMC In-Code Statement Revision 1.1 6/9/2016
+//
+//
+//
+// The diode_cmc is based on Juncap2 200.3.3 (test) from NXP Semiconductors.
+//
+// Portions commented as diode_cmc code: additional models since 2009.
+//
+// Portions commented as diode_cmc recovery and high-injection equations code: recovery model by Hiroshima University.
+//
+// All other parts are taken from Juncap2 200.3.3. Copyright 2008 NXP Semiconductors, All Rights Reserved.
+//======================================================================================
+//
+//
+
+//////////////////////////////////////////
+//
+// DIODE_CMC - Reduced parameterlist
+//
+//////////////////////////////////////////
+`MPRcz( minr, $simparam("minr",1e-3), "Ohm", "minimum resistance")
+`MPRco(imax           ,1000.0     ,"A"        ,`IMAX_cliplow     ,inf              ,"Maximum current up to which forward current behaves exponentially")
+`MPRco(trj            ,21.0       ,"C"        ,`TRJ_cliplow      ,inf              ,"Reference temperature")
+`MPRcc(frev           ,1.0e3      ,""         ,1E3               ,1E10             ,"Coefficient for reverse breakdown current limitation")
+
+`MPRco(cjorbot        ,1.0e-3     ,"Fm^-2"    ,`CJORBOT_cliplow  ,inf              ,"Zero-bias capacitance per unit-of-area of bottom component")
+`MPRco(cjorsti        ,1.0e-9     ,"Fm^-1"    ,`CJORSTI_cliplow  ,inf              ,"Zero-bias capacitance per unit-of-length of STI-edge component")
+`MPRco(cjorgat        ,1.0e-9     ,"Fm^-1"    ,`CJORGAT_cliplow  ,inf              ,"Zero-bias capacitance per unit-of-length of gate-edge component")
+`MPRco(vbirbot        ,1.0        ,"V"        ,`VBIR_cliplow     ,inf              ,"Built-in voltage at the reference temperature of bottom component")
+`MPRco(vbirsti        ,1.0        ,"V"        ,`VBIR_cliplow     ,inf              ,"Built-in voltage at the reference temperature of STI-edge component")
+`MPRco(vbirgat        ,1.0        ,"V"        ,`VBIR_cliplow     ,inf              ,"Built-in voltage at the reference temperature of gate-edge component")
+`MPRcc(pbot           ,0.5        ,""         ,`P_cliplow        ,`P_cliphigh      ,"Grading coefficient of bottom component")
+`MPRcc(psti           ,0.5        ,""         ,`P_cliplow        ,`P_cliphigh      ,"Grading coefficient of STI-edge component")
+`MPRcc(pgat           ,0.5        ,""         ,`P_cliplow        ,`P_cliphigh      ,"Grading coefficient of gate-edge component")
+`MPRnb(phigbot        ,1.16       ,"V"                                             ,"Zero-temperature bandgap voltage of bottom component")
+`MPRnb(phigsti        ,1.16       ,"V"                                             ,"Zero-temperature bandgap voltage of STI-edge component")
+`MPRnb(phiggat        ,1.16       ,"V"                                             ,"Zero-temperature bandgap voltage of gate-edge component")
+`MPRco(idsatrbot      ,1.0e-12    ,"Am^-2"    ,`IDSATR_cliplow   ,inf              ,"Saturation current density at the reference temperature of bottom component")
+`MPRco(idsatrsti      ,1.0e-18    ,"Am^-1"    ,`IDSATR_cliplow   ,inf              ,"Saturation current density at the reference temperature of STI-edge component")
+`MPRco(idsatrgat      ,1.0e-18    ,"Am^-1"    ,`IDSATR_cliplow   ,inf              ,"Saturation current density at the reference temperature of gate-edge component")
+`MPRco(csrhbot        ,1.0e2      ,"Am^-3"    ,`CSRH_cliplow     ,inf              ,"Shockley-Read-Hall prefactor of bottom component")
+`MPRco(csrhsti        ,1.0e-4     ,"Am^-2"    ,`CSRH_cliplow     ,inf              ,"Shockley-Read-Hall prefactor of STI-edge component")
+`MPRco(csrhgat        ,1.0e-4     ,"Am^-2"    ,`CSRH_cliplow     ,inf              ,"Shockley-Read-Hall prefactor of gate-edge component")
+`MPRco(xjunsti        ,1.0e-7     ,"m"        ,`XJUN_cliplow     ,inf              ,"Junction depth of STI-edge component")
+`MPRco(xjungat        ,1.0e-7     ,"m"        ,`XJUN_cliplow     ,inf              ,"Junction depth of gate-edge component")
+`MPRco(ctatbot        ,1.0e2      ,"Am^-3"    ,`CTAT_cliplow     ,inf              ,"Trap-assisted tunneling prefactor of bottom component")
+`MPRco(ctatsti        ,1.0e-4     ,"Am^-2"    ,`CTAT_cliplow     ,inf              ,"Trap-assisted tunneling prefactor of STI-edge component")
+`MPRco(ctatgat        ,1.0e-4     ,"Am^-2"    ,`CTAT_cliplow     ,inf              ,"Trap-assisted tunneling prefactor of gate-edge component")
+`MPRco(mefftatbot     ,0.25       ,""         ,`MEFFTAT_cliplow  ,inf              ,"Effective mass (in units of m0) for trap-assisted tunneling of bottom component")
+`MPRco(mefftatsti     ,0.25       ,""         ,`MEFFTAT_cliplow  ,inf              ,"Effective mass (in units of m0) for trap-assisted tunneling of STI-edge component")
+`MPRco(mefftatgat     ,0.25       ,""         ,`MEFFTAT_cliplow  ,inf              ,"Effective mass (in units of m0) for trap-assisted tunneling of gate-edge component")
+`MPRco(cbbtbot        ,1.0e-12    ,"AV^-3"    ,`CBBT_cliplow     ,inf              ,"Band-to-band tunneling prefactor of bottom component")
+`MPRco(cbbtsti        ,1.0e-18    ,"AV^-3m"   ,`CBBT_cliplow     ,inf              ,"Band-to-band tunneling prefactor of STI-edge component")
+`MPRco(cbbtgat        ,1.0e-18    ,"AV^-3m"   ,`CBBT_cliplow     ,inf              ,"Band-to-band tunneling prefactor of gate-edge component")
+`MPRnb(fbbtrbot       ,1.0e9      ,"Vm^-1"                                         ,"Normalization field at the reference temperature for band-to-band tunneling of bottom component")
+`MPRnb(fbbtrsti       ,1.0e9      ,"Vm^-1"                                         ,"Normalization field at the reference temperature for band-to-band tunneling of STI-edge component")
+`MPRnb(fbbtrgat       ,1.0e9      ,"Vm^-1"                                         ,"Normalization field at the reference temperature for band-to-band tunneling of gate-edge component")
+`MPRnb(stfbbtbot      ,-1.0e-3    ,"K^-1"                                          ,"Temperature scaling parameter for band-to-band tunneling of bottom component")
+`MPRnb(stfbbtsti      ,-1.0e-3    ,"K^-1"                                          ,"Temperature scaling parameter for band-to-band tunneling of STI-edge component")
+`MPRnb(stfbbtgat      ,-1.0e-3    ,"K^-1"                                          ,"Temperature scaling parameter for band-to-band tunneling of gate-edge component")
+`MPRco(vbrbot         ,10.0       ,"V"        ,`VBR_cliplow      ,inf              ,"Breakdown voltage of bottom component")
+`MPRco(vbrsti         ,10.0       ,"V"        ,`VBR_cliplow      ,inf              ,"Breakdown voltage of STI-edge component")
+`MPRco(vbrgat         ,10.0       ,"V"        ,`VBR_cliplow      ,inf              ,"Breakdown voltage of gate-edge component")
+`MPRco(pbrbot         ,4.0        ,"V"        ,`PBR_cliplow      ,inf              ,"Breakdown onset tuning parameter of bottom component")
+`MPRco(pbrsti         ,4.0        ,"V"        ,`PBR_cliplow      ,inf              ,"Breakdown onset tuning parameter of STI-edge component")
+`MPRco(pbrgat         ,4.0        ,"V"        ,`PBR_cliplow      ,inf              ,"Breakdown onset tuning parameter of gate-edge component")
+
+//Diode_cmc code
+`MPRco(rsbot          ,0.0        ,"VA^-1m^2" ,`RS_cliplow       ,inf              ,"Series resistance per unit-of-area of bottom component")
+`MPRco(rssti          ,0.0        ,"VA^-1m^2" ,`RS_cliplow       ,inf              ,"Series resistance per unit-of-length of STI-edge component")
+`MPRco(rsgat          ,0.0        ,"VA^-1m^2" ,`RS_cliplow       ,inf              ,"Series resistance per unit-of-length of gate-edge component")
+`MPRco(rscom          ,0.0        ,"VA^-1m^2" ,`RS_cliplow       ,inf              ,"Common series resistance, no scaling")
+`MPRco(strs           ,0.0        ,""         ,`RS_cliplow       ,inf              ,"Temperature scaling parameter for series resistance")
+`MPRco(kf             ,0.0        ,""         ,`KF_cliplow       ,inf              ,"kf parameter for flicker noise")
+`MPRco(af             ,1.0        ,""         ,`AF_cliplow       ,inf              ,"af parameter for flicker noise")
+`MPRco(tt             ,0.0        ,"s"        ,`TT_cliplow       ,inf              ,"Transit time")
+`MPRnb(stvbrbot1      ,0.0        ,"1/K"                                           ,"Temp. co of breakdown voltage bottom component")
+`MPRnb(stvbrbot2      ,0.0        ,"1/K^2"                                         ,"Temp. co of breakdown voltage bottom component")
+`MPRnb(stvbrsti1      ,0.0        ,"1/K"                                           ,"Temp. co of breakdown voltage STI-edge component")
+`MPRnb(stvbrsti2      ,0.0        ,"1/K^2"                                         ,"Temp. co of breakdown voltage STI-edge component")
+`MPRnb(stvbrgat1      ,0.0        ,"1/K"                                           ,"Temp. co of breakdown voltage gate-edge component")
+`MPRnb(stvbrgat2      ,0.0        ,"1/K^2"                                         ,"Temp. co of breakdown voltage gate-edge component")
+`MPRco(nfabot         ,1.0        ,""         ,`NFA_cliplow      ,inf              ,"ideality factor bottom component")
+`MPRco(nfasti         ,1.0        ,""         ,`NFA_cliplow      ,inf              ,"ideality factor STI-edge component")
+`MPRco(nfagat         ,1.0        ,""         ,`NFA_cliplow      ,inf              ,"ideality factor gate-edge component")
+`MPRco(abmin          ,0.0        ,"m^2"      ,`AB_cliplow       ,inf              ,"minimum allowed junction area")
+`MPRco(abmax          ,1.0        ,"m^2"      ,`AB_cliplow       ,inf              ,"maximum allowed junction area")
+`MPRco(lsmin          ,0.0        ,"m"        ,`LS_cliplow       ,inf              ,"minimum allowed junction STI-edge")
+`MPRco(lsmax          ,1.0        ,"m"        ,`LS_cliplow       ,inf              ,"maximum allowed junction STI-edge")
+`MPRco(lgmin          ,0.0        ,"m"        ,`LG_cliplow       ,inf              ,"minimum allowed junction gate-edge")
+`MPRco(lgmax          ,1.0        ,"m"        ,`LG_cliplow       ,inf              ,"maximum allowed junction gate-edge")
+`MPRco(tempmin        ,-55        ,"C"        ,`TRJ_cliplow      ,inf              ,"minimum allowed junction temp")
+`MPRco(tempmax        ,155        ,"C"        ,`TRJ_cliplow      ,inf              ,"maximum allowed junction temp")
+`MPRco(vfmax          ,0.0        ,"V"        ,`VOLT_cliplow     ,inf              ,"maximum allowed forward junction bias")
+`MPRco(vrmax          ,0.0        ,"V"        ,`VOLT_cliplow     ,inf              ,"maximum allowed reverse junction bias")
+`MPRco(xti            ,3.0        ,""         ,`XTI_cliplow      ,inf              ,"Temp. co of saturation current")
+`MPRcc(scale          ,1.0        ,""         ,`SCALE_cliplow    ,1.0              ,"Scale parameter")
+`MPRcc(shrink         ,0.0        ,""         ,`SHRINK_cliplow   ,`SHRINK_cliphigh ,"Shrink parameter")
+`MPRco(expceil        ,1e20       ,""         ,1.0               ,inf              ,"Safety valve against carrier conc explosion")
+`MPRcc(swbv           ,1.0        ,""         ,0.0               ,1.0              ,"Flag to enable the breakdown of diode_cmc; 1=breakdown effect enabled, 0=breakdown effect disabled")
+aliasparam  bv_enable= swbv;
+//End of Diode_cmc code
+
+// JUNCAP2-express parameters
+`MPRcc(swjunexp       ,0.0        ,""         ,0.0               ,1.0              ,"Flag for JUNCAP-express; 0=full model, 1=express model")
+`MPRco(vjunref        ,2.5        ,""         ,`VJUNREF_cliplow  ,inf              ,"Typical maximum junction voltage; usually about 2*VSUP")
+`MPRco(fjunq          ,0.03       ,""         ,`FJUNQ_cliplow    ,inf              ,"Fraction below which junction capacitance components are considered negligible")
+
+//Diode_cmc recovery and high-injection equations code
+`MPRcc(corecovery     ,0.0        ,""         ,0.0               ,1.0              ,"Flag for recovery equations; 0=original, 1=Hiroshima")
+`MPRcc(njh            ,1.0        ,""         ,0.5               ,5                ,"High-injection emission coefficient")
+`MPRcc(njdv           ,0.1        ,"1/V"      ,0                 ,1e6              ,"Transition slope of emission coefficient")
+`MPRcc(ndibot         ,1e16       ,"cm^-3"    ,1                 ,1e23             ,"Doping concentration of drift region")
+`MPRcc(ndigat         ,1e16       ,"cm^-3"    ,1                 ,1e23             ,"Doping concentration of drift region")
+`MPRcc(ndisti         ,1e16       ,"cm^-3"    ,1                 ,1e23             ,"Doping concentration of drift region")
+`MPRcc(inj1           ,1.0        ,""         ,0                 ,3                ,"Factor for recovery charge density")
+`MPRcc(inj2           ,10.0       ,"V^-2"     ,0                 ,50               ,"Voltage dependence of recovery charge density (high injection)")
+`MPRcc(nqs            ,5e-9       ,"s"        ,0                 ,1e-3             ,"Carrier delay time")
+`MPRcc(tau            ,2e-7       ,"s"        ,1.0e-12           ,1e-3             ,"Carrier lifetime")
+`MPRcc(wi             ,5e-6       ,"m"        ,0                 ,1.0              ,"Length of drift region")
+`MPRcc(depnqs         ,0.0        ,"s"        ,0                 ,1e-3             ,"Depletion delay time")
+`MPRco(tnom           ,21         ,"C"        ,`TRJ_cliplow      ,inf              ,"Alias reference temperature")
+`MPRcc(taut           ,0.0        ,""         ,0                 ,1.0e2            ,"Temp. co of carrier lifetime")
+`MPRcc(injt           ,0.0        ,""         ,0                 ,20               ,"Temp. co of carrier density in high-injection condition")
+//End of Diode_cmc recovery and high-injection equations code

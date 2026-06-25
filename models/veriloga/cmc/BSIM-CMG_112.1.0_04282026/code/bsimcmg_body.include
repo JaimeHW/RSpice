@@ -1,0 +1,3659 @@
+// *  BSIM-CMG 112.1.0 released on 04/28/2026                            *
+// *  BSIM Common Multi-Gate Model (Verilog-A)                                *
+// ****************************************************************************
+
+// ****************************************************************************
+// *  Copyright © 2026 University of California                               *
+// *                                                                          *
+// *  Project director: Prof. Sayeef Salahuddin                               *
+// *                    Prof. Chenming Hu                                     *
+// *                                                                          *
+// *  Developers: https://www.bsim.berkeley.edu/models/bsimcmg/auth_cmg/      *
+// ****************************************************************************
+
+// Clamped exponential function
+analog function real lexp;
+    input x; real x;
+    begin
+        if (x > `EXPL_THRESHOLD) begin
+            lexp = `MAX_EXPL * (1.0 + x - `EXPL_THRESHOLD);
+        end else if (x < -`EXPL_THRESHOLD) begin
+            lexp = `MIN_EXPL;
+        end else begin
+            lexp = exp(x);
+        end
+    end
+endfunction
+
+// Clamped logarithm function
+analog function real llnf;
+    input x; real x;
+    begin
+        if (x > `N_MINLOG) begin
+            llnf = ln(x);
+        end else begin
+            llnf = `LN_N_MINLOG;
+        end
+    end
+endfunction
+
+// Hyperbolic smoothing function
+analog function real hypsmooth;
+    input x, c; real x, c;
+    begin
+        if (x < -1e4 * c) begin
+            hypsmooth = -c * c / x;
+        end else begin
+            hypsmooth = 0.5 * (x + sqrt(x * x + 4.0 * c * c));
+        end
+    end
+endfunction
+
+// Hyperbolic smoothing function with a maximum value
+analog function real hypmax;
+    input x, xmin, c; real x, xmin, c;
+    begin
+        hypmax = (xmin + 0.5 * (x - xmin - c + sqrt((x - xmin - c) * (x - xmin - c) - 4.0 * xmin * c)));
+    end
+endfunction
+
+// Smoothing function with a minimum value
+analog function real smoothminx;
+    input x, x0, deltax; real x, x0, deltax;
+    begin
+        smoothminx = (0.5 * (x + x0 + sqrt((x - x0) * (x - x0) + 0.25 * deltax * deltax)));
+    end
+endfunction
+
+// Smoothing function with a maximum value
+analog function real smoothmaxx;
+    input x, x0, deltax; real x, x0, deltax;
+    begin
+        smoothmaxx = (0.5 * (x + x0 - sqrt((x - (x0)) * (x - (x0)) + 0.25 * deltax * deltax)) + 0.25 * deltax);
+    end
+endfunction
+
+// Smoothing function with a maximum value
+analog function real smoothmaxx2;
+    input x, x0, deltax; real x, x0, deltax;
+    begin
+        smoothmaxx2 = (0.5 * (x + x0 - sqrt((x - (x0)) * (x - (x0)) + 0.25 * deltax * deltax)));
+    end
+endfunction
+
+//Gamma function
+analog function real gammafunc;
+    input x; real x;
+    begin
+        gammafunc = (0.0385 * exp(-4.6 * (x-1)) + 7.5893e-7 * pow(2*(x) - 3, 8) + 6.9583e-5 * pow(2*(x-1), 6) - 6.583e-4 * pow(2*(x-1), 5) + 0.0065 * pow(2*(x-1), 4) - 0.026 * pow(2*(x-1), 3) + 0.1371 * pow(2*(x-1), 2) - 0.194 * 2*(x-1) + 0.959);
+    end
+endfunction
+
+// ln(1 + exp(x)) function
+analog function real ln_one_plus_exp;
+    input x; real x;
+    begin
+        if (x > 37) begin
+            ln_one_plus_exp = x;
+        end else if (x < -37) begin
+            ln_one_plus_exp = exp(x);
+        end else begin
+            ln_one_plus_exp = ln(1.0 + exp(x));
+        end
+    end
+endfunction
+
+// exp(x) - 1 function
+analog function real expm1;
+    input x; real x;
+    begin
+        if (abs(x) < 1e-7) begin
+            expm1 = x + 0.5 * x * x;
+        end else begin
+            expm1 = lexp(x) - 1.0;
+        end
+    end
+endfunction
+
+analog begin
+    // Bias-independent calculations
+    // Initialize variables for periodic steady state analysis
+    `include "bsimcmg_initialization.include"
+
+    gmin=$simparam("gmin",0);
+
+    if ($port_connected(t) == 1) begin
+        if ((shmod == 0 || rth0 == 0.0) && sh_warn == 1) begin
+            $strobe("The optional 5th terminal is present in instance %m but not active because shmod = 0 or rth0 = 0.0");
+        end
+    end
+
+    // N or p-type
+    if (type == `ntype) begin
+        devsign = 1;
+    end else begin
+        devsign = -1;
+    end
+
+    // Constants
+    epssub = epsrsub * `EPS0;
+    epssp = epsrsp * `EPS0;
+    cbox = epsrox * `EPS0 / eotbox;
+    epsratio = epsrsub / epsrox;
+
+    // Constants for quantum mechanical effects
+    mx = 0.916 * `MEL;
+    mxprime = 0.190 * `MEL;
+    md = 0.190 * `MEL;
+    mdprime = 0.417 * `MEL;
+    gprime = 4.0;
+    gfactor = 2.0;
+
+    XL_i    = xl + 1.0e-6 * lxl / l + nxl / nfin  + pxl * 1.0e-6 / (l * nfin);
+    DLBIN_i = dlbin + 1.0e-6 * ldlbin / l + ndlbin / nfin  + pdlbin * 1.0e-6 / (l * nfin);
+    LINT_i  = lint + 1.0e-6 * llint / l + nlint / nfin  + plint * 1.0e-6 / (l * nfin);
+
+    // Effective channel length for I-V and C-V
+    Lg = l + XL_i;
+    if (Lg <= 0.0) begin
+        $error("Fatal: Lg = %g is not positive.", Lg);
+        Lg = l;
+    end
+    T0 = pow(Lg, -lln);
+    deltaL = LINT_i + ll * T0;
+    deltaL1 = LINT_i + ll * pow((Lg + DLBIN_i), -lln);
+    deltaLCV = dlc + llc * T0;
+    Leff = Lg - 2.0 * deltaL;
+    Leff1 = Lg + DLBIN_i - 2.0 * deltaL1;
+    LeffCV = Lg - 2.0 * deltaLCV;
+    LeffCV_acc = LeffCV - dlcacc;
+    if (Leff <= 0.0) begin
+        $error("Fatal: Leff = %g is not positive.", Leff);
+        Leff = Lg;
+    end else if (Leff <= 1.0e-9) begin
+        $strobe("Warning: Leff = %g <= 1.0e-9.", Leff);
+    end
+
+    if (Leff1 <= 0.0) begin
+        $error("Fatal: Leff1 = %g is not positive.", Leff1);
+        Leff1 = Lg;
+    end else if (Leff1 <= 1.0e-9) begin
+        $strobe("Warning: Leff1 = %g <= 1.0e-9.", Leff1);
+    end
+    if (LeffCV <= 0.0) begin
+        $error("Fatal: LeffCV = %g is not positive.", LeffCV);
+        LeffCV = Lg;
+    end else if (LeffCV <= 1.0e-9) begin
+        $strobe("Warning: LeffCV = %g <= 1.0e-9.", LeffCV);
+    end
+    if (bulkmod != 0) begin
+        if (LeffCV_acc <= 0.0) begin
+            $error("Fatal: LeffCV_acc = %g is not positive.", LeffCV_acc);
+            LeffCV_acc = Lg;
+        end else if (LeffCV_acc <= 1.0e-9) begin
+            $strobe("Warning: LeffCV_acc = %g <= 1.0e-9.", LeffCV_acc);
+        end
+    end
+
+    // Effective GAA channel width for I-V and C-V
+    if (geomod == 5) begin
+        XW_i = xw + 1.0e-6 * lxw / l + nxw / nfin  + pxw * 1.0e-6 / (l * nfin) + 1.0e-6 * wxw / wgaa + p2xw * 1.0e-12 / (l * wgaa);
+        DWBIN_i = dwbin + 1.0e-6 * ldwbin / l + ndwbin / nfin  + pdwbin * 1.0e-6 / (l * nfin) +  1.0e-6 * wdwbin / wgaa + p2dwbin * 1.0e-12 / (l * wgaa);
+    end else begin
+        XW_i = 0;
+        DWBIN_i = 0;
+    end
+    WGAAeff = wgaa + XW_i;
+    WGAAeff1 = WGAAeff + DWBIN_i;
+
+    if (geomod == 5) begin
+        if (WGAAeff1 <= 0.0) begin
+            $error("Fatal: WGAAeff1 = %g is not positive.", WGAAeff1);
+            WGAAeff1 = wgaa;
+        end else if (WGAAeff1 <= 1.0e-9) begin
+            $strobe("Warning: WGAAeff1 = %g <= 1.0e-9.", WGAAeff1);
+        end
+    end
+
+    // Total Fins
+    NFINtotal = nfin * nf;
+
+    // Binning
+    Inv_L = 1.0e-6 / Leff1;
+    Inv_NFIN = 1.0 / nfin;
+    Inv_LNFIN = 1.0e-6 / (Leff1 * nfin);
+    if (geomod == 5) begin
+        Inv_W = 1.0e-6 / WGAAeff1;
+        Inv_WL = 1.0e-12 / (WGAAeff1 * Leff1);
+    end else begin
+        Inv_W = 0.0;
+        Inv_WL = 0.0;
+    end
+
+    // Nbody binning equation
+    `binning(NBODY_i, nbody, lnbody, nnbody, pnbody, 0.0, 0.0)
+    if (nbodyn1 != 0.0) begin
+        NBODY_i = NBODY_i * (1.0 + nbodyn1 / nfin * llnf(1.0 + nfin / nbodyn2));
+    end
+
+    if (NBODY_i <= 0.0) begin
+        $error("Fatal: Effective  nbody = %g is not positive.", NBODY_i);
+        NBODY_i = 1.0e22;
+    end else if (NBODY_i <= 1.0e18) begin
+        $strobe("Warning: NBODY_i = %g m^-3 may be too small.", NBODY_i);
+    end
+
+    // Unified FinFET compact model
+    case (geomod)
+        // Double gate
+        0: begin
+            if (tfin_top == 0.0 || tfin_base == 0.0) begin
+                Weff_UFCM = 2.0 * hfin;
+                Cins = Weff_UFCM * epsrox * `EPS0 / eot;
+                Ach = hfin * tfin;
+            end else begin
+                Weff_UFCM = 2.0 * sqrt(hfin * hfin + (tfin_top - tfin_base) * (tfin_top - tfin_base) / 4.0);
+                Cins = Weff_UFCM * epsrox * `EPS0 / eot;
+                Ach = hfin * (tfin_top + tfin_base) / 2.0;
+            end
+        end
+        // Triple gate
+        1: begin
+            if (tfin_top == 0.0 || tfin_base == 0.0) begin
+                Weff_UFCM = 2.0 * hfin + tfin;
+                Cins = Weff_UFCM * epsrox * `EPS0 / eot;
+                Ach = hfin * tfin;
+            end else begin
+                Weff_UFCM = 2.0 * sqrt(hfin * hfin + (tfin_top - tfin_base) * (tfin_top - tfin_base) / 4.0) + tfin_top;
+                Cins = Weff_UFCM * epsrox * `EPS0 / eot;
+                Ach = hfin * (tfin_top + tfin_base) / 2.0;
+            end
+        end
+        // Quadruple gate
+        2: begin
+            if (tfin_top == 0.0 || tfin_base == 0.0) begin
+                Weff_UFCM = 2.0 * hfin + 2.0 * tfin;
+                Cins = Weff_UFCM * epsrox * `EPS0 / eot;
+                Ach = hfin * tfin;
+            end else begin
+                Weff_UFCM = 2.0 * sqrt(hfin * hfin + (tfin_top - tfin_base) * (tfin_top - tfin_base) / 4.0) + tfin_top + tfin_base;
+                Cins = Weff_UFCM * epsrox * `EPS0 / eot;
+                Ach = hfin * (tfin_top + tfin_base) / 2.0;
+            end
+            WeffB = tfin_base;
+        end
+        // Cylindrical gate
+        3: begin
+            Weff_UFCM = `M_PI * dia;
+            Cins = 2.0 * `M_PI * epsrox * `EPS0 / llnf(1.0 + 2.0 * eot / dia);
+            Ach = `M_PI * dia * dia / 4.0;
+            WeffB = dia;
+        end
+        // Unified model
+        4: begin
+            Weff_UFCM = w_ufcm;
+            Cins = cins_ufcm;
+            Ach = ach_ufcm;
+        end
+        // Gate-All-Around FET model
+        5: begin
+            Weff1 = 2 * (WGAAeff + tgaa) + dws1;
+            Ach1 = WGAAeff * tgaa + dach1;
+            Weff_UFCM = Weff1;
+            Ach = Ach1;
+            if (ngaa > 1) begin
+                Weff2 = 2 * (WGAAeff + tgaa) + dws2;
+                Ach2 = WGAAeff * tgaa + dach2;
+                Weff_UFCM = Weff1 + Weff2;
+                Ach = Ach1 + Ach2;
+            end
+            if (ngaa > 2) begin
+                Weff3 = 2 * (WGAAeff + tgaa) + dws3;
+                Ach3 = WGAAeff * tgaa + dach3;
+                Weff_UFCM = Weff1 + Weff2 + Weff3;
+                Ach = Ach1 + Ach2 + Ach3;
+            end
+            if (ngaa > 3) begin
+                Weff4 = 2 * (WGAAeff + tgaa) + dws4;
+                Ach4 = WGAAeff * tgaa + dach4;
+                Weff_UFCM = Weff1 + Weff2 + Weff3 + Weff4;
+                Ach = Ach1 + Ach2 + Ach3 + Ach4;
+            end
+            if (ngaa > 4) begin
+                Weff5 = 2 * (WGAAeff + tgaa) + dws5;
+                Ach5 = WGAAeff * tgaa + dach5;
+                Weff_UFCM = Weff1 + Weff2 + Weff3 + Weff4 + Weff5;
+                Ach = Ach1 + Ach2 + Ach3 + Ach4 + Ach5;
+            end
+            if (ngaa > 5) begin
+                Weff6 = 2 * (WGAAeff + tgaa) + dws6;
+                Ach6 = WGAAeff * tgaa + dach6;
+                Weff_UFCM = Weff1 + Weff2 + Weff3 + Weff4 + Weff5 + Weff6;
+                Ach = Ach1 + Ach2 + Ach3 + Ach4 + Ach5 + Ach6;
+            end
+            WeffB = wgaa;
+            Cins = Weff_UFCM * epsrox * `EPS0 / eot;
+        end
+    endcase
+    rc = 2.0 * Cins / (Weff_UFCM * Weff_UFCM * epssub / Ach);
+    Qdep_ov_Cins = -`q * NBODY_i * Ach / Cins;
+
+    // Cox definition
+    cox = Cins / Weff_UFCM;
+    if (bulkmod != 0) begin
+        cox_acc = cox * eot / eotacc;
+    end
+
+    // Effective width calculation
+    Weff0 = Weff_UFCM - deltaw;
+    WeffCV0 = Weff_UFCM - deltawcv;
+    if (geomod == 5) begin
+        WeffCV_acc = Weff0 - 2 * ngaa * dwcacc;
+    end else begin
+        WeffCV_acc = Weff0;
+    end
+    if (geomod == 5) begin
+        if (bulkmod != 0) begin
+            if (WeffCV_acc <= 0.0) begin
+                $error("Fatal: WeffCV_acc = %g is not positive.", WeffCV_acc);
+                WeffCV_acc = Weff_UFCM;
+            end else if (WGAAeff1 <= 1.0e-9) begin
+                $strobe("Warning: WeffCV_acc = %g <= 1.0e-9.", WeffCV_acc);
+            end
+        end
+    end
+
+    // Redefining model parameters with limits set by instance parameters
+    deltaprsd_v = deltaprsd;
+    ef_v = ef;
+
+    // Binning equations
+    `binning(PHIG_i, phig, lphig, nphig, pphig, wphig, p2phig)
+    `binning(NGATE_i, ngate, lngate, nngate, pngate, wngate, p2ngate)
+    `binning(CIT_i, cit, lcit, ncit, pcit, wcit, p2cit)
+    `binning(CDSC_i, cdsc, lcdsc, ncdsc, pcdsc, wcdsc, p2cdsc)
+    `binning(CDSCD_i, cdscd, lcdscd, ncdscd, pcdscd, wcdscd, p2cdscd)
+    `binning(DVT0_i, dvt0, ldvt0, ndvt0, pdvt0, wdvt0, p2dvt0)
+    `binning(DVT1_i, dvt1, ldvt1, ndvt1, pdvt1, wdvt1, p2dvt1)
+    `binning(DVT1SS_i, dvt1ss, ldvt1ss, ndvt1ss, pdvt1ss, wdvt1ss, p2dvt1ss)
+    `binning(PHIN_i, phin, lphin, nphin, pphin, wphin, p2phin)
+    `binning(ETA0_i, eta0, leta0, neta0, peta0, weta0, p2eta0)
+    `binning(ETA1_i, eta1, leta1, neta1, peta1, weta1, p2eta1)
+    `binning(DSUB_i, dsub, ldsub, ndsub, pdsub, wdsub, p2dsub)
+    `binning(K1RSCE_i, k1rsce, lk1rsce, nk1rsce, pk1rsce, wk1rsce, p2k1rsce)
+    `binning(LPE0_i, lpe0, llpe0, nlpe0, plpe0, wlpe0, p2lpe0)
+    `binning(DVTSHIFT_i, dvtshift, ldvtshift, ndvtshift, pdvtshift, wdvtshift, p2dvtshift)
+    `binning(K0_i, k0, lk0, nk0, pk0, wk0, p2k0)
+    `binning(K01_i, k01, lk01, nk01, pk01, wk01, p2k01)
+    `binning(K0SI_i, k0si, lk0si, nk0si, pk0si, wk0si, p2k0si)
+    `binning(K0SI1_i, k0si1, lk0si1, nk0si1, pk0si1, wk0si1, p2k0si1)
+    `binning(K2SI_i, k2si, lk2si, nk2si, pk2si, wk2si, p2k2si)
+    `binning(K2SI1_i, k2si1, lk2si1, nk2si1, pk2si1, wk2si1, p2k2si1)
+    `binning(K0SISAT_i, k0sisat, lk0sisat, nk0sisat, pk0sisat, wk0sisat, p2k0sisat)
+    `binning(K0SISAT1_i, k0sisat1, lk0sisat1, nk0sisat1, pk0sisat1, wk0sisat1, p2k0sisat1)
+    `binning(K2SISAT_i, k2sisat, lk2sisat, nk2sisat, pk2sisat, wk2sisat, p2k2sisat )
+    `binning(K2SISAT1_i, k2sisat1, lk2sisat1, nk2sisat1, pk2sisat1, wk2sisat1, p2k2sisat1)
+    `binning(QMFACTOR_i, qmfactor, lqmfactor, nqmfactor, pqmfactor, wqmfactor, p2qmfactor)
+    `binning(QMTCENCV_i, qmtcencv, lqmtcencv, nqmtcencv, pqmtcencv, wqmtcencv, p2qmtcencv)
+    `binning(QMTCENCVA_i, qmtcencva, lqmtcencva, nqmtcencva, pqmtcencva, wqmtcencva, p2qmtcencva)
+    `binning(PQM_i, pqm, lpqm, npqm, ppqm, wpqm, p2pqm)
+    `binning(VSAT_i, vsat, lvsat, nvsat, pvsat, wvsat, p2vsat)
+    `binning(VSAT1_i, vsat1, lvsat1, nvsat1, pvsat1, wvsat1, p2vsat1)
+    `binning(VSATCV_i, vsatcv, lvsatcv, nvsatcv, pvsatcv, wvsatcv, p2vsatcv)
+    `binning(ASAT_i, asat, lasat, nasat, pasat, wasat, p2asat)
+    `binning(DELTAVSAT_i, deltavsat, ldeltavsat, ndeltavsat, pdeltavsat, wdeltavsat, p2deltavsat)
+    `binning(PSAT_i, psat, lpsat, npsat, ppsat, wpsat, p2psat)
+    `binning(DELTAVSATCV_i, deltavsatcv, ldeltavsatcv, ndeltavsatcv, pdeltavsatcv, wdeltavsatcv, p2deltavsatcv)
+    `binning(PSATCV_i, psatcv, lpsatcv, npsatcv, ppsatcv, wpsatcv, p2psatcv)
+    `binning(KSATIV_i, ksativ, lksativ, nksativ, pksativ, wksativ, p2ksativ)
+    `binning(MEXP_i, mexp, lmexp, nmexp, pmexp, wmexp, p2mexp)
+    `binning(PTWG_i, ptwg, lptwg, nptwg, pptwg, wptwg, p2ptwg)
+    `binning(U0_i, u0, lu0, nu0, pu0, wu0, p2u0)
+    `binning(ETAMOB_i, etamob, letamob, netamob, petamob, wetamob, p2etamob)
+    `binning(UP_i, up, lup, nup, pup, wup, p2up)
+    `binning(UA_i, ua, lua, nua, pua, wua, p2ua)
+    `binning(EU_i, eu, leu, neu, peu, weu, p2eu)
+    `binning(UD_i, ud, lud, nud, pud, wud, p2ud)
+    `binning(UCS_i, ucs, lucs, nucs, pucs, wucs, p2ucs)
+    `binning(UDS_i, uds, luds, nuds, puds, wuds, p2uds)
+    `binning(UDS1_i, uds1, luds1, nuds1, puds1, wuds1, p2uds1)
+    `binning(UDD_i, udd, ludd, nudd, pudd, wudd, p2udd)
+    `binning(UDD1_i, udd1, ludd1, nudd1, pudd1, wudd1, p2udd1)
+    `binning(PCLM_i, pclm, lpclm, npclm, ppclm, wpclm, p2pclm)
+    `binning(PCLMG_i, pclmg, lpclmg, npclmg, ppclmg, wpclmg, p2pclmg)
+    `binning(PCLMCV_i, pclmcv, lpclmcv, npclmcv, ppclmcv, wpclmcv, p2pclmcv)
+    `binning(A1_i, a1, la1, na1, pa1, wa1, p2a1)
+    `binning(A11_i, a11, la11, na11, pa11, wa11, p2a11)
+    `binning(A2_i, a2, la2, na2, pa2, wa2, p2a2)
+    `binning(A21_i, a21, la21, na21, pa21, wa21, p2a21)
+    `binning(RDSW_i, rdsw, lrdsw, nrdsw, prdsw, wrdsw, p2rdsw)
+    `binning(RSW_i, rsw, lrsw, nrsw, prsw, wrsw, p2rsw)
+    `binning(RDW_i, rdw, lrdw, nrdw, prdw, wrdw, p2rdw)
+    `binning(PRWGD_i, prwgd, lprwgd, nprwgd, pprwgd, wprwgd, p2prwgd)
+    `binning(PRWGS_i, prwgs, lprwgs, nprwgs, pprwgs, wprwgs, p2prwgs)
+    `binning(WR_i, wr, lwr, nwr, pwr, wwr, p2wr)
+    `binning(PDIBL1_i, pdibl1, lpdibl1, npdibl1, ppdibl1, wpdibl1, p2pdibl1)
+    `binning(PDIBL2_i, pdibl2, lpdibl2, npdibl2, ppdibl2, wpdibl2, p2pdibl2)
+    `binning(DROUT_i, drout, ldrout, ndrout, pdrout, wdrout, p2drout)
+    `binning(PVAG_i, pvag, lpvag, npvag, ppvag, wpvag, p2pvag)
+    `binning(AIGBINV_i, aigbinv, laigbinv, naigbinv, paigbinv, waigbinv, p2aigbinv)
+    `binning(AIGBINV1_i, aigbinv1, laigbinv1, naigbinv1, paigbinv1, waigbinv1, p2aigbinv1)
+    `binning(BIGBINV_i, bigbinv, lbigbinv, nbigbinv, pbigbinv, wbigbinv, p2bigbinv)
+    `binning(CIGBINV_i, cigbinv, lcigbinv, ncigbinv, pcigbinv, wcigbinv, p2cigbinv)
+    `binning(EIGBINV_i, eigbinv, leigbinv, neigbinv, peigbinv, weigbinv, p2eigbinv)
+    `binning(NIGBINV_i, nigbinv, lnigbinv, nnigbinv, pnigbinv, wnigbinv, p2nigbinv)
+    `binning(AIGBACC_i, aigbacc, laigbacc, naigbacc, paigbacc, waigbacc, p2aigbacc)
+    `binning(AIGBACC1_i, aigbacc1, laigbacc1, naigbacc1, paigbacc1, waigbacc1, p2aigbacc1)
+    `binning(BIGBACC_i, bigbacc, lbigbacc, nbigbacc, pbigbacc, wbigbacc, p2bigbacc)
+    `binning(CIGBACC_i, cigbacc, lcigbacc, ncigbacc, pcigbacc, wcigbacc, p2cigbacc)
+    `binning(NIGBACC_i, nigbacc, lnigbacc, nnigbacc, pnigbacc, wnigbacc, p2nigbacc)
+    `binning(AIGC_i, aigc, laigc, naigc, paigc, waigc, p2aigc)
+    `binning(AIGC1_i, aigc1, laigc1, naigc1, paigc1, waigc1, p2aigc1)
+    `binning(BIGC_i, bigc, lbigc, nbigc, pbigc, wbigc, p2bigc)
+    `binning(CIGC_i, cigc, lcigc, ncigc, pcigc, wcigc, p2cigc)
+    `binning(PIGCD_i, pigcd, lpigcd, npigcd, ppigcd, wpigcd, p2pigcd)
+    `binning(AIGS_i, aigs, laigs, naigs, paigs, waigs, p2aigs)
+    `binning(AIGS1_i, aigs1, laigs1, naigs1, paigs1, waigs1, p2aigs1)
+    `binning(BIGS_i, bigs, lbigs, nbigs, pbigs, wbigs, p2bigs)
+    `binning(CIGS_i, cigs, lcigs, ncigs, pcigs, wcigs, p2cigs)
+    `binning(AIGD_i, aigd, laigd, naigd, paigd, waigd, p2aigd)
+    `binning(AIGD1_i, aigd1, laigd1, naigd1, paigd1, waigd1, p2aigd1)
+    `binning(BIGD_i, bigd, lbigd, nbigd, pbigd, wbigd, p2bigd)
+    `binning(CIGD_i, cigd, lcigd, ncigd, pcigd, wcigd, p2cigd)
+    `binning(NTOX_i, ntox, lntox, nntox, pntox, wntox, p2ntox)
+    `binning(POXEDGE_i, poxedge, lpoxedge, npoxedge, ppoxedge, wpoxedge, p2poxedge)
+    `binning(AGIDL_i, agidl, lagidl, nagidl, pagidl, wagidl, p2agidl)
+    `binning(BGIDL_i, bgidl, lbgidl, nbgidl, pbgidl, wbgidl, p2bgidl)
+    `binning(CGIDL_i, cgidl, lcgidl, ncgidl, pcgidl, wcgidl, p2cgidl)
+    `binning(EGIDL_i, egidl, legidl, negidl, pegidl, wegidl, p2egidl)
+    `binning(PGIDL_i, pgidl, lpgidl, npgidl, ppgidl, wpgidl, p2pgidl)
+    `binning(ATATD_i, atatd, latatd, natatd, patatd, watatd, p2atatd)
+    `binning(BTATD_i, btatd, lbtatd, nbtatd, pbtatd, wbtatd, p2btatd)
+    `binning(CTATD_i, ctatd, lctatd, nctatd, pctatd, wctatd, p2ctatd)
+    `binning(DTATD_i, dtatd, ldtatd, ndtatd, pdtatd, wdtatd, p2dtatd)
+    `binning(AGISL_i, agisl, lagisl, nagisl, pagisl, wagisl, p2agisl)
+    `binning(BGISL_i, bgisl, lbgisl, nbgisl, pbgisl, wbgisl, p2bgisl)
+    `binning(CGISL_i, cgisl, lcgisl, ncgisl, pcgisl, wcgisl, p2cgisl)
+    `binning(EGISL_i, egisl, legisl, negisl, pegisl, wegisl, p2egisl)
+    `binning(PGISL_i, pgisl, lpgisl, npgisl, ppgisl, wpgisl, p2pgisl)
+    `binning(ATATS_i, atats, latats, natats, patats, watats, p2atats)
+    `binning(BTATS_i, btats, lbtats, nbtats, pbtats, wbtats, p2btats)
+    `binning(CTATS_i, ctats, lctats, nctats, pctats, wctats, p2ctats)
+    `binning(DTATS_i, dtats, ldtats, ndtats, pdtats, wdtats, p2dtats)
+    `binning(ALPHA0_i, alpha0, lalpha0, nalpha0, palpha0, walpha0, p2alpha0)
+    `binning(ALPHA1_i, alpha1, lalpha1, nalpha1, palpha1, walpha1, p2alpha1)
+    `binning(ALPHAII0_i, alphaii0, lalphaii0, nalphaii0, palphaii0, walphaii0, p2alphaii0)
+    `binning(ALPHAII1_i, alphaii1, lalphaii1, nalphaii1, palphaii1, walphaii1, p2alphaii1)
+    `binning(BETA0_i, beta0, lbeta0, nbeta0, pbeta0, wbeta0, p2beta0)
+    `binning(BETAII0_i, betaii0, lbetaii0, nbetaii0, pbetaii0, wbetaii0, p2betaii0)
+    `binning(BETAII1_i, betaii1, lbetaii1, nbetaii1, pbetaii1, wbetaii1, p2betaii1)
+    `binning(BETAII2_i, betaii2, lbetaii2, nbetaii2, pbetaii2, wbetaii2, p2betaii2)
+    `binning(ESATII_i, esatii, lesatii, nesatii, pesatii, wesatii, p2esatii)
+    `binning(LII_i, lii, llii, nlii, plii, wlii, p2lii)
+    `binning(SII0_i, sii0, lsii0, nsii0, psii0, wsii0, p2sii0)
+    `binning(SII1_i, sii1, lsii1, nsii1, psii1, wsii1, p2sii1)
+    `binning(SII2_i, sii2, lsii2, nsii2, psii2, wsii2, p2sii2)
+    `binning(SIID_i, siid, lsiid, nsiid, psiid, wsiid, p2siid)
+    `binning(TII_i, tii, ltii, ntii, ptii, wtii, p2tii)
+    `binning(CFS_i, cfs, lcfs, ncfs, pcfs, wcfs, p2cfs)
+    `binning(CFD_i, cfd, lcfd, ncfd, pcfd, wcfd, p2cfd)
+    `binning(COVS_i, covs, lcovs, ncovs, pcovs, wcovs, p2covs)
+    `binning(COVD_i, covd, lcovd, ncovd, pcovd, wcovd, p2covd)
+    `binning(CGSL_i, cgsl, lcgsl, ncgsl, pcgsl, wcgsl, p2cgsl)
+    `binning(CGDL_i, cgdl, lcgdl, ncgdl, pcgdl, wcgdl, p2cgdl)
+    `binning(CGBL_i, cgbl, lcgbl, ncgbl, pcgbl, wcgbl, p2cgbl)
+    `binning(CKAPPAS_i, ckappas, lckappas, nckappas, pckappas, wckappas, p2ckappas)
+    `binning(CKAPPAD_i, ckappad, lckappad, nckappad, pckappad, wckappad, p2ckappad)
+    `binning(CKAPPAB_i, ckappab, lckappab, nckappab, pckappab, wckappab, p2ckappab)
+    `binning(NTGEN_i, ntgen, lntgen, nntgen, pntgen, wntgen, p2ntgen)
+    `binning(AIGEN_i, aigen, laigen, naigen, paigen, waigen, p2aigen)
+    `binning(BIGEN_i, bigen, lbigen, nbigen, pbigen, wbigen, p2bigen)
+    `binning(UTE_i, ute, lute, nute, pute, wute, p2ute)
+    `binning(UTE1_i, ute1, lute1, nute1, pute1, wute1, p2ute1)
+    `binning(UTL_i, utl, lutl, nutl, putl, wutl, p2utl)
+    `binning(EMOBT_i, emobt, lemobt, nemobt, pemobt, wemobt, p2emobt)
+    `binning(UA1_i, ua1, lua1, nua1, pua1, wua1, p2ua1)
+    `binning(UA2_i, ua2, lua2, nua2, pua2, wua2, p2ua2)
+    `binning(EU1_i, eu1, leu1, neu1, peu1, weu1, p2eu1)
+    `binning(UD1_i, ud1, lud1, nud1, pud1, wud1, p2ud1)
+    `binning(UD2_i, ud2, lud2, nud2, pud2, wud2, p2ud2)
+    `binning(UCSTE_i, ucste, lucste, nucste, pucste, wucste, p2ucste)
+    `binning(UCSTE1_i, ucste1, lucste1, nucste1, pucste1, wucste1, p2ucste1)
+    `binning(PTWGT_i, ptwgt, lptwgt, nptwgt, pptwgt, wptwgt, p2ptwgt)
+    `binning(AT_i, at, lat, nat, pat, wat, p2at)
+    `binning(ATCV_i, atcv, latcv, natcv, patcv, watcv, p2atcv)
+    `binning(PRT_i, prt, lprt, nprt, pprt, wprt, p2prt)
+    `binning(PRT1_i, prt1, lprt1, nprt1, pprt1, wprt1, p2prt1)
+    `binning(TR0_i, tr0, ltr0, ntr0, ptr0, wtr0, p2tr0)
+    `binning(SPRT_i, sprt, lsprt, nsprt, psprt, wsprt, p2sprt)
+    `binning(KT1_i, kt1, lkt1, nkt1, pkt1, wkt1, p2kt1)
+    `binning(TSS_i, tss, ltss, ntss, ptss, wtss, p2tss)
+    `binning(IIT_i, iit, liit, niit, piit, wiit, p2iit)
+    `binning(TGIDL_i, tgidl, ltgidl, ntgidl, ptgidl, wtgidl, p2tgidl)
+    `binning(TTAT_i, ttat, lttat, nttat, pttat, wttat, p2ttat)
+    `binning(IGT_i, igt, ligt, nigt, pigt, wigt, p2igt)
+    `binning(DVTP0_i, dvtp0, ldvtp0, ndvtp0, pdvtp0, wdvtp0, p2dvtp0)
+    `binning(DVTP1_i, dvtp1, ldvtp1, ndvtp1, pdvtp1, wdvtp1, p2dvtp1)
+    `binning(NOIA2_i, noia2, lnoia2, nnoia2, pnoia2, wnoia2, p2noia2)
+    `binning(QSREF_i, qsref, lqsref, nqsref, pqsref, wqsref, p2qsref)
+    `binning(MPOWER_i, mpower, lmpower, nmpower, pmpower, wmpower, p2mpower)
+    if (bulkmod != 0) begin
+        `binning(PHIBE_i, phibe, lphibe, nphibe, pphibe, wphibe, p2phibe)
+        `binning(K1_i, k1, lk1, nk1, pk1, wk1, p2k1)
+        `binning(K11_i, k11, lk11, nk11, pk11, wk11, p2k11)
+        `binning(UC_i, uc, luc, nuc, puc, wuc, p2uc)
+        `binning(UC1_i, uc1, luc1, nuc1, puc1, wuc1, p2uc1)
+        if (bulkmod == 2) begin
+            `binning(K2_i, k2, lk2, nk2, pk2, wk2, p2k2)
+            `binning(K21_i, k21, lk21, nk21, pk21, wk21, p2k21)
+            `binning(K2SAT_i, k2sat, lk2sat, nk2sat, pk2sat, wk2sat, p2k2sat)
+            `binning(K2SAT1_i, k2sat1, lk2sat1, nk2sat1, pk2sat1, wk2sat1, p2k2sat1)
+        end
+        if ((gidlmod == 2 || gidlmod == 3) && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+            `binning(AGIDLB_i, agidlb, lagidlb, nagidlb, pagidlb, wagidlb, p2agidlb)
+            `binning(BGIDLB_i, bgidlb, lbgidlb, nbgidlb, pbgidlb, wbgidlb, p2bgidlb)
+            `binning(CGIDLB_i, cgidlb, lcgidlb, ncgidlb, pcgidlb, wcgidlb, p2cgidlb)
+            `binning(EGIDLB_i, egidlb, legidlb, negidlb, pegidlb, wegidlb, p2egidlb)
+            `binning(PGIDLB_i, pgidlb, lpgidlb, npgidlb, ppgidlb, wpgidlb, p2pgidlb)
+            `binning(AGISLB_i, agislb, lagislb, nagislb, pagislb, wagislb, p2agislb)
+            `binning(BGISLB_i, bgislb, lbgislb, nbgislb, pbgislb, wbgislb, p2bgislb)
+            `binning(CGISLB_i, cgislb, lcgislb, ncgislb, pcgislb, wcgislb, p2cgislb)
+            `binning(EGISLB_i, egislb, legislb, negislb, pegislb, wegislb, p2egislb)
+            `binning(PGISLB_i, pgislb, lpgislb, npgislb, ppgislb, wpgislb, p2pgislb)
+        end
+    end
+    if (asymmod != 0) begin
+        `binning(CDSCDR_i, cdscdr, lcdscdr, ncdscdr, pcdscdr, wcdscdr, p2cdscdr)
+        `binning(CITR_i, citr, lcitr, ncitr, pcitr, wcitr, p2citr)
+        `binning(ETA0R_i, eta0r, leta0r, neta0r, peta0r, weta0r, p2eta0r)
+        `binning(VSAT1R_i, vsat1r, lvsat1r, nvsat1r, pvsat1r, wvsat1r, p2vsat1r)
+        `binning(MEXPR_i, mexpr, lmexpr, nmexpr, pmexpr, wmexpr, p2mexpr)
+        `binning(PTWGR_i, ptwgr, lptwgr, nptwgr, pptwgr, wptwgr, p2ptwgr)
+        `binning(PDIBL1R_i, pdibl1r, lpdibl1r, npdibl1r, ppdibl1r, wpdibl1r, p2pdibl1r)
+        `binning(PDIBL2R_i, pdibl2r, lpdibl2r, npdibl2r, ppdibl2r, wpdibl2r, p2pdibl2r)
+        `binning(PCLMR_i, pclmr, lpclmr, npclmr, ppclmr, wpclmr, p2pclmr)
+        `binning(DVTSHIFTR_i, dvtshiftr, ldvtshiftr, ndvtshiftr, pdvtshiftr, wdvtshiftr, p2dvtshiftr)
+        `binning(VSATR_i, vsatr, lvsatr, nvsatr, pvsatr, wvsatr, p2vsatr)
+        `binning(KSATIVR_i, ksativr, lksativr, nksativr, pksativr, wksativr, p2ksativr)
+        `binning(U0R_i, u0r, lu0r, nu0r, pu0r, wu0r, p2u0r)
+        `binning(UAR_i, uar, luar, nuar, puar, wuar, p2uar)
+        `binning(UPR_i, upr, lupr, nupr, pupr, wupr, p2upr)
+        `binning(EUR_i, eur, leur, neur, peur, weur, p2eur)
+        `binning(UDR_i, udr, ludr, nudr, pudr, wudr, p2udr)
+        `binning(UTER_i, uter, luter, nuter, puter, wuter, p2uter)
+        `binning(UTLR_i, utlr, lutlr, nutlr, putlr, wutlr, p2utlr)
+        `binning(UA1R_i, ua1r, lua1r, nua1r, pua1r, wua1r, p2ua1r)
+        `binning(UD1R_i, ud1r, lud1r, nud1r, pud1r, wud1r, p2ud1r)
+        `binning(ATR_i, atr, latr, natr, patr, watr, p2atr)
+        if (bulkmod != 0) begin
+            `binning(UCR_i, ucr, lucr, nucr, pucr, wucr, p2ucr)
+            `binning(UC1R_i, uc1r, luc1r, nuc1r, puc1r, wuc1r, p2uc1r)
+        end
+    end
+    if (cvmod == 1) begin
+        `binning(U0CV_i, u0cv, lu0cv, nu0cv, pu0cv, wu0cv, p2u0cv)
+        `nfin_scaling(U0CV_i, u0n1cv, u0n2cv)
+        `binning(UACV_i, uacv, luacv, nuacv, puacv, wuacv, p2uacv)
+        `binning(UDCV_i, udcv, ludcv, nudcv, pudcv, wudcv, p2udcv)
+        `binning(UTECV_i, utecv, lutecv, nutecv, putecv, wutecv, p2utecv)
+        `binning(UTE1CV_i, ute1cv, lute1cv, nute1cv, pute1cv, wute1cv, p2ute1cv)
+        `binning(UTLCV_i, utlcv, lutlcv, nutlcv, putlcv, wutlcv, p2utlcv)
+        `binning(UA1CV_i, ua1cv, lua1cv, nua1cv, pua1cv, wua1cv, p2ua1cv)
+        `binning(UA2CV_i, ua2cv, lua2cv, nua2cv, pua2cv, wua2cv, p2ua2cv)
+        `binning(UD1CV_i, ud1cv, lud1cv, nud1cv, pud1cv, wud1cv, p2ud1cv)
+        `binning(UD2CV_i, ud2cv, lud2cv, nud2cv, pud2cv, wud2cv, p2ud2cv)
+        if (bulkmod != 0) begin
+            `binning(UCCV_i, uccv, luccv, nuccv, puccv, wuccv, p2uccv)
+            `binning(UC1CV_i, uc1cv, luc1cv, nuc1cv, puc1cv, wuc1cv, p2uc1cv)
+        end
+        `binning(ETA0CV_i, eta0cv, leta0cv, neta0cv, peta0cv, weta0cv, p2eta0cv)
+        `nfin_scaling(ETA0CV_i, eta0n1cv, eta0n2cv)
+        if (nfinnom != 0.0) begin
+            `nfinnom_scaling(U0CV_i, u0ltcv)
+            `nfinnom_scaling(ETA0CV_i, eta0ltcv)
+        end
+    end
+    if (nqsmod != 0 && xrcrg1 != 0.0) begin
+        `binning(XRCRG1_i, xrcrg1, lxrcrg1, nxrcrg1, pxrcrg1, wxrcrg1, p2xrcrg1)
+        `binning(XRCRG2_i, xrcrg2, lxrcrg2, nxrcrg2, pxrcrg2, wxrcrg2, p2xrcrg2)
+    end
+    if (subbandmod == 1) begin
+        `binning(DIMENSION1_i, dimension1, ldimension1, ndimension1, pdimension1, wdimension1, p2dimension1)
+        `binning(DIMENSION2_i, dimension2, ldimension2, ndimension2, pdimension2, wdimension2, p2dimension2)
+        `binning(DIMENSION3_i, dimension3, ldimension3, ndimension3, pdimension3, wdimension3, p2dimension3)
+        `binning(SSP1_i, ssp1, lssp1, nssp1, pssp1, wssp1, p2ssp1)
+        `binning(SSP2_i, ssp2, lssp2, nssp2, pssp2, wssp2, p2ssp2)
+        `binning(SSP3_i, ssp3, lssp3, nssp3, pssp3, wssp3, p2ssp3)
+        `binning(E2NOM_i, e2nom, le2nom, ne2nom, pe2nom, we2nom, p2e2nom)
+        `binning(E3NOM_i, e3nom, le3nom, ne3nom, pe3nom, we3nom, p2e3nom)
+        `binning(MFQ1NOM_i, mfq1nom, lmfq1nom, nmfq1nom, pmfq1nom, wmfq1nom, p2mfq1nom)
+        `binning(MFQ2NOM_i, mfq2nom, lmfq2nom, nmfq2nom, pmfq2nom, wmfq2nom, p2mfq2nom)
+        `binning(MFQ3NOM_i, mfq3nom, lmfq3nom, nmfq3nom, pmfq3nom, wmfq3nom, p2mfq3nom)
+    end
+
+    // nfin scaling
+    `nfin_scaling(PHIG_i, phign1, phign2)
+    `nfin_scaling(ETA0_i, eta0n1, eta0n2)
+    `nfin_scaling(CDSC_i, cdscn1, cdscn2)
+    `nfin_scaling(CDSCD_i, cdscdn1, cdscdn2)
+    `nfin_scaling(CDSCDR_i, cdscdrn1, cdscdrn2)
+    `nfin_scaling(VSAT_i, vsatn1, vsatn2)
+    `nfin_scaling(VSAT1_i, vsat1n1, vsat1n2)
+    `nfin_scaling(VSAT1R_i, vsat1rn1, vsat1rn2)
+    `nfin_scaling(U0_i, u0n1, u0n2)
+    `nfin_scaling(U0R_i, u0n1r, u0n2r)
+    if (nfinnom != 0.0) begin
+        `nfinnom_scaling(PHIG_i, phiglt)
+        `nfinnom_scaling(ETA0_i, eta0lt)
+        `nfinnom_scaling(U0_i, u0lt)
+    end
+
+    // Length scaling
+    Leff_ln = ln(Leff);
+    PHIG_i = PHIG_i + phigl * Leff;
+    PQM_i= PQM_i + pqml * Leff;
+    if (lpa > 0.0) begin
+        U0_i = U0_i * (1.0 - UP_i * exp(-lpa * Leff_ln));
+    end else begin
+        U0_i = U0_i * (1.0 - UP_i);
+    end
+    `length_scaling(UA_i, aua, bua)
+    `length_scaling(UD_i, aud, bud)
+    `length_scaling(EU_i, aeu, beu)
+    if (asymmod != 0) begin
+        `length_scaling(UAR_i, auar, buar)
+        `length_scaling(UDR_i, audr, budr)
+        `length_scaling(EUR_i, aeur, beur)
+        if (lpar > 0.0) begin
+            U0R_i = U0R_i * (1.0 - UPR_i * exp(-lpar * Leff_ln));
+        end else begin
+            U0R_i = U0R_i * (1.0 - UPR_i);
+        end
+    end
+    if (rdsmod == 1) begin
+        `length_scaling(RSW_i, arsw, brsw)
+        `length_scaling(RDW_i, ardw, brdw)
+    end else begin
+        `length_scaling(RDSW_i, ardsw, brdsw)
+    end
+    `length_scaling(PCLM_i, apclm, bpclm)
+    if (asymmod != 0) begin
+        PCLMR_i = PCLMR_i + apclmr * exp(-bpclmr * Leff_ln);
+    end
+    MEXP_i = MEXP_i + amexp * exp(-bmexp * Leff_ln);
+    if (asymmod != 0) begin
+        MEXPR_i = MEXPR_i + amexpr * exp(-bmexpr * Leff_ln);
+    end
+    `length_scaling(PTWG_i, aptwg, bptwg)
+    if (asymmod != 0) begin
+        `length_scaling(PTWGR_i, aptwg, bptwg)
+    end
+    `length_scaling(VSAT_i, avsat, bvsat)
+    `length_scaling(VSAT1_i, avsat1, bvsat1)
+    if (asymmod != 0) begin
+        `length_scaling(VSAT1R_i, avsat1, bvsat1)
+    end
+    `length_scaling(PSAT_i, apsat, bpsat)
+    `length_scaling_CV(PSATCV_i, apsatcv, bpsatcv)
+    `length_scaling_CV(VSATCV_i, avsatcv, bvsatcv)
+    DVTP0_i = DVTP0_i + advtp0 * lexp(-Leff / bdvtp0);
+    DVTP1_i = DVTP1_i + advtp1 * lexp(-Leff / bdvtp1);
+    // Geometric scaling for Toxeff / charge centroid Tcen
+    if (QMTCENCV_i > 0.0 || QMTCENCVA_i > 0.0) begin
+        MTcen = 1.0 + aqmtcen * lexp(-(2.0 * Ach / Weff_UFCM) / bqmtcen);
+        Tcen0 = (2.0 * Ach / Weff_UFCM) * MTcen;
+    end
+
+    // Parameter checking
+    `include "bsimcmg_checking.include"
+
+    // Self-heating
+    if (shmod != 0 && rth0 > 0.0) begin
+        if (bshexp != 0.0) begin
+            T1 = wth0 * pow(nf, bshexp);
+        end else begin
+            T1 = wth0;
+        end
+        if (ashexp != 0.0) begin
+            T2 = ash * fpitch * pow(NFINtotal, ashexp);
+        end else begin
+            T2 = ash * fpitch;
+        end
+        if (geomod == 5) begin
+            if (cshexp != 0.0) begin
+                T3 = csh * nf * wgaa * pow(ngaa, cshexp);
+            end else begin
+                T3 = csh * nf * wgaa;
+            end
+        end else begin
+            T3 = 0;
+        end
+        gth = (T1 + T2 + T3) / rth0;
+        cth = cth0 * (T1 + T2 + T3);
+    end
+
+    // Gate electrode resistance
+    if (rgatemod != 0) begin
+        Rgeltd = (rgext / ngcon + (rgfin * nfin) / (ngcon == 2 ? 12.0 : 3.0)) / nf;
+        ggeltd = 1.0 / max(1.0e-3, Rgeltd);
+        if (rgatemod == 2) begin
+            ggint = 1.0 / max(1.0e-3, rgint);
+            ggp = 1.0 / max(1.0e-3, rgp);
+        end
+    end
+
+    // Geometry-dependent source/drain resistances
+    if (rgeomod == 0) begin
+        RSourceGeo = rshs * nrs;
+        RDrainGeo = rshd * nrd;
+    end else begin
+        // Area and perimeter calculation
+        if (hepi > 0.0) begin
+            Arsd = fpitch * hfin + (tfin + (fpitch - tfin) * cratio) * hepi;
+        end else begin
+            Arsd = fpitch * max(1.0e-9, hfin + hepi);
+        end
+        Prsd = fpitch + deltaprsd_v;
+        // Resistivity calculation
+        if ($param_given(rhorsd)) begin
+            rhorsd_v = rhorsd;
+        end else begin
+            mu_max = (type == `ntype) ? 1417.0 : 470.5;
+            if (type == `ntype) begin
+                T0 = pow((nsd / 9.68e22), 0.68);
+                T1 = 3.43e26 / nsd;
+                mu_rsd = (52.2 + (mu_max - 52.2) / (1.0 + T0) - 43.4 / (1.0 + T1 * T1)) * 1.0e-4;
+            end else begin
+                T0 = pow((nsd / 2.23e22), 0.719);
+                T1 = 6.10e26 / nsd;
+                mu_rsd = (44.9 + (mu_max - 44.9) / (1.0 + T0) - 29.0 / (1.0 + T1 * T1)) * 1.0e-4;
+            end
+            rhorsd_v = 1.0 / (`q * nsd * mu_rsd);
+        end
+        // Component: spreading resistance
+        thetarsp = 55.0 * `M_PI / 180.0;
+        afin = min(Arsd, max(1.0e-18, tfin * (hfin + min(0.0, hepi))));
+        Rsp = rhorsd_v / tan(thetarsp) / (sqrt(`M_PI) * nfin) * (1.0 / sqrt(afin) - 2.0 / sqrt(Arsd) + sqrt(afin / (Arsd * Arsd)));
+        // Component: contact resistance
+        arsd_total = Arsd * nfin + arsdend;
+        prsd_total = Prsd * nfin + prsdend;
+        lt = sqrt(rhoc * arsd_total / (rhorsd_v * prsd_total));
+        alpha = lrsd / lt;
+        T0 = lexp(2.0 * alpha);
+        if (sdterm == 1.0) begin
+            eta = rhorsd_v * lt / rhoc;
+            T1 = T0 * (1.0 + eta);
+            T2 = T1 + 1.0 - eta;
+            T3 = T1 - 1.0 + eta;
+        end else begin
+            T2 = T0 + 1.0;
+            T3 = T0 - 1.0;
+        end
+        RrsdTML = rhorsd_v * lt * T2 / (arsd_total * T3);
+        if (hepi < -1.0e-10) begin
+            Rrsdside = rhoc / (-hepi * tfin * nfin);
+            Rrsd = (RrsdTML + Rsp) * Rrsdside / ((RrsdTML + Rsp) + Rrsdside);
+        end else begin
+            Rrsd = RrsdTML + Rsp;
+        end
+        Rdsgeo = Rrsd / nf * max(0.0, rgeoa + rgeob * tfin + rgeoc * fpitch + rgeod * lrsd + rgeoe * hepi);
+        RSourceGeo = Rdsgeo;
+        RDrainGeo = Rdsgeo;
+    end
+
+    // Clamping of source/drain resistances
+    if (rdsmod == 0) begin
+        if (RSourceGeo < minr) begin
+            RSourceGeo = 0;
+        end
+        if (RDrainGeo < minr) begin
+            RDrainGeo = 0;
+        end
+    end else begin
+        if (RSourceGeo <= minr) begin
+            RSourceGeo = minr;
+        end
+        if (RDrainGeo <= minr) begin
+            RDrainGeo = minr;
+        end
+    end
+    if (cgeomod != 1) begin
+        if ($param_given(cgso)) begin
+            CGSO_i = cgso;
+        end else begin
+            if ($param_given(dlc) && dlc > 0.0) begin
+                CGSO_i = max(0.0, dlc * cox - CGSL_i);
+            end else begin
+                if (cgeomod == 3) begin
+                    CGSO_i = 0.3 * wgaa * cox;
+                end else begin
+                    CGSO_i = 0.3 * tfin * cox;
+                end
+            end
+        end
+        if ($param_given(cgdo)) begin
+            CGDO_i = cgdo;
+        end else begin
+            if ($param_given(dlc) && dlc > 0.0) begin
+                CGDO_i = max(0.0, dlc * cox - CGDL_i);
+            end else begin
+                if (cgeomod == 3) begin
+                    CGDO_i = 0.3 * wgaa * cox;
+                end else begin
+                    CGDO_i = 0.3 * tfin * cox;
+                end
+            end
+        end
+    end
+
+    // Parasitic source/drain-to-gate fringe capacitance
+    if (cgeomod == 2) begin
+        Hg = tgate + tmask;
+        Trsd = 0.5 * (fpitch - tfin);
+        Wg = max(0.0, Trsd - toxp);
+        Hrsd = max(0.0, hepi + tsili);
+        // Top component
+        if (tmask > 0.0) begin
+            T0 = 3.467e-11 * llnf(1.0e-7 * epsrsp / (3.9 * lsp));
+            T1 = 0.942 * Hrsd * epssp / lsp;
+            Cgg_top = (T0 + T1) * (tfin + (fpitch - tfin) * cratio);
+        end else begin
+            `cfringe_2d(Hg, Hrsd, tfin, 0.85, Cgg_top)
+        end
+        // Side component
+        if (tmask > 0.0) begin
+            `cfringe_2d(Wg, Trsd, hfin, 0.70, Cgg_side)
+        end else begin
+            `cfringe_2d(Wg, Trsd, hfin, 0.85, Cgg_side)
+        end
+        // Corner component
+        if (tmask > 0.0) begin
+            Acorner = 0.0;
+        end else begin
+            if (hepi > 0.0) begin
+                Acorner = (fpitch - tfin) * (hepi * cratio + tsili);
+            end else begin
+                Acorner = (fpitch - tfin) * Hrsd;
+            end
+        end
+        Ccorner = (nfin * Acorner + arsdend + asiliend) * epssp / lsp;
+        Cfr_geo = (Ccorner + Cgg_top * nfin + cgeoe * Cgg_side * nfin * 2.0) * nf;
+        Cfr_geo = Cfr_geo * max(0.0, cgeoa + cgeob * tfin + cgeoc * fpitch + cgeod * lrsd);
+    end
+    //Gate-All-Around FET fringe capacitance model
+    if (cgeomod == 3) begin
+        Hg = tgate + tmask;
+        Trsd = 0.5 * (fpitch - wgaa);
+        Wg = max(0.0, Trsd - toxp);
+        Hrsd = max(0.0, hepi + tsili);
+        Hrsd2 = 0.5 * tsus;
+        // Topmost component: topmost GAA body
+        if (tmask > 0.0) begin
+            T0 = 3.467e-11 * llnf(1.0e-7 * epsrsp / (3.9 * lsp));
+            T1 = 0.942 * Hrsd * epssp / lsp;
+            Cgg_topm = (T0 + T1) * (wgaa + (fpitch - wgaa) * cratio);
+        end else begin
+            `cfringe_2d(Hg, Hrsd, wgaa, 0.85, Cgg_topm)
+        end
+        // Top or bottom component: intermeditate GAA bodies
+        `cfringe_2d(tgate, Hrsd2, wgaa, 0.85, Cgg_tb)
+        // Topmost side component
+        if (tmask > 0.0) begin
+            `cfringe_2d(Wg, Trsd, tgaa, 0.70, Cgg_sidetopm)
+        end else begin
+            `cfringe_2d(Wg, Trsd, tgaa, 0.85, Cgg_sidetopm)
+        end
+        // Intermediate side component
+        `cfringe_2d(Wg, Trsd, tgaa, 0.85, Cgg_sidetb)
+        // Parasitic FinFET side component
+        `cfringe_2d(Wg, Trsd, hpff, 0.85, Cgg_sidepff)
+        // Topmost corner component
+        if (tmask > 0.0) begin
+            Acorner_topm  =  0.0;
+        end else begin
+            if (hepi > 0.0) begin
+                Acorner_topm = (fpitch - wgaa) * (hepi * cratio + tsili);
+            end else begin
+                Acorner_topm = (fpitch - wgaa) * Hrsd;
+            end
+        end
+        // Intermediate corner component
+        Acorner_tb = (fpitch - wgaa) * Hrsd2;
+        Ccorner = (nfin * (Acorner_topm + 2 * ngaa * Acorner_tb) + arsdend + asiliend) * epssp / lsp;
+        Cfr_geo = (Ccorner + (Cgg_topm + 2 * ngaa * Cgg_tb) * nfin + cgeoe * (Cgg_sidetopm + Cgg_sidetb * (ngaa - 1) + Cgg_sidepff) * nfin * 2.0) * nf;
+        Cfr_geo = Cfr_geo * max(0.0, cgeoa + cgeob * wgaa + cgeoc * fpitch + cgeod * lrsd);
+    end
+    // Source/gate/drain-to-substrate parasitic capacitances
+    T0 = csdesw * llnf(1.0 + hfin / eotbox);
+    csbox = cbox * aseo + T0 * max(0.0, pseo - fpitch * NFINtotal);
+    cdbox = cbox * adeo + T0 * max(0.0, pdeo - fpitch * NFINtotal);
+    if (geomod != 5) begin
+        cgbox = (cgbo * nf * ngcon + cgbn * NFINtotal) * Lg;
+    end else begin
+        cgbox = (cgbo * nf * ngcon + (cgbn + cgbw * WGAAeff) * NFINtotal) * Lg;
+    end
+
+    // Mobility degradation
+    EeffFactor = 1.0e-8 / (epsratio * eot);
+    WeffWRFactor = 1.0 / (NFINtotal * pow((Weff0 * 1.0e6), WR_i));
+    litl = sqrt(epsratio * eot * 0.5 * tfin);
+    scl = sqrt((epssub * Ach / Cins) * (1.0 + Ach * Cins / (2.0 * epssub * Weff_UFCM * Weff_UFCM)));
+    if (!$param_given(thetasce)) begin
+        tmp = DVT1_i * Leff / scl + 1.0e-6;
+        if (tmp < 40.0) begin
+            Theta_SCE = 0.5 / (cosh(tmp) - 1.0);
+        end else begin
+            Theta_SCE = lexp(-tmp);
+        end
+    end else begin
+        Theta_SCE = thetasce;
+    end
+    if (!$param_given(thetasw)) begin
+        tmp = DVT1SS_i * Leff / scl + 1.0e-6;
+        if (tmp < 40.0) begin
+            Theta_SW = 0.5 / (cosh(tmp) - 1.0);
+        end else begin
+            Theta_SW = lexp(-tmp);
+        end
+    end else begin
+        Theta_SW = thetasw;
+    end
+    if (!$param_given(thetadibl)) begin
+        tmp = DSUB_i * Leff / scl + 1.0e-6;
+        if (tmp < 40.0) begin
+            Theta_DIBL = 0.5 / (cosh(tmp) - 1.0);
+        end else begin
+            Theta_DIBL = lexp(-tmp);
+        end
+    end else begin
+        Theta_DIBL = thetadibl;
+    end
+    Theta_RSCE = sqrt(1.0 + LPE0_i / Leff) - 1.0;
+    tmp = DSUB_i * Leff / scl + 1.0e-6;
+    if (tmp < 40.0) begin
+        Theta_DITS = 1.0 / max((1.0 + dvtp2 * (cosh(tmp) - 2.0)), 1.0e-6);
+    end else begin
+        Theta_DITS = lexp(-tmp) / max((dvtp2 + lexp(-tmp)), 1.0e-6);
+    end
+    qbs = `q * NBODY_i * Ach / Cins;
+
+    // Gate current
+    if (type == `ntype) begin
+        Aechvb = 4.97232e-7;
+        Bechvb = 7.45669e11;
+    end else begin
+        Aechvb = 3.42537e-7;
+        Bechvb = 1.16645e12;
+    end
+    T0 = toxg * toxg;
+    T1 = toxg * POXEDGE_i;
+    T2 = T1 * T1;
+    Toxratio = pow((toxref / toxg), NTOX_i) / T0;
+    Toxratioedge = pow((toxref / T1), NTOX_i) / T2;
+    igsd_mult0 = Weff0 * Aechvb * Toxratioedge;
+    if (tnom < -`P_CELSIUS0) begin
+        $strobe("Warning: (tnom = %g) < -`P_CELSIUS0. Set to 27 C.", tnom);
+        Tnom = `REFTEMP;
+    end else begin
+        Tnom = tnom + `CONSTCtoK;
+    end
+
+    //Gate-All-Around (GAA) FET quantum subband model: Geometry dependent calculations
+    // (Ref: A. Dasgupta et.al., IEEE TED, vol. 67, no. 2, 2020.)
+    if (subbandmod == 1) begin
+        //Dimension scaling
+        d1 = (dim1h - DIMENSION1_i) / (1 + lexp((wdim0 * 1e9 - wgaa * 1e9) / wdimr)) + DIMENSION1_i;
+        d2 = (dim2h - DIMENSION2_i) / (1 + lexp((wdim0 * 1e9 - wgaa * 1e9) / wdimr)) + DIMENSION2_i;
+        d3 = (dim3h - DIMENSION3_i) / (1 + lexp((wdim0 * 1e9 - wgaa * 1e9) / wdimr)) + DIMENSION3_i;
+        p1 = smoothminx(-dssp1 / (1 + lexp((wssp0 * 1e9 - wgaa * 1e9) / wsspr)) + SSP1_i, 0.0, 0.001);
+        p2 = smoothminx(-dssp2 / (1 + lexp((wssp0 * 1e9 - wgaa * 1e9) / wsspr)) + SSP2_i, 0.0, 0.001);
+        p3 = smoothminx(-dssp3 / (1 + lexp((wssp0 * 1e9 - wgaa * 1e9) / wsspr)) + SSP3_i, 0.0, 0.001);
+
+        //Effect of dimension on capacitance normalizations
+        Wp1 = smoothmaxx(smoothminx(1.001 * (d1 - 1.001), 0, 0.001), 1, 0.001);
+        Tp1 = smoothmaxx(smoothminx(1.001 * (d1 - 2.001), 0, 0.001), 1, 0.001);
+        Wp2 = smoothmaxx(smoothminx(1.001 * (d2 - 1.001), 0, 0.001), 1, 0.001);
+        Tp2 = smoothmaxx(smoothminx(1.001 * (d2 - 2.001), 0, 0.001), 1, 0.001);
+        Wp3 = smoothmaxx(smoothminx(1.001 * (d3 - 1.001), 0, 0.001), 1, 0.001);
+        Tp3 = smoothmaxx(smoothminx(1.001 * (d3 - 2.001), 0, 0.001), 1, 0.001);
+        VnD1 = pow(Weff0, Wp1) * pow(Ach / Weff0, Tp1);
+        qndnf1 = VnD1 / Cins;
+        VnD2 = pow(Weff0, Wp2) * pow(Ach / Weff0, Tp2);
+        qndnf2 = VnD2 / Cins;
+        VnD3 = pow(Weff0, Wp3) * pow(Ach / Weff0, Tp3);
+        qndnf3 = VnD3 / Cins;
+
+        nc3d0 = smoothminx(1 / (1 + lexp((2.75 - tgaa * 1e9) / 0.78)), 0.5, 0.003);
+        nc3d = (1 - nc3d0) * (d1 - DIMENSION1_i) / (dim1h - DIMENSION1_i) + nc3d0;
+        ncq = 1 / (1 + lexp((nc3d - 0.999) / 1e-4));
+        //tgaa scaling model for subband energies
+        QT0= 0.5 * tgaa * tgaa * 1e18 - 1.5 * tgaa * 1e9 + 2;
+        QT1= smoothmaxx(QT0, 4, 0.01);
+        ne2h = smoothmaxx(smoothminx(T0 + pow(tgaa * 1e9 - QT1, tsre2) * (9.24e5 - 1.81e4) / pow(2, tsre2) , 1.81e4, 0.01), 9.24e5, 9.24e3);
+        pe2h = smoothmaxx(smoothminx(5.5 + pow(tgaa * 1e9 - QT1, tdwse2) * (8 - 5.5) / pow(2, tdwse2), 0, 0.01), 8, 0.01);
+        ne3h = (120.66 * pow(4, tsre3)) / pow(tgaa * 1e9, tsre3);
+        pe3h = 2 * pow(4, tdwse3) / pow(tgaa * 1e9, tdwse3);
+        //tgaa scaling model for subband contributions
+        nc1l0 = 107 * pow(4, tsrq1) / pow(tgaa * 1e9, tsrq1);
+        pnc1l = smoothmaxx(smoothminx(0.7 + pow(tgaa * 1e9 - QT1, tdwsq1) * 0.1, 0.5, 0.01), 1, 0.01);
+        nc2l0 = 103 * pow(4, tsrq2) / pow(tgaa * 1e9, tsrq2);
+        pnc2l = 1.5 * pow(4, tdwsq2) / pow(tgaa * 1e9, tdwsq2);
+        nc3l0 = 833 * pow(4, tsrq3) / pow(tgaa * 1e9, tsrq3);
+        pnc3l = 3.4 * pow(4, tdwsq3) / pow(tgaa * 1e9, tdwsq3);
+        //wgaa scaling model for subband energies
+        qe2n = ne2h / pow(wgaanom * 1e9, wsfe2 * pe2h);
+        qe3n = ne3h / pow(wgaanom * 1e9, wsfe3 * pe3h);
+        qe2 = smoothminx(E2NOM_i + mfe2 * (ne2h / pow(wgaa * 1e9, wsfe2 * pe2h)-qe2n), 0, 0.01);
+        qe3 = smoothminx(E3NOM_i + mfe3 * (ne3h / pow(wgaa * 1e9, wsfe3 * pe3h)-qe3n), 0, 0.01);
+        //wgaa scaling model for subband contributions
+        nc1l = smoothminx(nc1l0 / pow(1 + 5 * pow(wgaa * 1e9, wsfq1 * pnc1l), 0.5), 0, 0.1);
+        nc1ln = smoothminx(nc1l0 / pow(1 + 5 * pow(wgaanom * 1e9, wsfq1 * pnc1l), 0.5), 0, 0.1);
+        nc1 = MFQ1NOM_i + mfq1 * (nc1l-nc1ln);
+        nc2l = smoothminx(nc2l0 / pow(1 + 5 * pow(wgaa * 1e9, wsfq2 * pnc2l), 0.5), 0, 0.1);
+        nc2ln = smoothminx(nc2l0 / pow(1 + 5 * pow(wgaanom * 1e9, wsfq2 * pnc2l), 0.5), 0, 0.1);
+        nc2 = MFQ2NOM_i + mfq2 * (nc2l-nc2ln);
+        nc3l = smoothminx(nc3l0 / pow(1 + 5 * pow(wgaa * 1e9, wsfq3 * pnc3l), 0.5), 0, 0.1);
+        nc3ln = smoothminx(nc3l0 / pow(1 + 5 * pow(wgaanom * 1e9, wsfq3 * pnc3l), 0.5), 0, 0.1);
+        nc3 = MFQ3NOM_i + mfq3 * (nc3l-nc3ln);
+        //Pre-factors for charge
+        qnd10 = `q * (d1 / 2) * (pow(3.14, d1 / 2) / gammafunc(1 + d1 / 2)) * pow(nc1 * 1e6, d1) * qndnf1;
+        qnd20 = `q * (d2 / 2) * (pow(3.14, d2 / 2) / gammafunc(1 + d2 / 2)) * pow(nc2 * 1e6, d2) * qndnf2;
+        qnd30 = `q * (d3 / 2) * (pow(3.14, d3 / 2) / gammafunc(1 + d3 / 2)) * pow(nc3 * 1e6, d3) * qndnf3;
+    end
+
+    // Geometry dependent mobility scaling
+    // (Ref: A. Dasgupta et.al., IEEE EDL, vol. 41, no. 3, 2020.)
+    if (mobscmod == 1) begin
+        ETAMOB_i=etamobthin + (ETAMOB_i-etamobthin) / (lexp((etamobtni*1e9 - tgaa*1e9) / etamobir) + 1);
+
+        mut0 =UA_i - uathin - uatsat*1e9*uartsc;
+        mut1 = (mut0 + tgaa*1e9*uartsc )/ (1+lexp((uatni*1e9 - tgaa*1e9)/uair));
+        UA_i = smoothmaxx2(mut1 + uathin, UA_i + 0.2, 0.6);
+
+        mut2 = (euthin-EU_i)*370/pow(tgaa*1e9,euptsc) + (euthin-EU_i)/(1+lexp((tgaa*1e9-eutni*1e9)/euir)) + EU_i;
+        EU_i = smoothmaxx2(mut2, euthin, 0.2);
+
+        mut3 = wgaa/(wgaa + tgaa);
+        mut4 = egbulk*tgaa*tgaa*1e18 - u0emsm1*1e-3;
+        mut5 = (mut4 + pow(mut4*mut4 + 4*u0emsm1*1e-3*(egbulk+0.24)*tgaa*tgaa*1e18, 0.5))/(2*(egbulk+0.24)*tgaa*tgaa*1e18);
+        mut6 = smoothmaxx2(1e-4/(mut5 - 0.8208 - u0emsm2*1e-5), 1, 0.06);
+        U0_i = U0_i * (mut3 + u0etawsc * (1 - mut3)) * mut6;
+
+        UD_i = (udthin-UD_i) * pow(smoothminx(udtsat*1e9-tgaa*1e9,0,1),udptsc) + UD_i;
+    end
+
+    // Temperature dependence calculations
+    if (shmod != 0 && rth0 > 0.0) begin
+        DevTemp = $temperature + Temp(t) + dtemp;
+    end else begin
+        DevTemp = $temperature + dtemp;
+    end
+    TRatio = DevTemp / Tnom;
+    TRatio_m1 = TRatio - 1.0;
+    delTemp = DevTemp - Tnom;
+    Vtm = `KboQ * DevTemp;
+    Vtm0 = `KboQ * Tnom;
+    Tlow = tlow;
+    if (cryomod != 0) begin
+        // Effective temperature for core model charge calculation at low temperatures
+        DevTemplow0 = smoothminx(DevTemp, Tlow, dtlow);
+        DevTemplow1 = smoothminx((-klow1 * (DevTemp - tlow1)), 0.0, dtlow1);
+        if (cryomod == 1) begin
+            T1 = smoothminx(Tnom, Tlow, dtlow);
+            T2 = smoothminx((-klow1 * (Tnom - tlow1)), 0.0, dtlow1);
+            if (Tnom > Tlow) begin
+                T3 = DevTemplow0 + DevTemplow1 - T1 - T2 + Tnom;
+            end else begin
+                T3 = DevTemplow0 + DevTemplow1 - T1 - T2 + Tlow;
+            end
+            DevTempeff = smoothminx(DevTemp, T3, 0.2);
+        end else begin
+            if (Tlow > 210) begin
+                $strobe("Warning: tlow = %e is greater than 210 K. Set to 210 K", tlow);
+                Tlow = 210;
+            end
+            wh = 0.5 + 0.5 * tanh(0.5 * (DevTemp - 210));
+            wl = 1.0 - wh;
+            if (Tnom > 210) begin
+                T1 = smoothminx(210, Tlow, dtlow);
+                T2 = smoothminx((-klow1 * (210 - tlow1)), 0.0, dtlow1);
+                T3 = DevTemplow0 + DevTemplow1 - T1 - T2 + 210;
+                DevTempeff = smoothminx(DevTemp, T3, 0.2);
+            end else begin
+                T1 = smoothminx(Tnom, Tlow, dtlow);
+                T2 = smoothminx((-klow1 * (Tnom - tlow1)), 0.0, dtlow1);
+                if (Tnom > Tlow) begin
+                    T3 = DevTemplow0 + DevTemplow1 - T1 - T2 + Tnom;
+                end else begin
+                    T3 = DevTemplow0 + DevTemplow1 - T1 - T2 + Tlow;
+                end
+                T4 = smoothminx(DevTemp, T3, 0.2);
+                DevTempeff = wl * T4 + wh * DevTemp;
+            end
+            DevTemp1 = smoothmaxx2(DevTemp, 210, 0.2);
+            delTemp1 = DevTemp1 - smoothmaxx2(Tnom, 210, 0.2);
+            delTRatio1 = (DevTemp1 - 210) / Tnom;
+        end
+        Vtmeff = `KboQ * DevTempeff;
+    end
+    Eg = bg0sub - tbgasub * DevTemp * DevTemp / (DevTemp + tbgbsub);
+    Eg0 = bg0sub - tbgasub * Tnom * Tnom / (Tnom + tbgbsub);
+    T1 = (DevTemp / 300.15) * sqrt(DevTemp / 300.15);
+    ni = ni0sub * T1 * lexp(bg0sub / (2.0 * `KboQ * 300.15) - Eg / (2.0 * Vtm));
+    if (cryomod == 0) begin
+        Nc = nc0sub * T1;
+    end else begin
+        Nc = nc0sub * (DevTempeff / 300.15) * sqrt(DevTempeff / 300.15);
+        niln = llnf(ni0sub * T1) + bg0sub / (2.0 * `KboQ * 300.15) - Eg / (2.0 * Vtm);
+    end
+    ThetaSS = hypsmooth((1.0 + TSS_i * delTemp - 1.0e-6), 1.0e-3);
+
+    // Quantum mechanical Vth correction
+    kT = Vtm * `q;
+    T0 = `HBAR * `M_PI / (2.0 * Ach / Weff_UFCM);
+    E0 = T0 * T0 / (2.0 * mx);
+    E0prime = T0 * T0 / (2.0 * mxprime);
+    E1 = 4.0 * E0;
+    E1prime = 4.0 * E0prime;
+    T1 = gprime * mdprime / (gfactor * md);
+    gam0 = 1.0 + T1 * lexp((E0 - E0prime) / kT);
+    gam1 = gam0 + lexp((E0 - E1) / kT) + T1 * lexp((E0 - E1prime) / kT);
+    T2 = -Vtm * llnf(gfactor * md / (`M_PI * `HBAR * `HBAR * Nc) * kT / (2.0 * Ach / Weff_UFCM) * gam1);
+    dvch_qm = QMFACTOR_i * (E0 / `q + T2);
+
+    // Temperature dependence
+    Trat_ln = ln(TRatio);
+    if (cryomod == 0) begin
+        T1 = U0_i * exp(UTE_i * Trat_ln);
+        u0_v = T1 + hypmax(UTL_i * delTemp, -0.9 * T1, 1.0e-4);
+        if (asymmod == 1) begin
+            T1 = U0R_i * exp(UTER_i * Trat_ln);
+            U0R_t = T1 + hypmax(UTLR_i * delTemp, -0.9 * T1, 1.0e-4);
+            u0r_v = U0R_t;
+        end
+        UA_t = UA_i + hypmax(UA1_i * delTemp, -UA_i, 1.0e-6);
+        EU_t = EU_i;
+        if (asymmod != 0) begin
+            UAR_t = UAR_i + hypmax(UA1R_i * delTemp, -UAR_i, 1.0e-6);
+        end
+        UD_t = UD_i * exp(UD1_i * Trat_ln);
+        if (asymmod != 0) begin
+            UDR_t = UDR_i * exp(UD1R_i * Trat_ln);
+        end
+        UCS_t = UCS_i * exp(UCSTE_i * Trat_ln);
+        rdstemp = hypsmooth((1.0 + PRT_i * delTemp - 1.0e-6), 1.0e-3);
+        `tempdep(VSAT_t, VSAT_i, -AT_i)
+        if (asymmod != 0) begin
+            `tempdep(VSATR_t, VSATR_i, -ATR_i)
+            if (VSATR_t < 1000) begin
+                VSATR_t = 1000;
+            end
+        end
+        if (cvmod == 1) begin
+            T1 = U0CV_i * exp(UTECV_i * Trat_ln);
+            u0_cv = T1 + hypmax(UTLCV_i * delTemp, -0.9 * T1, 1.0e-4);
+            UACV_t = UACV_i + hypmax(UA1CV_i * delTemp, -UACV_i, 1.0e-6);
+            UDCV_t = UDCV_i * exp(UD1CV_i * Trat_ln);
+        end
+        `tempdep(VSAT1_t, VSAT1_i, -AT_i)
+        if (asymmod != 0) begin
+            `tempdep(VSAT1R_t, VSAT1R_i, -AT_i)
+            if (VSAT1R_t < 1000) begin
+                VSAT1R_t = 1000;
+            end
+        end
+        `tempdep(VSATCV_t, VSATCV_i, -ATCV_i)
+        MEXP_t = hypsmooth((MEXP_i * (1.0 + tmexp * delTemp) - 2.0), 1.0e-3) + 2.0;
+        if (asymmod != 0) begin
+            MEXPR_t = hypsmooth((MEXPR_i * (1.0 + tmexpr * delTemp) - 2.0), 1.0e-3) + 2.0;
+        end
+        KSATIV_t = KSATIV_i;
+        PCLM_t = PCLM_i;
+        dvth_temp = (KT1_i + kt1l / Leff) * TRatio_m1;
+    end else if (cryomod == 1) begin
+        T1 = U0_i * exp((UTE_i + UTE1_i * TRatio) * Trat_ln);
+        u0_v = T1 + hypmax(UTL_i * delTemp, -0.9 * T1, 1.0e-4);
+        if (asymmod == 1) begin
+            T1 = U0R_i * exp((UTER_i + UTE1_i * TRatio) * Trat_ln);
+            U0R_t = T1 + hypmax(UTLR_i * delTemp, -0.9 * T1, 1.0e-4);
+            u0r_v = U0R_t;
+        end
+        UA_t = UA_i * exp((UA1_i + UA2_i * TRatio) * Trat_ln);
+        if (asymmod != 0) begin
+            UAR_t = UAR_i * exp((UA1R_i + UA2_i * TRatio) * Trat_ln);
+        end
+        UD_t = UD_i * exp((UD1_i + UD2_i * TRatio) * Trat_ln);
+        if (asymmod != 0) begin
+            UDR_t = UDR_i * exp((UD1R_i + UD2_i * TRatio) * Trat_ln);
+        end
+        UCS_t = UCS_i * exp((UCSTE_i + ucste1 * TRatio) * Trat_ln);
+        UDS_t = UDS_i * (lexp(UDS1_i * TRatio_m1) - 1);
+        UDD_t = UDD_i * (lexp(UDD1_i * TRatio_m1) - 1);
+        UDSeff_t = 0.5 + UDS_t;
+        UDDeff_t = 0.5 + UDD_t;
+        `tempdep(EU_t, EU_i, EU1_i)
+        if (cvmod == 1) begin
+            T1 = U0CV_i * exp((UTECV_i + UTE1CV_i * TRatio) * Trat_ln);
+            u0_cv = T1 + hypmax(UTLCV_i * delTemp, -0.9 * T1, 1.0e-4);
+            UACV_t = UACV_i * exp((UA1CV_i + UA2CV_i * TRatio) * Trat_ln);
+            UDCV_t = UDCV_i * exp((UD1CV_i + UD2CV_i * TRatio) * Trat_ln);
+        end
+        if (PRT_i == PRT1_i) begin
+            T2 = 1.0 + PRT_i * delTemp;
+        end else if (TR0_i < Tnom) begin
+            rdstemp0 = 1 + PRT_i * delTemp;
+            rdstemp1 = 1 + PRT1_i * (DevTemp - TR0_i) + PRT_i * (TR0_i - Tnom);
+            T3 = (PRT_i - PRT1_i) * (TR0_i - Tnom);
+            if (PRT1_i < PRT_i) begin
+                T2 = smoothminx(rdstemp0, rdstemp1, SPRT_i) - smoothminx(T3, 0, SPRT_i);
+            end else begin
+                T2 = smoothmaxx2(rdstemp0, rdstemp1, SPRT_i) - smoothmaxx2(T3, 0, SPRT_i);
+            end
+        end else begin
+            rdstemp1 = 1 + PRT1_i * (DevTemp - Tnom);
+            rdstemp0 = 1 + PRT_i * (DevTemp - TR0_i) + PRT1_i * (TR0_i - Tnom);
+            T3 = (PRT1_i - PRT_i) * (TR0_i - Tnom);
+            if (PRT1_i < PRT_i) begin
+                T2 = smoothminx(rdstemp1, rdstemp0, SPRT_i) - smoothminx(T3, 0, SPRT_i);
+            end else begin
+                T2 = smoothmaxx2(rdstemp1, rdstemp0, SPRT_i) - smoothmaxx2(T3, 0, SPRT_i);
+            end
+        end
+        rdstemp = hypsmooth((T2 - 1.0e-6), 1.0e-3);
+        `tempdep2(VSAT_t, VSAT_i, -AT_i, at2)
+        if (asymmod != 0) begin
+            `tempdep2(VSATR_t, VSATR_i, -ATR_i, at2)
+            if (VSATR_t < 1000) begin
+                VSATR_t = 1000;
+            end
+        end
+        `tempdep2(VSAT1_t, VSAT1_i, -AT_i, at2)
+        if (asymmod != 0) begin
+            `tempdep2(VSAT1R_t, VSAT1R_i, -AT_i, at2)
+            if (VSAT1R_t < 1000) begin
+                VSAT1R_t = 1000;
+            end
+        end
+        `tempdep2(VSATCV_t, VSATCV_i, -ATCV_i, at2cv)
+        MEXP_t = hypsmooth((MEXP_i * (1.0 + tmexp * delTemp + tmexp2 * delTemp * delTemp) - 2.0), 1.0e-3) + 2.0;
+        if (asymmod != 0) begin
+            MEXPR_t = hypsmooth((MEXPR_i * (1.0 + tmexpr * delTemp + tmexp2 * delTemp * delTemp) - 2.0), 1.0e-3) + 2.0;
+        end
+        `tempdep2(KSATIV_t, KSATIV_i, ksativt1, ksativt2)
+        `tempdep(PCLM_t, PCLM_i, pclmt)
+        dvth_temp = (KT1_i + kt1l / Leff) * TRatio_m1 + kt11 / (1 + lexp(kt12 * (DevTemp - tvth))) - kt11 / (1 + lexp(kt12 * (Tnom - tvth)));
+    end else begin
+        T1 = U0_i * exp((UTE_i + UTE1_i * delTRatio1) * Trat_ln);
+        u0_v = T1 + hypmax(UTL_i * delTemp, -0.9 * T1, 1.0e-4);
+        if (asymmod == 1) begin
+            T1 = U0R_i * exp((UTER_i + UTE1_i * delTRatio1) * Trat_ln);
+            U0R_t = T1 + hypmax(UTLR_i * delTemp, -0.9 * T1, 1.0e-4);
+            u0r_v = U0R_t;
+        end
+        if (Tnom > 210) begin
+            T2 = 210 * (UA1_i / (UA_i + UA1_i * (210 - Tnom)) - UA2_i * (llnf(210 / Tnom) + 1) / Tnom);
+            T1 = (UA_i + UA1_i * (210 - Tnom)) / pow(210 / Tnom, T2 + UA2_i * (210 / Tnom));
+            UA_tl = T1 * pow(TRatio, T2 + UA2_i * TRatio);
+            UA_th = UA_i + UA1_i * delTemp;
+        end else begin
+            T2 = UA_i * pow(210 / Tnom, UA1_i + UA2_i * (210 / Tnom)) * (UA1_i / 210 + UA2_i * (llnf(210 / Tnom) + 1) / Tnom);
+            T1 = UA_i * pow(210 / Tnom, UA1_i + UA2_i * (210 / Tnom)) - T2 * (210 - Tnom);
+            UA_tl = UA_i * pow(TRatio, UA1_i + UA2_i * TRatio);
+            UA_th = T1 + T2 * delTemp;
+        end
+        T0 = wl * UA_tl + wh * UA_th;
+        UA_t = hypsmooth(T0, 1.0e-6);
+        if (asymmod != 0) begin
+            if (Tnom > 210) begin
+                T2 = 210 * (UA1R_i / (UAR_i + UA1R_i * (210 - Tnom)) - UA2_i * (llnf(210 / Tnom) + 1) / Tnom);
+                T1 = (UAR_i + UA1R_i * (210 - Tnom)) / pow(210 / Tnom, T2 + UA2_i * (210 / Tnom));
+                UAR_tl = T1 * pow(TRatio, T2 + UA2_i * TRatio);
+                UAR_th = UAR_i + UA1R_i * delTemp;
+            end else begin
+                T2 = UAR_i * pow(210 / Tnom, UA1R_i + UA2_i * (210 / Tnom)) * (UA1R_i / 210 + UA2_i * (llnf(210 / Tnom) + 1) / Tnom);
+                T1 = UAR_i * pow(210 / Tnom, UA1R_i + UA2_i * (210 / Tnom)) - T2 * (210 - Tnom);
+                UAR_tl = UAR_i * pow(TRatio, UA1R_i + UA2_i * TRatio);
+                UAR_th = T1 + T2 * delTemp;
+            end
+            T0 = wl * UAR_tl + wh * UAR_th;
+            UAR_t = hypsmooth(T0, 1.0e-6);
+        end
+        UD_t = UD_i * exp((UD1_i + UD2_i * delTRatio1) * Trat_ln);
+        if (asymmod != 0) begin
+            UDR_t = UDR_i * exp((UD1R_i + UD2_i * delTRatio1) * Trat_ln);
+        end
+        UCS_t = UCS_i * exp((UCSTE_i + UCSTE1_i * delTRatio1) * Trat_ln);
+        if (abs(UDS1_i * (Tnom - 210) / Tnom) < 1.0e-6) begin
+            UDS_t = UDS_i * (lexp(UDS1_i * delTRatio1) - 1);
+        end else begin
+            UDS_t = UDS_i * (lexp(UDS1_i * delTRatio1) - 1) / abs(lexp(UDS1_i * (Tnom - 210) / Tnom) - 1);
+        end
+        if (abs(UDD1_i * (Tnom - 210) / Tnom) < 1.0e-6) begin
+            UDD_t = UDD_i * (lexp(UDD1_i * delTRatio1) - 1);
+        end else begin
+            UDD_t = UDD_i * (lexp(UDD1_i * delTRatio1) - 1) / abs(lexp(UDD1_i * (Tnom - 210) / Tnom) - 1);
+        end
+        UDSeff_t = 0.5 + UDS_t;
+        UDDeff_t = 0.5 + UDD_t;
+        if (tempmod != 0) begin
+            EU_t = EU_i + hypmax((EU1_i * delTemp1), -EU_i, 1.0e-6);
+            VSAT_t = VSAT_i + hypmax((-AT_i * delTemp + at2 * delTemp1* delTemp1), -VSAT_i, 1.0e-6);
+            if (asymmod != 0) begin
+                VSATR_t = VSATR_i + hypmax((-ATR_i * delTemp + at2 * delTemp1* delTemp1), -VSATR_i, 1.0e-6);
+                if (VSATR_t < 1000) begin
+                    VSATR_t = 1000;
+                end
+            end
+            VSAT1_t = VSAT1_i + hypmax((-AT_i * delTemp + at2 * delTemp1 * delTemp1), -VSAT1_i, 1.0e-6);
+            if (asymmod != 0) begin
+                VSAT1R_t = VSAT1R_i + hypmax((-AT_i * delTemp + at2 * delTemp1 * delTemp1), -VSAT1R_i, 1.0e-6);
+                if (VSAT1R_t < 1000) begin
+                    VSAT1R_t = 1000;
+                end
+            end
+            VSATCV_t = VSATCV_i + hypmax((-ATCV_i * delTemp + at2cv * delTemp1 * delTemp1), -VSATCV_i, 1.0e-6);
+            KSATIV_t = KSATIV_i + hypmax((ksativt1 * delTemp1 + ksativt2 * delTemp1 * delTemp1), -KSATIV_i, 1.0e-6);
+            PCLM_t = PCLM_i + hypmax((pclmt * delTemp1), -PCLM_i, 1.0e-6);
+        end else begin
+            EU_t = EU_i * hypsmooth((1.0 + EU1_i * delTemp1 - 1.0e-6), 1.0e-3);
+            VSAT_t = VSAT_i * hypsmooth((1.0 - AT_i * delTemp + at2 * delTemp1 * delTemp1 - 1.0e-6), 1.0e-3);
+            if (asymmod != 0) begin
+                VSATR_t = VSATR_i * hypsmooth((1.0 - ATR_i * delTemp + at2 * delTemp1 * delTemp1 - 1.0e-6), 1.0e-3);
+                if (VSATR_t < 1000) begin
+                    VSATR_t = 1000;
+                end
+            end
+            VSAT1_t = VSAT1_i * hypsmooth((1.0 - AT_i * delTemp + at2 * delTemp1 * delTemp1 - 1.0e-6), 1.0e-3);
+            if (asymmod != 0) begin
+                VSAT1R_t = VSAT1R_i * hypsmooth((1.0 - AT_i * delTemp + at2 * delTemp1 * delTemp1 - 1.0e-6), 1.0e-3);
+                if (VSAT1R_t < 1000) begin
+                    VSAT1R_t = 1000;
+                end
+            end
+            VSATCV_t = VSATCV_i * hypsmooth((1.0 - ATCV_i * delTemp + at2cv * delTemp1 * delTemp1 - 1.0e-6), 1.0e-3);
+            KSATIV_t = KSATIV_i * hypsmooth((1.0 + ksativt1 * delTemp1 + ksativt2 * delTemp1 * delTemp1 - 1.0e-6), 1.0e-3);
+            PCLM_t = PCLM_i * hypsmooth((1.0 + pclmt * delTemp1 - 1.0e-6), 1.0e-3);
+        end
+        MEXP_t = hypsmooth((MEXP_i * (1.0 + tmexp * delTemp + tmexp2 * delTemp1 * delTemp1) - 2.0), 1.0e-3) + 2.0;
+        if (asymmod != 0) begin
+            MEXPR_t = hypsmooth((MEXPR_i * (1.0 + tmexpr * delTemp + tmexp2 * delTemp1 * delTemp1) - 2.0), 1.0e-3) + 2.0;
+        end
+        if (cvmod == 1) begin
+            T1 = U0CV_i * exp((UTECV_i + UTE1CV_i * delTRatio1) * Trat_ln);
+            u0_cv = T1 + hypmax(UTLCV_i * delTemp, -0.9 * T1, 1.0e-4);
+            if (Tnom > 210) begin
+                T2 = 210 * (UA1CV_i / (UACV_i + UA1CV_i * (210 - Tnom)) - UA2CV_i * (llnf(210 / Tnom) + 1) / Tnom);
+                T1 = (UACV_i + UA1CV_i * (210 - Tnom)) / pow(210 / Tnom, T2 + UA2CV_i * (210 / Tnom));
+                UACV_tl = T1 * pow(TRatio, T2 + UA2CV_i * TRatio);
+                UACV_th = UACV_i + UA1CV_i * delTemp;
+            end else begin
+                T2 = UACV_i * pow(210 / Tnom, UA1CV_i + UA2CV_i * (210 / Tnom)) * (UA1CV_i / 210 + UA2CV_i * (llnf(210 / Tnom) + 1) / Tnom);
+                T1 = UACV_i * pow(210 / Tnom, UA1CV_i + UA2CV_i * (210 / Tnom)) - T2 * (210 - Tnom);
+                UACV_tl = UACV_i * pow(TRatio, UA1CV_i + UA2CV_i * TRatio);
+                UACV_th = T1 + T2 * delTemp;
+            end
+            T0 = wl * UACV_tl + wh * UACV_th;
+            UACV_t = hypsmooth(T0, 1.0e-6);
+            UDCV_t = UDCV_i * exp((UD1CV_i + UD2CV_i * delTRatio1) * Trat_ln);
+        end
+        if (PRT_i == PRT1_i) begin
+            T2 = 1.0 + PRT_i * delTemp;
+        end else if (TR0_i < 210) begin
+            if (Tnom > 210) begin
+                rdstemp0 = 1 + PRT_i * delTemp;
+                rdstemp1 = 1 + PRT1_i * (DevTemp - TR0_i) + PRT_i * (TR0_i - Tnom);
+                T3 = 1 + PRT_i * (210 - Tnom);
+                T4 = 1 + PRT1_i * (210 - TR0_i) + PRT_i * (TR0_i - Tnom);
+                if (PRT1_i < PRT_i) begin
+                    T5 = smoothminx(rdstemp0, rdstemp1, SPRT_i) - smoothminx(T3, T4, SPRT_i) + T3;
+                    T2 = smoothminx(T5, rdstemp0, 1.0e-3);
+                end else begin
+                    T5 = smoothmaxx2(rdstemp0, rdstemp1, SPRT_i) - smoothmaxx2(T3, T4, SPRT_i) + T3;
+                    T2 = smoothmaxx2(T5, rdstemp0, 1.0e-3);
+                end
+            end else if (Tnom > TR0_i) begin
+                rdstemp0 = 1 + PRT_i * delTemp;
+                rdstemp1 = 1 + PRT1_i * (DevTemp - TR0_i) + PRT_i * (TR0_i - Tnom);
+                T3 = (PRT_i - PRT1_i) * (TR0_i - Tnom);
+                T4 = 1 + PRT_i * (210 - Tnom);
+                T5 = 1 + PRT1_i * (210 - TR0_i) + PRT_i * (TR0_i - Tnom);
+                if (PRT1_i < PRT_i) begin
+                    T6 = smoothminx(rdstemp0, rdstemp1, SPRT_i) - smoothminx(T3, 0, SPRT_i);
+                    T7 = smoothminx(T4, T5, SPRT_i) - smoothminx(T3, 0, SPRT_i);
+                    T8 = T7 + PRT_i * (DevTemp - 210);
+                    T2 = smoothminx(T6, T8, 1.0e-3);
+                end else begin
+                    T6 = smoothmaxx2(rdstemp0, rdstemp1, SPRT_i) - smoothmaxx2(T3, 0, SPRT_i);
+                    T7 = smoothmaxx2(T4, T5, SPRT_i) - smoothmaxx2(T3, 0, SPRT_i);
+                    T8 = T7 + PRT_i * (DevTemp - 210);
+                    T2 = smoothmaxx2(T6, T8, 1.0e-3);
+                end
+            end else begin
+                rdstemp1 = 1 + PRT1_i * delTemp;
+                rdstemp0 = 1 + PRT_i * (DevTemp - TR0_i) + PRT1_i * (TR0_i - Tnom);
+                T3 = (PRT1_i - PRT_i) * (TR0_i - Tnom);
+                T4 = 1 + PRT1_i * (210 - Tnom);
+                T5 = 1 + PRT_i * (210 - TR0_i) + PRT1_i * (TR0_i - Tnom);
+                if (PRT1_i < PRT_i) begin
+                    T6 = smoothminx(rdstemp0, rdstemp1, SPRT_i) - smoothminx(T3, 0, SPRT_i);
+                    T7 = smoothminx(T4, T5, SPRT_i) - smoothminx(T3, 0, SPRT_i);
+                    T8 = T7 + PRT_i * (DevTemp - 210);
+                    T2 = smoothminx(T6, T8, 1.0e-3);
+                end else begin
+                    T6 = smoothmaxx2(rdstemp0, rdstemp1, SPRT_i) - smoothmaxx2(T3, 0, SPRT_i);
+                    T7 = smoothmaxx2(T4, T5, SPRT_i) - smoothmaxx2(T3, 0, SPRT_i);
+                    T8 = T7 + PRT_i * (DevTemp - 210);
+                    T2 = smoothmaxx2(T6, T8, 1.0e-3);
+                end
+            end
+        end else begin
+            if (Tnom > 210) begin
+                rdstemp0 = 1 + PRT_i * delTemp;
+                rdstemp1 = 1 + PRT1_i * (DevTemp - 210) + PRT_i * (210 - Tnom);
+                if (PRT1_i < PRT_i) begin
+                    T2 = smoothminx(rdstemp0, rdstemp1, 1.0e-2);
+                end else begin
+                    T2 = smoothmaxx2(rdstemp0, rdstemp1, 1.0e-2);
+                end
+            end else begin
+                rdstemp1 = 1 + PRT1_i * delTemp;
+                rdstemp0 = 1 + PRT_i * (DevTemp - 210) + PRT1_i * (210 - Tnom);
+                if (PRT1_i < PRT_i) begin
+                    T2 = smoothminx(rdstemp0, rdstemp1, 1.0e-2);
+                end else begin
+                    T2 = smoothmaxx2(rdstemp0, rdstemp1, 1.0e-2);
+                end
+            end
+        end
+        rdstemp = hypsmooth((T2 - 1.0e-6), 1.0e-3);
+        T4 = smoothmaxx2(Tnom, 210, 0.2);
+        dvth_temp = (KT1_i + kt1l / Leff) * TRatio_m1 + kt11 / (1 + lexp(kt12 * (DevTemp1 - tvth))) - kt11 / (1 + lexp(kt12 * (T4 - tvth)));
+    end
+    if (VSAT_t < 1000) begin
+        VSAT_t = 1000;
+    end
+    if (VSAT1_t < 1000) begin
+        VSAT1_t = 1000;
+    end
+    if (VSATCV_t < 1000) begin
+        VSATCV_t = 1000;
+    end
+    if (bulkmod != 0) begin
+        if (tempmod == 0) begin
+            `tempdep(UC_t, UC_i, UC1_i)
+            if (cvmod == 1) begin
+                `tempdep(UCCV_t, UCCV_i, UC1CV_i)
+            end
+            if (asymmod != 0) begin
+                `tempdep(UCR_t, UCR_i, UC1R_i)
+            end
+        end else begin
+            UC_t = UC_i + UC1_i * delTemp;
+            if (cvmod == 1) begin
+                UCCV_t = UCCV_i + UC1CV_i * delTemp;
+            end
+            if (asymmod != 0) begin
+                UCR_t = UCR_i + UC1R_i * delTemp;
+            end
+        end
+    end
+    `tempdep(ETA0_t, ETA0_i, teta0)
+    if (cvmod == 1) begin
+        `tempdep(ETA0CV_t, ETA0CV_i, teta0cv)
+    end
+    `tempdep(ETA0R_t, ETA0R_i, teta0r)
+    `tempdep(ETAMOB_t, ETAMOB_i, EMOBT_i)
+    `tempdep(RSDR_t, rsdr, trsdr)
+    if (asymmod != 0) begin
+        `tempdep(RSDRR_t, rsdrr, trsdr)
+    end
+    `tempdep(RDDR_t, rddr, trddr)
+    if (asymmod != 0) begin
+        `tempdep(RDDRR_t, rddrr, trddr)
+    end
+    `tempdep(PTWG_t, PTWG_i, -PTWGT_i)
+    if (asymmod != 0) begin
+        `tempdep(PTWGR_t, PTWGR_i, -PTWGT_i)
+    end
+    BETA0_t = BETA0_i * exp(IIT_i * Trat_ln);
+    SII0_t = SII0_i * (hypsmooth((1.0 + TII_i * TRatio_m1 - 0.01), 1.0e-3) + 0.01);
+    K0_t = K0_i + K01_i * delTemp;
+    K0SI_t = K0SI_i + hypmax(K0SI1_i * delTemp, -K0SI_i, 1.0e-6);
+    K2SI_t = K2SI_i + hypmax(K2SI1_i * delTemp, -K2SI_i, 1.0e-6);
+    K1_t = K1_i + hypmax(K11_i * delTemp, -K1_i, 1.0e-6);
+    K2SAT_t = K2SAT_i + K2SAT1_i * delTemp;
+    A1_t = A1_i + A11_i * delTemp;
+    A2_t = A2_i + A21_i * delTemp;
+    K2_t = K2_i + hypmax(K21_i * delTemp, -K2_i, 1.0e-6);
+    K0SISAT_t = K0SISAT_i + K0SISAT1_i * delTemp;
+    K2SISAT_t = K2SISAT_i + K2SISAT1_i * delTemp;
+    AIGBINV_t = AIGBINV_i + hypmax(AIGBINV1_i * delTemp, -AIGBINV_i, 1.0e-6);
+    AIGBACC_t = AIGBACC_i + hypmax(AIGBACC1_i * delTemp, -AIGBACC_i, 1.0e-6);
+    AIGC_t = AIGC_i + hypmax(AIGC1_i * delTemp, -AIGC_i, 1.0e-6);
+    AIGS_t = AIGS_i + hypmax(AIGS1_i * delTemp, -AIGS_i, 1.0e-6);
+    AIGD_t = AIGD_i + hypmax(AIGD1_i * delTemp, -AIGD_i, 1.0e-6);
+    BGIDL_t = BGIDL_i * hypsmooth((1.0 + TGIDL_i * delTemp - 1.0e-6), 1.0e-3);
+    BGISL_t = BGISL_i * hypsmooth((1.0 + TGIDL_i * delTemp - 1.0e-6), 1.0e-3);
+    ALPHA0_t = ALPHA0_i + hypmax(alpha01 * delTemp, -ALPHA0_i, 1.0e-6);
+    ALPHA1_t = ALPHA1_i + hypmax(alpha11 * delTemp, -ALPHA1_i, 1.0e-6);
+    ALPHAII0_t = ALPHAII0_i + hypmax(alphaii01 * delTemp, -ALPHAII0_i, 1.0e-25);
+    ALPHAII1_t = ALPHAII1_i + hypmax(alphaii11 * delTemp, -ALPHAII1_i, 1.0e-20);
+    igtemp = exp(IGT_i * Trat_ln);
+    igsd_mult = igsd_mult0 * igtemp;
+    if (bulkmod != 0) begin
+        `tempdep(CJS_t, cjs, tcj)
+        `tempdep(CJD_t, cjd, tcj)
+        `tempdep(CJSWS_t, cjsws, tcjsw)
+        `tempdep(CJSWD_t, cjswd, tcjsw)
+        `tempdep(CJSWGS_t, cjswgs, tcjswg)
+        `tempdep(CJSWGD_t, cjswgd, tcjswg)
+        PBS_t = hypsmooth((pbs - tpb * delTemp - 0.01), 1.0e-3) + 0.01;
+        PBD_t = hypsmooth((pbd - tpb * delTemp - 0.01), 1.0e-3) + 0.01;
+        PBSWS_t = hypsmooth((pbsws - tpbsw * delTemp - 0.01), 1.0e-3) + 0.01;
+        PBSWD_t = hypsmooth((pbswd - tpbsw * delTemp - 0.01), 1.0e-3) + 0.01;
+        PBSWGS_t = hypsmooth((pbswgs - tpbswg * delTemp - 0.01), 1.0e-3) + 0.01;
+        PBSWGD_t = hypsmooth((pbswgd - tpbswg * delTemp - 0.01), 1.0e-3) + 0.01;
+        T0 = Eg0 / Vtm0 - Eg / Vtm;
+        T3 = lexp((T0 + xtis * Trat_ln) / njs);
+        JSS_t = jss * T3;
+        JSWS_t = jsws * T3;
+        JSWGS_t = jswgs * T3;
+        T3 = lexp((T0 + xtid * Trat_ln) / njd);
+        JSD_t = jsd * T3;
+        JSWD_t = jswd * T3;
+        JSWGD_t = jswgd * T3;
+        JTSS_t = jtss * lexp(Eg0 * xtss * TRatio_m1 / Vtm);
+        JTSD_t = jtsd * lexp(Eg0 * xtsd * TRatio_m1 / Vtm);
+        JTSSWS_t = jtssws * lexp(Eg0 * xtssws * TRatio_m1 / Vtm);
+        JTSSWD_t = jtsswd * lexp(Eg0 * xtsswd * TRatio_m1 / Vtm);
+        JTSSWGS_t = jtsswgs * (sqrt(jtweff / Weff0) + 1.0) * lexp(Eg0 * xtsswgs * TRatio_m1 / Vtm);
+        JTSSWGD_t = jtsswgd * (sqrt(jtweff / Weff0) + 1.0) * lexp(Eg0 * xtsswgd * TRatio_m1 / Vtm);
+        NJTS_t = hypsmooth((njts * (1.0 + tnjts * TRatio_m1) - 0.01), 1.0e-3) + 0.01;
+        NJTSD_t = hypsmooth((njtsd * (1.0 + tnjtsd * TRatio_m1) - 0.01), 1.0e-3) + 0.01;
+        NJTSSW_t = hypsmooth((njtssw * (1.0 + tnjtssw * TRatio_m1) - 0.01), 1.0e-3) + 0.01;
+        NJTSSWD_t = hypsmooth((njtsswd * (1.0 + tnjtsswd * TRatio_m1) - 0.01), 1.0e-3) + 0.01;
+        NJTSSWG_t = hypsmooth((njtsswg * (1.0 + tnjtsswg * TRatio_m1) - 0.01), 1.0e-3) + 0.01;
+        NJTSSWGD_t = hypsmooth((njtsswgd * (1.0 + tnjtsswgd * TRatio_m1) - 0.01), 1.0e-3) + 0.01;
+    end
+
+    if (!$param_given(vfbsd)) begin
+        if (ngate > 0.0) begin
+            if (cryomod == 0) begin
+                vfbsd_v = devsign * (hypsmooth((0.5 * Eg - Vtm * llnf(ngate / ni)), 1.0e-4) - (0.5 * Eg - devsign * (0.5 * Eg - hypsmooth((0.5 * Eg - Vtm * llnf(nsd / ni)), 1.0e-4))));
+            end else begin
+                vfbsd_v = devsign * (hypsmooth((0.5 * Eg - Vtm * (llnf(ngate) - niln)), 1.0e-4) - (0.5 * Eg - devsign * (0.5 * Eg - hypsmooth((0.5 * Eg - Vtm * (llnf(nsd) - niln)), 1.0e-4))));
+            end
+        end else begin
+            if (cryomod == 0) begin
+                vfbsd_v = devsign * (PHIG_i - (easub + 0.5 * Eg - devsign * (0.5 * Eg - hypsmooth((0.5 * Eg - Vtm * llnf(nsd / ni)), 1.0e-4))));
+            end else begin
+                vfbsd_v = devsign * (PHIG_i - (easub + 0.5 * Eg - devsign * (0.5 * Eg - hypsmooth((0.5 * Eg - Vtm * (llnf(nsd) - niln)), 1.0e-4))));
+            end
+        end
+    end else begin
+        vfbsd_v = vfbsd;
+    end
+    if (!$param_given(vfbsdcv)) begin
+        vfbsdcv_v = vfbsd_v;
+    end else begin
+        vfbsdcv_v = vfbsdcv;
+    end
+    if (cryomod == 0) begin
+        phib = Vtm * llnf(NBODY_i / ni);
+        phib = smoothminx(phib, 0, 1e-10);
+        vbi = Vtm * llnf(NBODY_i * nsd / (ni * ni));
+    end else begin
+        phib = Vtm * (llnf(NBODY_i) - niln);
+        phib = smoothminx(phib, 0, 1e-10);
+        vbi = Vtm * (llnf(NBODY_i * nsd) - 2 * niln);
+    end
+
+    // Workfunction difference between gate and n+ source.
+    deltaPhi = devsign * (PHIG_i - (easub + (type == `ntype ? 0.0 : Eg)));
+
+    // Mobility degradation
+    eta_mu = 0.5 * ETAMOB_t;
+    eta_mu_cv = 0.5;
+    if (type != `ntype) begin
+        eta_mu = `ONE_OV_3 * ETAMOB_t;
+        eta_mu_cv = `ONE_OV_3;
+    end
+
+    // Junction current and capacitance
+    if (bulkmod != 0) begin
+        // Source-side junction current
+        Isbs = asej * JSS_t + psej * JSWS_t + tfin * NFINtotal * JSWGS_t;
+        if (Isbs > 0.0) begin
+            Nvtms = Vtm * njs;
+            XExpBVS = lexp(-bvs / Nvtms) * xjbvs;
+            T2 = max(ijthsfwd / Isbs, 10.0);
+            Tb = 1.0 + T2 - XExpBVS;
+            VjsmFwd = Nvtms * llnf(0.5 * (Tb + sqrt(Tb * Tb + 4.0 * XExpBVS)));
+            T0 = lexp(VjsmFwd / Nvtms);
+            IVjsmFwd = Isbs * (T0 - XExpBVS / T0 + XExpBVS - 1.0);
+            SslpFwd = Isbs * (T0 + XExpBVS / T0) / Nvtms;
+            T2 = hypsmooth((ijthsrev / Isbs - 10.0), 1.0e-3) + 10.0;
+            VjsmRev = -bvs - Nvtms * llnf((T2 - 1.0) / xjbvs);
+            T1 = xjbvs * lexp(-(bvs + VjsmRev) / Nvtms);
+            IVjsmRev = Isbs * (1.0 + T1);
+            SslpRev = -Isbs * T1 / Nvtms;
+        end
+        // Drain-side junction current
+        Isbd = adej * JSD_t + pdej * JSWD_t + tfin * NFINtotal * JSWGD_t;
+        if (Isbd > 0.0) begin
+            Nvtmd = Vtm * njd;
+            XExpBVD = lexp(-bvd / Nvtmd) * xjbvd;
+            T2 = max(ijthdfwd / Isbd, 10.0);
+            Tb = 1.0 + T2 - XExpBVD;
+            VjdmFwd = Nvtmd * llnf(0.5 * (Tb + sqrt(Tb * Tb + 4.0 * XExpBVD)));
+            T0 = lexp(VjdmFwd / Nvtmd);
+            IVjdmFwd = Isbd * (T0 - XExpBVD / T0 + XExpBVD - 1.0);
+            DslpFwd = Isbd * (T0 + XExpBVD / T0) / Nvtmd;
+            T2 = hypsmooth((ijthdrev / Isbd - 10.0), 1.0e-3) + 10.0;
+            VjdmRev = -bvd - Nvtmd * llnf((T2 - 1.0) / xjbvd);
+            T1 = xjbvd * lexp(-(bvd + VjdmRev) / Nvtmd);
+            IVjdmRev = Isbd * (1.0 + T1);
+            DslpRev = -Isbd * T1 / Nvtmd;
+        end
+        // Junction capacitance
+        Czbs = CJS_t * asej;
+        Czbssw = CJSWS_t * psej;
+        Czbsswg = CJSWGS_t * Weff0 * NFINtotal;
+        Czbd = CJD_t * adej;
+        Czbdsw = CJSWD_t * pdej;
+        Czbdswg = CJSWGD_t * Weff0 * NFINtotal;
+        // Bias-independent part
+        `juncap_bias_indep(sjs, PBS_t, mjs, mjs2, vec1s, pb21s)
+        `juncap_bias_indep(sjsws, PBSWS_t, mjsws, mjsws2, vec2s, pb22s)
+        `juncap_bias_indep(sjswgs, PBSWGS_t, mjswgs, mjswgs2, vec3s, pb23s)
+        `juncap_bias_indep(sjd, PBD_t, mjd, mjd2, vec1d, pb21d)
+        `juncap_bias_indep(sjswd, PBSWD_t, mjswd, mjswd2, vec2d, pb22d)
+        `juncap_bias_indep(sjswgd, PBSWGD_t, mjswgd, mjswgd2, vec3d, pb23d)
+    end
+
+    // Generation-recombination current
+    igentemp = lexp(Eg * TRatio_m1 / Vtm / NTGEN_i);
+
+    // Bias-dependent calculations
+    vgs_noswap = devsign * V(gi, si);
+    vds_noswap = devsign * V(di, si);
+    vgd_noswap = devsign * V(gi, di);
+    ves_jct = devsign * V(e, si);
+    ved_jct = devsign * V(e, di);
+    vge = devsign * V(gi, e);
+    if (rgatemod !=2) begin
+        vgdrift = devsign * V(ge, di);
+        vgdrift_s = devsign * V(ge, si);
+    end else begin
+        vgdrift = devsign * V(gintd, di);
+        vgdrift_s = devsign * V(gints, si);
+    end
+
+    // Source/drain swap
+    sigvds = 1.0;
+    if (vds_noswap < 0.0) begin
+        sigvds = -1.0;
+        vgs = vgs_noswap - vds_noswap;
+        vds = -1.0 * vds_noswap;
+        ves = ved_jct;
+    end else begin
+        vgs = vgs_noswap;
+        vds = vds_noswap;
+        ves = ves_jct;
+    end
+    vgsfb = vgs - deltaPhi;
+
+    // Vds smoothing
+    vdsx = sqrt(vds * vds + 0.01) - 0.1;
+
+    // Ves Smoothing
+    if (bulkmod != 0) begin
+        vesx = ves - 0.5 * (vds - vdsx);
+        vesmax = 0.95 * PHIBE_i;
+        T2 = vesmax - vesx - 1.0e-3;
+        veseff = vesmax - 0.5 * (T2 + sqrt(T2 * T2 + 0.004 * vesmax));
+    end
+
+    // Asymmetry model
+    T0 = tanh(0.6 * vds_noswap / Vtm);
+    wf = 0.5 + 0.5 * T0;
+    wr_v = 1.0 - wf;
+    if (asymmod != 0) begin
+        CDSCD_a = CDSCDR_i * wr_v + CDSCD_i * wf;
+        ETA0_a = ETA0R_t * wr_v + ETA0_t * wf;
+        PDIBL1_a = PDIBL1R_i * wr_v + PDIBL1_i * wf;
+        PDIBL2_a = PDIBL2R_i * wr_v + PDIBL2_i * wf;
+        MEXP_a = MEXPR_t * wr_v + MEXP_t * wf;
+        PTWG_a = PTWGR_t * wr_v + PTWG_t * wf;
+        VSAT1_a = VSAT1R_t * wr_v + VSAT1_t * wf;
+        RSDR_a = RSDRR_t * wr_v + RSDR_t * wf;
+        RDDR_a = RDDRR_t * wr_v + RDDR_t * wf;
+        PCLM_a = PCLMR_i * wr_v + PCLM_t * wf;
+        VSAT_a = VSATR_t * wr_v + VSAT_t * wf;
+        KSATIV_a = KSATIVR_i * wr_v + KSATIV_t * wf;
+        DVTSHIFT_a = DVTSHIFTR_i * wr_v + DVTSHIFT_i * wf;
+        CIT_a = CITR_i * wr_v + CIT_i * wf;
+        u0_a = u0r_v * wr_v + u0_v * wf;
+        UA_a = UAR_t * wr_v + UA_t * wf;
+        UD_a = UDR_t * wr_v + UD_t * wf;
+        UC_a = UCR_t * wr_v + UC_t * wf;
+        EU_a = EUR_i * wr_v + EU_t * wf;
+    end else begin
+        CDSCD_a = CDSCD_i;
+        ETA0_a = ETA0_t;
+        PDIBL1_a = PDIBL1_i;
+        PDIBL2_a = PDIBL2_i;
+        MEXP_a = MEXP_t;
+        PTWG_a = PTWG_t;
+        VSAT1_a = VSAT1_t;
+        RSDR_a = RSDR_t;
+        RDDR_a = RDDR_t;
+        PCLM_a = PCLM_t;
+        VSAT_a = VSAT_t;
+        KSATIV_a = KSATIV_t;
+        DVTSHIFT_a = DVTSHIFT_i;
+        CIT_a = CIT_i;
+        u0_a = u0_v;
+        UA_a = UA_t;
+        UD_a = UD_t;
+        UC_a = UC_t;
+        EU_a = EU_t;
+    end
+
+    // Drain saturation voltage
+    inv_MEXP = 1.0 / MEXP_a;
+
+    // SCE, DIBL, SS degradation, Ref: BSIM4
+    phist = 0.4 + phib + PHIN_i;
+    T1 = 2.0 * (Cins / Weff_UFCM) / (rc + 2.0);
+    cdsc_v = Theta_SW * (CDSC_i + CDSCD_a * vdsx);
+    if (nvtm == 0.0) begin
+        if (cryomod == 0) begin
+            nVtm = Vtm * ThetaSS * (1.0 + (CIT_a + cdsc_v) / T1);
+        end else begin
+            nVtm = Vtmeff * ThetaSS * (1.0 + (CIT_a + cdsc_v) / T1);
+        end
+    end else begin
+        nVtm = nvtm;
+    end
+
+    // Unified FinFET compact model
+    qdep = Qdep_ov_Cins / nVtm;
+    vth_fixed_factor_SI = llnf(Cins * nVtm / (`q * Nc * 2.0 * Ach));
+    vth_fixed_factor_Sub = llnf((qdep * rc) * (qdep * rc) / ((lexp(qdep * rc) - qdep * rc - 1.0))) + vth_fixed_factor_SI;
+    q0 = 10.0 * nVtm / rc + 2.0 * qbs;
+
+    // New QM parameter calculation
+    fieldnormalizationfactor = Vtm * Cins / (Weff_UFCM * epssub);
+    auxQMfact = pow(4.5 * `HBAR * `M_PI * `q / (4.0 * sqrt(2.0 * mx)), `TWO_OV_3);
+    QMFACTORCVfinal = qmfactorcv * auxQMfact * pow(fieldnormalizationfactor, `TWO_OV_3) / (`q * Vtm);
+
+    // Delta Vth
+    dvth_vtroll = -DVT0_i * Theta_SCE * (vbi - phist);
+    dvth_dibl = -ETA0_a * Theta_DIBL * (vdsx + ETA1_i * sqrt(vdsx + 0.01)) + (DVTP0_i * Theta_DITS * pow(vdsx+0.01, DVTP1_i));
+    dvth_rsce = K1RSCE_i * Theta_RSCE * sqrt(phist);
+    dvth_all = dvth_vtroll + dvth_dibl + dvth_rsce + dvth_temp + DVTSHIFT_a;
+    vgsfb = vgsfb - dvth_all;
+
+    // Vgs clamping for inversion region
+    beta0_v = u0_a * cox * Weff0 / Leff;
+    if (cryomod == 0) begin
+        T3 = pow((2.0 * cox * imin / (beta0_v * nVtm * `q * Nc * tfin)), nVtm);
+        T0 = -(dvch_qm + llnf(T3));
+        T1 = vgsfb + T0 + delvtrand;
+        vgsfbeff = hypsmooth(T1, 1.0e-4) - T0;
+    end else begin
+        T0 = -nVtm * llnf(2.0 * cox * imin / (beta0_v * nVtm * `q * Nc * tfin));
+        T1  = -dvch_qm + smoothminx(T0, 0.01, 1e-4);
+        T2 = vgsfb + T1 + delvtrand;
+        vgsfbeff = hypsmooth(T2, 1.0e-4) - T1;
+    end
+
+    // Core model calculation at source
+    vch = dvch_qm;
+    T4 = pow(-qdep, `TWO_OV_3);
+    if (bulkmod != 0) begin
+        T1 = hypsmooth((2.0 * phib + vch - ves), 0.1);
+        T3 = -K1_t / (2.0 * nVtm) * (sqrt(T1) - sqrt(2.0 * phib));
+        T0 = -qdep - T3 + vth_fixed_factor_Sub + QMFACTORCVfinal * T4;
+        T1 = -qdep - T3 + vth_fixed_factor_SI;
+    end else begin
+        T0 = -qdep + vth_fixed_factor_Sub + QMFACTORCVfinal * T4;
+        T1 = -qdep + vth_fixed_factor_SI;
+    end
+    T2 = (vgsfbeff - vch) / nVtm;
+    F0 = -T2 + T1;
+    T3 = 0.5 * (T2 - T0);
+    qm = lexp(T3);
+    if (qm > 1.0e-7) begin
+        T7 = ln(1.0 + qm);
+        qm = 2.0 * (1.0 - sqrt(1.0 + T7 * T7));
+        T8 = (qm * alpha_ufcm + qdep) * rc;
+        T4 = T8 / (lexp(T8) - T8 - 1.0);
+        T5 = T8 * T4;
+        qm_ln = ln(-(qm + qdep));
+        e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+        e1 = -1.0 + 1.0 / qm + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+        e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+        qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+        T8 = (qm * alpha_ufcm + qdep) * rc;
+        T4 = T8 / (lexp(T8) - T8 - 1.0);
+        T5 = T8 * T4;
+        qm_ln = ln(-(qm + qdep));
+        e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+        e1 = -1.0 + 1.0 / qm + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+        e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+        qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+    end else begin
+        qm = -qm * qm;
+    end
+    qis = -qm * nVtm;
+
+    //Gate-All-Around FET quantum subband model: source side
+    if (subbandmod == 1) begin
+        QT2 = (vgsfb - vch) / nVtm;
+        QT3 = smoothminx(QT2, 0, p1);
+        QT4 = pow(QT3, d1 / 2);
+        qnds1 = qnd10 * QT4 * lexp(QT2 - QT3);
+
+        QT5 = (vgsfb - vch - qe2) / nVtm;
+        QT6 = smoothminx(QT5, 0, p2);
+        QT7 = pow(QT6, d2 / 2);
+        qnds2 = qnd20 * QT7 * lexp(QT5 - QT6);
+
+        QT8 = (vgsfb - vch - qe3) / nVtm;
+        QT9 = smoothminx(QT8, 0, p3);
+        QT10 = pow(QT9, d3 / 2);
+        qnds3 = qnd30 * QT10 * lexp(QT8 - QT9) ;
+
+        qis = nc3d * qis + ncq * (qnds1 + qnds2 + qnds3);
+    end
+
+    // Drain-to-source saturation voltage
+    qb0 = 1.0e-2 / cox;
+    Eeffs = EeffFactor * (qbs + eta_mu * qis);
+    T2 = pow((0.5 * (1.0 + qis / qb0)), UCS_t);
+    T3 = pow(Eeffs, EU_a);
+    if (bulkmod != 0) begin
+        T3 = (UA_a + UC_a * veseff) * T3 + UD_a / T2;
+    end else begin
+        T3 = UA_a * T3 + UD_a / T2;
+    end
+    Dmobs = 1.0 + T3;
+    Dmobs = smoothminx(Dmobs, 1.0, dmobclamp);
+    Dmobs = Dmobs / u0mult;
+    if (rdsmod == 1) begin
+        Rdss = 0.0;
+    end else if (rdsmod == 0) begin
+        T4 = 1.0 + PRWGS_i * qis;
+        T1 = 1.0 / T4;
+        T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+        Rdss = (rdswmin + RDSW_i * T0) * WeffWRFactor * NFINtotal * rdstemp;
+    end else begin
+        T4 = 1.0 + PRWGS_i * qis;
+        T1 = 1.0 / T4;
+        T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+        Rdss = (RSourceGeo + RDrainGeo + (rdswmin + RDSW_i * T0) * WeffWRFactor * NFINtotal) * rdstemp;
+    end
+    Esat = 2.0 * VSAT_a / u0_a * Dmobs;
+    EsatL = Esat * Leff;
+    if (cryomod == 0) begin
+        T6 = KSATIV_a * (qis + 2.0 * Vtm);
+    end else begin
+        T6 = KSATIV_a * (qis + 2.0 * Vtmeff);
+    end
+    if (Rdss > 0.0) begin
+        WVCox = Weff0 * VSAT_a * cox;
+        T0 = WVCox * Rdss;
+        Ta = 2.0 * T0;
+        Tb = T6 + EsatL + 3.0 * T6 * T0;
+        Tc = T6 * (EsatL + 2.0 * T6 * T0);
+        Vdsat = (Tb * Tb - (Tb * Tb - 2.0 * Ta * Tc))/((Tb + sqrt(Tb * Tb - 2.0 * Ta * Tc)) * Ta);
+    end else begin
+        Vdsat = EsatL * T6 / (EsatL + T6);
+    end
+    Vdsat = hypsmooth((Vdsat - 1.0e-3), 1.0e-5) + 1.0e-3;
+    T7 = pow((vds / Vdsat)+1e-6, MEXP_a);
+    T8 = pow((1.0 + T7), inv_MEXP);
+    Vdseff = min((vds / T8), vds);
+
+    // Core model calculation at drain side
+    vch = Vdseff + dvch_qm;
+    T2 = pow(-qdep, `TWO_OV_3);
+    if (bulkmod != 0) begin
+        T1 = hypsmooth((2.0 * phib + vch - ves), 0.1);
+        T3 = -K1_t / (2.0 * nVtm) * (sqrt(T1) - sqrt(2.0 * phib));
+        T0 = -qdep - T3 + vth_fixed_factor_Sub + QMFACTORCVfinal * T2;
+        T1 = -qdep - T3 + vth_fixed_factor_SI;
+    end else begin
+        T0 = -qdep + vth_fixed_factor_Sub + QMFACTORCVfinal * T2;
+        T1 = -qdep + vth_fixed_factor_SI;
+    end
+    T2 = (vgsfbeff - vch) / nVtm;
+    F0 = -T2 + T1;
+    T3 = (T2 - T0) * 0.5;
+    qm = lexp(T3);
+    if (qm > 1.0e-7) begin
+        T7 = ln(1.0 + qm);
+        qm = 2.0 * (1.0 - sqrt(1.0 + T7 * T7));
+        T8 = (qm * alpha_ufcm + qdep) * rc;
+        T4 = T8 / (lexp(T8) - T8 - 1.0);
+        T5 = T8 * T4;
+        qm_ln = ln(-(qm + qdep));
+        e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+        e1 = -1.0 + (1.0 / qm) + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+        e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+        qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+        T8 = (qm * alpha_ufcm + qdep) * rc;
+        T4 = T8 / (lexp(T8) - T8 - 1.0);
+        T5 = T8 * T4;
+        qm_ln = ln(-(qm + qdep));
+        e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+        e1 = -1.0 + (1.0 / qm) + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+        e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+        qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+    end else begin
+        qm = -qm * qm;
+    end
+    qid = -qm * nVtm;
+
+    //Gate-All-Around quantum subband model: drain side
+    if (subbandmod == 1) begin
+        QT2 = (vgsfb - vch) / nVtm;
+        QT3 = smoothminx(QT2, 0, p1);
+        QT4 = pow(QT3, d1 / 2);
+        qndd1 = qnd10 * QT4 * lexp(QT2 - QT3);
+
+        QT5 = (vgsfb - vch - qe2) / nVtm;
+        QT6 = smoothminx(QT5, 0, p2);
+        QT7 = pow(QT6, d2 / 2);
+        qndd2 = qnd20 * QT7 * lexp(QT5 - QT6);
+
+        QT8 = (vgsfb - vch - qe3) / nVtm;
+        QT9 = smoothminx(QT8, 0, p3);
+        QT10 = pow(QT9, d3 / 2);
+        qndd3 = qnd30 * QT10 * lexp(QT8 - QT9);
+
+        qid = nc3d * qid + ncq * (qndd1 + qndd2 + qndd3);
+    end
+
+    // Core model calculation for C-V
+    if (cvmod == 1) begin
+        // Delta Vth_cv
+        dvth_dibl_cv = -ETA0CV_t * Theta_DIBL * (vdsx + ETA1_i * sqrt(vdsx + 0.01)) + (DVTP0_i * Theta_DITS * pow(vdsx + 0.01, DVTP1_i));
+        dvth_all_cv = dvth_vtroll + dvth_dibl_cv + dvth_rsce + dvth_temp + DVTSHIFT_a;
+        vgsfb_cv = vgs - deltaPhi - dvth_all_cv;
+
+        // Vgs clamping for inversion region
+        beta0_cv = u0_cv * cox * Weff0 / Leff;
+        if (cryomod == 0) begin
+            T3 = pow((2.0 * cox * imin / (beta0_cv * nVtm * `q * Nc * tfin)), nVtm);
+            T0 = -(dvch_qm + llnf(T3));
+            T1 = vgsfb_cv + T0 + delvtrand;
+            vgsfbeff_cv = hypsmooth(T1, 1.0e-4) - T0;
+        end else begin
+            T0 = -nVtm * llnf(2.0 * cox * imin / (beta0_cv * nVtm * `q * Nc * tfin));
+            T1  = -dvch_qm + smoothminx(T0, 0.01, 1e-4);
+            T2 = vgsfb_cv + T1 + delvtrand;
+            vgsfbeff_cv = hypsmooth(T2, 1.0e-4) - T1;
+        end
+
+        // Core model calculation at source
+        vch_cv = dvch_qm;
+        T4 = pow(-qdep, `TWO_OV_3);
+        if (bulkmod != 0) begin
+            T1 = hypsmooth((2.0 * phib + vch_cv - ves), 0.1);
+            T3 = -K1_t / (2.0 * nVtm) * (sqrt(T1) - sqrt(2.0 * phib));
+            T0 = -qdep - T3 + vth_fixed_factor_Sub + QMFACTORCVfinal * T4;
+            T1 = -qdep - T3 + vth_fixed_factor_SI;
+        end else begin
+            T0 = -qdep + vth_fixed_factor_Sub + QMFACTORCVfinal * T4;
+            T1 = -qdep + vth_fixed_factor_SI;
+        end
+        T2 = (vgsfbeff_cv - vch_cv) / nVtm;
+        F0 = -T2 + T1;
+        T3 = 0.5 * (T2 - T0);
+        qm = lexp(T3);
+        if (qm > 1.0e-7) begin
+            T7 = ln(1.0 + qm);
+            qm = 2.0 * (1.0 - sqrt(1.0 + T7 * T7));
+            T8 = (qm * alpha_ufcm + qdep) * rc;
+            T4 = T8 / (lexp(T8) - T8 - 1.0);
+            T5 = T8 * T4;
+            qm_ln = ln(-(qm + qdep));
+            e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+            e1 = -1.0 + 1.0 / qm + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+            e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+            qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+            T8 = (qm * alpha_ufcm + qdep) * rc;
+            T4 = T8 / (lexp(T8) - T8 - 1.0);
+            T5 = T8 * T4;
+            qm_ln = ln(-(qm + qdep));
+            e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+            e1 = -1.0 + 1.0 / qm + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+            e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+            qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+        end else begin
+            qm = -qm * qm;
+        end
+        qis_cv = -qm * nVtm;
+
+        //Gate-All-Around FET quantum subband model: source side
+        if (subbandmod == 1) begin
+            QT2 = (vgsfb_cv - vch_cv) / nVtm;
+            QT3 = smoothminx(QT2, 0, p1);
+            QT4 = pow(QT3, d1 / 2);
+            qnds1 = qnd10 * QT4 * lexp(QT2 - QT3);
+
+            QT5 = (vgsfb_cv - vch_cv - qe2) / nVtm;
+            QT6 = smoothminx(QT5, 0, p2);
+            QT7 = pow(QT6, d2 / 2);
+            qnds2 = qnd20 * QT7 * lexp(QT5 - QT6);
+
+            QT8 = (vgsfb_cv - vch_cv - qe3) / nVtm;
+            QT9 = smoothminx(QT8, 0, p3);
+            QT10 = pow(QT9, d3 / 2);
+            qnds3 = qnd30 * QT10 * lexp(QT8 - QT9) ;
+
+            qis_cv = nc3d * qis_cv + ncq * (qnds1 + qnds2 + qnds3);
+        end
+
+        // Drain-to-source saturation voltage
+        Eeffs_cv = EeffFactor * (qbs + eta_mu * qis_cv);
+        T2 = pow((0.5 * (1.0 + qis_cv / qb0)), UCS_t);
+        T3 = pow(Eeffs_cv, EU_a);
+        if (bulkmod != 0) begin
+            T3 = (UACV_t + UCCV_t * veseff) * T3 + UDCV_t / T2;
+        end else begin
+            T3 = UACV_t * T3 + UDCV_t / T2;
+        end
+        Dmobs_cv = 1.0 + T3;
+        Dmobs_cv = smoothminx(Dmobs_cv, 1.0, dmobclamp);
+        Dmobs_cv = Dmobs_cv / u0mult;
+        if (rdsmod == 1) begin
+            Rdss_cv = 0.0;
+        end else if (rdsmod == 0) begin
+            T4 = 1.0 + PRWGS_i * qis_cv;
+            T1 = 1.0 / T4;
+            T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+            Rdss_cv = (rdswmin + RDSW_i * T0) * WeffWRFactor * NFINtotal * rdstemp;
+        end else begin
+            T4 = 1.0 + PRWGS_i * qis_cv;
+            T1 = 1.0 / T4;
+            T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+            Rdss_cv = (RSourceGeo + RDrainGeo + (rdswmin + RDSW_i * T0) * WeffWRFactor * NFINtotal) * rdstemp;
+        end
+        Esats_cv = 2.0 * VSATCV_t / u0_cv * Dmobs_cv;
+        EsatLs_cv = Esats_cv * Leff;
+        if (cryomod == 0) begin
+            T6 = KSATIV_a * (qis_cv + 2.0 * Vtm);
+        end else begin
+            T6 = KSATIV_a * (qis_cv + 2.0 * Vtmeff);
+        end
+        if (Rdss_cv > 0.0) begin
+            T0 = Weff0 * VSATCV_t * cox * Rdss_cv;
+            Ta = 2.0 * T0;
+            Tb = T6 + EsatLs_cv + 3.0 * T6 * T0;
+            Tc = T6 * (EsatLs_cv + 2.0 * T6 * T0);
+            Vdsat_cv = (Tb * Tb - (Tb * Tb - 2.0 * Ta * Tc))/((Tb + sqrt(Tb * Tb - 2.0 * Ta * Tc)) * Ta);
+        end else begin
+            Vdsat_cv = EsatLs_cv * T6 / (EsatLs_cv + T6);
+        end
+        Vdsat_cv = hypsmooth((Vdsat_cv - 1.0e-3), 1.0e-5) + 1.0e-3;
+        T7 = pow((vds / Vdsat_cv) + 1e-6, MEXP_a);
+        T8 = pow((1.0 + T7), inv_MEXP);
+        Vdseff_cv = min((vds / T8), vds);
+
+        // Core model calculation at drain side
+        vch_cv = Vdseff_cv + dvch_qm;
+        T2 = pow(-qdep, `TWO_OV_3);
+        if (bulkmod != 0) begin
+            T1 = hypsmooth((2.0 * phib + vch_cv - ves), 0.1);
+            T3 = -K1_t / (2.0 * nVtm) * (sqrt(T1) - sqrt(2.0 * phib));
+            T0 = -qdep - T3 + vth_fixed_factor_Sub + QMFACTORCVfinal * T2;
+            T1 = -qdep - T3 + vth_fixed_factor_SI;
+        end else begin
+            T0 = -qdep + vth_fixed_factor_Sub + QMFACTORCVfinal * T2;
+            T1 = -qdep + vth_fixed_factor_SI;
+        end
+        T2 = (vgsfbeff_cv - vch_cv) / nVtm;
+        F0 = -T2 + T1;
+        T3 = (T2 - T0) * 0.5;
+        qm = lexp(T3);
+        if (qm > 1.0e-7) begin
+            T7 = ln(1.0 + qm);
+            qm = 2.0 * (1.0 - sqrt(1.0 + T7 * T7));
+            T8 = (qm * alpha_ufcm + qdep) * rc;
+            T4 = T8 / (lexp(T8) - T8 - 1.0);
+            T5 = T8 * T4;
+            qm_ln = ln(-(qm + qdep));
+            e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+            e1 = -1.0 + (1.0 / qm) + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+            e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+            qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+            T8 = (qm * alpha_ufcm + qdep) * rc;
+            T4 = T8 / (lexp(T8) - T8 - 1.0);
+            T5 = T8 * T4;
+            qm_ln = ln(-(qm + qdep));
+            e0 = F0 - qm + llnf(-qm) + llnf(T5) + QMFACTORCVfinal * exp(`TWO_OV_3 * qm_ln);
+            e1 = -1.0 + (1.0 / qm) + (2.0 / T8 - T4 - 1.0) * rc - `TWO_OV_3 * QMFACTORCVfinal * exp(-`ONE_OV_3 * qm_ln);
+            e2 = -1.0 / (qm * qm) - (2.0 / 9.0) * QMFACTORCVfinal * exp(-`FOUR_OV_3 * qm_ln);
+            qm = qm - (e0 / e1) * (1.0 + (e0 * e2) / (2.0 * e1 * e1));
+        end else begin
+            qm = -qm * qm;
+        end
+        qid_cv = -qm * nVtm;
+
+        //Gate-All-Around quantum subband model: drain side
+        if (subbandmod == 1) begin
+            QT2 = (vgsfb_cv - vch_cv) / nVtm;
+            QT3 = smoothminx(QT2, 0, p1);
+            QT4 = pow(QT3, d1 / 2);
+            qndd1 = qnd10 * QT4 * lexp(QT2 - QT3);
+
+            QT5 = (vgsfb_cv - vch_cv - qe2) / nVtm;
+            QT6 = smoothminx(QT5, 0, p2);
+            QT7 = pow(QT6, d2 / 2);
+            qndd2 = qnd20 * QT7 * lexp(QT5 - QT6);
+
+            QT8 = (vgsfb_cv - vch_cv - qe3) / nVtm;
+            QT9 = smoothminx(QT8, 0, p3);
+            QT10 = pow(QT9, d3 / 2);
+            qndd3 = qnd30 * QT10 * lexp(QT8 - QT9);
+
+            qid_cv = nc3d * qid_cv + ncq * (qndd1 + qndd2 + qndd3);
+        end
+        qia_cv = 0.5 * (qis_cv + qid_cv);
+        dqi_cv = qis_cv - qid_cv;
+        T0 = Vdseff_cv * Vdseff_cv / 6.25e-4;
+        if (chargewf != 0.0) begin
+            qia2_cv = 0.5 * (qis_cv + qid_cv) + chargewf * (1.0 - lexp(-T0)) * 0.5 * dqi_cv;
+        end else begin
+            qia2_cv = 0.5 * (qis_cv + qid_cv);
+        end
+    end
+
+    if (bulkmod != 0) begin
+        T9 = K1_t / (2.0 * nVtm) * sqrt(Vtm);
+        T0 = T9 / 2.0;
+        T2 = (vge - (deltaPhi - Eg - Vtm * llnf(NBODY_i / Nc) + delvfbacc)) / Vtm;
+        if ((T2 * Vtm) > phib + T9 * sqrt(phib * Vtm)) begin
+            T1 = sqrt(T2 - 1.0 + T0 * T0) - T0;
+            T10 = 1.0 + T1 * T1;
+            T6 = expm1(-T10);
+        end else begin
+            T3 = T2 * 0.5 - 3.0 * (1.0 + T9 / sqrt(2.0));
+            T10 = T3 + sqrt(T3 * T3 + 6.0 * T2);
+            if (T2 < 0.0) begin
+                T4 = (T2 - T10) / T9;
+                T6 = -T10 + T4 * T4;
+                T10 = -llnf(1.0 - T10 + T4 * T4);
+            end else begin
+                T11 = lexp(-T10);
+                T4 = sqrt(T2 - 1.0 + T11 + T0 * T0) - T0;
+                T10 = 1.0 - T11 + T4 * T4;
+                T6  = expm1(-T10);
+            end
+        end
+        T7 = sqrt(T6 + T10);
+        if (T10 > 1.0e-15) begin
+            e0 = -(T2 - T10) + T9 * T7;
+            e1 = 1.0 - T9 * 0.5 * T6 / T7;
+            T8 = T10 - (e0 / e1);
+            T11 = expm1(-T8);
+            T12 = sqrt(T11 + T8);
+            qba = -T9 * T12 * Vtm;
+        end else begin
+            if (T10 < -1.0e-15) begin
+                e0 = -(T2 - T10) - T9 * T7;
+                e1 = 1.0 + T9 * 0.5 * T6 / T7;
+                T8 = T10 - e0 / e1;
+                T12a = expm1(-T8) + T8;
+                T12 = T9 * sqrt(T12a);
+            end else begin
+                T8 = 0.0;
+                T12 = 0.0;
+            end
+            qba = T12 * Vtm;
+        end
+        qi_acc_for_QM = T9 * lexp(-T8 / 2.0) * Vtm;
+        psipclamp = 0.5 * (T8 + 1.0 + sqrt((T8 - 1.0) * (T8 - 1.0) + 0.25 * 2.0 * 2.0));
+        sqrtpsip = sqrt(psipclamp);
+        nq = 1.0 + T9 / sqrtpsip;
+    end
+
+    // Average surface potential / charge
+    qia = 0.5 * (qis + qid);
+    dqi = qis - qid;
+    T0 = Vdseff * Vdseff / 6.25e-4;
+    if (chargewf != 0.0) begin
+        qia2 = 0.5 * (qis + qid) + chargewf * (1.0 - lexp(-T0)) * 0.5 * dqi;
+    end else begin
+        qia2 = 0.5 * (qis + qid);
+    end
+
+    // Toxeff model for quantum mechanical effects
+    if (QMTCENCV_i > 0.0) begin
+        T4 = qia / qm0;
+        T5 = 1.0 + pow(T4, PQM_i);
+        Tcen = Tcen0 / T5;
+        coxeff = 1.0 / (1.0 / (cox * eot / toxp) + Tcen * QMTCENCV_i / epssub);
+    end else begin
+        coxeff = cox;
+    end
+    // Quantum mechanical effect correction for accumulation
+    if (bulkmod != 0 && QMTCENCVA_i != 0.0) begin
+        T6 = 1.0 + pow((qi_acc_for_QM / qm0acc), pqmacc);
+        Tcen = Tcen0 / T6;
+        cox_acc = 1.0 / (1.0 / cox_acc + Tcen * QMTCENCVA_i / epssub);
+    end
+
+    // Multiplication factor for I-V
+    beta_v = u0_a * cox * Weff0 / Leff;
+
+    // Mobility degradation
+    Eeffm = EeffFactor * (qbs + eta_mu * qia2);
+    if (cryomod == 0) begin
+        T2 = pow((0.5 * (1.0 + qia2 / qb0)), UCS_t);
+    end else begin
+        T0 = Vdseff * Vdseff / 6.25e-4;
+        T1 = 1.0 - lexp(-T0);
+        T0 = (UDSeff_t * qis + UDDeff_t * qid) * T1;
+        T1 = hypsmooth(T0, 1.0e-12);
+        T2 = pow((0.5 * (1.0 + T1 / qb0)), UCS_t);
+    end
+    T0 = pow(Eeffm, EU_a);
+    if (bulkmod != 0) begin
+        T3 = (UA_a + UC_a * veseff) * T0 + UD_a / T2;
+    end else begin
+        T3 = UA_a * T0 + UD_a / T2;
+    end
+    Dmob = 1.0 + T3;
+    Dmob = smoothminx(Dmob, 1.0, dmobclamp);
+    u0mult_v = u0mult * (1 - muhc0 * lexp(-muhc1 * Vdseff));
+    Dmob = Dmob / u0mult_v;
+    ueff = u0_a / Dmob;
+
+    // Mobility degradation for C-V
+    if (cvmod == 1) begin
+        if (cryomod == 0) begin
+            T2 = pow((0.5 * (1.0 + qia2_cv / qb0)), UCS_t);
+        end else begin
+            T0 = UDSeff_t * qis_cv + UDDeff_t * qid_cv;
+            T1 = hypsmooth(T0, 1.0e-12);
+            T2 = pow((0.5 * (1.0 + T1 / qb0)), UCS_t);
+        end
+        Eeffm_cv = EeffFactor * (qbs + eta_mu_cv * qia2_cv);
+        T3 = UACV_t * pow(Eeffm_cv, EU_a) + UDCV_t / T2;
+    end else begin
+        Eeffm_cv = EeffFactor * (qbs + eta_mu_cv * qia2);
+        T3 = UA_a * pow(Eeffm_cv, EU_a) + UD_a / T2;
+    end
+    Dmob_cv = 1.0 + T3;
+    Dmob_cv = smoothminx(Dmob_cv, 1.0, dmobclamp);
+    Dmob_cv = Dmob_cv / u0mult_v;
+
+    // CLM and DIBL effects
+    tmp = DROUT_i * Leff / scl + 1.0e-6;
+    if (tmp < 40.0) begin
+        DIBLfactor = 0.5 * PDIBL1_a / (cosh(tmp) - 1.0) + PDIBL2_a;
+    end else begin
+        DIBLfactor = PDIBL1_a * lexp(-tmp) + PDIBL2_a;
+    end
+    if (PVAG_i > 0.0) begin
+        PVAGfactor = 1.0 + PVAG_i * qia / EsatL;
+    end else begin
+        PVAGfactor = 1.0 / (1.0 - PVAG_i * qia / EsatL);
+    end
+    diffVds = vds - Vdseff;
+    if (cryomod == 0) begin
+        Vgst2Vtm = qia + 2.0 * Vtm;
+    end else begin
+        Vgst2Vtm = qia + 2.0 * Vtmeff;
+    end
+    if (DIBLfactor > 0.0) begin
+        T1 = Vgst2Vtm;
+        T3 = T1 / (Vdsat + T1);
+        VaDIBL = T1 / DIBLfactor * T3 * PVAGfactor;
+        Moc = 1.0 + diffVds / VaDIBL;
+    end else begin
+        Moc = 1.0;
+    end
+    if (PCLM_a > 0.0) begin
+        if (PCLMG_i < 0.0) begin
+            T1 = 1.0 / (1.0 / PCLM_a - PCLMG_i * qia);
+        end else begin
+            T1 = PCLM_a + PCLMG_i * qia;
+        end
+        Mclm = 1.0 + T1 * llnf(1.0 + (vds - Vdseff) / T1 / (Vdsat + EsatL));
+    end else begin
+        Mclm = 1.0;
+    end
+    Moc = Moc * Mclm;
+
+    // Current degradation due to velocity saturation
+    Esat1 = 2.0 * VSAT1_a / ueff;
+    Esat1L = Esat1 * Leff;
+    T0 = lexp(PSAT_i * llnf(dqi / Esat1L));
+    T1 = 1.0 / PSAT_i;
+    Ta = 1.0 + lexp(T1 * llnf(DELTAVSAT_i));
+    Dvsat = (1.0 + lexp(T1 * llnf(DELTAVSAT_i + T0))) / Ta;
+    Dvsat = Dvsat + 0.5 * PTWG_a * qia * dqi * dqi;
+
+    // Non-saturation effect
+    T0 = A1_t + A2_t / (qia + 2.0 * nVtm);
+    T1 = T0 * dqi * dqi;
+    T2 = T1 + 1.0 - 0.001;
+    T3 = -1.0 + 0.5 * (T2 + sqrt(T2 * T2 + 0.004));
+    Nsat = 0.5 * (1.0 + sqrt(1.0 + T3));
+    Dvsat = Dvsat * Nsat;
+    Dvsat = smoothminx(Dvsat, 1.0, dvsatclamp);
+
+    // Lateral non-uniform doping effect (Vth shift between I-V and C-V)
+    T1 = K0_t / (max(0.0, K0SI_t + K0SISAT_t * dqi * dqi) * qia + 2.0 * nVtm);
+    Mnud = lexp(-T1);
+
+    // Body effect for bulkmod = 2
+    if (bulkmod == 2) begin
+        T0 = hypsmooth((K2_t + K2SAT_t * vdsx), 1.0e-6);
+        T1 = T0 / (max(0.0, K2SI_t + K2SISAT_t * dqi * dqi) * qia + 2.0 * nVtm);
+        T3 = sqrt(PHIBE_i - veseff) - sqrt(PHIBE_i);
+        Mob = lexp(-T1 * T3);
+    end else begin
+        Mob = 1.0;
+    end
+
+    // Velocity saturation for C-V
+    if (cvmod == 1) begin
+        EsatCV = 2.0 * VSATCV_t * Dmob_cv / u0_cv;
+    end else begin
+        EsatCV = 2.0 * VSATCV_t * Dmob_cv / u0_a;
+    end
+    EsatCVL = EsatCV * LeffCV;
+    if (cvmod == 1) begin
+        T0 = pow((dqi_cv / EsatCVL), PSATCV_i);
+    end else begin
+        T0 = pow((dqi / EsatCVL), PSATCV_i);
+    end
+    T1 = 1.0 / PSATCV_i;
+    Ta = 1.0 + pow(DELTAVSATCV_i, T1);
+    DvsatCV = (1.0 + pow((DELTAVSATCV_i + T0), T1)) / Ta;
+    ASAT_i = smoothminx(ASAT_i, 0.1, 0.001);
+    DvsatCV = DvsatCV * ASAT_i;
+
+    // Channel Length Modulation for C-V
+    if (PCLMCV_i != 0.0) begin
+        MclmCV = 1.0 + PCLMCV_i * llnf(1.0 + (vds - Vdseff) / PCLMCV_i / (Vdsat + EsatCVL));
+    end else begin
+        MclmCV = 1.0;
+    end
+
+    // Fixed body charge qb_v
+    qb_v = -`q * NBODY_i * Ach * LeffCV;
+
+    // Quasi-static I-V model
+    etaiv = q0 / (q0 + qia);
+    ids0_ov_dqi = qia + (2.0 - etaiv) * nVtm;
+    ids0 = ids0_ov_dqi * dqi;
+
+    // Source/drain series resistance
+    case (rdsmod)
+        // Bias-dependent part of parasitic resistances is internal, bias-independent part is external
+        0: begin
+            Rsource = RSourceGeo;
+            Rdrain = RDrainGeo;
+            T4 = 1.0 + PRWGS_i * qia;
+            T1 = 1.0 / T4;
+            T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+            Rdsi = rdstemp * (rdswmin + RDSW_i * T0) * WeffWRFactor;
+            Dr = 1.0 + NFINtotal * beta_v * ids0_ov_dqi / (Dmob * Dvsat) * Rdsi;
+        end
+        // Both bias-dependent and bias-independent parts of parasitic resistances are external
+        1: begin
+            Rdsi = 0.0;
+            Dr = 1.0;
+            T2 = devsign * V(gi, si1) - vfbsd_v;
+            T3 = sqrt(T2 * T2 + 0.1);
+            vgs_eff = 0.5 * (T2 + T3);
+            T4 = 1.0 + PRWGS_i * vgs_eff;
+            T1 = 1.0 / T4;
+            T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+            T5 = RSW_i * (1.0 + RSDR_a * pow((V(s, si1) * V(s, si1) + 1.0e-6), (0.5 * prsdr)));
+            Rsource = rdstemp * (RSourceGeo + (rswmin + T5 * T0) * WeffWRFactor);
+            T2 = devsign * V(gi, di2) - vfbsd_v;
+            T3 = sqrt(T2 * T2 + 0.1);
+            vgd_eff = 0.5 * (T2 + T3);
+            T4 = 1.0 + PRWGD_i * vgd_eff;
+            T1 = 1.0 / T4;
+            T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+            T5 = RDW_i * (1.0 + RDDR_a * pow((V(d, di2) * V(d, di2) + 1.0e-6), (0.5 * prddr)));
+            Rdrain = rdstemp * (RDrainGeo + (rdwmin + T5 * T0) * WeffWRFactor);
+        end
+        // Both bias-dependent and bias-independent parts of parasitic resistances are internal
+        2: begin
+            T4 = 1.0 + PRWGS_i * qia;
+            T1 = 1.0 / T4;
+            T0 = 0.5 * (T1 + sqrt(T1 * T1 + 0.01));
+            Rdsi = rdstemp * ((rdswmin + RDSW_i * T0) * WeffWRFactor + RSourceGeo + RDrainGeo);
+            Dr = 1.0 + NFINtotal * beta_v * ids0_ov_dqi / (Dmob * Dvsat) * Rdsi;
+            Rsource = 0.0;
+            Rdrain = 0.0;
+        end
+    endcase
+
+    // Drain current
+    ids_v = NFINtotal * beta_v * ids0 * Moc * Mnud * Mob / (Dmob * Dvsat * Dr);
+    ids_v = ids_v * ids0mult;
+
+    // Quasi-static C-V model
+    if (cvmod == 1) begin
+        T11 = (2.0 * qia_cv + nVtm) / DvsatCV;
+        qg_v = qia_cv + dqi_cv * dqi_cv / (6.0 * T11);
+        qd_v = -0.5 * (qia_cv - (dqi_cv / 6.0) * (1.0 - (dqi_cv / T11) * (1.0 + dqi_cv / (5.0 * T11))));
+    end else begin
+        T11 = (2.0 * qia + nVtm) / DvsatCV;
+        qg_v = qia + dqi * dqi / (6.0 * T11);
+        qd_v = -0.5 * (qia - (dqi / 6.0) * (1.0 - (dqi / T11) * (1.0 + dqi / (5.0 * T11))));
+    end
+
+    // CLM in qg_v and qd_v
+    inv_MclmCV = 1.0 / MclmCV;
+    qg_v = inv_MclmCV * qg_v + (MclmCV - 1.0) * qid;
+    qd_v = inv_MclmCV * inv_MclmCV * qd_v + 0.5 * (MclmCV - inv_MclmCV) * qid;
+
+    if (nqsmod == 2) begin
+        xdpart = - qd_v / qg_v;
+    end else begin
+        xdpart = 0.0;
+    end
+
+    qs_v = -qg_v - qd_v;
+    T6 = NFINtotal * WeffCV0 * LeffCV * coxeff;
+    qg_v = T6 * qg_v;
+    qd_v = T6 * qd_v;
+    qs_v = T6 * qs_v;
+    qinv = qg_v;
+
+    if (bulkmod != 0) begin
+        if (geomod == 5) begin
+            T1 = NFINtotal * WeffCV_acc * LeffCV_acc * cox_acc;
+        end else begin
+            T1 = NFINtotal * WeffCV0 * LeffCV_acc * cox_acc;
+        end
+        T7 = qi_acc_for_QM;
+        T10 = T7 * T1;
+        qg_acc = -T10;
+        qb_acc = T10;
+        T1 = NFINtotal * WeffCV0 * LeffCV * cox;
+        T2 = qba - qi_acc_for_QM;
+        T10 = T1 * T2;
+        qg_acc = qg_acc - T10;
+        qb_acc = qb_acc + T10;
+        T1 = NFINtotal * WeffCV0 * LeffCV * cox;
+        T2 = (nq - 1.0) * 0.5 * (qia + (dqi * dqi / (6.0 * T11)));
+        T10 = T1 * T2;
+        qg_acc = qg_acc - T10;
+        qb_acc = qb_acc + T10;
+    end
+
+    if (sigvds < 0.0) begin
+        T1 = qd_v;
+        qd_v = qs_v;
+        qs_v = T1;
+    end
+
+    // Bias-dependent overlap capacitances
+    if (cgeomod != 1) begin
+        if (rgatemod != 2) begin
+            T1 = NFINtotal * WeffCV0 * devsign;
+            T2 = devsign * V(ge, si);
+            T0 = T2 - vfbsdcv_v + `DELTA_1;
+            vgs_overlap = 0.5 * (T0 - sqrt(T0 * T0 + 4.0 * `DELTA_1));
+            qgs_ov = T1 * (CGSL_i * (T2 - vfbsdcv_v - vgs_overlap - 0.5 * CKAPPAS_i * (sqrt(1.0 - 4.0 * vgs_overlap / CKAPPAS_i) - 1.0)) + CGSO_i * T2);
+            T2 = devsign * V(ge, di);
+            T0 = T2 - vfbsdcv_v + `DELTA_1;
+            vgd_overlap = 0.5 * (T0 - sqrt(T0 * T0 + 4.0 * `DELTA_1));
+            qgd_ov = T1 * (CGDL_i * (T2 - vfbsdcv_v - vgd_overlap - 0.5 * CKAPPAD_i * (sqrt(1.0 - 4.0 * vgd_overlap / CKAPPAD_i) - 1.0)) + CGDO_i * T2);
+        end else begin
+            T1 = NFINtotal * WeffCV0 * devsign;
+            T2 = devsign * V(gints, si);
+            T0 = T2 - vfbsdcv_v + `DELTA_1;
+            vgs_overlap = 0.5 * (T0 - sqrt(T0 * T0 + 4.0 * `DELTA_1));
+            qgs_ov = T1 * (CGSL_i * (T2 - vfbsdcv_v - vgs_overlap - 0.5 * CKAPPAS_i * (sqrt(1.0 - 4.0 * vgs_overlap / CKAPPAS_i) - 1.0)) + CGSO_i * T2);
+            T2 = devsign * V(gintd, di);
+            T0 = T2 - vfbsdcv_v + `DELTA_1;
+            vgd_overlap = 0.5 * (T0 - sqrt(T0 * T0 + 4.0 * `DELTA_1));
+            qgd_ov = T1 * (CGDL_i * (T2 - vfbsdcv_v - vgd_overlap - 0.5 * CKAPPAD_i * (sqrt(1.0 - 4.0 * vgd_overlap / CKAPPAD_i) - 1.0)) + CGDO_i * T2);
+        end
+    end
+    if (cgeomod == 0) begin
+        if (rgatemod != 2) begin
+            T1 = NFINtotal * WeffCV0;
+            qgs_fr = T1 * CFS_i * V(ge, si);
+            qgd_fr = T1 * CFD_i * V(ge, di);
+            qgs_parasitic = qgs_ov + qgs_fr;
+            qgd_parasitic = qgd_ov + qgd_fr;
+        end else begin
+            T1 = NFINtotal * WeffCV0;
+            qgs_fr = T1 * CFS_i * V(gints, si);
+            qgd_fr = T1 * CFD_i * V(gintd, di);
+            qgs_parasitic = qgs_ov + qgs_fr;
+            qgd_parasitic = qgd_ov + qgd_fr;
+        end
+    end else if (cgeomod == 1) begin
+        if (rgatemod != 2) begin
+            if (cgeo1sw == 1) begin
+                T0 = NFINtotal * WeffCV0;
+                COVS_i = T0 * COVS_i;
+                COVD_i = T0 * COVD_i;
+                cgsp_v = T0 * cgsp;
+                cgdp_v = T0 * cgdp;
+            end else begin
+                cgsp_v = cgsp;
+                cgdp_v = cgdp;
+            end
+            qgs_ov = COVS_i * V(ge, si);
+            qgd_ov = COVD_i * V(ge, di);
+            qgs_parasitic = qgs_ov;
+            qgd_parasitic = qgd_ov;
+            qgs_fr = cgsp_v * V(ge, s);
+            qgd_fr = cgdp_v * V(ge, d);
+        end else begin
+            if (cgeo1sw == 1) begin
+                T0 = NFINtotal * WeffCV0;
+                COVS_i = T0 * COVS_i;
+                COVD_i = T0 * COVD_i;
+                cgsp_v = T0 * cgsp;
+                cgdp_v = T0 * cgdp;
+            end else begin
+                cgsp_v = cgsp;
+                cgdp_v = cgdp;
+            end
+            qgs_ov = COVS_i * V(gints, si);
+            qgd_ov = COVD_i * V(gintd, di);
+            qgs_parasitic = qgs_ov;
+            qgd_parasitic = qgd_ov;
+            qgs_fr = cgsp_v * V(gints, s);
+            qgd_fr = cgdp_v * V(gintd, d);
+        end
+    end else begin
+        if (rgatemod != 2) begin
+            qgs_fr = Cfr_geo * V(ge, si);
+            qgd_fr = Cfr_geo * V(ge, di);
+            qgs_parasitic = qgs_ov + qgs_fr;
+            qgd_parasitic = qgd_ov + qgd_fr;
+        end else begin
+            qgs_fr = Cfr_geo * V(gints, si);
+            qgd_fr = Cfr_geo * V(gintd, di);
+            qgs_parasitic = qgs_ov + qgs_fr;
+            qgd_parasitic = qgd_ov + qgd_fr;
+        end
+    end
+
+    //hvmod overlap charges
+    if (hvmod == 1) begin
+        K1_t = 1e-6;
+        T9 = K1_t / (2.0 * nVtm) * sqrt(Vtm);
+        T0 = T9 / 2.0;
+        T2 = - (vgdrift - vfbdrifts) / Vtm;
+        if ((T2 * Vtm) > phib + T9 * sqrt(phib * Vtm)) begin
+            T1 = sqrt(T2 - 1.0 + T0 * T0) - T0;
+            T10 = 1.0 + T1 * T1;
+            T6 = lexp(-T10) - 1.0;
+        end else begin
+            T3 = T2 * 0.5 - 3.0 * (1.0 + T9 / sqrt(2.0));
+            T10 = T3 + sqrt(T3 * T3 + 6.0 * T2);
+            if (T2 < 0.0) begin
+                T4 = (T2 - T10) / T9;
+                T6 = -T10 + T4 * T4;
+                T10 = -llnf(1.0 - T10 + T4 * T4);
+            end else begin
+                T11 = lexp(-1.2*T10);
+                T4 = sqrt(T2 - 1.0 + T11 + T0 * T0) - T0;
+                T10 = 1.0 - T11 + T4 * T4;
+                T6  = lexp(-T10) - 1.0;
+            end
+        end
+        T7 = sqrt(T6 + T10);
+        if (T10 > 1.0e-15) begin
+            e0 = -(T2 - T10) + T9 * T7;
+            e1 = 1.0 - T9 * 0.5 * T6 / T7;
+            T8 = T10 - (e0 / e1);
+        end else begin
+            if (T10 < -1.0e-15) begin
+                e0 = -(T2 - T10) - T9 * T7;
+                e1 = 1.0 + T9 * 0.5 * T6 / T7;
+                T8 = T10 - e0 / e1;
+            end else begin
+                T8 = 0.0;
+            end
+        end
+        qdrift_s = T9 * lexp(-T8 / 2.0) * Vtm;
+        vdr_ov = abs(V(di1, si));
+        Esat_ov = 2.0 * vsatdr / u0_a * Dmobs;
+        EsatL_ov = Esat_ov * lover;
+        inv_mexpdr = 1 / mexpdr;
+        T6 = ksativdr * (qdrift_s + 2.0 * Vtmeff);
+        Vdsat_ov = EsatL_ov * T6 / (EsatL_ov + T6);
+        Vdsat_ov = hypsmooth((Vdsat_ov - 1.0e-3), 1.0e-5) + 1.0e-3;
+        T7 = pow((vdr_ov / Vdsat_ov) + 1e-6, mexpdr);
+        T8 = pow((1.0 + T7), inv_mexpdr);
+        Vdseff_ov = min((vdr_ov / T8), vdr_ov);
+        K1_t = 1e-6;
+        T9 = K1_t / (2.0 * nVtm) * sqrt(Vtm);
+        T0 = T9 / 2.0;
+        T2 = - (vgdrift_s + Vdseff_ov - (vfbdriftd)) / Vtm;
+        if ((T2 * Vtm) > phib + T9 * sqrt(phib * Vtm)) begin
+            T1 = sqrt(T2 - 1.0 + T0 * T0) - T0;
+            T10 = 1.0 + T1 * T1;
+            T6 = lexp(-T10) - 1.0;
+        end else begin
+            T3 = T2 * 0.5 - 3.0 * (1.0 + T9 / sqrt(2.0));
+            T10 = T3 + sqrt(T3 * T3 + 6.0 * T2);
+            if (T2 < 0.0) begin
+                T4 = (T2 - T10) / T9;
+                T6 = -T10 + T4 * T4;
+                T10 = -llnf(1.0 - T10 + T4 * T4);
+            end else begin
+                T11 = lexp(-1.2*T10);
+                T4 = sqrt(T2 - 1.0 + T11 + T0 * T0) - T0;
+                T10 = 1.0 - T11 + T4 * T4;
+                T6  = lexp(-T10) - 1.0;
+            end
+        end
+        T7 = sqrt(T6 + T10);
+        if (T10 > 1.0e-15) begin
+            e0 = -(T2 - T10) + T9 * T7;
+            e1 = 1.0 - T9 * 0.5 * T6 / T7;
+            T8 = T10 - (e0 / e1);
+        end else begin
+            if (T10 < -1.0e-15) begin
+                e0 = -(T2 - T10) - T9 * T7;
+                e1 = 1.0 + T9 * 0.5 * T6 / T7;
+                T8 = T10 - e0 / e1;
+            end else begin
+                T8 = 0.0;
+            end
+        end
+        qdrift_d = T9 * lexp(-T8 / 2.0) * Vtm;
+        qdrift_diff = qdrift_s - qdrift_d;
+        qdrift_a = (qdrift_s + qdrift_d) / 2;
+        T11 = (2.0 * qdrift_a + nVtm) / Dvsat;
+        qdrift = qdrift_a + qdrift_diff * qdrift_diff / (6.0 * T11);
+        qdrift_D = 0.5 * (qdrift_a - (qdrift_diff / 6.0) * (1.0 - (qdrift_diff / T11) * (1.0 + qdrift_diff / (5.0 * T11))));
+        qdrift_S = qdrift - qdrift_D;
+        if (geomod == 5) begin
+            T1 = NFINtotal * WeffCV_acc * (lover) * cox_acc;
+        end else begin
+            T1 = NFINtotal * WeffCV0 * (lover) * cox_acc;
+        end
+        T7 = qdrift_S;
+        T8 = qdrift_D;
+        T10 = T7 * T1;
+        T11 = T8 * T1;
+        qdrift_S = T10;
+        qdrift_D = T11;
+        qbov_s = qdrift_S;
+        qbov = qdrift_D;
+    end
+
+    // Drain-to-source fringe capacitance
+    qds_fr = cdsp * V(d, s);
+
+    // Impact ionization current
+    if (iimod == 1) begin
+        T0 = (ALPHA0_t + ALPHA1_t * Leff) / Leff;
+        if ((T0 <= 0.0) || (BETA0_t <= 0.0))
+            Iii = 0.0;
+        else begin
+            T1 = -BETA0_t / (diffVds + 1.0e-30);
+            Iii = T0 * diffVds * ids_v * lexp(T1);
+        end
+    end else if (iimod == 2) begin
+        ALPHAII = (ALPHAII0_t + ALPHAII1_t * Leff) / Leff;
+        if (ALPHAII <= 0.0) begin
+            Iii = 0.0;
+        end else begin
+            T0 = ESATII_i * Leff;
+            T1 = SII0_t * T0 / (1.0 + T0);
+            T0 = 1.0 / (1.0 + hypsmooth((SII1_i * vgsfbeff), iimod2clamp1));
+            T3 = T0 + SII2_i;
+            T2 = hypsmooth((vgsfbeff * T3), iimod2clamp2);
+            T3 = 1.0 / (1.0 + SIID_i * vds);
+            VgsStep = T1 * T2 * T3;
+            Vdsatii = VgsStep * (1.0 - LII_i / Leff);
+            Vdiff = vds - Vdsatii;
+            T0 = BETAII2_i + BETAII1_i * Vdiff + BETAII0_i * Vdiff * Vdiff;
+            T1 = sqrt(T0 * T0 + 1.0e-10);
+            Ratio = -hypmax(-ALPHAII * lexp(Vdiff / T1), -10.0, iimod2clamp3);
+            Iii = Ratio * ids_v;
+        end
+    end
+
+    // Gate currents, Ref: BSIM4
+    // Igb calculation
+    if (igbmod != 0) begin
+        // Igbinv
+        T1 = (qia - EIGBINV_i) / NIGBINV_i / Vtm;
+        Vaux_Igbinv = NIGBINV_i * Vtm * ln_one_plus_exp(T1);
+        T2 = hypmax(AIGBINV_t - BIGBINV_i * qia, -igbinvclamp, 1.0e-6);
+        T3 = 1.0 + CIGBINV_i * qia;
+        T4 = -9.82222e11 * toxg * T2 * T3;
+        T5 = lexp(T4);
+        T6 = 3.75956e-7;
+        igbinv_v = Weff0 * Leff * T6 * Toxratio * vge * Vaux_Igbinv * T5;
+        igbinv_v = igb0mult * igbinv_v * igtemp;
+        // Igbacc
+        vfbzb = deltaPhi - (Eg / 2.0) - phib;
+        T0 = vfbzb - vge;
+        T1 = T0 / NIGBACC_i / Vtm;
+        Vaux_Igbacc = NIGBACC_i * Vtm * ln_one_plus_exp(T1);
+        if (bulkmod != 0) begin
+            Voxacc = qi_acc_for_QM;
+        end else begin
+            if (vfbzb <= 0.0) begin
+                Voxacc = 0.5 * (T0 - 0.02 + sqrt((T0 - 0.02) * (T0 - 0.02) - 0.08 * vfbzb));
+            end else begin
+                Voxacc = 0.5 * (T0 - 0.02 + sqrt((T0 - 0.02) * (T0 - 0.02) + 0.08 * vfbzb));
+            end
+        end
+        T2 = hypmax(AIGBACC_t - BIGBACC_i * Voxacc, -igbaccclamp, 1.0e-6);
+        T3 = 1.0 + CIGBACC_i * Voxacc;
+        T4 = -7.45669e11 * toxg * T2 * T3;
+        T5 = lexp(T4);
+        T6 = 4.97232e-7;
+        igbacc_v = Weff0 * Leff * T6 * Toxratio * vge * Vaux_Igbacc * T5;
+        igbacc_v = igb0mult * igbacc_v * igtemp;
+    end
+    // Igc calculation
+    if (igcmod != 0) begin
+        // Igcinv
+        T1 = hypmax(AIGC_t - BIGC_i * qia, -igcinvclamp, 1.0e-6);
+        T2 = 1.0 + CIGC_i * qia;
+        T3 = -Bechvb * toxg * T1 * T2;
+        T4 = qia * lexp(T3);
+        T5 = (vge + 0.5 * vdsx + 0.5 * (ves_jct + ved_jct));
+        igc0 = igc0mult * Weff0 * Leff * Aechvb * Toxratio * T4 * T5 * igtemp;
+        // Gate-current partitioning
+        Vdseffx = sqrt(Vdseff * Vdseff + 0.01) - 0.1;
+        T1 = PIGCD_i * Vdseffx;
+        T1_exp = lexp(-T1);
+        T3 = T1 + T1_exp - 1.0 + 1.0e-4;
+        T4 = 1.0 - (T1 + 1.0) * T1_exp + 1.0e-4;
+        T5 = T1 * T1 + 2.0e-4;
+        igcd_v = igc0 * T4 / T5;
+        igcs_v = igc0 * T3 / T5;
+        // Igs
+        T0 = vgs_noswap - vfbsd_v;
+        vgs_eff = sqrt(T0 * T0 + 1.0e-4);
+        if (igclamp == 1) begin
+            T1 = hypsmooth((AIGS_t - BIGS_i * vgs_eff), 1.0e-6);
+            if (CIGS_i < 0.01) begin
+                CIGS_i = 0.01;
+            end
+        end else begin
+            T1 = AIGS_t - BIGS_i * vgs_eff;
+        end
+        T2 = 1.0 + CIGS_i * vgs_eff;
+        T3 = -Bechvb * toxg * POXEDGE_i * T1 * T2;
+        T4 = lexp(T3);
+        if (sigvds > 0.0) begin
+            igs_v = igsd_mult * dlcigs * vgs_noswap * vgs_eff * T4;
+        end else begin
+            igd_v = igsd_mult * dlcigs * vgs_noswap * vgs_eff * T4;
+        end
+        // Igd
+        T0 = vgd_noswap - vfbsd_v;
+        vgd_eff = sqrt(T0 * T0 + 1.0e-4);
+        if (igclamp == 1) begin
+            T1 = hypsmooth((AIGD_t - BIGD_i * vgd_eff), 1.0e-6);
+            if (CIGD_i < 0.01) begin
+                CIGD_i = 0.01;
+            end
+        end else begin
+            T1 = AIGD_t - BIGD_i * vgd_eff;
+        end
+        T2 = 1.0 + CIGD_i * vgd_eff;
+        T3 = -Bechvb * toxg * POXEDGE_i * T1 * T2;
+        T4 = lexp(T3);
+        if (sigvds > 0.0) begin
+            igd_v = igsd_mult * dlcigd * vgd_noswap * vgd_eff * T4;
+        end else begin
+            igs_v = igsd_mult * dlcigd * vgd_noswap * vgd_eff * T4;
+        end
+    end
+
+    // GIDL, GISL currents, Ref: BSIM4
+    if (gidlmod != 0) begin
+        T0 = epsratio * eot;
+        // GIDL current
+        if ((AGIDL_i <= 0.0) || (BGIDL_t <= 0.0)) begin
+            T6 = 0.0;
+        end else begin
+            T1 = (-vgd_noswap - EGIDL_i + vfbsd_v) / T0;
+            T1 = hypsmooth(T1, 1.0e-2);
+            T2 = BGIDL_t / (T1 + 1.0e-3);
+            T3 = pow(T1, PGIDL_i);
+            if (bulkmod != 0) begin
+                T4 = -ved_jct * ved_jct * ved_jct;
+                T4a = CGIDL_i + abs(T4) + 1.0e-5;
+                T5 = hypsmooth((T4 / T4a), 1.0e-6) - 1.0e-6;
+                T6 = AGIDL_i * Weff0 * T3 * lexp(-T2) * T5;
+            end else begin
+                T6 = AGIDL_i * Weff0 * T3 * lexp(-T2) * vds_noswap;
+            end
+        end
+        // Trap Assisted Tunneling GIDL
+        if (gidlmod == 3 && ATATD_i > 0.0) begin
+            if (bulkmod != 0) begin
+                CTATD_t = CTATD_i * hypsmooth((1.0 + TTAT_i * delTemp - 1.0e-6), 1.0e-3);
+                T1 = (BTATD_i * vgd_noswap * vgd_noswap - CTATD_t * vgd_noswap - DTATD_i + vfbsd_v) / Vtm;
+                T2 = ATATD_i * Weff0 * ni * lexp(T1);
+                T4 = -ved_jct * ved_jct * ved_jct;
+                T4a = CGIDL_i + abs(T4) + 1.0e-5;
+                T5 = hypsmooth((T4 / T4a), 1.0e-6) - 1.0e-6;
+                T6 = T6 + T2 * T5;
+            end else begin
+                CTATD_t = CTATD_i * hypsmooth((1.0 + TTAT_i * delTemp - 1.0e-6), 1.0e-3);
+                T1 = (BTATD_i * vgd_noswap * vgd_noswap - CTATD_t * vgd_noswap - DTATD_i + vfbsd_v) / Vtm;
+                T2 = ATATD_i * Weff0 * ni * lexp(T1);
+                T6 = T6 + T2 * vds_noswap;
+            end
+        end
+        // Parasitic substrate GIDL
+        if (bulkmod != 0 && (gidlmod == 2 || gidlmod == 3) && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+            BGIDLB_t = BGIDLB_i * hypsmooth((1.0 + TGIDL_i * delTemp - 1.0e-6), 1.0e-3);
+            if ((AGIDLB_i <= 0.0) || (BGIDLB_t <= 0.0)) begin
+                T7 = 0.0;
+            end else begin
+                T1 = (-vgd_noswap - EGIDLB_i + vfbsd_v) / T0;
+                T1 = hypsmooth(T1, 1.0e-2);
+                T2 = BGIDLB_t / (T1 + 1.0e-3);
+                T3 = pow(T1, PGIDLB_i);
+                T4 = -ved_jct * ved_jct * ved_jct;
+                T4a = CGIDLB_i + abs(T4) + 1.0e-5;
+                T5 = hypsmooth((T4 / T4a), 1.0e-6) - 1.0e-6;
+                T7 = AGIDLB_i * WeffB * T3 * lexp(-T2) * T5;
+            end
+        end
+        if (sigvds > 0.0) begin
+            igidl_v = T6;
+            igidlb = T7;
+        end else begin
+            igisl_v = T6;
+            igislb = T7;
+        end
+        // GISL current
+        if ((AGISL_i <= 0.0) || (BGISL_t <= 0.0)) begin
+            T6 = 0.0;
+        end else begin
+            T1 = (-vgs_noswap - EGISL_i + vfbsd_v) / T0;
+            T1 = hypsmooth(T1, 1.0e-2);
+            T2 = BGISL_t / (T1 + 1.0e-3);
+            T3 = pow(T1, PGISL_i);
+            if (bulkmod != 0) begin
+                T4 = -ves_jct * ves_jct * ves_jct;
+                T4a = CGISL_i + abs(T4) + 1.0e-5;
+                T5 = hypsmooth((T4 / T4a), 1.0e-6) - 1.0e-6;
+                T6 = AGISL_i * Weff0 * T3 * lexp(-T2) * T5;
+            end else begin
+                T6 = AGISL_i * Weff0 * T3 * lexp(-T2) * (-vds_noswap);
+            end
+        end
+        // Trap Assisted Tunneling GISL
+        if (gidlmod == 3 && ATATS_i > 0.0) begin
+            if (bulkmod != 0) begin
+                CTATS_t=  CTATS_i*hypsmooth((1.0 + TTAT_i * delTemp - 1.0e-6), 1.0e-3);
+                T1 = (BTATS_i * vgs_noswap * vgs_noswap - CTATS_t * vgs_noswap - DTATS_i + vfbsd_v) / Vtm;
+                T2 = ATATS_i * Weff0 * ni * lexp(T1);
+                T4 = -ves_jct * ves_jct * ves_jct;
+                T4a = CGISL_i + abs(T4) + 1.0e-5;
+                T5 = hypsmooth((T4 / T4a), 1.0e-6) - 1.0e-6;
+                T6 = T6 + T2 * T5;
+            end else begin
+                CTATS_t=  CTATS_i*hypsmooth((1.0 + TTAT_i * delTemp - 1.0e-6), 1.0e-3);
+                T1 = (BTATS_i * vgs_noswap * vgs_noswap - CTATS_t * vgs_noswap - DTATS_i + vfbsd_v) / Vtm;
+                T2 = ATATS_i * Weff0 * ni * lexp(T1);
+                T6 = T6 + T2 * (-vds_noswap);
+            end
+        end
+        // Parasitic substrate GISL
+        if (bulkmod != 0 && (gidlmod == 2 || gidlmod == 3) && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+            BGISLB_t = BGISLB_i * hypsmooth((1.0 + TGIDL_i * delTemp - 1.0e-6), 1.0e-3);
+            if ((AGISLB_i <= 0.0) || (BGISLB_t <= 0.0)) begin
+                T7 = 0.0;
+            end else begin
+                T1 = (-vgs_noswap - EGISLB_i + vfbsd_v) / T0;
+                T1 = hypsmooth(T1, 1.0e-2);
+                T2 = BGISLB_t / (T1 + 1.0e-3);
+                T3 = pow(T1, PGISLB_i);
+                T4 = -ves_jct * ves_jct * ves_jct;
+                T4a = CGISLB_i + abs(T4) + 1.0e-5;
+                T5 = hypsmooth((T4 / T4a), 1.0e-6) - 1.0e-6;
+                T7 = AGISLB_i * WeffB * T3 * lexp(-T2) * T5;
+            end
+        end
+        if (sigvds > 0.0) begin
+            igisl_v = T6;
+            igislb = T7;
+        end else begin
+            igidl_v = T6;
+            igidlb = T7;
+        end
+    end
+
+    // Junction currents
+    if (bulkmod != 0) begin
+        // Source-side junction current
+        if (Isbs > 0.0) begin
+            if (ves_jct < VjsmRev) begin
+                T0 = ves_jct / Nvtms;
+                T1 = lexp(T0) - 1.0;
+                T2 = IVjsmRev + SslpRev * (ves_jct - VjsmRev);
+                Ies = T1 * T2;
+            end else if (ves_jct <= VjsmFwd) begin
+                T0 = ves_jct / Nvtms;
+                T1 = (bvs + ves_jct) / Nvtms;
+                T2 = lexp(-T1);
+                Ies = Isbs * (lexp(T0) + XExpBVS - 1.0 - xjbvs * T2);
+            end else begin
+                Ies = IVjsmFwd + SslpFwd * (ves_jct - VjsmFwd);
+            end
+        end else begin
+            Ies = 0.0;
+        end
+        // Source-side junction tunneling current
+        if (JTSS_t > 0.0) begin
+            if ((vtss - ves_jct) < (vtss * 1.0e-3)) begin
+                T0 = -ves_jct / Vtm0 / NJTS_t;
+                T1 = lexp(T0 * 1.0e3) - 1.0;
+                Ies = Ies - asej * JTSS_t * T1;
+            end else begin
+                T0 = -ves_jct / Vtm0 / NJTS_t;
+                T1 = lexp(T0 * vtss / (vtss - ves_jct)) - 1.0;
+                Ies = Ies - asej * JTSS_t * T1;
+            end
+        end
+        if (JTSSWS_t > 0.0) begin
+            if ((vtssws - ves_jct) < (vtssws * 1.0e-3)) begin
+                T0 = -ves_jct / Vtm0 / NJTSSW_t;
+                T1 = lexp(T0 * 1.0e3) - 1.0;
+                Ies = Ies - psej * JTSSWS_t * T1;
+            end else begin
+                T0 = -ves_jct / Vtm0 / NJTSSW_t;
+                T1 = lexp(T0 * vtssws / (vtssws - ves_jct)) - 1.0;
+                Ies = Ies - psej * JTSSWS_t * T1;
+            end
+        end
+        if (JTSSWGS_t > 0.0) begin
+            if ((vtsswgs - ves_jct) < (vtsswgs * 1.0e-3)) begin
+                T0 = -ves_jct / Vtm0 / NJTSSWG_t;
+                T1 = lexp(T0 * 1.0e3) - 1.0;
+                Ies = Ies - tfin * NFINtotal * JTSSWGS_t * T1;
+            end else begin
+                T0 = -ves_jct / Vtm0 / NJTSSWG_t;
+                T1 = lexp(T0 * vtsswgs / (vtsswgs - ves_jct)) - 1.0;
+                Ies = Ies - tfin * NFINtotal * JTSSWGS_t * T1;
+            end
+        end
+        // Drain-side junction current
+        if (Isbd > 0.0) begin
+            if (ved_jct < VjdmRev) begin
+                T0 = ved_jct / Nvtmd;
+                T1 = lexp(T0) - 1.0;
+                T2 = IVjdmRev + DslpRev * (ved_jct - VjdmRev);
+                Ied = T1 * T2;
+            end else if (ved_jct <= VjdmFwd) begin
+                T0 = ved_jct / Nvtmd;
+                T1 = (bvd + ved_jct) / Nvtmd;
+                T2 = lexp(-T1);
+                Ied = Isbd * (lexp(T0) + XExpBVD - 1.0 - xjbvd * T2);
+            end else begin
+                Ied = IVjdmFwd + DslpFwd * (ved_jct - VjdmFwd);
+            end
+        end else begin
+            Ied = 0.0;
+        end
+        // Drain-side junction tunneling current
+        if (JTSD_t > 0.0) begin
+            if ((vtsd - ved_jct) < (vtsd * 1.0e-3)) begin
+                T0 = -ved_jct / Vtm0 / NJTSD_t;
+                T1 = lexp(T0 * 1.0e3) - 1.0;
+                Ied = Ied - adej * JTSD_t * T1;
+            end else begin
+                T0 = -ved_jct / Vtm0 / NJTSD_t;
+                T1 = lexp(T0 * vtsd/ (vtsd - ved_jct)) - 1.0;
+                Ied = Ied - adej * JTSD_t * T1;
+            end
+        end
+        if (JTSSWD_t > 0.0) begin
+            if ((vtsswd - ved_jct) < (vtsswd * 1.0e-3)) begin
+                T0 = -ved_jct / Vtm0 / NJTSSWD_t;
+                T1 = lexp(T0 * 1.0e3) - 1.0;
+                Ied = Ied - pdej * JTSSWD_t * T1;
+            end else begin
+                T0 = -ved_jct / Vtm0 / NJTSSWD_t;
+                T1 = lexp(T0 * vtsswd / (vtsswd - ved_jct)) - 1.0;
+                Ied = Ied - pdej * JTSSWD_t * T1;
+            end
+        end
+        if (JTSSWGD_t > 0.0) begin
+            if ((vtsswgd - ved_jct) < (vtsswgd * 1.0e-3)) begin
+                T0 = -ved_jct / Vtm0 / NJTSSWGD_t;
+                T1 = lexp(T0 * 1.0e3) - 1.0;
+                Ied = Ied - tfin * NFINtotal * JTSSWGD_t * T1;
+            end else begin
+                T0 = -ved_jct / Vtm0 / NJTSSWGD_t;
+                T1 = lexp(T0 * vtsswgd / (vtsswgd - ved_jct)) - 1.0;
+                Ied = Ied - tfin * NFINtotal * JTSSWGD_t * T1;
+            end
+        end
+        // Source-to-substrate junction capacitance
+        `junction_cap(juncaps1, ves_jct, vec1s, pb21s, Czbs, PBS_t, sjs, mjs, mjs2, Qesj1)
+        `junction_cap(juncaps2, ves_jct, vec2s, pb22s, Czbssw, PBSWS_t, sjsws, mjsws, mjsws2, Qesj2)
+        `junction_cap(juncaps3, ves_jct, vec3s, pb23s, Czbsswg, PBSWGS_t, sjswgs, mjswgs, mjswgs2, Qesj3)
+        Qesj = Qesj1 + Qesj2 + Qesj3;
+        // Drain-to-substrate junction capacitance
+        `junction_cap(juncapd1, ved_jct, vec1d, pb21d, Czbd, PBD_t, sjd, mjd, mjd2, Qedj1)
+        `junction_cap(juncapd2, ved_jct, vec2d, pb22d, Czbdsw, PBSWD_t, sjswd, mjswd, mjswd2, Qedj2)
+        `junction_cap(juncapd3, ved_jct, vec3d, pb23d, Czbdswg, PBSWGD_t, sjswgd, mjswgd, mjswgd2, Qedj3)
+        Qedj = Qedj1 + Qedj2 + Qedj3;
+    end
+    Qes = Qesj + csbox * ves_jct;
+    Qed = Qedj + cdbox * ved_jct;
+
+    // Gate-to-substrate parasitic capacitance
+    // Bias-independent component
+    Qeg = cgbox * devsign * V(e, ge);
+    // Bias-dependent component
+    if (bulkmod != 0) begin
+        T2 = devsign * V(ge, e);
+        T3 = T2 - deltaPhi + Eg / 2.0 + phib - delvfbacc;
+        T0 = T3 + `DELTA_1;
+        vge_overlap = 0.5 * (T0 + sqrt(T0 * T0 + 4.0 * `DELTA_1));
+        Qeg = Qeg - NFINtotal * LeffCV * (CGBL_i * (T3 - vge_overlap + 0.5 * CKAPPAB_i * (sqrt(1.0 + 4.0 * vge_overlap / CKAPPAB_i) - 1.0)));
+    end
+
+    // Generation-recombination component
+    T1 = vds * (AIGEN_i + BIGEN_i * vds * vds);
+    idsgen_v = hfin * tfin * (Leff - 2.0 * LINTIGEN_i) * igentemp * T1;
+
+    // NQS gate resistance, Ref: BSIM4
+    T0 = ueff * coxeff * Weff0 / Leff;
+    if (nqsmod != 0 && XRCRG1_i != 0.0) begin
+        IdovVds = beta_v * ids0_ov_dqi * Moc / (Dmob * Dvsat * Dr);
+        gcrg = NFINtotal * XRCRG1_i * (IdovVds + XRCRG2_i * Vtm * T0);
+    end
+    if (nqsmod == 2) begin
+        gtau = 1e-9 * gcrg / (cox * Weff0 * Leff);
+    end
+
+    // Multiply all current and charge components by NFINtotal
+    igidl_v = NFINtotal * igidl_v;
+    igisl_v = NFINtotal * igisl_v;
+    igidlb = NFINtotal * igidlb;
+    igislb = NFINtotal * igislb;
+    igcd_v = NFINtotal * igcd_v;
+    igcs_v = NFINtotal * igcs_v;
+    igs_v = NFINtotal * igs_v;
+    igd_v = NFINtotal * igd_v;
+    igbinv_v = NFINtotal * igbinv_v;
+    igbacc_v = NFINtotal * igbacc_v;
+    idsgen_v = NFINtotal * idsgen_v;
+
+    // Gate-to-substrate tunneling current empirical partition
+    if (bulkmod == 0) begin
+        igbs_v = (igbinv_v + igbacc_v) * wf;
+        igbd_v = (igbinv_v + igbacc_v) * wr_v;
+    end
+
+    // Transconductance
+    ids = devsign * ids_v;
+    gm = ddx(ids, V(gi));
+    // Noise model
+    `include "bsimcmg_noise.include"
+
+    // Loading Ids, gate and drain charges
+    if (sigvds > 0.0) begin
+        I(di, si) <+ devsign * ids_v;
+    end else begin
+        I(si, di) <+ devsign * ids_v;
+    end
+    if (nqsmod == 2) begin
+        I(gi, si) <+ devsign * gtau * -V(q);
+        I(di, si) <+ devsign * xdpart * gtau * V(q);
+    end else begin
+        I(di, si) <+ devsign * ddt(qd_v);
+        I(gi, si) <+ devsign * ddt(qg_v);
+    end
+    if (hvmod == 1) begin
+        I(di1, di) <+ V(di1,di)*1e3;
+    end else begin
+        V(di1, di) <+ 0.0;
+    end
+
+    // Loading other currents
+    if (sigvds > 0.0) begin
+        I(di, si) <+ devsign * idsgen_v;
+        I(gi, si) <+ devsign * (igcs_v + igs_v);
+        I(gi, di) <+ devsign * (igcd_v + igd_v);
+        if (bulkmod != 0) begin
+            if (gidlmod == 2 && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+                I(di, si) <+ devsign * (igidl_v + Iii);
+                I(si, di) <+ devsign * igisl_v;
+                I(di, e) <+ devsign * igidlb;
+                I(si, e) <+ devsign * igislb;
+            end else begin
+                I(di, e) <+ devsign * (igidl_v + Iii);
+                I(si, e) <+ devsign * igisl_v;
+            end
+            I(gi, e) <+ devsign * (igbinv_v + igbacc_v);
+        end else begin
+            I(di, si) <+ devsign * (igidl_v + Iii);
+            I(si, di) <+ devsign * igisl_v;
+        end
+    end else begin
+        I(si, di) <+ devsign * idsgen_v;
+        I(gi, di) <+ devsign * (igcs_v + igs_v);
+        I(gi, si) <+ devsign * (igcd_v + igd_v);
+        if (bulkmod != 0) begin
+            if (gidlmod == 2 && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+                I(si, di) <+ devsign * (igidl_v + Iii);
+                I(di, si) <+ devsign * igisl_v;
+                I(si, e) <+ devsign * igidlb;
+                I(di, e) <+ devsign * igislb;
+            end else begin
+                I(si, e) <+ devsign * (igidl_v + Iii);
+                I(di, e) <+ devsign * igisl_v;
+            end
+            I(gi, e) <+ devsign * (igbinv_v + igbacc_v);
+        end else begin
+            I(si, di) <+ devsign * (igidl_v + Iii);
+            I(di, si) <+ devsign * igisl_v;
+        end
+    end
+    if (bulkmod == 0) begin
+        I(gi, si) <+ devsign * igbs_v;
+        I(gi, di) <+ devsign * igbd_v;
+    end
+    if (bulkmod != 0) begin
+        I(e, si) <+ devsign * Ies + V(e, si) * gmin;
+        I(e, di) <+ devsign * Ied + V(e, di) * gmin;
+    end
+    I(e, si) <+ devsign * ddt(Qes);
+    I(e, di) <+ devsign * ddt(Qed);
+    I(e, ge) <+ devsign * ddt(Qeg);
+
+    // Loading other charges
+    if (rgatemod != 2) begin
+        I(ge, si) <+ ddt(qgs_parasitic);
+        if (hvmod == 1) begin
+            I(ge, di1) <+ ddt(qgd_parasitic);
+            I(ge, di1) <+ devsign * ddt(qbov);
+            I(ge, di) <+ devsign * ddt(qbov_s);
+        end else begin
+            I(ge, di) <+ ddt(qgd_parasitic);
+        end
+        I(d, s) <+ ddt(qds_fr);
+        if (cgeomod == 1) begin
+            I(ge, s) <+ ddt(qgs_fr);
+            I(ge, d) <+ ddt(qgd_fr);
+        end
+    end else begin
+        I(gints, si) <+ ddt(qgs_parasitic);
+        if (hvmod == 1) begin
+            I(gintd, di1) <+ ddt(qgd_parasitic);
+            I(gintd, di1) <+ devsign * ddt(qbov);
+            I(gintd, di) <+ devsign * ddt(qbov_s);
+        end else begin
+            I(gintd, di) <+ ddt(qgd_parasitic);
+        end
+        I(d, s) <+ ddt(qds_fr);
+        if (cgeomod == 1) begin
+            I(gints, s) <+ ddt(qgs_fr);
+            I(gintd, d) <+ ddt(qgd_fr);
+        end
+    end
+
+    // Accumulation charge for bulk FET
+    if (bulkmod != 0) begin
+        I(gi, si) <+ devsign * ddt(qg_acc);
+        I(e, si) <+ devsign * ddt(qb_acc);
+    end
+
+    // Velocity saturation in source/drain resistances
+    if (rdsmod == 1) begin
+        if (rdlcw > 0) begin
+            rdstempvs = hypsmooth((1.0 + prtvsrsd * delTemp - 1.0e-6), 1.0e-3);
+            `tempdep(VSATRSD_t, vsatrsd, -atvsrsd)
+            T0 = qis - ptwg1vsrsd;
+            T0 = smoothminx(T0, 0.1, 2.0);
+            T1  = 10.0 * psatxvsrsd * T0 / (10.0 * psatxvsrsd + T0);
+            vsatrsd_eff = VSATRSD_t * (1.0 + ptwgvsrsd * T1);
+            vsatrsd_eff = hypsmooth(vsatrsd_eff, 10.0);
+            T2 = NFINtotal * Weff0 * `q * vsatrsd_eff;
+            T5 = abs(V(di2, di1));
+            if (gavsrd == 0) begin
+                T3 = 1.0;
+            end else begin
+                T3 = smoothminx((T5 - rdvds), 0, 0.5);
+                T3 = 1.0 + T3 * gavsrd;
+            end
+            isat_rd = T2 * nvsrd * T3;
+            T4 = rdstempvs * rdlcw * WeffWRFactor;
+            vsat_rd = isat_rd * T4;
+            delta_vsrd = pow(T5, 4 - mvsrsd) / (pow(T5, 4 - mvsrsd) + vsrdfactor * pow(vsat_rd, 4 - mvsrsd));
+            T6 = pow(delta_vsrd, 1.0 / mvsrsd) * T5 / vsat_rd;
+            Rvs_d = T4 * pow((1.0 + pow(T6, mvsrsd)), 1 / mvsrsd);
+        end
+        if (rslcw > 0) begin
+            if (rdlcw == 0.0) begin
+                rdstempvs = hypsmooth((1.0 + prtvsrsd * delTemp - 1.0e-6), 1.0e-3);
+                `tempdep(VSATRSD_t, vsatrsd, -atvsrsd)
+                T0 = qis - ptwg1vsrsd;
+                T0 = smoothminx(T0, 0.1, 2.0);
+                T1  = 10.0 * psatxvsrsd * T0 / (10.0 * psatxvsrsd + T0);
+                vsatrsd_eff = VSATRSD_t * (1.0 + ptwgvsrsd * T1);
+                vsatrsd_eff = hypsmooth(vsatrsd_eff, 10.0);
+                T2 = NFINtotal * Weff0 * `q * vsatrsd_eff;
+            end
+            isat_rs = T2 * nvsrs;
+            T4 = rdstempvs * rslcw * WeffWRFactor;
+            vsat_rs = isat_rs * T4;
+            T5 = abs(V(si, si1));
+            delta_vsrs = pow(T5, 4 - mvsrsd) / (pow(T5, 4 - mvsrsd) + vsrsfactor * pow(vsat_rs, 4 - mvsrsd));
+            T6 = pow(delta_vsrs, 1.0 / mvsrsd) * T5 / vsat_rs;
+            Rvs_s = T4 * pow((1.0 + pow(T6, mvsrsd)), 1 / mvsrsd);
+        end
+    end
+
+    // External source/drain resistance
+    if (rdsmod != 2 && RDrainGeo > 0) begin
+        gdpr = 1.0 / Rdrain;
+        I(d, di2) <+ V(d, di2) * gdpr;
+        if (rdsmod == 1 && rdlcw > 0) begin
+            gvs_d = 1.0 / Rvs_d;
+            I(di2, di1) <+ V(di2, di1) * gvs_d;
+        end else begin
+            V(di2, di1) <+ 0.0;
+        end
+    end else begin
+        V(d, di2) <+ 0.0;
+        V(di2, di1) <+ 0.0;
+    end
+    if (rdsmod != 2 && RSourceGeo > 0) begin
+        gspr = 1.0 / Rsource;
+        I(s, si1) <+ V(s, si1) * gspr;
+        if (rdsmod == 1 && rslcw > 0) begin
+            gvs_s = 1.0 / Rvs_s;
+            I(si1, si) <+ V(si1, si) * gvs_s;
+        end else begin
+            V(si1, si) <+ 0.0;
+        end
+    end else begin
+        V(s, si1) <+ 0.0;
+        V(si1, si) <+ 0.0;
+    end
+
+    // NQS gate resistance model
+    if (nqsmod == 1 && XRCRG1_i != 0.0) begin
+        I(gint, gi) <+ V(gint, gi) * gcrg;
+    end else begin
+        V(gint, gi) <+ 0.0;
+    end
+    if (nqsmod == 2) begin
+        I(q) <+ ddt(qg_v - qb_v);
+        I(q) <+ V(q) * gtau;
+        I(q) <+ 1.0e-9 * ddt(V(q));
+    end else begin
+        V(q) <+ 0.0;
+    end
+
+    // Gate electrode resistance
+    if (rgatemod != 0) begin
+        I(g, ge) <+ V(g, ge) * ggeltd;
+        if (rgatemod == 2) begin
+            I(ge, gint) <+ V(ge, gint) * ggint;
+            I(ge, gints) <+ V(ge, gints) * ggp;
+            I(ge, gintd) <+ V(ge, gintd) * ggp;
+        end else begin
+            V(ge, gint) <+ 0.0;
+            V(ge, gints) <+ 0.0;
+            V(ge, gintd) <+ 0.0;
+        end
+    end else begin
+        V(g, ge) <+ 0.0;
+        V(ge, gint) <+ 0.0;
+        V(ge, gints) <+ 0.0;
+        V(ge, gintd) <+ 0.0;
+    end
+
+    // Flicker noise
+    I(di, si) <+ flicker_noise(sigvds * FNPowerAt1Hz, ef_v, "1overf");
+
+    // Thermal noise for parasitics
+    if (rdsmod != 2 && RDrainGeo > 0) begin
+        I(d, di2) <+ white_noise(4.0 * Vtm * `q * gdpr, "rd");
+        if (rdsmod == 1 && rdlcw > 0) begin
+            I(di2, di1) <+ white_noise(4.0 * Vtm * `q * gvs_d, "rd");
+        end
+    end
+    if (rdsmod != 2 && RSourceGeo > 0) begin
+        I(s, si1) <+ white_noise(4.0 * Vtm * `q * gspr, "rs");
+        if (rdsmod == 1 && rslcw > 0) begin
+            I(si1, si) <+ white_noise(4.0 * Vtm * `q * gvs_s, "rs");
+        end
+    end
+    if (rgatemod != 0) begin
+        I(g, ge) <+ white_noise(4.0 * Vtm * `q * ggeltd, "rg");
+    end
+
+    // Channel thermal noise and induced gate noise stamping
+    if (tnoimod == 0) begin
+        I(di, si) <+ white_noise(sid, "id");
+        V(n) <+ 0.0;
+    end else begin
+        // Additional node for correlated noise
+        I(n) <+ V(n);
+        I(n) <+ white_noise(sid, "corl");
+        I(di, si) <+ white_noise(sid * (1.0 - ctnoi * ctnoi), "id");
+        I(di, si) <+ ctnoi * V(n);
+        // Correlated Sig noise to S/D through capacitive coupling
+        I(gi, si) <+ ddt(0.7071 * sigrat * V(n));
+        I(gi, di) <+ ddt(0.7071 * sigrat * V(n));
+    end
+
+    // Gate current shot noise
+    if (igcmod != 0) begin
+        if (sigvds > 0.0) begin
+            I(gi, si) <+ white_noise(2.0 * `q * abs(igcs_v + igs_v), "igs_v");
+            I(gi, di) <+ white_noise(2.0 * `q * abs(igcd_v + igd_v), "igd_v");
+        end else begin
+            I(gi, di) <+ white_noise(2.0 * `q * abs(igcs_v + igs_v), "igd_v");
+            I(gi, si) <+ white_noise(2.0 * `q * abs(igcd_v + igd_v), "igs_v");
+        end
+    end
+    if (igbmod != 0) begin
+        if (bulkmod != 0) begin
+            I(gi, e)  <+ white_noise(2.0 * `q * abs(igbinv_v + igbacc_v), "igb");
+        end else begin
+            I(gi, si) <+ white_noise(2.0 * `q * abs(igbs_v), "igbs_v");
+            I(gi, di) <+ white_noise(2.0 * `q * abs(igbd_v), "igbd_v");
+        end
+    end
+
+    // Self-heating
+    if (shmod != 0 && rth0 > 0.0) begin
+        Pwr(t) <+ -(devsign * sigvds * V(di, si) * ids_v);
+        if (rdsmod != 2 && RDrainGeo > 0) begin
+            Pwr(t) <+ -V(d, di2) * V(d, di2) * gdpr;
+            if (rdsmod == 1 && rdlcw > 0) begin
+                Pwr(t) <+ -V(di2, di1) * V(di2, di1) * gvs_d;
+            end
+        end
+        if (rdsmod != 2 && RSourceGeo > 0) begin
+            Pwr(t) <+ -V(s, si1) * V(s, si1) * gspr;
+            if (rdsmod == 1 && rslcw > 0) begin
+                Pwr(t) <+ -V(si1, si) * V(si1, si) * gvs_s;
+            end
+        end
+        Pwr(t) <+ Temp(t) * gth;
+        Pwr(t) <+ ddt(Temp(t) * cth);
+    end else begin
+        Temp(t) <+ 0.0;
+    end
+
+    // Operating-point information
+    // W & l
+    weff = Weff0;
+    leff = Leff;
+    weffcv = WeffCV0;
+    leffcv = LeffCV;
+    // Intrinsic drain current
+    ids = devsign * ids_v;
+    // Total drain and source currents
+    if (sigvds > 0.0) begin
+        if (bulkmod != 0) begin
+            if (gidlmod == 2 && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+                ideff = ids + devsign * idsgen_v - devsign * (igd_v + igcd_v) + devsign * (Iii + igidl_v + igidlb) - devsign * Ied;
+                iseff = -ids - devsign * idsgen_v - devsign * (igs_v + igcs_v) + devsign * (igisl_v + igislb) - devsign * Ies;
+            end else begin
+                ideff = ids + devsign * idsgen_v - devsign * (igd_v + igcd_v) + devsign * (Iii + igidl_v) - devsign * Ied;
+                iseff = -ids - devsign * idsgen_v - devsign * (igs_v + igcs_v) + devsign * igisl_v - devsign * Ies;
+            end
+        end else begin
+            ideff = ids + devsign * idsgen_v - devsign * (igd_v + igcd_v + igbd_v) + devsign * (Iii + igidl_v - igisl_v);
+            iseff = -ids - devsign * idsgen_v - devsign * (igs_v + igcs_v + igbs_v) + devsign * (igisl_v - igidl_v - Iii);
+        end
+    end else begin
+        if (bulkmod != 0) begin
+            if (gidlmod == 2 && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+                ideff = -ids - devsign * idsgen_v - devsign * (igs_v + igcs_v) + devsign * (igisl_v + igislb) - devsign * Ied;
+                iseff = ids + devsign * idsgen_v - devsign * (igd_v + igcd_v) + devsign * (Iii + igidl_v + igidlb) - devsign * Ies;
+            end else begin
+                ideff = -ids - devsign * idsgen_v - devsign * (igs_v + igcs_v) + devsign * igisl_v - devsign * Ied;
+                iseff = ids + devsign * idsgen_v - devsign * (igd_v + igcd_v) + devsign * (Iii + igidl_v) - devsign * Ies;
+            end
+        end else begin
+            ideff = -ids - devsign * idsgen_v - devsign * (igs_v + igcs_v + igbd_v) + devsign * (igisl_v - igidl_v - Iii);
+            iseff = ids + devsign * idsgen_v - devsign * (igd_v + igcd_v + igbs_v) + devsign * (Iii + igidl_v - igisl_v);
+        end
+    end
+    // Total gate current
+    if (bulkmod == 0) begin
+        igtot = devsign * (igs_v + igd_v + igcs_v + igcd_v + igbs_v + igbd_v);
+    end else begin
+        igtot = devsign * (igs_v + igd_v + igcs_v + igcd_v + igbacc_v + igbinv_v);
+    end
+    // Generation-recombination current
+    idsgen = sigvds * devsign * idsgen_v;
+    // Impact ionization current
+    iii = devsign * Iii;
+    // GIDL, GISL currents
+    if (sigvds > 0.0) begin
+        if (bulkmod != 0 && gidlmod == 2 && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+            igidl = devsign * (igidl_v + igidlb);
+            igisl = devsign * (igisl_v + igislb);
+        end else begin
+            igidl = devsign * igidl_v;
+            igisl = devsign * igisl_v;
+        end
+    end else begin
+        if (bulkmod != 0 && gidlmod == 2 && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+            igidl = devsign * (igisl_v + igislb);
+            igisl = devsign * (igidl_v + igidlb);
+        end else begin
+            igidl = devsign * igisl_v;
+            igisl = devsign * igidl_v;
+        end
+    end
+    // Source-to-substrate and drain-to-substrate junction currents
+    if (bulkmod != 0) begin
+        ijsb = -devsign * Ies;
+        ijdb = -devsign * Ied;
+    end else begin
+        ijsb = 0.0;
+        ijdb = 0.0;
+    end
+    // Substrate current
+    if (bulkmod != 0) begin
+        if ((gidlmod == 2 || gidlmod == 3) && (geomod == 2 || geomod == 3 || geomod == 5)) begin
+            isub = -iii - devsign * (igidlb + igislb) - ijsb - ijdb - devsign * (igbinv_v + igbacc_v);
+        end else begin
+            isub = -iii - igidl - igisl - ijsb - ijdb - devsign * (igbinv_v + igbacc_v);
+        end
+    end else begin
+        isub = 0.0;
+    end
+    // Drain current prefactor per fin per finger
+    beta = beta_v;
+    // Drain-to-source saturation voltage
+    Lterm0 = 0.15 * (Lg-10e-9) / 10e-9 + 1.12;
+    Lterm = Lterm0 / pow(1 + pow(Lterm0 / 1.45, 3), 0.33);
+    vdssat = Vdsat * Lterm / pow(1 + pow(Vdsat / 0.5, 1.8), 1 / 1.8);
+    // Effective drain-to-source voltage
+    vdseff = Vdseff;
+    // Flatband voltage
+    if (NGATE_i > 0.0) begin
+        if (cryomod == 0) begin
+            vfb = -devsign * (phib + Vtm * llnf(NGATE_i / ni));
+        end else begin
+            vfb = -devsign * (phib + Vtm * (llnf(NGATE_i) - niln));
+        end
+    end else begin
+        vfb = PHIG_i - (easub + 0.5 * Eg + devsign * phib);
+    end
+    // Threshold voltage calculation
+    q0 = 10.0 * Vtm / rc + 2.0 * qbs;
+    T1 = Vtm * (Vtm + q0);
+    T2 = cox * cox * T1;
+    T3 = 2.0 * `q * ni * epssub * Vtm;
+    vth = vfb + devsign * (Vtm * llnf(T2 / T3) + dvch_qm + phib + qbs + Vtm + dvth_all - delvtrand);
+    // Transconductance
+    gm = ddx(ids, V(gi));
+    // Output conductance
+    if (sigvds > 0) begin
+        gds = ddx(ids, V(di));
+    end else begin
+        gds = ddx(ids, V(si));
+    end
+
+    // Body transconductance
+    if (bulkmod != 0) begin
+        gmbs = ddx(ids, V(e));
+    end else begin
+        gmbs = 0.0;
+    end
+    // Intrinsic charges
+    qgi = devsign * (qg_v + qg_acc);
+    qdi = devsign * qd_v;
+    qsi = devsign * qs_v;
+    qbi = devsign * (qb_v + qb_acc);
+    // Total charges
+    qg = devsign * qg_v + qgs_parasitic + qgd_parasitic + (cgeomod == 1 ? qgs_fr + qgd_fr : 0.0) + devsign * qg_acc - devsign * Qeg + devsign * (qbov + qbov_s);
+    qd = devsign * qd_v - qgd_parasitic - (cgeomod == 1 ? qgd_fr : 0.0) - devsign * Qed +  qds_fr - devsign * qbov;
+    qs = devsign * qs_v - qgs_parasitic - (cgeomod == 1 ? qgs_fr : 0.0) - devsign * Qes -  qds_fr - devsign * qbov_s;
+    qb = devsign * (qb_v + qb_acc) + devsign * (Qeg + Qes + Qed);
+    // Intrinsic capacitances
+    cggi = ddx(qgi, V(gi));
+    cgsi = -ddx(qgi, V(si));
+    cgdi = -ddx(qgi, V(di));
+    cgei = -ddx(qgi, V(e));
+    csgi = -ddx(qsi, V(gi));
+    csdi = -ddx(qsi, V(di));
+    cssi = ddx(qsi, V(si));
+    csei = -ddx(qsi, V(e));
+    cdgi = -ddx(qdi, V(gi));
+    cddi = ddx(qdi, V(di));
+    cdsi = -ddx(qdi, V(si));
+    cdei = -ddx(qdi, V(e));
+    cegi = -ddx(qbi, V(gi));
+    cedi = -ddx(qbi, V(di));
+    cesi = -ddx(qbi, V(si));
+    ceei = ddx(qbi, V(e));
+    // Total capacitances
+    if (rgatemod == 2) begin
+        cgg = cggi + ddx(qgs_parasitic + (cgeomod == 1 ? qgs_fr : 0.0), V(gints)) + ddx(qgd_parasitic + (cgeomod == 1 ? qgd_fr : 0.0), V(gintd)) - ddx(devsign * Qeg, V(ge));
+    end else begin
+        cgg = cggi + ddx(qgs_parasitic + (cgeomod == 1 ? qgs_fr : 0.0), V(ge)) + ddx(qgd_parasitic + (cgeomod == 1 ? qgd_fr : 0.0), V(ge)) - ddx(devsign * Qeg, V(ge));
+    end
+    cgs = -ddx(qg, V(si));
+    cgd = -ddx(qg, V(di));
+    cge = -ddx(qg, V(e));
+    if (rgatemod == 2) begin
+        csg = csgi + ddx(qgs_parasitic + (cgeomod == 1 ? qgs_fr : 0.0), V(gints));
+    end else begin
+        csg = csgi + ddx(qgs_parasitic + (cgeomod == 1 ? qgs_fr : 0.0), V(ge));
+    end
+    csd = -ddx(qs, V(di)) + cdsp;
+    css = ddx(qs, V(si))  + cdsp;
+    cse = -ddx(qs, V(e));
+    if (rgatemod == 2) begin
+        cdg = cdgi + ddx(qgd_parasitic + (cgeomod == 1 ? qgd_fr : 0.0), V(gintd));
+    end else begin
+        cdg = cdgi + ddx(qgd_parasitic + (cgeomod == 1 ? qgd_fr : 0.0), V(ge));
+    end
+    cdd = ddx(qd, V(di))  + cdsp;
+    cds = -ddx(qd, V(si)) + cdsp;
+    cde = -ddx(qd, V(e));
+    ceg = cegi - ddx(devsign * Qeg, V(ge));
+    ced = -ddx(qb, V(di));
+    ces = -ddx(qb, V(si));
+    cee = ddx(qb, V(e));
+    // Gate-to-source overlap and outer fringe capacitance
+    cgsext = -ddx(qgs_parasitic + (cgeomod == 1 ? qgs_fr : 0.0), V(si));
+    // Gate-to-drain overlap and outer fringe capacitance
+    cgdext = -ddx(qgd_parasitic + (cgeomod == 1 ? qgd_fr : 0.0), V(di));
+    // Gate-to-substrate overlap capacitance
+    cgbov = -devsign * ddx(Qeg, V(e));
+    // Total junction and source/drain-to-substrate overlap capacitances
+    cjst = -devsign * ddx(Qes, V(si));
+    cjdt = -devsign * ddx(Qed, V(di));
+    // External bias-independent source resistance
+    rsgeo = RSourceGeo;
+    // External bias-independent drain resistance
+    rdgeo = RDrainGeo;
+    // Geometric parasitic capacitance
+    cfgeo = Cfr_geo;
+    // Output for self-heating temperature
+    t_total_k = DevTemp;
+    t_total_c = DevTemp - `P_CELSIUS0;
+    t_delta_sh = Temp(t);
+    // Gate current components
+    igs = devsign * igs_v;
+    igd = devsign * igd_v;
+    igcs = devsign * igcs_v;
+    igcd = devsign * igcd_v;
+    if (bulkmod == 0) begin
+        igbs = devsign * igbs_v;
+        igbd = devsign * igbd_v;
+        igbinv = 0.0;
+        igbacc = 0.0;
+    end else begin
+        igbinv = devsign * igbinv_v;
+        igbacc = devsign * igbacc_v;
+        igbs = 0.0;
+        igbd = 0.0;
+    end
+    didsdvg = devsign * sigvds * ddx(ids_v, V(gi));
+    didsdvs = devsign * sigvds * ddx(ids_v, V(si));
+    didsdvd = devsign * sigvds * ddx(ids_v, V(di));
+    digsdvg = devsign * ddx(igs_v + igcs_v, V(gi));
+    digsdvs = devsign * ddx(igs_v + igcs_v, V(si));
+    digsdvd = devsign * ddx(igs_v + igcs_v, V(di));
+    digddvg = devsign * ddx(igd_v + igcd_v, V(gi));
+    digddvs = devsign * ddx(igd_v + igcd_v, V(si));
+    digddvd = devsign * ddx(igd_v + igcd_v, V(di));
+    diiidvg = devsign * ddx(Iii, V(gi));
+    diiidvs = devsign * ddx(Iii, V(si));
+    diiidvd = devsign * ddx(Iii, V(di));
+    digidldvg = devsign * ddx(igidl_v, V(gi));
+    digidldvs = devsign * ddx(igidl_v, V(si));
+    digidldvd = devsign * ddx(igidl_v, V(di));
+    digisldvg = devsign * ddx(igisl_v, V(gi));
+    digisldvs = devsign * ddx(igisl_v, V(si));
+    digisldvd = devsign * ddx(igisl_v, V(di));
+    cgt = ddx(qg, Temp(t));
+    cst = ddx(qs, Temp(t));
+    cdt = ddx(qd, Temp(t));
+    didsdvth = devsign * sigvds * ddx(ids_v, Temp(t));
+    digsdvth = devsign * ddx(igs_v + igcs_v, Temp(t));
+    digddvth = devsign * ddx(igd_v + igcd_v, Temp(t));
+    diiidvth = devsign * ddx(Iii, Temp(t));
+    digidldvth = devsign * ddx(igidl_v, Temp(t));
+    digisldvth = devsign * ddx(igisl_v, Temp(t));
+    if (rdsmod != 2) begin
+        if (rdsmod == 1 && (rdlcw > 0 || rslcw > 0)) begin
+            ith = V(di, si) * ids_v + V(di2, di1) * V(di2, di1) * gvs_d + V(d, di2) * V(d, di2) * gdpr + V(si1, si) * V(si1, si) * gvs_s + V(s, si1) * V(s, si1) * gspr;
+        end else begin
+            ith = V(di, si) * ids_v + V(d, di2) * V(d, di2) * gdpr + V(s, si1) * V(s, si1) * gspr;
+        end
+    end else begin
+        ith = V(di, si) * ids_v;
+    end
+    dithdvth = ddx(ith, Temp(t));
+    dithdvg = ddx(ith, V(gi));
+    dithdvs = ddx(ith, V(si));
+    dithdvd = ddx(ith, V(di));
+end
+

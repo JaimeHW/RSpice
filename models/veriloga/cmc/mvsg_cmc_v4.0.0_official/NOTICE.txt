@@ -1,0 +1,7 @@
+The MVSG_CMC standard has been supported by the members of Silicon Integration Initiative's Compact Model Coalition. A link to the most recent version of this standard can be found at:
+
+http://www.si2.org/cmc 
+
+
+CMC Release Date: 18 March 2024
+Public Release Date: 18 September 2025

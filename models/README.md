@@ -10,18 +10,26 @@ discrete parts and op-amps for examples and tests: `diode.lib`,
 
 ## `veriloga/`
 
-Verilog-A sources for the `rspice-veriloga` compiler crate. The compact
-models below are vendored from their upstream sources; each file retains
-its original copyright and license header. Consolidated third-party
-attribution lives in the root [`NOTICE`](../NOTICE).
+Shipped Verilog-A sources for the `rspice-veriloga` compiler crate.
+`constants.vams` and `disciplines.vams` provide the standard support
+headers used by compact models.
 
-| Path | Model | Origin | License |
-|------|-------|--------|---------|
-| `bsim4.va` | BSIM4 MOSFET | BSIM Group, UC Berkeley | UC Berkeley (see file header) |
-| `ekv26_mod.va` | EKV v2.6 MOSFET | EPFL / Tiburon Design Automation | ECL-2.0 (see file header) |
-| `psp103/` | PSP 103 MOSFET + JUNCAP200 junction (CMC standard) | NXP / CEA / Arizona State University | ECL-2.0 |
-| `r3_cmc/` | R3_CMC three-terminal resistor (CMC standard) | Si2 Compact Model Coalition | ECL-2.0 (`LICENSE.txt` / `NOTICE.txt` in directory) |
-| `constants.vams`, `disciplines.vams` | Standard Verilog-AMS support headers | Verilog-AMS LRM | — |
+`veriloga/cmc/` contains redistributable Compact Model Coalition model
+packages using their upstream package directory names. Each package keeps
+its upstream source layout and bundled license/notice files. The root
+[`NOTICE`](../NOTICE) summarizes third-party attribution; package-specific
+license files remain authoritative.
 
-`psp103/releasenotesPSP103p6.txt` is the upstream release-notes file for
-the vendored PSP snapshot.
+These CMC sources are not a staging area for hand-written native ports. They
+are the canonical inputs for the planned Verilog-A to Rust transpiler;
+generated Rust devices should preserve the upstream source package identity
+and license/notice attribution.
+
+OMI packages are intentionally not shipped in `veriloga/cmc/` because they
+are not normal Verilog-A model packages and their terms require separate
+review.
+
+Auto-discovery treats each module-bearing `.va` file under
+`veriloga/<pack>/<package>/` as a candidate model source, derives package
+identity from the first two path components, and scopes include directories
+to the package.

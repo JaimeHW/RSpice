@@ -1,0 +1,70 @@
+// *********************************************************************************************
+// ****                                                                                     ****
+// ****                                    L-UTSOI Model                                    ****
+// ****                                   Version 102.9.0                                   ****
+// ****                                                                                     ****
+// ****                      Ultra Thin Fully Depleted SOI MOSFET Model                     ****
+// ****                                                                                     ****
+// ****                                   Verilog-A code                                    ****
+// ****      Authors: S. Martinie, T. Bedecarrats, O. Rozeau, T. Poiroux, M.A. Jaud         ****
+// ****                                                                                     ****
+// *********************************************************************************************
+//
+//
+// *********************************************************************************************
+// ****                            Copyright 2013-2025 CEA-Leti                             ****
+// *********************************************************************************************
+//
+// *********************************************************************************************
+// ****                     Comments on this version: January, 2026                         ****
+// ****                                                                                     ****
+// ****   This model is suitable for undoped ultrathin film SOI MOSFET                      ****
+// ****   The core of the model (drain current and intrinsic charges) is valid also         ****
+// ****   for independent double gate MOSFET, since it accounts for back interface          ****
+// ****   conduction                                                                        ****
+// ****                                                                                     ****
+// ****   Includes:                                                                         ****
+// ****       - specific surface potential calculations for FDSOI, valid also for IDG       ****
+// ****       - specific drain current expression for FDSOI, valid also for IDG             ****
+// ****       - specific intrinsic charges model, valid also for IDG                        ****
+// ****       - field-dependent mobility including remote coulomb scattering                ****
+// ****       - quantum confinement effect                                                  ****
+// ****       - velocity saturation                                                         ****
+// ****       - channel length modulation                                                   ****
+// ****       - series-resistance with gate voltage dependence                              ****
+// ****       - short-channel effects                                                       ****
+// ****       - overlap capacitances (SP-based)                                             ****
+// ****       - gate leakage current                                                        ****
+// ****       - gate-induced drain/source leakage (GIDL, GISL)                              ****
+// ****       - Impact ionization current                                                   ****
+// ****       - Poly-depletion model                                                        ****
+// ****       - Cryogenic temperature simulation improvement                                ****
+// ****       - Separate capacitance calculation                                            ****
+// ****       - self heating effect                                                         ****
+// ****       - narrow-width effects                                                        ****
+// ****       - stress model                                                                ****
+// ****       - noise (1/f, thermal, induced gate and shot noise)                           ****
+// ****       - source/drain junctions asymmetry                                            ****
+// ****       - Non-quasi-static effects (using RTA approximation)                          ****
+// ****       - global and local scale levels                                               ****
+// ****                                                                                     ****
+// *********************************************************************************************
+
+`include "discipline.h"
+
+// Flag for .OP calculations. Commenting this line cancels OP-related variables definition and OP calculations
+`define OP_CALC
+
+// `define NQSmodel
+
+`include "L_UTSOI_102_macrodef.include"
+
+// *************************************************************************************************************************
+// Model Calculation
+// *************************************************************************************************************************
+
+module l_utsoi(d,g,s,b,Tnode);
+
+`include "L_UTSOI_102_module.include"
+
+endmodule

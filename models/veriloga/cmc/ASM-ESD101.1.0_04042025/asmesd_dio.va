@@ -1,0 +1,178 @@
+/*
+ASM ESD version 101.1.0 model code released by Sourabh Khandelwal on 04/04/2025.
+Copyright 2025 Sourabh Khandelwal
+Copyright 2024 Sourabh Khandelwal
+Copyright 2023 Sourabh Khandelwal
+Copyright 2022 Sourabh Khandelwal
+Copyright 2021 Sourabh Khandelwal
+*/
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+`include "asmesd_macros.include"
+`define ASMESD_DIO
+
+module asmesd_dio(b,e,dt);
+    inout b,e,dt;
+    electrical b,e,bi,ei;
+    thermal dt, dt1;
+    electrical tt;
+
+    analog function real ln_exp_plus_1;
+        input x; real x;
+        begin
+            if (x >= 37) begin
+                ln_exp_plus_1 = x;
+            end else if (x <= -37) begin
+                ln_exp_plus_1 = exp(x);
+            end else begin
+                ln_exp_plus_1 = ln(exp(x) + 1);
+            end
+        end
+    endfunction
+
+    analog function integer sign;
+        input arg;
+        real  arg;
+        sign = arg >= 0 ? +1 : -1;
+    endfunction
+
+    branch (b,bi) br_bbi;
+    branch (e,ei) br_eei;
+    branch (bi,ei) br_biei;
+    branch (dt) rth;
+    branch (dt) ith;
+    branch (tt) itt;
+    branch (tt) rtt;
+    branch (tt) ctt;
+
+`include "asmesd_parameters.include"
+
+    // variable declaration
+    real arg,le,lebv,weff;
+    real dv0,dvh,pwq,qlo,qhi;
+    real ttype,Tdev,Tnom,Tamb,rT,lnrT,Vt;
+    real is_t,cje_t,vje_t;
+    real ijbv_t, bvr_t, theexp_t;
+    real cje_i;
+    real ifwd,Ibe,Itzf;
+    real itrev;
+    real re_nom,rb_nom,Rb,Re,tff,Qde,Qje;
+    real argt,fourkt,twoq,flicker_Pwr,noipwr_Rb,noipwr_re;
+    real Vbiei;
+    real Vbbi, Veei;
+    real fact1,fact2,egfet,arg0,pbfact,pbo,gmaold,gmanew,cjt;
+    real argbv, argbvvt, argtr, isr_t;
+    real Vtff,Vtff1;
+    real vbesat, veesat;
+    real t0;
+    analog begin
+        begin: voltages
+            Tamb = $temperature + Temp(dt) + dtemp;
+            Tdev = `CLAMP((Tamb),(`TMIN+`P_CELSIUS0),(`TMAX+`P_CELSIUS0));
+            if ($port_connected(dt)==0) begin
+                $strobe("DT node not connected");
+            end
+            if (Tdev>tfail) begin
+                $strobe("Device temperature has reached failure");
+            end
+
+            weff = n*l;
+            Tnom = tnom+`P_CELSIUS0;
+            Vt = `KBoQ*Tdev;
+            rT = Tdev/Tnom;
+            lnrT = ln(rT);
+            argt = xti*lnrT+eg*(rT-1)/Vt;
+            argtr = xtir*lnrT;
+            is_t = is*exp(argt);
+            isr_t = isr*exp(argtr);
+            ijbv_t = ijbv*(1.0 + xjbv*(rT-1.0));
+            bvr_t = bvr*(1.0 + xbvr*(rT-1.0));
+            theexp_t = theexp*(1.0 + xtheexp*(rT-1.0));
+            cje_i = cje;
+            `TEMPCJ(cje_i,vje,mje,cje_t,vje_t)
+
+            ttype = type;
+            Vbiei = ttype*V(br_biei);
+            Vbbi  = ttype*V(br_bbi);
+            Veei  = ttype*V(br_eei);
+            `IDIO(is_t,nf,nbv,bvr_t,ijbv_t,ther,theexp_t,Vbiei,  ifwd)
+            `IDIOR(isr_t,ntr,vtr,Vbiei,  itrev)
+            Ibe = (ifwd-itrev);
+            vbesat = 1.0 + pow(abs(Vbbi/vsatb),mexp);
+            veesat = 1.0 + pow(abs(Veei/vsate),mexpe);
+            Rb = rb*exp(lnrT*arb)*pow(vbesat,1.0/mexp);
+            Re = re*exp(lnrT*are)*pow(veesat,1.0/mexpe);
+            if (extmod == 1) begin
+                Rb = Rb + rbe;
+                Re = Re + ree;
+            end
+            Itzf = ifwd;
+            //effective transit time
+            Vtff = pow(abs(V(b,e)/vtf0),texp);
+            Vtff1 = pow((1.0 + Vtff),1.0/texp)-1.0;
+            tff = tf*(1.0 + atff*Vtff1);
+            
+            Qde = tff*Itzf;
+            if (rbmod==1) begin
+                I(itt) <+ -(ifwd)*tff;
+                I(rtt) <+ V(tt)*1.0;
+                I(ctt) <+ (tff)*ddt(V(tt));
+                Rb = Rb/(1.0 + pow((abs(V(tt))/qtt0),qexp));
+            end else begin
+                Rb = Rb;
+                V(tt) <+ 0.0;
+            end
+            `QJ(Qje,cje_t,Vbiei,vje_t,mje,fc)
+            if (shmod == 1 && rth0>0) begin
+                Pwr(ith) <+ -1.0*abs(Ibe*V(b,e));
+                Pwr(rth) <+ Temp(rth)/rth0;
+                Pwr(rth) <+ ddt(Temp(rth)*cth0);
+                Temp(dt1) <+ 0.0;
+            end else if (shmod == 2 && rth0>0 && rth1>0) begin
+                Pwr(ith) <+ -1.0*abs(Ibe*V(b,e));
+                Pwr(dt,dt1) <+ Temp(dt,dt1)/rth0;
+                Pwr(dt)    <+ ddt(cth0*Temp(dt));
+                Pwr(dt1)   <+ Temp(dt1)/rth1;
+                Pwr(dt1)   <+ ddt(cth1*Temp(dt1));
+            end else if (shmod==-1) begin
+                Pwr(ith) <+ -1.0*abs(Ibe*V(b,e));
+                Temp(dt1) <+ 0.0 ;
+            end else begin
+                Temp(dt) <+ 0.0 ;
+                Temp(dt1) <+ 0.0 ;
+            end
+
+            fourkt = 4.0 * `KB * Tdev;
+            I(br_biei) <+ `Gmin*V(br_biei);
+            rb_nom = (rb + extmod*rbe)/weff;
+            re_nom = (re + extmod*ree)/weff;
+            if ((rb_nom > 0.0) && (rb_nom >= minr)) begin
+                I(br_bbi)  <+ V(br_bbi)/(`MAX(Rb/weff,minr));
+                noipwr_Rb = (((Rb/weff)>=(minr))?(fourkt/(Rb/weff)):(0));
+                I(br_bbi) <+ white_noise(noipwr_Rb, "Rb");
+            end else begin
+                V(br_bbi) <+ 0.0;
+            end
+            if ((re_nom > 0.0) && (re_nom >= minr)) begin
+                I(br_eei)  <+ V(br_eei)/(`MAX(Re/weff,minr));
+                noipwr_re = (((Re/weff)>=(minr))?(fourkt/(Re/weff)):(0));
+                I(br_eei) <+ white_noise(noipwr_re, "Re");
+            end else begin
+                V(br_eei)  <+ 0.0;
+            end
+            I(br_biei) <+ ttype*Ibe*weff;
+            I(br_biei) <+ ddt(ttype*Qje*weff);
+            I(br_biei) <+ ddt(ttype*Qde*weff);
+
+            //flicker noise
+            flicker_Pwr = (((af > 0) && (kf > 0))>(0)?(kf*pow(abs(Ibe),af)):(0));
+            I(br_biei) <+ flicker_noise(sign(ttype*Ibe)*flicker_Pwr,1.0, "flicker_Ibe");
+
+            //shot noise
+            twoq = 2.0 * `QQ;
+            I(br_biei) <+ white_noise(twoq*abs(Ibe),"Ibe");
+        end //voltages
+    end //analog
+endmodule

@@ -1,0 +1,1212 @@
+// *********************************************************************************************
+// ****                                                                                     ****
+// ****                                    L-UTSOI Model                                    ****
+// ****                                   Version 102.9.0                                   ****
+// ****                                                                                     ****
+// ****                      Ultra Thin Fully Depleted SOI MOSFET Model                     ****
+// ****                                                                                     ****
+// ****                                   Verilog-A code                                    ****
+// ****      Authors: S. Martinie, T. Bedecarrats, O. Rozeau, T. Poiroux, M.A. Jaud         ****
+// ****                                                                                     ****
+// *********************************************************************************************
+//
+//
+// *********************************************************************************************
+// ****                            Copyright 2013-2025 CEA-Leti                             ****
+// *********************************************************************************************
+//
+// *********************************************************************************************
+// ****                     Comments on this version: January, 2026                         ****
+// ****                                                                                     ****
+// ****   This model is suitable for undoped ultrathin film SOI MOSFET                      ****
+// ****   The core of the model (drain current and intrinsic charges) is valid also         ****
+// ****   for independent double gate MOSFET, since it accounts for back interface          ****
+// ****   conduction                                                                        ****
+// ****                                                                                     ****
+// ****   Includes:                                                                         ****
+// ****       - specific surface potential calculations for FDSOI, valid also for IDG       ****
+// ****       - specific drain current expression for FDSOI, valid also for IDG             ****
+// ****       - specific intrinsic charges model, valid also for IDG                        ****
+// ****       - field-dependent mobility including remote coulomb scattering                ****
+// ****       - quantum confinement effect                                                  ****
+// ****       - velocity saturation                                                         ****
+// ****       - channel length modulation                                                   ****
+// ****       - series-resistance with gate voltage dependence                              ****
+// ****       - short-channel effects                                                       ****
+// ****       - overlap capacitances (SP-based)                                             ****
+// ****       - gate leakage current                                                        ****
+// ****       - gate-induced drain/source leakage (GIDL, GISL)                              ****
+// ****       - Impact ionization current                                                   ****
+// ****       - Poly-depletion model                                                        ****
+// ****       - Cryogenic temperature simulation improvement                                ****
+// ****       - Separate capacitance calculation                                            ****
+// ****       - self heating effect                                                         ****
+// ****       - narrow-width effects                                                        ****
+// ****       - stress model                                                                ****
+// ****       - noise (1/f, thermal, induced gate and shot noise)                           ****
+// ****       - source/drain junctions asymmetry                                            ****
+// ****       - Non-quasi-static effects (using RTA approximation)                          ****
+// ****       - global and local scale levels                                               ****
+// ****                                                                                     ****
+// *********************************************************************************************
+
+// *************************************************************************************************************************
+// Macros and constants used in L-UTSOI model
+// *************************************************************************************************************************
+
+// Channel type
+// `define PMOS                   -1
+`define NMOS                   +1
+
+// Some functions
+`define MIN_FUNC(x,y,a)         0.5*((x)+(y)-sqrt(((x)-(y))*((x)-(y))+(a)))
+`define MAX_FUNC(x,y,a)         0.5*((x)+(y)+sqrt(((x)-(y))*((x)-(y))+(a)))
+
+// Constants
+`define PI                      3.1415926535898
+`define INV3                    0.3333333333333
+`define INV6                    0.1666666666667
+`define INV60                   0.0166666666667
+`define INV42                   0.0238095238095
+`define INV30                   0.0333333333333
+`define INV28                   0.0357142857143
+`define INV14                   0.0714285714286
+`define INV180                  0.0055555555556
+`define INV300                  0.0033333333333
+`define SQRT2                   1.4142135623731
+`define LN2                     0.6931471805599
+`define LN10                    2.3025850929941
+`define X1OV                    1.25
+
+// Physical constants
+`define EPSOX                   3.45313E-11
+`define QMN                     1.27520989
+`define QMP                     1.54120870
+`define KBOL                    1.3806488E-23
+`define QELE                    1.602176565E-19
+`define HBAR                    1.054571726E-34
+`define MELE                    9.10938291E-31
+`define KBOL_QELE               8.617332384961E-05
+
+// Channel material constants
+`define EPSSI                   1.04479E-10        // eps_rel = 11.8 for Si
+`define EPSGE                   1.43438E-10        // eps_rel = 16.2 for Ge
+`define EG0SI                   1.17               // bandgap for Si at 0K
+`define EG0GE                   0.744              // bandgap for Ge at 0K
+`define ALPHASI                 4.730e-4           // 1st bandgap temperature dependence parameter for Si
+`define ALPHAGE                 4.774e-4           // 1st bandgap temperature dependence parameter for Ge
+`define BETASI                  636                // 2nd bandgap temperature dependence parameter for Si
+`define BETAGE                  235                // 2nd bandgap temperature dependence parameter for Ge
+`define CG                     -0.4                // non linearity coefficient for SiGe bandgap
+`define NIFACT300               4.05E25            // sqrt of NcNv for Si at 300K
+
+// Constants needed for exponential approximation
+`define EXP_THRESHOLD           80.0
+`define MIN_EXP                 1.80485e-35
+`define MAX_EXP                 5.54062e34
+
+// Constants defined for drain current calculation
+`define QI_LOW                  1.0E-6
+`define QI_TH                   0.5
+`define XSAT_MIN                6.0
+`define XSAT_MAX                600.0
+`define SAT_FACT                0.94
+`define SMTH_SQ                 36.0
+`define FIELD_SMTH              2.0
+
+// dev3_exp       3rd order dev of exp()
+`define dev3_exp(u)    (1.0 + (u) * (1.0 + 0.5 * (u) * (1.0 + (u) * `INV3)))
+
+// lin_exp        Linearization of exponential function
+`define lin_exp(x, res) \
+    if (abs(x) < `EXP_THRESHOLD) begin \
+        res = exp(x); \
+    end else begin \
+        if (x < -`EXP_THRESHOLD) begin \
+            res =  `MIN_EXP / `dev3_exp(- (x) - `EXP_THRESHOLD); \
+        end else begin \
+            res =  `MAX_EXP * `dev3_exp((x) - `EXP_THRESHOLD); \
+        end \
+    end
+
+// linmin_exp     Linearization of exponential function below threshold
+`define linmin_exp(x, res) \
+    if (x > -`EXP_THRESHOLD) begin \
+        res = exp(x); \
+    end else begin \
+        res = `MIN_EXP / `dev3_exp(-(x) - `EXP_THRESHOLD); \
+    end
+
+// linmax_exp     Linearization of exponential function above threshold
+`define linmax_exp(x, res) \
+    if (x < `EXP_THRESHOLD) begin \
+        res = exp(x); \
+    end else begin \
+        res = `MAX_EXP * `dev3_exp((x) - `EXP_THRESHOLD); \
+    end
+
+// ln_one_plus_exp function
+`define ln_one_plus_exp(x, res) \
+    if (x < `EXP_THRESHOLD) begin \
+        res = ln(1.0 + exp(x)); \
+    end else begin \
+        res = (x); \
+    end
+
+//  Parameter definition macros: "des" description argument is intended to
+//  be a short description, the "inf" information argument is intended to be
+//  a detailed description (e.g. for display as part of on-line help).
+//
+//  MPR      model    parameter real
+//  MPI      model    parameter integer
+//  IPR      instance parameter real
+//  IPI      instance parameter integer
+//  OPP      operating point parameter, includes units and description for printing
+//  OPM      operating point parameter, scales with $mfactor
+//  OPD      operating point parameter, scales with 1/$mfactor
+//
+//  Instance parameters have the attribute *type="instance"* and note that
+//  compilers treat these as both instance and model parameters, with a
+//  specified instance value taking precedence over a specified model card value.
+//
+//  There are some issues with passing range directives with some compilers,
+//  so for each parameter declaration there are multiple versions:
+//  cc       closed lower bound, closed upper bound
+//  co       closed lower bound, open   upper bound
+//  cz       closed lower bound of zero (no upper bound)
+//  oc       open   lower bound, closed upper bound
+//  oo       open   lower bound, open   upper bound
+//  oz       open   lower bound of zero (no upper bound)
+//  nb       no bounds
+//  sw       switch (integer only, values  0=false  and >0=true)
+//  ty       switch (integer only, values -1=n-type and +1=p-type)
+//
+// `define ALIAS(alias,paramName) aliasparam alias = paramName;
+`define OPP(nam,uni,des)               (*units=uni,                             desc=des*)           real    nam;
+`define OPM(nam,uni,des)               (*units=uni, multiplicity="multiply",    desc=des*)           real    nam;
+`define OPD(nam,uni,des)               (*units=uni, multiplicity="divide",      desc=des*)           real    nam;
+`define MPRcc(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter real    nam=def from[lwr:upr];
+`define MPRco(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter real    nam=def from[lwr:upr);
+`define MPRcz(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter real    nam=def from[  0:inf);
+// `define MPRoc(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter real    nam=def from(lwr:upr];
+`define MPRoo(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter real    nam=def from(lwr:upr);
+// `define MPRoz(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter real    nam=def from(  0:inf);
+`define MPRnb(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter real    nam=def;
+`define MPIcc(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter integer nam=def from[lwr:upr];
+// `define MPIco(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter integer nam=def from[lwr:upr);
+// `define MPIcz(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter integer nam=def from[  0:inf);
+// `define MPIoc(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter integer nam=def from(lwr:upr];
+// `define MPIoo(nam,def,uni,lwr,upr,des) (*units=uni                            , desc=des*) parameter integer nam=def from(lwr:upr);
+// `define MPIoz(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter integer nam=def from(  0:inf);
+// `define MPInb(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter integer nam=def;
+// `define MPIsw(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter integer nam=def from[  0:inf);
+`define MPIty(nam,def,uni,        des) (*units=uni                            , desc=des*) parameter integer nam=def from[ -1:  1] exclude 0;
+// `define IPRcc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter real    nam=def from[lwr:upr];
+`define IPRco(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter real    nam=def from[lwr:upr);
+`define IPRcz(nam,def,uni,        des) (*units=uni, type="instance",            desc=des*) parameter real    nam=def from[  0:inf);
+// `define IPRoc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter real    nam=def from(lwr:upr];
+// `define IPRoo(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter real    nam=def from(lwr:upr);
+// `define IPRoz(nam,def,uni,        des) (*units=uni, type="instance",            desc=des*) parameter real    nam=def from(  0:inf);
+`define IPRnb(nam,def,uni,        des) (*units=uni, type="instance",            desc=des*) parameter real    nam=def;
+`define IPIcc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def from[lwr:upr];
+`define IPIco(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def from[lwr:upr);
+`define IPIcz(nam,def,uni,        des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def from[  0:inf);
+// `define IPIoc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def from(lwr:upr];
+// `define IPIoo(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def from(lwr:upr);
+// `define IPIoz(nam,def,uni,        des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def from(  0:inf);
+// `define IPInb(nam,def,uni,        des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def;
+// `define IPIsw(nam,def,uni,        des) (*units=uni, type="instance",            desc=des*) parameter integer nam=def from[  0:inf);
+
+//  Function for parameter definition in the case of separate calculation of charge model
+`define DefACparam(param_i,param_dc,param_ac) \
+    param_i =  (param_dc); \
+    if ($param_given(param_ac) == 1) \
+        param_i =  (param_ac);
+
+// Mathematical function for surface potential calculation
+`define sigma2(a, b, c, tau, eta, y) \
+    nu          =  (a) + (c); \
+    mutau       =  nu * nu + (tau) * (0.5 * (c) * (c) - (a) * (b)); \
+    y           =  (eta) + (a) * nu * (tau) / (mutau + nu / mutau * (tau) * (tau) * (c) * ((c) * (c) * `INV3 - (a) * (b)));
+
+`define sigma3(a, c, tau, eta, y) \
+    nu          =  (a) + (c); \
+    mutau       =  nu * nu + (tau) * (0.5 * (c) * (c) - (a)); \
+    y           =  (eta) + (a) * nu * (tau) / (mutau + nu / mutau * (tau) * (tau) * (c) * ((c) * (c) * `INV3 - a));
+
+// Internal variables used in the surface potentials and inversion charge calculation routines
+`define QcalcLocalVarDecl \
+    real q_temp1, q_temp2, q_temp3, q_x1sat, q_x2sat, q_x1_WI, q_x2_WI, q_x1, q_x2, q_k1q1, q_Aexp, q_qsq, q_d1_qsq; \
+    real q_d2_qsq, q_rac_qsq, q_qcoth, q_d1_qcoth, q_invexpq, q_d2_qcoth, q_sh_term, q_ln_term, q_d1_ln, q_d2_ln; \
+    real q_expnum, q_d1_expnum, q_d2_expnum, q_lnexpnum, q_d1_lnexpnum, q_d2_lnexpnum, q_q2_int, q_d1_q2, q_d2_q2, q_qi_int; \
+    real q_d1_qi, q_d2_qi, q_zero, q_d1_zero, q_d2_zero, q_eps2, q_k2q2, q_a, q_b, q_c, q_disc, q_delta, q_dx1, q_temp;
+
+// Initial guess on surface potentials and gate charges
+`define init_q(xg1_i, xg2_i, delta_n, q1, q2) \
+    q_temp1     =  1.0 / (k1 + 1.0); \
+    q_temp2     =  1.0 / (k2 + 1.0); \
+    q_x1sat     =  ln((k1 + k2 * q_temp2) * diff_min / A0) + delta_n + 3.0; \
+    q_x2sat     =  ln((k2 + k1 * q_temp1) * diff_min / A0) + delta_n + 3.0; \
+    `ln_one_plus_exp((q_x1sat - x1_WI0) * `INV3, q_temp3) \
+    q_x1        =  q_x1sat - 3.0 * q_temp3; \
+    `ln_one_plus_exp((q_x2sat - x2_WI0) * `INV3, q_temp3) \
+    q_x2        =  q_x2sat - 3.0 * q_temp3; \
+    q_x1_WI     =  (k1 * xg1_i + q_x2) * q_temp1; \
+    q_x2_WI     =  (k2 * xg2_i + q_x1) * q_temp2; \
+    `ln_one_plus_exp((q_x1sat - q_x1_WI) * `INV3, q_temp3) \
+    q_x1        =  q_x1sat - 3.0 * q_temp3; \
+    `ln_one_plus_exp((q_x2sat - q_x2_WI) * `INV3, q_temp3) \
+    q_x2        =  q_x2sat - 3.0 * q_temp3; \
+    q1          =  xg1_i - q_x1; \
+    q2          =  xg2_i - q_x2; \
+    q_rac_qsq   =  0.0; \
+    q_invexpq   =  0.0;
+
+// Global correction on front gate charge by 2nd order Taylor dvpt of resolution function
+`define corr_global_q(xg1_i, xg2_i, delta_n, q1, q_eps2) \
+    q_k1q1      =  k1 * q1; \
+    `linmax_exp(xg1_i - q1 - delta_n, q_temp1) \
+    q_Aexp      =  A0 * q_temp1; \
+    q_qsq       =  q_k1q1 * q_k1q1 - q_Aexp; \
+    q_d1_qsq    =  2.0 * k1 * q_k1q1 + q_Aexp; \
+    q_d2_qsq    =  2.0 * k1 * k1 - q_Aexp; \
+    if (q_qsq < -0.005) begin \
+        q_rac_qsq   =  sqrt(abs(q_qsq)); \
+        q_qcoth     =  q_rac_qsq / tan(0.5 * q_rac_qsq); \
+        q_temp1     =  0.25 * q_d1_qsq / q_qsq; \
+        q_d1_qcoth  =  (q_qsq + q_qcoth * (2.0 - q_qcoth)) * q_temp1; \
+        q_d2_qcoth  =  (q_d1_qsq - 2.0 * q_d1_qcoth * (1.0 + q_qcoth)) * q_temp1 + q_d1_qcoth * q_d2_qsq / q_d1_qsq; \
+        q_temp2     =  1.0 - 0.5 * q_qcoth; \
+        q_d1_ln     =  q_d1_qsq / q_qsq * q_temp2; \
+        q_d2_ln     =  (q_d2_qsq * q_temp2 - q_d1_qsq * (q_d1_ln + 0.5 * q_d1_qcoth)) / q_qsq; \
+    end else begin \
+        if (q_qsq > 0.005) begin \
+            q_rac_qsq   =  sqrt(abs(q_qsq)); \
+            q_invexpq   =  exp(-q_rac_qsq); \
+            q_qcoth     =  q_rac_qsq * (1.0 + q_invexpq) / (1.0 - q_invexpq); \
+            q_temp1     =  0.25 * q_d1_qsq / q_qsq; \
+            q_d1_qcoth  =  (q_qsq + q_qcoth * (2.0 - q_qcoth)) * q_temp1; \
+            q_d2_qcoth  =  (q_d1_qsq - 2.0 * q_d1_qcoth * (1.0 + q_qcoth)) * q_temp1 + q_d1_qcoth * q_d2_qsq / q_d1_qsq; \
+            q_temp2     =  1.0 - 0.5 * q_qcoth; \
+            q_d1_ln     =  q_d1_qsq / q_qsq * q_temp2; \
+            q_d2_ln     =  (q_d2_qsq * q_temp2 - q_d1_qsq * (q_d1_ln + 0.5 * q_d1_qcoth)) / q_qsq; \
+        end else begin \
+            q_temp3     = `INV6 * (1.0 - q_qsq * `INV60 * (1.0 - q_qsq * `INV42 * (1.0 - q_qsq * 0.025))); \
+            q_qcoth     =  2.0 + q_qsq * q_temp3; \
+            q_temp1     = `INV6 * (1.0 - q_qsq * `INV30 * (1.0 - q_qsq * `INV28 * (1.0 - q_qsq * `INV30))); \
+            q_d1_qcoth  =  q_d1_qsq * q_temp1; \
+            q_temp2     = `INV180 * (1.0 - q_qsq * `INV14 * (1.0 - 0.05 * q_qsq * (1.0 - 0.0420875420875421 * q_qsq))); \
+            q_d2_qcoth  =  q_d2_qsq * q_temp1 - q_d1_qsq * q_d1_qsq * q_temp2; \
+            q_d1_ln     = -0.5 * q_d1_qsq * q_temp3; \
+            q_d2_ln     = -0.5 * q_d2_qsq * q_temp3 + 0.25 * `INV180 * q_d1_qsq * q_d1_qsq * (1.0 - q_qsq * `INV42 * (2.0 - 0.075 * q_qsq)); \
+        end \
+    end \
+    if (q_qsq > 0.005) begin \
+        q_temp2     =  4.0 * q_qsq / (1.0 - q_invexpq * (2.0 - q_invexpq)); \
+        q_sh_term   =  q_temp2 * q_invexpq; \
+        q_ln_term   =  ln(q_temp2) - q_rac_qsq; \
+    end else begin \
+        if (q_qsq < -0.005) begin \
+            q_temp2     =  sin(0.5 * q_rac_qsq); \
+            q_sh_term   = -q_qsq / (q_temp2 * q_temp2); \
+            q_ln_term   =  ln(q_sh_term); \
+        end else begin \
+            q_sh_term   =  4.0 - q_qsq * `INV3 * (1.0 - 0.05 * q_qsq * (1.0 - 0.0396825396825397 * q_qsq)); \
+            q_ln_term   =  ln(q_sh_term); \
+        end \
+    end \
+    if (1.01 * q_k1q1 + q_qcoth > 0.0) begin \
+        q_expnum    =  q_k1q1 + q_qcoth; \
+        q_d1_expnum =  k1 + q_d1_qcoth; \
+        q_d2_expnum =  q_d2_qcoth; \
+    end else begin \
+        q_temp2     =  1.0 / (q_k1q1 - q_qcoth); \
+        q_temp3     =  q_d1_qcoth - k1; \
+        q_expnum    =  (q_Aexp - q_sh_term) * q_temp2; \
+        q_d1_expnum =  (q_temp3 * q_expnum - q_Aexp - q_d1_ln * q_sh_term) * q_temp2; \
+        q_d2_expnum =  (q_d2_qcoth * q_expnum + 2.0 * q_temp3 * q_d1_expnum + q_Aexp - (q_d2_ln + q_d1_ln * q_d1_ln) * q_sh_term) * q_temp2; \
+    end \
+    if (q_expnum > 0.0) begin \
+        q_lnexpnum  =  ln(q_expnum); \
+        q_temp1     =  1.0 / q_expnum; \
+        q_d1_lnexpnum =  q_d1_expnum * q_temp1; \
+        q_d2_lnexpnum =  q_d2_expnum * q_temp1 - q_d1_lnexpnum * q_d1_lnexpnum; \
+    end else begin \
+        q_lnexpnum  =  q_k1q1 + `LN2 + ln(-q_k1q1); \
+        q_temp1     =  1.0 / q1; \
+        q_d1_lnexpnum =  k1 + q_temp1; \
+        q_d2_lnexpnum = -q_temp1 * q_temp1; \
+    end \
+    q_q2_int    =  xg2_i - xg1_i + q1 + 2.0 * q_lnexpnum - q_ln_term; \
+    q_d1_q2     =  1.0 + 2.0 * q_d1_lnexpnum - q_d1_ln; \
+    q_d2_q2     =  2.0 * q_d2_lnexpnum - q_d2_ln; \
+    q_qi_int    =  q_k1q1 + k2 * q_q2_int; \
+    q_d1_qi     =  k1 + k2 * q_d1_q2; \
+    q_d2_qi     =  k2 * q_d2_q2; \
+    q_zero      =  q_qi_int * q_expnum - q_Aexp; \
+    q_d1_zero   =  q_d1_qi * q_expnum + q_qi_int * q_d1_expnum + q_Aexp; \
+    q_d2_zero   =  q_d2_qi * q_expnum + 2.0 * q_d1_qi * q_d1_expnum + q_qi_int * q_d2_expnum - q_Aexp; \
+    q_temp      =  q_d1_zero * q_d1_zero - 0.5 * q_zero * q_d2_zero; \
+    q_eps2      =  -q_zero * q_d1_zero * q_temp / (q_temp * q_temp + 1e-200); \
+    q1          =  q1 + q_eps2;
+
+// First strong inversion correction on front gate charge from
+// 1st order Taylor dvpt of first Poisson integral at front interface side
+`define corr_str_inv1(xg1_i, delta_n, q1, q2) \
+    q_k1q1      =  k1 * q1; \
+    q_k2q2      =  k2 * q2; \
+    q_qi_int    =  q_k1q1 + q_k2q2; \
+    q_a         =  1.0 + 0.065345483024 * q_qi_int; \
+    q_b         =  39.478417604 + 8.5797362674 * q_qi_int + q_k1q1 * q_k2q2; \
+    q_c         =  39.478417604 * (2.0 * q_qi_int + q_k1q1 * q_k2q2); \
+    q_disc      =  sqrt(q_b * q_b - 4.0 * q_a * q_c); \
+    q_qsq       =  (q_disc - q_b) / (2.0 * q_a); \
+    q_delta     =  q_k1q1 * q_k1q1 - q_qsq; \
+    if (q_delta > 0.0) begin \
+        q_zero      =  q_delta * (ln(q_delta / A0) + delta_n - xg1_i + q1); \
+        q_d1_zero   =  2.0 * k1 * q_k1q1 + q_delta; \
+        q_dx1       =  xg1_i - q1 - q_x1sat; \
+        if (((q_zero < 0.0) && (q_d1_zero > 0.0) && (q_dx1 + `LN10 + ln(k1) > 0.0)) || (q_dx1 > 1.0)) begin \
+            q1          =  q1 - q_zero / q_d1_zero; \
+        end \
+    end
+
+// Second strong inversion correction on front gate charge from
+// 1st order Taylor dvpt of first Poisson integral at front interface side
+`define corr_str_inv2(xg1_i, delta_n, q1, q2) \
+    q_k1q1      =  k1 * q1; \
+    q_k2q2      =  k2 * q2; \
+    q_qi_int    =  q_k1q1 + q_k2q2; \
+    q_a         =  1.0 + 0.065345483024 * q_qi_int; \
+    q_b         =  39.478417604 + 8.5797362674 * q_qi_int + q_k1q1 * q_k2q2; \
+    q_c         =  39.478417604 * (2.0 * q_qi_int + q_k1q1 * q_k2q2); \
+    q_disc      =  sqrt(q_b * q_b - 4.0 * q_a * q_c); \
+    q_qsq       =  (q_disc - q_b) / (2.0 * q_a); \
+    if (q_qsq < -0.005) begin \
+        q_rac_qsq   =  sqrt(abs(q_qsq)); \
+        q_qcoth     =  q_rac_qsq / tan(0.5 * q_rac_qsq); \
+        q_d1_qcoth  =  0.25 * (q_qsq + q_qcoth * (2.0 - q_qcoth)) / q_qsq; \
+    end else begin \
+        if (q_qsq > 0.005) begin \
+            q_rac_qsq   =  sqrt(abs(q_qsq)); \
+            q_invexpq   =  exp(-q_rac_qsq); \
+            q_qcoth     =  q_rac_qsq * (1.0 + q_invexpq) / (1.0 - q_invexpq); \
+            q_d1_qcoth  =  0.25 * (q_qsq + q_qcoth * (2.0 - q_qcoth)) / q_qsq; \
+        end else begin \
+            q_qcoth     =  2.0 + q_qsq * `INV6 * (1.0 - q_qsq * `INV60 * (1.0 - q_qsq * `INV42)); \
+            q_d1_qcoth  = `INV6 * (1.0 - q_qsq * `INV30 * (1.0 - q_qsq * `INV28 * (1.0 - q_qsq * `INV30))); \
+        end \
+    end \
+    q_qsq       =  q_qsq - (q_qi_int * q_qcoth + q_k1q1 * q_k2q2 + q_qsq) / (q_qi_int * q_d1_qcoth + 1.0); \
+    q_delta     =  q_k1q1 * q_k1q1 - q_qsq; \
+    if (q_delta > 0.0) begin \
+        q_zero      =  q_delta * (ln(q_delta / A0) + delta_n - xg1_i + q1); \
+        q_d1_zero   =  2.0 * k1 * q_k1q1 + q_delta; \
+        q_dx1       =  xg1_i - q1 - q_x1sat; \
+        if (((q_zero < 0.0) && (q_d1_zero > 0.0) && (q_dx1 + `LN10 + ln(k1) > 0.0)) || (q_dx1 > 1.0)) begin \
+            q1          =  q1 - q_zero / q_d1_zero; \
+        end \
+    end
+
+//  Front gate charge calculation for a quasi-Fermi level delta_n.phit
+`define func_q(xg1_i, xg2_i, delta_n, q1, q2) \
+    `init_q(xg1_i, xg2_i, delta_n, q1, q2) \
+    `corr_global_q(xg1_i, xg2_i, delta_n, q1, q_eps2) \
+    `corr_str_inv1(xg1_i, delta_n, q1, q2) \
+    `corr_str_inv2(xg1_i, delta_n, q1, q2) \
+    `corr_global_q(xg1_i, xg2_i, delta_n, q1, q_eps2) \
+    `corr_global_q(xg1_i, xg2_i, delta_n, q1, q_eps2) \
+    if (SWCRYO == 1) begin \
+        if (abs(q_eps2) > 0.01) begin \
+            `corr_global_q(xg1_i, xg2_i, delta_n, q1, q_eps2) \
+        end \
+    end
+
+//  Inversion charge calculation for a quasi-Fermi level delta_n.phit
+`define func_qi(xg1_i, xg2_i, delta_n, q1, q2, qi, k1q1, k2q2, qsq, Aexp1, Aexp2) \
+    k1q1        =  k1 * q1; \
+    `linmax_exp(xg1_i - q1 - delta_n, q_temp1) \
+    Aexp1       =  A0 * q_temp1; \
+    qsq         =  k1q1 * k1q1 - Aexp1; \
+    if (Aexp1 <= 0.0) begin \
+        qi          =  1.0e-80; \
+        k2q2        =  qi - k1q1; \
+        q2          =  k2q2 / k2; \
+    end else begin \
+        if (qsq < -0.005) begin \
+            q_rac_qsq   =  sqrt(abs(qsq)); \
+            q_qcoth     =  q_rac_qsq / tan(0.5 * q_rac_qsq); \
+        end else begin \
+            if (qsq > 0.005) begin \
+                q_rac_qsq   =  sqrt(abs(qsq)); \
+                q_invexpq   =  exp(-q_rac_qsq); \
+                q_qcoth     =  q_rac_qsq * (1.0 + q_invexpq) / (1.0 - q_invexpq); \
+            end else begin \
+                q_qcoth     =  2.0 + qsq * `INV6 * (1.0 - qsq * `INV60 * (1.0 - qsq * `INV42)); \
+            end \
+        end \
+        if (1.01 * k1q1 + q_qcoth > 0.0) begin \
+            q_temp1     =  k1q1 + q_qcoth; \
+            if (Aexp1 * k1q1 < 0.9 * k1q1 * k1q1 * q_temp1) begin \
+                qi          =  Aexp1 / q_temp1 + 1.0e-80; \
+                k2q2        =  qi - k1q1; \
+                q2          =  k2q2 / k2; \
+            end else begin \
+                if (qsq > 0.005) begin \
+                    q_temp2     =  ln(4.0 * qsq / (1.0 - q_invexpq * (2.0 - q_invexpq))) - q_rac_qsq; \
+                end else begin \
+                    if (qsq < -0.005) begin \
+                        q_temp3     =  sin(0.5 * q_rac_qsq); \
+                        q_temp2     =  ln(-qsq / (q_temp3 * q_temp3)); \
+                    end else begin \
+                        q_temp2     =  ln(4.0 - qsq * `INV3 * (1.0 - 0.05 * qsq * (1.0 - 0.0396825396825397 * qsq))); \
+                    end \
+                end \
+                q2          =  xg2_i - xg1_i + q1 + 2.0 * ln(q_temp1) - q_temp2; \
+                k2q2        =  k2 * q2; \
+                qi          =  k1q1 + k2q2; \
+            end \
+        end else begin \
+            if (qsq > 0.005) begin \
+                `linmax_exp(q1 + delta_n - xg1_i - q_rac_qsq, q_temp3) \
+                q_temp2     =  q_temp3 / A0; \
+                q_temp1     =  4.0 * qsq * q_temp2 / (1.0 - q_invexpq * (2.0 - q_invexpq)); \
+            end else begin \
+                if (qsq < -0.005) begin \
+                    q_temp2     =  sin(0.5 * q_rac_qsq); \
+                    q_temp1     = -qsq / (q_temp2 * q_temp2) / Aexp1; \
+                end else begin \
+                    q_temp1     =  (4.0 - qsq * `INV3 * (1.0 - 0.05 * qsq * (1.0 - 0.0396825396825397 * qsq))) / Aexp1; \
+                end \
+            end \
+            qi          =  (k1q1  - q_qcoth) / (1.0 - q_temp1) + 1.0e-80; \
+            k2q2        =  qi - k1q1; \
+            q2          =  k2q2 / k2; \
+        end \
+    end \
+    `linmax_exp(xg2_i - q2 - delta_n, q_temp1) \
+    Aexp2       =  A0 * q_temp1;
+
+// Initial guess on surface potentials for substrate depletion
+`define init_approx(xg1_i, xg2_i, delta_n, q_x2, smooth) \
+    q_temp1     =  1.0 / (k1_1D + 1.0); \
+    q_temp2     =  1.0 / (k2_1D + 1.0); \
+    q_x1sat     =  ln((k1_1D + k2_1D * q_temp2) * diff_min / A0) + delta_n + smooth; \
+    q_x2sat     =  ln((k2_1D + k1_1D * q_temp1) * diff_min / A0) + delta_n + smooth; \
+    `ln_one_plus_exp((q_x1sat - x1_WI0) / smooth, q_temp3) \
+    q_x1        =  q_x1sat - smooth * q_temp3; \
+    q_x2_WI     =  (k2_1D * xg2_i + q_x1) * q_temp2; \
+    `ln_one_plus_exp((q_x2sat - q_x2_WI) / smooth, q_temp3) \
+    q_x2        =  q_x2sat - smooth * q_temp3;
+
+//  Substrate surface potential calculation
+`define SPSUBcalcLocalVarDecl \
+    real nu, mutau; \
+    real SPSUB_temp, SPSUB_temp1, SPSUB_temp2, SPSUB_xgb, SPSUB_delta, SPSUB_yg, SPSUB_ysub, SPSUB_eta, SPSUB_a, SPSUB_b; \
+    real SPSUB_c, SPSUB_tau, SPSUB_y0, SPSUB_delta0, SPSUB_delta1, SPSUB_xi0, SPSUB_xi1, SPSUB_xi2, SPSUB_pC, SPSUB_qC; \
+    real SPSUB_xg1, SPSUB_A_fac, SPSUB_xbar, SPSUB_w, SPSUB_x1, SPSUB_bx, SPSUB_x0;
+
+`define spsub(spsub, xg1_i, xg2_i, xn_i) \
+    SPSUB_xgb   =  xg1_i - xg2_i; \
+    `lin_exp((-xn_i),SPSUB_delta) \
+    if (abs(SPSUB_xgb) <= margin_sub) begin \
+        SPSUB_temp1 =  inv_xisub * inv_xisub * `INV6 / `SQRT2; \
+        spsub       =  SPSUB_xgb * inv_xisub * (1.0 + SPSUB_xgb * (1.0 - SPSUB_delta) * Gfsub * SPSUB_temp1); \
+    end else begin \
+        if (SPSUB_xgb < -margin_sub) begin \
+            SPSUB_yg    = -SPSUB_xgb; \
+            SPSUB_ysub  =  1.25 * (SPSUB_yg * inv_xisub); \
+            SPSUB_eta   =  0.5 * (SPSUB_ysub + 10.0 - sqrt((SPSUB_ysub - 6.0) * (SPSUB_ysub - 6.0) + 64.0)); \
+            SPSUB_temp  =  SPSUB_yg - SPSUB_eta; \
+            SPSUB_a     =  SPSUB_temp * SPSUB_temp + Gfsub2 * (SPSUB_eta + 1.0); \
+            SPSUB_c     =  2.0 * SPSUB_temp - Gfsub2; \
+            SPSUB_tau   = -SPSUB_eta + ln(SPSUB_a * inv_Gfsub2); \
+            `sigma3(SPSUB_a, SPSUB_c, SPSUB_tau, SPSUB_eta, SPSUB_y0) \
+            `linmax_exp(SPSUB_y0, SPSUB_delta0) \
+            SPSUB_delta1 =  1.0 / SPSUB_delta0; \
+            SPSUB_temp  =  1.0 / (2.0 + SPSUB_y0 * SPSUB_y0); \
+            SPSUB_xi0   =  SPSUB_y0 * SPSUB_y0 * SPSUB_temp; \
+            SPSUB_xi1   =  4.0 * (SPSUB_y0 * SPSUB_temp * SPSUB_temp); \
+            SPSUB_xi2   =  (8.0 * SPSUB_temp - 12.0 * SPSUB_xi0) * SPSUB_temp * SPSUB_temp; \
+            SPSUB_temp  =  SPSUB_yg - SPSUB_y0; \
+            SPSUB_temp1 =  SPSUB_delta * SPSUB_delta1; \
+            SPSUB_pC    =  2.0 * SPSUB_temp + Gfsub2 * (SPSUB_delta0 - 1.0 - SPSUB_temp1 + SPSUB_delta * (1.0 - SPSUB_xi1)); \
+            SPSUB_qC    =  SPSUB_temp * SPSUB_temp - Gfsub2 * (SPSUB_delta0 - SPSUB_y0 - 1.0 + SPSUB_temp1 + SPSUB_delta * (SPSUB_y0 - 1.0 - SPSUB_xi0)); \
+            SPSUB_temp  =  2.0 - Gfsub2 * (SPSUB_delta0 + SPSUB_temp1 - SPSUB_delta * SPSUB_xi2); \
+            SPSUB_temp  =  SPSUB_pC * SPSUB_pC - 2.0 * (SPSUB_qC * SPSUB_temp); \
+            spsub       = -SPSUB_y0 - 2.0 * (SPSUB_qC / (SPSUB_pC + sqrt(SPSUB_temp))); \
+        end else begin \
+            SPSUB_xg1   =  1.0 / (1.25 + Gfsub * 0.732464877560822); \
+            SPSUB_A_fac =  (1.25 * xisub * SPSUB_xg1 - 1.0) * SPSUB_xg1; \
+            SPSUB_xbar  =  SPSUB_xgb * inv_xisub * (1.0 + SPSUB_A_fac * SPSUB_xgb); \
+            `linmin_exp((-SPSUB_xbar), SPSUB_temp) \
+            SPSUB_w     =  1.0 - SPSUB_temp; \
+            SPSUB_x1    =  SPSUB_xgb + Gfsub2 * 0.5 - Gfsub * sqrt(SPSUB_xgb + Gfsub2 * 0.25 - SPSUB_w); \
+            SPSUB_bx    =  xn_i + 3.0; \
+            SPSUB_eta   = `MIN_FUNC(SPSUB_x1, SPSUB_bx, 5.0) - 0.5 * (SPSUB_bx - sqrt(SPSUB_bx * SPSUB_bx + 5.0)); \
+            SPSUB_temp  =  SPSUB_xgb - SPSUB_eta; \
+            SPSUB_temp1 =  exp(-SPSUB_eta); \
+            SPSUB_temp2 =  1.0 / (2.0 + SPSUB_eta * SPSUB_eta); \
+            SPSUB_xi0   =  SPSUB_eta * SPSUB_eta * SPSUB_temp2; \
+            SPSUB_xi1   =  4.0 * (SPSUB_eta * SPSUB_temp2 * SPSUB_temp2); \
+            SPSUB_xi2   =  (8.0 * SPSUB_temp2 - 12.0 * SPSUB_xi0) * SPSUB_temp2 * SPSUB_temp2; \
+            SPSUB_a     =  max(1.0e-40, SPSUB_temp * SPSUB_temp - Gfsub2 * (SPSUB_temp1 + SPSUB_eta - 1.0 - SPSUB_delta * (SPSUB_eta + 1.0 + SPSUB_xi0))); \
+            SPSUB_b     =  1.0 - 0.5 * (Gfsub2 * (SPSUB_temp1 - SPSUB_delta * SPSUB_xi2)); \
+            SPSUB_c     =  2.0 * SPSUB_temp + Gfsub2 * (1.0 - SPSUB_temp1 - (SPSUB_delta) * (1.0 + SPSUB_xi1)); \
+            SPSUB_tau   =  xn_i - SPSUB_eta + ln(SPSUB_a / Gfsub2); \
+            `sigma2(SPSUB_a, SPSUB_b, SPSUB_c, SPSUB_tau, SPSUB_eta, SPSUB_x0) \
+            if (SPSUB_x0 < `EXP_THRESHOLD) begin \
+                SPSUB_delta0 =  exp(SPSUB_x0); \
+                SPSUB_delta1 =  1.0 / SPSUB_delta0; \
+                SPSUB_delta0 =  SPSUB_delta * SPSUB_delta0; \
+            end else begin \
+                if (SPSUB_x0 > (xn_i - `EXP_THRESHOLD)) begin \
+                    SPSUB_delta0 =  exp(SPSUB_x0 - xn_i); \
+                    SPSUB_delta1 =  SPSUB_delta / SPSUB_delta0; \
+                end else begin \
+                    SPSUB_delta0 = `MIN_EXP / `dev3_exp(xn_i - SPSUB_x0 - `EXP_THRESHOLD); \
+                    SPSUB_delta1 = `MIN_EXP / `dev3_exp(SPSUB_x0 - `EXP_THRESHOLD); \
+                end \
+            end \
+            SPSUB_temp  =  1.0 / (2.0 + SPSUB_x0 * SPSUB_x0); \
+            SPSUB_xi0   =  SPSUB_x0 * SPSUB_x0 * SPSUB_temp; \
+            SPSUB_xi1   =  4.0 * (SPSUB_x0 * SPSUB_temp * SPSUB_temp); \
+            SPSUB_xi2   =  (8.0 * SPSUB_temp - 12.0 * SPSUB_xi0) * SPSUB_temp * SPSUB_temp; \
+            SPSUB_temp  =  SPSUB_xgb - SPSUB_x0; \
+            SPSUB_pC    =  2.0 * SPSUB_temp + Gfsub2 * (1.0 - SPSUB_delta1 + SPSUB_delta0 - SPSUB_delta * (1.0 + SPSUB_xi1)); \
+            SPSUB_qC    =  SPSUB_temp * SPSUB_temp - Gfsub2 * (SPSUB_delta1 + SPSUB_x0 - 1.0 + SPSUB_delta0 - SPSUB_delta * (SPSUB_x0 + 1.0 + SPSUB_xi0)); \
+            SPSUB_temp  =  2.0 - Gfsub2 * (SPSUB_delta1 + SPSUB_delta0 - SPSUB_delta * SPSUB_xi2); \
+            SPSUB_temp  =  SPSUB_pC * SPSUB_pC - 2.0 * (SPSUB_qC * SPSUB_temp); \
+            spsub       =  SPSUB_x0 + 2.0 * (SPSUB_qC / (SPSUB_pC + sqrt(SPSUB_temp))); \
+        end \
+    end
+
+//  Surface potential calculation for the overlap regions for gate currents, GIDL/GISL and overlap capacitances
+`define SPOVcalcLocalVarDecl \
+    real SP_OV_ygf, SP_OV_z, SP_OV_eta, SP_OV_a, SP_OV_c, SP_OV_tau, SP_OV_nu, SP_OV_mutau, SP_OV_temp; \
+    real SP_OV_y0, SP_OV_D0, SP_OV_p, SP_OV_q, SP_OV_xi, SP_OV_w, SP_OV_Afac, SP_OV_xbar, SP_OV_x0, SP_OV_u; \
+
+`define sp_fdsoi_ov(sp,xgf_ov) \
+    if (abs(xgf_ov) <= x_mrg_ov) begin \
+        sp          = -xgf_ov * inv_xi_ov; \
+    end else begin \
+        if (xgf_ov < -x_mrg_ov) begin \
+            SP_OV_ygf   = -xgf_ov; \
+            SP_OV_z     = `X1OV * SP_OV_ygf * inv_xi_ov; \
+            SP_OV_eta   =  0.5 * (SP_OV_z + 10.0 - sqrt((SP_OV_z - 6.0) * (SP_OV_z - 6.0) + 64.0)); \
+            SP_OV_a     =  (SP_OV_ygf - SP_OV_eta) * (SP_OV_ygf - SP_OV_eta) + GOV2 * (SP_OV_eta + 1.0); \
+            SP_OV_c     =  2.0 * (SP_OV_ygf - SP_OV_eta) - GOV2; \
+            SP_OV_tau   =  ln(SP_OV_a / GOV2) - SP_OV_eta; \
+            SP_OV_nu    =  SP_OV_a + SP_OV_c; \
+            SP_OV_mutau =  SP_OV_nu * SP_OV_nu + SP_OV_tau * (0.5 * SP_OV_c * SP_OV_c - SP_OV_a); \
+            SP_OV_temp  =  SP_OV_mutau + SP_OV_nu / SP_OV_mutau * SP_OV_tau * SP_OV_tau * SP_OV_c * (SP_OV_c * SP_OV_c * `INV3 - SP_OV_a); \
+            SP_OV_y0    =  SP_OV_eta + SP_OV_a * SP_OV_nu * SP_OV_tau / SP_OV_temp; \
+            `lin_exp(SP_OV_y0, SP_OV_D0) \
+            SP_OV_temp  =  SP_OV_ygf - SP_OV_y0; \
+            SP_OV_p     =  2.0 * SP_OV_temp + GOV2 * (SP_OV_D0 - 1.0); \
+            SP_OV_q     =  SP_OV_temp * SP_OV_temp + GOV2 * (SP_OV_y0 + 1.0 - SP_OV_D0); \
+            SP_OV_xi    =  1.0 - GOV2 * 0.5 * SP_OV_D0; \
+            SP_OV_temp  =  SP_OV_p * SP_OV_p - 4.0 * (SP_OV_xi * SP_OV_q); \
+            SP_OV_w     =  2.0 * SP_OV_q / (SP_OV_p + sqrt(SP_OV_temp)); \
+            sp          = -(SP_OV_y0 + SP_OV_w); \
+        end else begin \
+            SP_OV_Afac  =  (xi_ov * `X1OV * inv_xg1 - 1.0) * inv_xg1; \
+            SP_OV_xbar  =  xgf_ov * inv_xi_ov * (1.0 + SP_OV_Afac * xgf_ov); \
+            `lin_exp((-SP_OV_xbar), SP_OV_temp) \
+            SP_OV_w     =  1.0 - SP_OV_temp; \
+            SP_OV_x0    =  xgf_ov + GOV2 * 0.5 - GOV * sqrt(xgf_ov + GOV2 * 0.25 - SP_OV_w); \
+            `lin_exp((-SP_OV_x0), SP_OV_D0) \
+            SP_OV_p     =  2.0 * (xgf_ov - SP_OV_x0) + GOV2 * (1 - SP_OV_D0); \
+            SP_OV_q     =  (xgf_ov - SP_OV_x0) * (xgf_ov - SP_OV_x0) - GOV2 * (SP_OV_x0 - 1.0 + SP_OV_D0); \
+            SP_OV_xi    =  1.0 - GOV2 * 0.5 * SP_OV_D0; \
+            SP_OV_temp  =  SP_OV_p * SP_OV_p - 4.0 * (SP_OV_xi * SP_OV_q); \
+            SP_OV_u     =  2.0 * SP_OV_q / (SP_OV_p + sqrt(SP_OV_temp)); \
+            sp          =  SP_OV_x0 + SP_OV_u; \
+        end \
+        sp          = -sp; \
+    end
+
+// Lambert W function asymptote for surface potential computation
+`define Wfunc(a, x, res) \
+    if ((x) < `EXP_THRESHOLD) begin \
+        w_temp       =  ln(1.0 + (a) * exp(x)); \
+        res          =  w_temp * (1.0 - ln(1.0 + w_temp) / (2.0 + w_temp)); \
+    end else begin \
+        if ((x) < 0.0) begin \
+            `linmin_exp(x, w_temp) \
+            res       =  (a) * w_temp; \
+        end else begin \
+            w_temp    =  ln(a) + (x); \
+            res          =  w_temp * (1.0 - ln(1.0 + w_temp) / (2.0 + w_temp)); \
+        end \
+    end
+
+//  Threshold voltage calculation for operating point information
+`define vth(VFB1_t, VFB2_t, VFB1_i, PSCE1_i, PSCE2_i, CF1_t, CF2_t, k1, k2, A0, diff_min, xg2x, xg2, xedge, sce1, dxg1_dibl) \
+    r1init_op   =  k2 / k1 / (1.0 + k2); \
+    r2init_op   =  k1 / k2 / (1.0 + k1); \
+    x1init_op   =  ln(k1 * (1.0 + r1init_op) * diff_min / A0) + 2.0; \
+    x2init_op   =  ln(k2 * (1.0 + r2init_op) * diff_min / A0) + 2.0; \
+    xth1init_op =  (1.0 + r1init_op) * x1init_op - xg2x * r1init_op; \
+    xth2init_op =  (1.0 + 1.0 / r2init_op) * x2init_op - xg2x / r2init_op; \
+    xg1thinit_op =  (`MIN_FUNC(xth1init_op, xth2init_op, 38.0) - xg2) / CIC1_i + xg2; \
+    vthinit_op  =  phit * ((xg1thinit_op - xedge) / sce1 - dxg1_dibl + xedge) + VFB1_i;  \
+    temp        =  STCF_i * (TKD - TKR); \
+    CF1_op      =  CF1_t + temp; \
+    CF2_op      =  CF2_t + temp; \
+    temp        =  TYPE * STVFB_i * (TKD - TKR) + dVfbQM; \
+    VFB1_op     =  TYPE * (VFB1_t + dVfbch_op + dVfb1Nch) + temp + DELVTO - dVfbpdep_op; \
+    VFB2_op     =  TYPE * (VFB2_t + dVfbch_op + dVfb2Nch) + temp; \
+    /* Conditioning of terminal voltages for threshold voltage conditions */ \
+    xg10_op     =  (vthinit_op - VFB1_op) * inv_phit_op - dxdsx_op; \
+    xg20_op     =  (-Vsb - VFB2_op) * inv_phit_op - dxdsx_op; \
+    /* Substrate depletion effect at threshold voltage */ \
+    if (SWSUBDEP > 0) begin \
+        temp        =  TYPE * TYPESUB_i * (xg10_op - xg20_op) / Gfsub; \
+        if (temp < 0.0) begin \
+            temp1       = -2.0 * ln(1.0 - temp); \
+        end else begin \
+            temp1       =  temp * temp / (1.0 + 2.0 * temp / Gfsub); \
+        end \
+        xg2eff_op   =  xg20_op + TYPE * TYPESUB_i * temp1; \
+    end else begin \
+        xg2eff_op   =  xg20_op; \
+    end \
+    /* Quantum mechanical corrections below threshold */ \
+    temp        =  keq_1D * (xg10_op - xg2eff_op); \
+    if (QMC > 0.0) begin \
+        e1_op       = `MAX_FUNC(temp, emin, emin * emin); \
+        e2_op       = `MAX_FUNC(-temp, emin, emin * emin); \
+        temp1       =  qq_op * exp(-`INV3 * ln(e1_op)); \
+        temp2       =  qq_op * exp(-`INV3 * ln(e2_op)); \
+        temp3       =  1.0 - temp1 - temp2; \
+        CsiPrime_op =  CsiPrime_0 / temp3; \
+        k1_1D_QM_op =  k1_1D * temp3 / (1.0 + k1_1D * temp1); \
+        k2_1D_QM_op =  k2_1D * temp3 / (1.0 + k2_1D * temp2); \
+        keq_1D_QM_op = 1.0 / (1.0 + 1.0 / k1_1D_QM_op + 1.0 / k2_1D_QM_op); \
+    end else begin \
+        CsiPrime_op =  CsiPrime_0; \
+        k1_1D_QM_op =  k1_1D; \
+        k2_1D_QM_op =  k2_1D; \
+        keq_1D_QM_op = keq_1D; \
+    end \
+    /* Short channel effects */ \
+    Dx_WI_1D_op =  keq_1D_QM_op * (xg10_op - xg2eff_op); \
+    if (Dx_WI_1D_op > 0.0) begin \
+        `ln_one_plus_exp(-Dx_WI_1D_op, temp) \
+        x_WI_1D_op  =  xg10_op - Dx_WI_1D_op / k1_1D_QM_op + temp - `LN2; \
+    end else begin \
+        `ln_one_plus_exp(Dx_WI_1D_op, temp) \
+        x_WI_1D_op  =  xg2eff_op + Dx_WI_1D_op / k2_1D_QM_op + temp - `LN2; \
+    end \
+    x_1D_op     = `MIN_FUNC(x_WI_1D_op, xth_1D_op, 4.0); \
+    dleff_op    =  sqrt(1.0 + 2.0 * (xth_1D_op - x_1D_op) / xSDdep_op) - 1.0; \
+    xedge_op    =  x_1D_op + xSDdep_op * dleff_op; \
+    temp        = `MAX_FUNC(1.0 + PSCEDLB_i * xg20_op, 0.5, 0.01); \
+    sce1_op     =  1.0 / (1.0 + PSCE1_i * temp); \
+    sce2_op     =  1.0 / (1.0 + PSCE2_i * temp); \
+    temp        =  2.0 * xd0_op * (sqrt(1.0 + xdsx_op / xd0_op) - 1.0) * (1.0 + CFDL_i * dleff_op) * (1.0 + CFDLB_i * xg20_op); \
+    dxg1_dibl_op =  CF1_op * temp; \
+    dxg2_dibl_op =  CF2_op * temp; \
+    xg1_op      =  (xg10_op - xedge_op + dxg1_dibl_op) * sce1_op + xedge_op + dxdsx_op; \
+    xg2_op      =  (xg2eff_op - xedge_op + dxg2_dibl_op) * sce2_op + xedge_op + dxdsx_op; \
+    xg2x_op     =  xg1_op + CIC2_i * (xg2_op - xg1_op); \
+    /* Coupling factors at threshold voltage */ \
+    k1_op       =  k1_1D_QM_op / sce1_op; \
+    k2_op       =  k2_1D_QM_op / sce2_op; \
+    A0_op       =  A0_Csisq_op / (CsiPrime_op * CsiPrime_op); \
+    exp_dxth_op =  (1.0 + k1_op) / (1.0 + k2_op); \
+    dxth_op     =  ln(exp_dxth_op); \
+    if (dxth_op > 1.0e-8) begin \
+        diff_min_op = 2.0 * dxth_op * (exp_dxth_op + 1.0) / (exp_dxth_op - 1.0); \
+    end else begin \
+        diff_min_op = 2.0 * (2.0 + dxth_op); \
+    end \
+    /* Final threshold voltage calculation */ \
+    r1_op       =  k2_op / k1_op / (1.0 + k2_op); \
+    r2_op       =  k1_op / k2_op / (1.0 + k1_op); \
+    x1sat_op    =  ln(k1_op * (1.0 + r1_op) * diff_min_op / A0_op) + 2.0 + Eg_2phit0_op; \
+    x2sat_op    =  ln(k2_op * (1.0 + r2_op) * diff_min_op / A0_op) + 2.0 + Eg_2phit0_op; \
+    xth1_op     =  (1.0 + r1_op) * x1sat_op - xg2x_op * r1_op; \
+    xth2_op     =  (1.0 + 1.0 / r2_op) * x2sat_op - xg2x_op / r2_op; \
+    xg1th_op    =  (`MIN_FUNC(xth1_op, xth2_op, 38.0) - xg2_dc) / CIC1_i + xg2_dc; \
+    vth_op      =  ((xg1th_op - xedge_op) / sce1_op - dxg1_dibl_op + xedge_op) / inv_phit_op + VFB1_op;
+
+//  Model's core for currents and charges calculation
+`define CoreLocalVarDecl \
+    `QcalcLocalVarDecl \
+    `SPSUBcalcLocalVarDecl \
+    real vfb1_loc, vfb2_loc, psce1_loc, psce2_loc, cf1_loc, cf2_loc, sat_phit_loc, gamAX_loc, alp_loc; \
+    real xg10, xg20shift, xg20, exp_dxth, dxth, diff_min, A0, inv_k1, inv_k2, x1_WI0, x2_WI0, xg2eff, e1, e2, tox1fact, tox2fact; \
+    real k1_1D_QM, k2_1D_QM, keq_1D_QM, Dx_WI_1D, CsiPrime, x_WI_1D, x_1D, dleff, xedge, sce1, sce2, dxg1_dibl, dxg2_dibl, xg1, xg2; \
+    real xg1x, xg2x, k1, k2, keq, Dx_WI, Dx_WIsq, q1s, qis, k1q1s, k2q2s, q2s, qsqs, Aexp1s, Aexp2s, b1s, b2s, a1s, a2s, sums; \
+    real dqsqs_dxn_qi, xdrifts, esurf1s, esurf2s, ecpl1s, ecpl2s, eeff1s, eeff2s, qi1s, qi2s, c1s, c2s, fcors, Gcss, frscsi, Grss; \
+    real Gmob1s, Gmob2s, Gmobs, s1, s2, deltaxinf, q1chapinf, q2chapinf, dinf, inv_dinf, wsat1, sat_fact1, wsat2, sat_fact2; \
+    real dqis_dxn_qi, ds, deltaxi, gamma, vs, vd, wd, ps_cub, qs_cub, pd_cub, qd_cub, racs, racd, deltaxsats, deltaxsatd, deltaxsat; \
+    real qidsats, qidsatd, qidsat, xndssat, xdeff, q1d, q2d, qid, k1q1d, k2q2d, qsqd, Aexp1d, Aexp2d, b1d, b2d, a1d, a2d, sumd; \
+    real dqsqd_dxn_qi, xdriftd, qim, dxdrift, qim_pd, xp_pd, ratio_pd, esurf1d, esurf2d, ecpl1d, ecpl2d, eeff1d, eeff2d, esurf1; \
+    real esurf2, qi1m, qi2m, ecpl1, ecpl2, eeff1, eeff2, c1, c2, csum, fcor, Gcs, Grs, Gmob1, Gmob2, Gmob, inv_qimstar1, r1; \
+    real dL_L_fact, dL_L, GdL, Ggamma, sqrt_zsat, zsat, vsat_fact, hsat, qmfact1, qmfact2, dqid_dxn_qi, dd, Ls, Ld, Us, Ud, idrift2; \
+    real norm_Ids, q1s_chap, q1d_chap, inv_k1h1_0, q2s_chap, q2d_chap, inv_k2h2_0, zeta1, zeta2, ksi1, ksi2, inv_k1h1, inv_k2h2; \
+    real delta_k1q1, delta_k2q2, prod1, prod2;
+
+`define QCalculation \
+    \
+    /* *********** Conditioning of terminal voltages *********** */ \
+    xg10       =  (Vgs - vfb1_loc) * inv_phit - dxdsx - Eg_2phit0; \
+    xg20shift  =  (-Vsb - vfb2_loc) * inv_phit - dxdsx; \
+    xg20       =  xg20shift - Eg_2phit0; \
+    \
+    /* *********** Substrate depletion effect *********** */ \
+    if (SWSUBDEP > 0) begin \
+        temp       =  TYPE * TYPESUB_i; \
+        exp_dxth   =  (1.0 + k1_1D) / (1.0 + k2_1D); \
+        dxth       =  ln(exp_dxth); \
+        if (dxth > 1.0e-8) begin \
+            diff_min   =  2.0 * dxth * (exp_dxth + 1.0) / (exp_dxth - 1.0); \
+        end else begin \
+            diff_min   =  2.0 * (2.0 + dxth); \
+        end \
+        A0         =  A0_Csisq / (CsiPrime_0 * CsiPrime_0); \
+        inv_k1     =  1.0 / k1_1D; \
+        inv_k2     =  1.0 / k2_1D; \
+        keq        =  1.0 / (1.0 + inv_k1 + inv_k2); \
+        Dx_WI      =  keq * (xg10 - xg20); \
+        x1_WI0     =  xg10 - Dx_WI * inv_k1; \
+        x2_WI0     =  xg20 + Dx_WI * inv_k2; \
+        `init_approx(xg10, xg20, 0.0, temp0, 1.5) \
+        temp1      =  temp * temp0; \
+        temp2      =  temp * xg20; \
+        `spsub(temp3, temp1, temp2, xn_sub) \
+        xg2eff     =  temp * (temp3 + temp2); \
+    end else begin \
+        xg2eff     =  xg20; \
+    end \
+    \
+    /* *********** Quantum mechanical corrections below threshold *********** */ \
+    temp       =  keq_1D * (xg10 - xg2eff); \
+    if (QMC > 0.0) begin \
+        e1         = `MAX_FUNC(temp, emin, emin * emin); \
+        e2         = `MAX_FUNC(-temp, emin, emin * emin); \
+        temp1      =  qq * exp(-`INV3 * ln(e1)); \
+        temp2      =  qq * exp(-`INV3 * ln(e2)); \
+        temp3      =  1.0 - temp1 - temp2; \
+        CsiPrime   =  CsiPrime_0 / temp3; \
+        tox1fact   =  1.0 + k1_1D * temp1; \
+        tox2fact   =  1.0 + k2_1D * temp2; \
+        k1_1D_QM   =  k1_1D * temp3 / tox1fact; \
+        k2_1D_QM   =  k2_1D * temp3 / tox2fact; \
+        keq_1D_QM  =  1.0 / (1.0 + 1.0 / k1_1D_QM + 1.0 / k2_1D_QM); \
+        tox1fact   =  1.0 + k1_1D_QM * temp1; \
+        tox2fact   =  1.0 + k2_1D_QM * temp2; \
+    end else begin \
+        CsiPrime   =  CsiPrime_0; \
+        k1_1D_QM   =  k1_1D; \
+        k2_1D_QM   =  k2_1D; \
+        keq_1D_QM  =  keq_1D; \
+        tox1fact   =  1.0; \
+        tox2fact   =  1.0; \
+    end \
+    \
+    /* *********** Short channel effects *********** */ \
+    Dx_WI_1D   =  keq_1D_QM * (xg10 - xg2eff); \
+    if (Dx_WI_1D > 0.0) begin \
+        `ln_one_plus_exp(-Dx_WI_1D, temp) \
+        x_WI_1D    =  xg10 - Dx_WI_1D / k1_1D_QM + temp - `LN2; \
+    end else begin \
+        `ln_one_plus_exp(Dx_WI_1D, temp) \
+        x_WI_1D    =  xg2eff + Dx_WI_1D / k2_1D_QM + temp - `LN2; \
+    end \
+    x_1D       = `MIN_FUNC(x_WI_1D, xth_1D, 4.0); \
+    /* For short channel effects */ \
+    dleff      =  sqrt(1.0 + 2.0 * (xth_1D - x_1D) / xSDdep) - 1.0; \
+    xedge      =  x_1D + xSDdep * dleff; \
+    temp       = `MAX_FUNC(1.0 + PSCEDLB_i * xg20shift, 0.5, 0.01); \
+    sce1       =  1.0 / (1.0 + psce1_loc * temp); \
+    sce2       =  1.0 / (1.0 + psce2_loc * temp); \
+    /* For DIBL */ \
+    temp       =  2.0 * xd0 * (sqrt(1.0 + xdsx / xd0) - 1.0) * (1.0 + CFDL_i * dleff) * (1.0 + CFDLB_i * xg20shift); \
+    dxg1_dibl  =  cf1_loc * temp; \
+    dxg2_dibl  =  cf2_loc * temp; \
+    /* For drain current and intrinsic charge models */ \
+    xg1        =  (xg10 - xedge + dxg1_dibl) * sce1 + xedge + dxdsx; \
+    xg2        =  (xg2eff - xedge + dxg2_dibl) * sce2 + xedge + dxdsx; \
+    xg1x       = `MIN_FUNC(xg2 + CIC1_i * (xg1 - xg2), xsatmax, 0.01); \
+    xg2x       = `MIN_FUNC(xg1 + CIC2_i * (xg2 - xg1), xsatmax, 0.01); \
+    \
+    /* *********** Coupling factors *********** */ \
+    k1         =  k1_1D_QM / sce1; \
+    k2         =  k2_1D_QM / sce2; \
+    inv_k1     =  1.0 / k1; \
+    inv_k2     =  1.0 / k2; \
+    keq        =  1.0 / (1.0 + inv_k1 + inv_k2); \
+    A0         =  A0_Csisq / (CsiPrime * CsiPrime); \
+    exp_dxth   =  (1.0 + k1) / (1.0 + k2); \
+    dxth       =  ln(exp_dxth); \
+    if (dxth > 1.0e-8) begin \
+        diff_min   =  2.0 * dxth * (exp_dxth + 1.0) / (exp_dxth - 1.0); \
+    end else begin \
+        diff_min   =  2.0 * (2.0 + dxth); \
+    end \
+    Dx_WI      =  keq * (xg1x - xg2x); \
+    Dx_WIsq    =  Dx_WI * Dx_WI; \
+    x1_WI0     =  xg1x - Dx_WI * inv_k1; \
+    x2_WI0     =  xg2x + Dx_WI * inv_k2; \
+    \
+    /* *********** Inversion charge at source side *********** */ \
+    `func_q(xg1x, xg2x, 0.0, q1s, q2s) \
+    `func_qi(xg1x, xg2x, 0.0, q1s, q2s, qis, k1q1s, k2q2s, qsqs, Aexp1s, Aexp2s) \
+    /* Calculation of (dqsq/dxn)/qi and xdrift at source side */ \
+    a1s        =  0.0; \
+    a2s        =  0.0; \
+    b1s        =  0.0; \
+    b2s        =  0.0; \
+    sums       =  0.0; \
+    dqsqs_dxn_qi =  0.0; \
+    if (qis > `QI_LOW) begin \
+        b1s        =  Aexp1s * inv_k1; \
+        b2s        =  Aexp2s * inv_k2; \
+        a1s        =  b1s + 2.0 * k1q1s; \
+        a2s        =  b2s + 2.0 * k2q2s; \
+        sums       =  2.0 * qis + b1s + b2s; \
+        if (abs(qsqs) > 0.005) begin \
+            temp1      =  a1s * a2s + 2.0 * (q1s + 2.0) * a2s + 2.0 * (q2s + 2.0) * a1s; \
+            dqsqs_dxn_qi =  -4.0 * qsqs * sums / (qis * temp1); \
+        end else begin \
+            temp1      = `INV6 * (1.0 - qsqs * `INV30 * (1.0 - qsqs * `INV28 * (1.0 - qsqs * `INV30))); \
+            temp2      =  a1s * Aexp1s + a2s * Aexp2s + a1s * a2s * qis * (1.0 + qis * temp1); \
+            dqsqs_dxn_qi =  Aexp1s * Aexp2s * sums / (qis * temp2); \
+        end \
+    end \
+    xdrifts    =  ln(qis); \
+    \
+    /* *********** Mobility attenuation and series resistance at source side *********** */ \
+    `ln_one_plus_exp(k1q1s / `FIELD_SMTH, temp1) \
+    esurf1s    = `FIELD_SMTH * temp1; \
+    `ln_one_plus_exp(k2q2s / `FIELD_SMTH, temp2) \
+    esurf2s    = `FIELD_SMTH * temp2; \
+    ecpl1s     =  esurf2s - k2q2s; \
+    ecpl2s     =  esurf1s - k1q1s; \
+    eeff1s     =  eta_mu * esurf1s + one_m_eta * ecpl1s; \
+    eeff2s     =  eta_mu * esurf2s + one_m_eta * ecpl2s; \
+    temp       =  qis / (esurf1s + esurf2s); \
+    qi1s       =  esurf1s * temp; \
+    qi2s       =  esurf2s * temp; \
+    c1s        =  esurf1s * BETN1_t * exp(STBET_i * lnrTn); \
+    c2s        =  esurf2s * BETN2_t * exp(STBET_i * lnrTn); \
+    temp1      =  XCOR_i * (ecpl1s + XCORB_i * ecpl2s); \
+    temp2      = `MAX_FUNC(1.0 + temp1, 0.0, 0.01); \
+    temp3      = `MAX_FUNC(1.0 + 0.2 * temp1, 0.0, 0.01); \
+    fcors      =  temp2 / temp3; \
+    Gcss       =  CS_i * (1.0 + CSFI_i * ecpl1s + CSBI_i * ecpl2s) * exp(-THECS_i * ln(1.0 + qi1s * inv_qi1cs + qi2s * inv_qi2cs)); \
+    if (RSG_i == 0.0) begin \
+        temp3      =  1.0; \
+    end else begin \
+        if (RSG_i < 0.0) begin \
+            temp1      =  RSG_i * exp(THERSG_i * ln(qis + 1.0e-12)); \
+            temp3      =  1.0 - temp1; \
+        end else begin \
+            temp1      =  RSG_i * exp(THERSG_i * ln(qis + 1.0e-12)); \
+            temp3      =  1.0 / (1.0 + temp1); \
+        end \
+    end \
+    frscsi     =  frs * CsiPrime * `MAX_FUNC(1.0 - RSB_i * xg20shift, 0.0, 0.01); \
+    Grss       =  frscsi * (qis * temp3 + RSIG_i); \
+    Gmob1s     =  (1.0 + exp(THEMU_i * ln(fmue * eeff1s + 1.0e-6)) + Gcss + BETN1_i * Grss); \
+    Gmob2s     =  (1.0 + exp(THEMU_i * ln(fmue * eeff2s + 1.0e-6)) + Gcss + BETN2_i * Grss); \
+    Gmobs      =  fcors * (c1s + c2s) / (c1s / Gmob1s + c2s / Gmob2s); \
+    \
+    /* *********** Calculation of various quantities at the onset of saturation *********** */ \
+    if (abs(Dx_WI) > 0.007) begin \
+        if (Dx_WI > 0.0) begin \
+            temp       =  exp(-Dx_WI); \
+            s1         =  Dx_WI / (1.0 - temp); \
+            s2         =  temp * s1; \
+            deltaxinf  =  ln(A0 / (qis * s1)) - `LN2 + x1_WI0; \
+        end else begin \
+            temp       =  exp(Dx_WI); \
+            s2         =  Dx_WI / (temp - 1.0); \
+            s1         =  temp * s2; \
+            deltaxinf  =  ln(A0 / (qis * s2)) - `LN2 + x2_WI0; \
+        end \
+        q1chapinf  = -Dx_WI / (keq * (1.0 - s1 - Dx_WI * inv_k2)); \
+        q2chapinf  =  Dx_WI / (keq * (1.0 - s2 + Dx_WI * inv_k1)); \
+        dinf       =  Dx_WI / ((s2 * inv_k2 + 0.5) / q2chapinf - (s1 * inv_k1 + 0.5) / q1chapinf); \
+    end else begin \
+        temp       =  0.5 * `INV6 * Dx_WIsq; \
+        temp1      =  0.5 * Dx_WI; \
+        s1         =  1.0 + temp1 + temp; \
+        s2         =  1.0 - temp1 + temp; \
+        temp2      = `INV6 * temp1; \
+        q1chapinf  =  1.0 / (keq * (0.5 + inv_k2 + temp2)); \
+        q2chapinf  =  1.0 / (keq * (0.5 + inv_k1 - temp2)); \
+        deltaxinf  =  ln(A0 / (qis * (1.0 - 0.5 * temp))) - `LN2 + 0.5 * (x1_WI0 + x2_WI0); \
+        dinf       = -12.0 / (4.0 - 3.0 * keq + 12.0 * keq / (k1 * k2) + keq * (inv_k1 - inv_k2) * Dx_WI + `INV3 * (0.2 - 0.25 * keq) * Dx_WIsq); \
+    end \
+    inv_dinf   =  1.0 / dinf; \
+    \
+    /* *********** Drain saturation voltage *********** */ \
+    if (qis > `QI_LOW) begin \
+        /* Front gate bias dependence of velocity saturation */ \
+        wsat1      =  100.0 * esurf1s / (100.0 + esurf1s); \
+        if (THESAT1_i < 0.0) begin \
+            sat_fact1  =  1.0 / (1.0 - THESAT1_i * wsat1); \
+        end else begin \
+            sat_fact1  =  1.0 + THESAT1_i * wsat1; \
+        end \
+        /* Back gate bias dependence of velocity saturation */ \
+        wsat2      =  100.0 * esurf2s / (100.0 + esurf2s); \
+        if (THESAT2_i < 0.0) begin \
+            sat_fact2  =  1.0 / (1.0 - THESAT2_i * wsat2); \
+        end else begin \
+            sat_fact2  =  1.0 + THESAT2_i * wsat2; \
+        end \
+        /* deltaxsat and qidsat calculation */ \
+        dqis_dxn_qi =  dqsqs_dxn_qi * sums / (a1s * a2s) - (Aexp1s / a1s + Aexp2s / a2s) / qis; \
+        ds         =  dqis_dxn_qi * qis / (dqis_dxn_qi + 1.0); \
+        temp1      =  dinf - ds; \
+        deltaxi    =  (qis + dinf * deltaxinf) / temp1; \
+        deltaxi    =  0.5 * (deltaxi + sqrt(deltaxi * deltaxi + 1.0e-6)); \
+        gamma      =  sat_phit_loc / Gmobs * 0.5 * (sat_fact1 + sat_fact2); \
+        vs         =  1.0 - qis / ds; \
+        vd         =  1.0 + deltaxinf; \
+        wd         =  ((2.0 * ds - qis) * inv_dinf - 2.0 - deltaxinf) * deltaxi; \
+        if (gamma > 1.0e-14) begin \
+            ps_cub     =  2.0 / (gamma * gamma); \
+            qs_cub     =  ps_cub * vs; \
+            pd_cub     =  ps_cub + wd; \
+            qd_cub     =  ps_cub * vd; \
+            racs       =  sqrt(qs_cub * qs_cub + 0.148148148148 * ps_cub * ps_cub * ps_cub + 1.0e-20); \
+            racd       =  sqrt(qd_cub * qd_cub + 0.148148148148 * pd_cub * pd_cub * pd_cub + 1.0e-20); \
+            deltaxsats =  exp(`INV3 * ln(0.5 * (racs + qs_cub))) - exp(`INV3 * ln(0.5 * (racs - qs_cub))); \
+            deltaxsatd =  exp(`INV3 * ln(0.5 * (racd + qd_cub))) - exp(`INV3 * ln(0.5 * (racd - qd_cub))); \
+        end else begin \
+            deltaxsats =  vs; \
+            deltaxsatd =  vd; \
+        end \
+        temp3      =  temp1 * temp1; \
+        deltaxsat  = `SAT_FACT * `MAX_FUNC(deltaxsats, deltaxsatd, 10.0 * temp3); \
+        qidsats    =  qis + ds * deltaxsat; \
+        qidsatd    =  dinf * (deltaxsat - deltaxinf); \
+        qidsat     = `MAX_FUNC(qidsats, qidsatd,`SMTH_SQ * temp3); \
+    end else begin \
+        ds         =  dinf; \
+        deltaxsat  = `SAT_FACT * (1.0 + deltaxinf); \
+        qidsat     =  0.5 * qis + dinf * (deltaxsat - 0.5 * deltaxinf); \
+    end \
+    /* xndssat calculation */ \
+    `ln_one_plus_exp(qidsat - `QI_TH, temp1) \
+    temp2      =  temp1 + `QI_TH; \
+    temp3      =  deltaxsat + ln(qis / temp2); \
+    `ln_one_plus_exp(temp3 - `XSAT_MIN, temp1) \
+    temp3      =  temp1 + `XSAT_MIN; \
+    `ln_one_plus_exp(xsatmax - temp3, temp1) \
+    xndssat    =  xsatmax - temp1; \
+    \
+    /* *********** Effective drain voltage  *********** */ \
+    temp1      =  xd / xndssat; \
+    temp2      =  temp1 * temp1; \
+    temp3      =  temp2 * temp2; \
+    temp4      =  temp3 * temp3; \
+    temp       =  exp(2.666666666667 * ln(1.0 + gamAX_loc * temp3)); \
+    xdeff      =  xd * exp(-0.0625 * ln(temp + temp4 * temp4)); \
+    \
+    /* *********** Inversion charge at drain side *********** */ \
+    `func_q(xg1x, xg2x, xdeff, q1d, q2d) \
+    `func_qi(xg1x, xg2x, xdeff, q1d, q2d, qid, k1q1d, k2q2d, qsqd, Aexp1d, Aexp2d) \
+    /* Calculation of (dqsq/dxn)/qi and xdrift at drain side */ \
+    a1d         =  0.0; \
+    a2d         =  0.0; \
+    b1d         =  0.0; \
+    b2d         =  0.0; \
+    sumd        =  0.0; \
+    dqsqd_dxn_qi =  0.0; \
+    if (qis > `QI_LOW) begin \
+        b1d         =  Aexp1d * inv_k1; \
+        b2d         =  Aexp2d * inv_k2; \
+        a1d         =  b1d + 2.0 * k1q1d; \
+        a2d         =  b2d + 2.0 * k2q2d; \
+        sumd        =  2.0 * qid + b1d + b2d; \
+        if (abs(qsqd) > 0.005) begin \
+            temp1       =  a1d * a2d + 2.0 * (q1d + 2.0) * a2d + 2.0 * (q2d + 2.0) * a1d; \
+            dqsqd_dxn_qi =  -4.0 * qsqd * sumd / (qid * temp1); \
+        end else begin \
+            temp1       = `INV6 * (1.0 - qsqd * `INV30 * (1.0 - qsqd * `INV28 * (1.0 - qsqd * `INV30))); \
+            temp2       =  a1d * Aexp1d + a2d * Aexp2d + a1d * a2d * qid * (1.0 + qid * temp1); \
+            dqsqd_dxn_qi =  Aexp1d * Aexp2d * sumd / (qid * temp2); \
+        end \
+    end \
+    xdriftd     =  xdeff + ln(qid); \
+    \
+    /* *********** Mid-point inversion charge *********** */ \
+    qim         =  0.5 * (qis + qid); \
+    dxdrift     =  xdriftd - xdrifts; \
+    \
+    /* *********** Inclusion of poly-depletion *********** */ \
+    ratio_pd    =  1.0; \
+    if (SWPDEP > 0) begin \
+        qim_pd      =  0.5 * (k1q1s + k1q1d) / k1; \
+        qim_pd      =  `MAX_FUNC(qim_pd, 1.0e-5, 1.0); \
+        temp0       =  sqrt( qim_pd / inv_phit + 0.25 * KP * KP)- 0.5 * KP; \
+        xp_pd       =  pow(temp0, 2.0) * inv_phit; \
+        ratio_pd    =  1.0 - xp_pd / qim_pd; \
+    end \
+    \
+    /* *********** Mobility attenuation and series resistance *********** */ \
+    `ln_one_plus_exp(k1q1d / `FIELD_SMTH, temp1) \
+    esurf1d     = `FIELD_SMTH * temp1; \
+    `ln_one_plus_exp(k2q2d / `FIELD_SMTH, temp2) \
+    esurf2d     = `FIELD_SMTH * temp2; \
+    ecpl1d      =  esurf2d - k2q2d; \
+    ecpl2d      =  esurf1d - k1q1d; \
+    eeff1d      =  eta_mu * esurf1d + one_m_eta * ecpl1d; \
+    eeff2d      =  eta_mu * esurf2d + one_m_eta * ecpl2d; \
+    esurf1      =  0.5 * (esurf1s + esurf1d); \
+    esurf2      =  0.5 * (esurf2s + esurf2d); \
+    temp        =  1.0 / (esurf1 + esurf2); \
+    qi1m        =  qim * esurf1 * temp; \
+    qi2m        =  qim * esurf2 * temp; \
+    ecpl1       =  0.5 * (ecpl1s + ecpl1d); \
+    ecpl2       =  0.5 * (ecpl2s + ecpl2d); \
+    eeff1       =  0.5 * (eeff1s + eeff1d); \
+    eeff2       =  0.5 * (eeff2s + eeff2d); \
+    c1          =  esurf1 * BETN1_t * exp(STBET_i * lnrTn) * ratio_pd; \
+    c2          =  esurf2 * BETN2_t * exp(STBET_i * lnrTn); \
+    csum        =  c1 + c2; \
+    temp1       =  XCOR_i * (ecpl1 + XCORB_i * ecpl2); \
+    temp2       = `MAX_FUNC(1.0 + temp1, 0.0, 0.01); \
+    temp3       = `MAX_FUNC(1.0 + 0.2 * temp1, 0.0, 0.01); \
+    fcor        =  temp2 / temp3; \
+    Gcs         =  CS_i * (1.0 + CSFI_i * ecpl1 + CSBI_i * ecpl2) * exp(-THECS_i * ln(1.0 + qi1m * inv_qi1cs + qi2m * inv_qi2cs)); \
+    if (RSG_i == 0.0) begin \
+        temp3       =  1.0; \
+    end else begin \
+        if (RSG_i < 0.0) begin \
+            temp1       =  RSG_i * exp(THERSG_i * ln(qim + 1.0e-12)); \
+            temp3       =  1.0 - temp1; \
+        end else begin \
+            temp1       =  RSG_i * exp(THERSG_i * ln(qim + 1.0e-12)); \
+            temp3       =  1.0 / (1.0 + temp1); \
+        end \
+    end \
+    Grs         =  frscsi * (qim * temp3 + RSIG_i); \
+    Gmob1       =  (1.0 + exp(THEMU_i * ln(fmue * eeff1 + 1.0e-6)) + Gcs + BETN1_i * Grs); \
+    Gmob2       =  (1.0 + exp(THEMU_i * ln(fmue * eeff2 + 1.0e-6)) + Gcs + BETN2_i * Grs); \
+    Gmob        =  fcor * csum / (c1 / Gmob1 + c2 / Gmob2); \
+    \
+    /* *********** Channel length modulation *********** */ \
+    inv_qimstar1 =  1.0 / (4.0 + qim); \
+    if (ALPB_i > 0) begin \
+        temp        =  1.0 / (1.0 + ALPB_i * qi2m); \
+    end else begin \
+        temp        =  1.0 - ALPB_i * qi2m; \
+    end \
+    r1          =  qim * inv_qimstar1 * temp; \
+    dL_L_fact   =  ln(1.0 + (xd - xdeff) / (VP_i * inv_phit + VPG_i * qim * qim)) * r1; \
+    dL_L        =  alp_loc * dL_L_fact; \
+    GdL         =  1.0 / (1.0 + dL_L * (1.0 + dL_L)); \
+    \
+    /* *********** Velocity saturation *********** */ \
+    /* Front gate bias dependence of velocity saturation */ \
+    wsat1       =  100.0 * esurf1 / (100.0 + esurf1); \
+    if (THESAT1_i < 0.0) begin \
+        sat_fact1   =  1.0 / (1.0 - THESAT1_i * wsat1); \
+    end else begin \
+        sat_fact1   =  1.0 + THESAT1_i * wsat1; \
+    end \
+    /* Back gate bias dependence of velocity saturation */ \
+    wsat2       =  100.0 * esurf2 / (100.0 + esurf2); \
+    if (THESAT2_i < 0.0) begin \
+        sat_fact2   =  1.0 / (1.0 - THESAT2_i * wsat2); \
+    end else begin \
+        sat_fact2   =  1.0 + THESAT2_i * wsat2; \
+    end \
+    /* Gvsat calculation */ \
+    Ggamma      =  sat_phit_loc * dxdrift * 0.5 * (sat_fact1 + sat_fact2); \
+    sqrt_zsat   =  Ggamma / (Gmob * GdL); \
+    zsat        =  sqrt_zsat * sqrt_zsat; \
+    vsat_fact   =  sqrt(1.0 + zsat); \
+    hsat        =  (1.0 + 1.5 * zsat) / vsat_fact; \
+    \
+    /* *********** Quantum mechanical corrections *********** */ \
+    if (QMC > 0.0) begin \
+        temp1       =  0.6 * qq * exp(-`INV6 * ln(esurf1 * esurf1 + 60.0)); \
+        temp2       =  0.6 * qq * exp(-`INV6 * ln(esurf2 * esurf2 + 60.0)); \
+        qmfact1     =  (1.0 + k1 * temp1) / tox1fact; \
+        qmfact2     =  (1.0 + k2 * temp2) / tox2fact; \
+    end else begin \
+        qmfact1     =  1.0; \
+        qmfact2     =  1.0; \
+    end \
+    \
+    /* *********** Drain-source current *********** */ \
+    if (qis > `QI_LOW) begin \
+        if (qid > `QI_LOW) begin \
+            if (abs(a2d) < 0.01) begin \
+                temp        =  (2.0 + q1d + 0.5 * a1d) / ((2.0 + q2d) * a1d); \
+                temp1       =  temp * a2d; \
+                temp2       =  temp1 * temp1; \
+                temp3       =  1.0 - temp1 + temp2; \
+                temp4       =  temp3 - temp1 * temp2; \
+                temp1       =  (k2q2d - 2.0 * qsqd * (temp - 1.0 / a1d) * temp4) / (2.0 + q2d); \
+                dqid_dxn_qi =  ((dqsqd_dxn_qi * qid - Aexp1d) / a1d - temp1) / qid; \
+                dd          =  dqid_dxn_qi * qid / (dqid_dxn_qi + 1.0); \
+            end else begin \
+                dqid_dxn_qi =  dqsqd_dxn_qi * sumd / (a1d * a2d) - (Aexp1d / a1d + Aexp2d / a2d) / qid; \
+                dd          =  dqid_dxn_qi * qid / (dqid_dxn_qi + 1.0); \
+            end \
+        end else begin \
+            dd          =  dinf; \
+        end \
+        temp1       =  dd - ds; \
+        temp2       =  1.0 + `SMTH_SQ * temp1 * temp1; \
+        if (abs(temp1) > 1.0e-3) begin \
+            temp3       =  qid - qis; \
+            Ls          =  temp3 - dd * dxdrift; \
+            Ld          =  temp3 - ds * dxdrift; \
+            Us          =  sqrt(Ls * Ls + temp2); \
+            Ud          =  sqrt(Ld * Ld + temp2); \
+            idrift2     =  0.25 / temp1 * (Ud * Ls - Us * Ld + temp2 * ln((Ld + Ud) / (Ls + Us))); \
+        end else begin \
+            temp3       =  dxdrift * temp1; \
+            idrift2     = -0.25 * `INV6 * dxdrift * temp3 * temp3 / sqrt(temp2); \
+        end \
+    end else begin \
+        dd          =  dinf; \
+        idrift2     =  0.0; \
+    end \
+    norm_Ids    =  qim * dxdrift + idrift2 + qis - qid; \
+    \
+    /* *********** Variables for calculation of intrinsic charges and gate current *********** */ \
+    if (qis > `QI_LOW) begin \
+        if (norm_Ids > 1.0e-30) begin \
+            q1s_chap    =  a1s / (Aexp1s / qis - dqsqs_dxn_qi); \
+            q1d_chap    =  a1d / (Aexp1d / qid - dqsqd_dxn_qi); \
+            inv_k1h1_0  =  (q1s_chap - q1d_chap) / norm_Ids; \
+            q2s_chap    =  a2s / (Aexp2s / qis - dqsqs_dxn_qi); \
+            q2d_chap    =  a2d / (Aexp2d / qid - dqsqd_dxn_qi); \
+            inv_k2h2_0  =  (q2s_chap - q2d_chap) / norm_Ids; \
+        end else begin \
+            inv_k1h1_0  =  0.0; \
+            inv_k2h2_0  =  0.0; \
+        end \
+    end else begin \
+        zeta1       = -2.0 * s1 * (inv_k1 / q1chapinf + inv_dinf); \
+        zeta2       = -2.0 * s2 * (inv_k2 / q2chapinf + inv_dinf); \
+        temp        =  (zeta2 - zeta1) * inv_dinf; \
+        temp1       =  zeta1 * inv_k1; \
+        temp2       =  zeta2 * inv_k2; \
+        temp3       =  temp1 + temp2; \
+        temp4       =  3.0 + 2.0 * (s1 * inv_k1 + s2 * inv_k2); \
+        ksi1        =  (temp2 + temp - temp3 / q1chapinf) / temp4; \
+        ksi2        =  (temp1 - temp - temp3 / q2chapinf) / temp4; \
+        inv_k1h1_0  = -q1chapinf * (ksi1 * q1chapinf + inv_dinf); \
+        inv_k2h2_0  = -q2chapinf * (ksi2 * q2chapinf + inv_dinf); \
+    end \
+    inv_k1h1    =  inv_k1h1_0 * hsat; \
+    inv_k2h2    =  inv_k2h2_0 * hsat; \
+    delta_k1q1  =  0.5 * (k1q1d - k1q1s); \
+    delta_k2q2  =  0.5 * (k2q2d - k2q2s); \
+    prod1       =  delta_k1q1 * inv_k1h1; \
+    prod2       =  delta_k2q2 * inv_k2h2;
+

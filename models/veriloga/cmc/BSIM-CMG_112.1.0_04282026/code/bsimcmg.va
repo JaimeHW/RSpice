@@ -1,0 +1,28 @@
+// *  BSIM-CMG 112.1.0 released on 04/28/2026                            *
+// *  BSIM Common Multi-Gate Model (Verilog-A)                                *
+// ****************************************************************************
+
+// ****************************************************************************
+// *  Copyright © 2026 University of California                               *
+// *                                                                          *
+// *  Project director: Prof. Sayeef Salahuddin                               *
+// *                    Prof. Chenming Hu                                     *
+// *                                                                          *
+// *  Developers: https://www.bsim.berkeley.edu/models/bsimcmg/auth_cmg/      *
+// ****************************************************************************
+
+`include "constants.vams"
+`include "disciplines.vams"
+`include "bsimcmg_macros.include"
+module bsimcmg_va(d, g, s, e, t);
+    inout d, g, s, e, t;
+    electrical d, g, s, e;
+    electrical di, si, di1, si1, di2;
+    electrical ge, gi, gint, gints, gintd;
+    electrical q;
+    electrical n;
+    thermal t;
+    `include "bsimcmg_parameters.include"
+    `include "bsimcmg_variables.include"
+    `include "bsimcmg_body.include"
+endmodule
