@@ -106,6 +106,164 @@ fn resolve_resistor_eval_context(
     Ok((ctx, current_temp_c, model_tnom_c))
 }
 
+fn resolve_resistor_model_level(
+    element_name: &str,
+    model_name: &str,
+    model_def: &crate::netlist::ModelDef,
+    eval_ctx: &crate::netlist::ParamContext,
+) -> Result<i32, SimulationError> {
+    for (name, value) in &model_def.string_params {
+        if name.eq_ignore_ascii_case("LEVEL") {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' model '{}' has non-numeric LEVEL=\"{}\"; LEVEL selectors must be finite integers",
+                element_name, model_name, value
+            )));
+        }
+    }
+
+    let Some(level) = resolve_model_param(model_def, &["LEVEL"], eval_ctx)? else {
+        return Ok(1);
+    };
+    let rounded = level.round();
+    if !level.is_finite() || (level - rounded).abs() > 1e-9 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' has unsupported resistor LEVEL={} (LEVEL selectors must be finite integers)",
+            element_name, model_name, level
+        )));
+    }
+
+    match rounded as i32 {
+        0 | 1 | 2 => Ok(rounded as i32),
+        level => Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' requests unsupported resistor LEVEL={}",
+            element_name, model_name, level
+        ))),
+    }
+}
+
+fn model_has_param(model_def: &crate::netlist::ModelDef, names: &[&str]) -> bool {
+    names.iter().any(|candidate| {
+        model_def
+            .params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(candidate))
+            || model_def
+                .expr_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(candidate))
+            || model_def
+                .string_params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(candidate))
+    })
+}
+
+fn level2_requests_self_consistent_thermal_resistor(
+    model_def: &crate::netlist::ModelDef,
+    instance_params: &[(String, f64)],
+) -> bool {
+    let has_l = instance_param(instance_params, &["L", "LENGTH"]).is_some();
+    let has_a = instance_param(instance_params, &["A", "AREA"]).is_some();
+    let has_instance_material = instance_param(instance_params, &["RESISTIVITY"]).is_some()
+        && instance_param(instance_params, &["HEATCAPACITY"]).is_some();
+    let has_model_material = model_has_param(model_def, &["RESISTIVITY"])
+        && model_has_param(model_def, &["HEATCAPACITY"]);
+
+    has_l && has_a && (has_instance_material || has_model_material)
+}
+
+fn resolve_level2_resistor_electrical_subset(
+    element_name: &str,
+    model_name: &str,
+    value: f64,
+    value_expr: Option<&str>,
+    model_def: &crate::netlist::ModelDef,
+    instance_params: &[(String, f64)],
+    eval_ctx: &crate::netlist::ParamContext,
+) -> Result<f64, SimulationError> {
+    let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
+    if resistance.is_none() && value.is_finite() && value > 0.0 {
+        resistance = Some(value);
+    }
+    if resistance.is_none()
+        && let Some(expr) = value_expr
+    {
+        resistance = Some(
+            crate::netlist::expr::eval_expression(expr, eval_ctx).map_err(|e| {
+                SimulationError::Circuit(format!(
+                    "Resistor '{}' value expression could not be resolved: {}",
+                    element_name, e
+                ))
+            })?,
+        );
+    }
+
+    if resistance.is_none() {
+        let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Resistor '{}' model '{}' requires instance R or RSH with L/W geometry for native Xyce LEVEL=2",
+                    element_name, model_name
+                ))
+            })?;
+        if !rsh.is_finite() || rsh <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' model '{}' has invalid RSH={} (must be finite and > 0)",
+                element_name, model_name, rsh
+            )));
+        }
+
+        let l = instance_param(instance_params, &["L", "LENGTH"])
+            .or_else(|| {
+                resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
+                    .ok()
+                    .flatten()
+            })
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Resistor '{}' model '{}' requires L/LENGTH when using RSH with native Xyce LEVEL=2",
+                    element_name, model_name
+                ))
+            })?;
+        let w = instance_param(instance_params, &["W", "WIDTH"])
+            .or_else(|| {
+                resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], eval_ctx)
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or(10.0e-6);
+        let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
+        let l_eff = l - narrow;
+        let w_eff = w - narrow;
+        if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' has invalid Xyce LEVEL=2 effective geometry (L={}, W={}, NARROW={})",
+                element_name, l, w, narrow
+            )));
+        }
+        resistance = Some(if w_eff == 0.0 {
+            f64::INFINITY
+        } else {
+            rsh * l_eff / w_eff
+        });
+    }
+
+    let multiplier = resolve_model_param(model_def, &["R"], eval_ctx)?.unwrap_or(1.0);
+    if !multiplier.is_finite() || multiplier <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' has invalid LEVEL=2 model R multiplier {} (must be finite and > 0)",
+            element_name, model_name, multiplier
+        )));
+    }
+
+    Ok(resistance.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' LEVEL=2 value could not be resolved",
+            element_name, model_name
+        ))
+    })? * multiplier)
+}
+
 fn apply_resistor_instance_scaling(
     element_name: &str,
     quantity_label: &str,
@@ -176,22 +334,52 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
 
     let (eval_ctx, current_temp_c, tnom_c) =
         resolve_resistor_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
-    let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
-    if resistance.is_none() && value.is_finite() && value > 0.0 {
-        resistance = Some(value);
-    }
-    if resistance.is_none()
-        && let Some(expr) = value_expr
+    let resistor_level = if let (Some(model_def), Some(model_name)) = (model_def, model_name) {
+        let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
+        if level == 2
+            && level2_requests_self_consistent_thermal_resistor(model_def, instance_params)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' model '{}' requests Xyce LEVEL=2 self-consistent thermal resistor state, which has no native implementation yet",
+                element_name, model_name
+            )));
+        }
+        Some(level)
+    } else {
+        None
+    };
+
+    let mut resistance = if let (Some(2), Some(model_def), Some(model_name)) =
+        (resistor_level, model_def, model_name)
     {
-        resistance = Some(
-            crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
-                SimulationError::Circuit(format!(
-                    "Resistor '{}' value expression could not be resolved: {}",
-                    element_name, e
-                ))
-            })?,
-        );
-    }
+        Some(resolve_level2_resistor_electrical_subset(
+            element_name,
+            model_name,
+            value,
+            value_expr,
+            model_def,
+            instance_params,
+            &eval_ctx,
+        )?)
+    } else {
+        let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
+        if resistance.is_none() && value.is_finite() && value > 0.0 {
+            resistance = Some(value);
+        }
+        if resistance.is_none()
+            && let Some(expr) = value_expr
+        {
+            resistance = Some(
+                crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
+                    SimulationError::Circuit(format!(
+                        "Resistor '{}' value expression could not be resolved: {}",
+                        element_name, e
+                    ))
+                })?,
+            );
+        }
+        resistance
+    };
 
     if let Some(model_def) = model_def {
         if resistance.is_none() {

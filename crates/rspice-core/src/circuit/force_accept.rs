@@ -148,6 +148,12 @@ impl CircuitData {
                 ],
             );
         }
+        for dev in &self.ekv26s.devices {
+            Self::add_force_accept_topology_clique(&mut graph, &dev.nodes());
+        }
+        for dev in &self.ekv3s.devices {
+            Self::add_force_accept_topology_clique(&mut graph, &dev.nodes());
+        }
         for vdmos in &self.vdmoses.devices {
             Self::add_force_accept_topology_clique(
                 &mut graph,
@@ -173,6 +179,9 @@ impl CircuitData {
             Self::add_force_accept_topology_edge(&mut graph, switch.node_pos, switch.node_neg);
         }
         for switch in &self.iswitches {
+            Self::add_force_accept_topology_edge(&mut graph, switch.node_pos, switch.node_neg);
+        }
+        for switch in &self.generic_switches {
             Self::add_force_accept_topology_edge(&mut graph, switch.node_pos, switch.node_neg);
         }
 

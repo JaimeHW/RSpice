@@ -151,6 +151,68 @@ fn resolve_model_param(
     Ok(None)
 }
 
+fn canonical_supported_model_param<'a>(name: &str, supported: &'a [&'a str]) -> Option<&'a str> {
+    supported
+        .iter()
+        .copied()
+        .find(|candidate| name.eq_ignore_ascii_case(candidate))
+}
+
+pub(super) fn resolve_supported_model_params_upper_map(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    element_kind: &str,
+    element_name: &str,
+    model_name: &str,
+    supported: &[&str],
+    temperature_kelvin: f64,
+) -> Result<std::collections::HashMap<String, f64>, SimulationError> {
+    let (ctx, _, _) =
+        resolve_passive_eval_context(netlist, Some(model_def), &[], temperature_kelvin)?;
+    let mut params = std::collections::HashMap::new();
+
+    for (name, value) in &model_def.params {
+        if let Some(param) = canonical_supported_model_param(name, supported) {
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "{} '{}' model '{}' uses non-finite switch parameter {}={}",
+                    element_kind, element_name, model_name, param, value
+                )));
+            }
+            params.insert(param.to_string(), *value);
+        }
+    }
+
+    for (name, value) in &model_def.string_params {
+        if let Some(param) = canonical_supported_model_param(name, supported) {
+            return Err(SimulationError::Circuit(format!(
+                "{} '{}' model '{}' uses non-numeric switch parameter {}=\"{}\"; switch parameters must be finite numeric values",
+                element_kind, element_name, model_name, param, value
+            )));
+        }
+    }
+
+    for (name, expr) in &model_def.expr_params {
+        if let Some(param) = canonical_supported_model_param(name, supported) {
+            let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "{} '{}' model '{}' switch parameter {} could not be resolved: {}",
+                    element_kind, element_name, model_name, param, err
+                ))
+            })?;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "{} '{}' model '{}' uses non-finite switch parameter {}={}",
+                    element_kind, element_name, model_name, param, value
+                )));
+            }
+            params.insert(param.to_string(), value);
+        }
+    }
+
+    Ok(params)
+}
+
 fn model_binning_param(model_def: &crate::netlist::ModelDef, name: &str) -> Option<f64> {
     model_param(&model_def.params, &[name])
 }
@@ -191,11 +253,15 @@ fn model_bin_range_size(model_def: &crate::netlist::ModelDef) -> f64 {
 pub(super) fn resolve_bjt_type_from_model(model_type: &str) -> Option<crate::netlist::BjtType> {
     if model_type.eq_ignore_ascii_case("NPN") {
         Some(crate::netlist::BjtType::Npn)
-    } else if model_type.eq_ignore_ascii_case("PNP") {
+    } else if model_type.eq_ignore_ascii_case("PNP") || is_lpnp_bjt_model_type(model_type) {
         Some(crate::netlist::BjtType::Pnp)
     } else {
         None
     }
+}
+
+pub(super) fn is_lpnp_bjt_model_type(model_type: &str) -> bool {
+    model_type.eq_ignore_ascii_case("LPNP")
 }
 
 pub(super) fn resolve_mos_type_from_model(model_type: &str) -> Option<crate::netlist::MosType> {
@@ -212,16 +278,18 @@ pub(super) fn is_vdmos_model_type(model_type: &str) -> bool {
     model_type.eq_ignore_ascii_case("VDMOS")
         || model_type.eq_ignore_ascii_case("NVDMOS")
         || model_type.eq_ignore_ascii_case("PVDMOS")
+        || model_type.eq_ignore_ascii_case("VDMOSN")
+        || model_type.eq_ignore_ascii_case("VDMOSP")
 }
 
 pub(super) fn resolve_vdmos_type_from_model(
     model_type: &str,
     params: &HashMap<String, f64>,
 ) -> Option<crate::netlist::MosType> {
-    if model_type.eq_ignore_ascii_case("NVDMOS") {
+    if model_type.eq_ignore_ascii_case("NVDMOS") || model_type.eq_ignore_ascii_case("VDMOSN") {
         return Some(crate::netlist::MosType::Nmos);
     }
-    if model_type.eq_ignore_ascii_case("PVDMOS") {
+    if model_type.eq_ignore_ascii_case("PVDMOS") || model_type.eq_ignore_ascii_case("VDMOSP") {
         return Some(crate::netlist::MosType::Pmos);
     }
     if !model_type.eq_ignore_ascii_case("VDMOS") {

@@ -180,6 +180,12 @@ impl Engine {
                 unsupported_iswitch
             ));
         }
+        if !circuit.generic_switches.is_empty() {
+            kinds.push(format!(
+                "{} generic SWITCH CONTROL device(s) (HB support for expression-controlled switches is not native yet)",
+                circuit.generic_switches.len()
+            ));
+        }
         if kinds.is_empty() {
             None
         } else {

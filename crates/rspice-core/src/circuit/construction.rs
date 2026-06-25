@@ -28,6 +28,8 @@ impl CircuitData {
             b3soi_pd: B3SoiPds::new(),
             bsim3v3: Bsim3v3s::new(),
             bsim4v8: Bsim4v8s::new(),
+            ekv26s: EkvMosfets::new(),
+            ekv3s: Ekv3Mosfets::new(),
             vdmoses: Vdmoses::new(),
             jfets: Vec::new(),
             vcvs: Vcvs::new(),
@@ -40,6 +42,7 @@ impl CircuitData {
             // New device types
             vswitches: Vec::new(),
             iswitches: Vec::new(),
+            generic_switches: Vec::new(),
             tlines: Vec::new(),
             coupled_tlines: Vec::new(),
             couplings: Vec::new(),
@@ -206,8 +209,7 @@ impl CircuitData {
         Self::remap_node_slice(&mut self.inductors.node_pos, old_node_id);
         Self::remap_node_slice(&mut self.inductors.node_neg, old_node_id);
         for diode in &mut self.diodes.devices {
-            diode.node_anode = Self::remap_node_id(diode.node_anode, old_node_id);
-            diode.node_cathode = Self::remap_node_id(diode.node_cathode, old_node_id);
+            diode.remap_nodes(old_node_id);
         }
         for bjt in &mut self.bjts.devices {
             bjt.node_collector = Self::remap_node_id(bjt.node_collector, old_node_id);
@@ -241,6 +243,18 @@ impl CircuitData {
             dev.node_drain_body = Self::remap_node_id(dev.node_drain_body, old_node_id);
             dev.node_source_body = Self::remap_node_id(dev.node_source_body, old_node_id);
             dev.node_charge_deficit = Self::remap_node_id(dev.node_charge_deficit, old_node_id);
+        }
+        for dev in &mut self.ekv26s.devices {
+            dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
+            dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
+            dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
+            dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
+        }
+        for dev in &mut self.ekv3s.devices {
+            dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
+            dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
+            dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
+            dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
         }
         for vdmos in &mut self.vdmoses.devices {
             vdmos.drain = Self::remap_node_id(vdmos.drain, old_node_id);
@@ -286,6 +300,10 @@ impl CircuitData {
             switch.ctrl_neg = Self::remap_node_id(switch.ctrl_neg, old_node_id);
         }
         for switch in &mut self.iswitches {
+            switch.node_pos = Self::remap_node_id(switch.node_pos, old_node_id);
+            switch.node_neg = Self::remap_node_id(switch.node_neg, old_node_id);
+        }
+        for switch in &mut self.generic_switches {
             switch.node_pos = Self::remap_node_id(switch.node_pos, old_node_id);
             switch.node_neg = Self::remap_node_id(switch.node_neg, old_node_id);
         }

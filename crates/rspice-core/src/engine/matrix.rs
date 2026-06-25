@@ -106,18 +106,15 @@ impl Engine {
             }
         }
 
-        // Diode stamps (2-terminal: 2x2 matrix)
+        // Diode stamps.
         for diode in &circuit.diodes.devices {
             let a = diode.node_anode;
             let c = diode.node_cathode;
-            // 2x2 stamp pattern
             if a > 0 {
                 triplets.push((a - 1, a - 1, 0.0));
             }
             if a > 0 && c > 0 {
                 triplets.push((a - 1, c - 1, 0.0));
-            }
-            if c > 0 && a > 0 {
                 triplets.push((c - 1, a - 1, 0.0));
             }
             if c > 0 {
@@ -298,6 +295,31 @@ impl Engine {
             }
         }
 
+        // EKV 2.6 LEVEL=260 DC slice stamps the four external terminals with
+        // a numerically linearized Xyce-compatible evaluator.
+        for dev in &circuit.ekv26s.devices {
+            let nodes = dev.nodes();
+            for &row in &nodes {
+                for &col in &nodes {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
+        // EKV3 LEVEL=301 NMOS150 slice stamps the four external terminals.
+        for dev in &circuit.ekv3s.devices {
+            let nodes = dev.nodes();
+            for &row in &nodes {
+                for &col in &nodes {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
         // JFET stamps (3-terminal: include full 3x3 topology to support AC capacitances).
         for jfet in &circuit.jfets {
             let d = jfet.drain;
@@ -373,6 +395,22 @@ impl Engine {
                 if n > 0 && cb > 0 {
                     triplets.push((n - 1, cb - 1, 0.0));
                 }
+            }
+        }
+        for sw in &circuit.generic_switches {
+            let p = sw.node_pos;
+            let n = sw.node_neg;
+            if p > 0 {
+                triplets.push((p - 1, p - 1, 0.0));
+            }
+            if p > 0 && n > 0 {
+                triplets.push((p - 1, n - 1, 0.0));
+            }
+            if n > 0 && p > 0 {
+                triplets.push((n - 1, p - 1, 0.0));
+            }
+            if n > 0 {
+                triplets.push((n - 1, n - 1, 0.0));
             }
         }
 

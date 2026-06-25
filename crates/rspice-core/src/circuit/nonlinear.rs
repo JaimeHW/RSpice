@@ -10,10 +10,13 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     b3soi_pd: B3SoiPds,
     bsim3v3: Bsim3v3s,
     bsim4v8: Bsim4v8s,
+    ekv26s: EkvMosfets,
+    ekv3s: Ekv3Mosfets,
     vdmoses: Vdmoses,
     jfets: Vec<crate::device::Jfet>,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
+    generic_switches: Vec<crate::device::GenericSwitch>,
     behavioral_sources: BehavioralSources,
     xspice_instances: Vec<XspiceInstance>,
     xspice_digital_values: HashMap<NodeId, DigitalValue>,
@@ -21,6 +24,28 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     xspice_event_queue: EventQueue,
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::EkvMosfet;
+
+    #[test]
+    fn ekv26_consumes_circuit_junction_gmin() {
+        let mut circuit = CircuitData::new();
+        circuit
+            .ekv26s
+            .add(EkvMosfet::new_nmos("mekv".to_string(), 1, 2, 0, 0));
+
+        circuit.set_semiconductor_junction_gmin(1.0e-8);
+
+        assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 1.0e-8);
+
+        circuit.set_semiconductor_junction_gmin(-1.0);
+
+        assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 0.0);
+    }
 }
 
 impl CircuitData {
@@ -34,6 +59,8 @@ impl CircuitData {
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
             || !self.bsim4v8.is_empty()
+            || !self.ekv26s.is_empty()
+            || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
@@ -93,6 +120,8 @@ impl CircuitData {
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
             || !self.bsim4v8.is_empty()
+            || !self.ekv26s.is_empty()
+            || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
@@ -127,6 +156,8 @@ impl CircuitData {
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
             || !self.bsim4v8.is_empty()
+            || !self.ekv26s.is_empty()
+            || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -182,6 +213,9 @@ impl CircuitData {
         for dev in &mut self.bsim4v8.devices {
             dev.set_eval_gmin(gmin);
         }
+        for dev in &mut self.ekv26s.devices {
+            dev.set_eval_gmin(gmin);
+        }
     }
 
     /// Return true when any JFET-family compact model exposes a stiff gate
@@ -217,10 +251,13 @@ impl CircuitData {
             b3soi_pd: self.b3soi_pd.clone(),
             bsim3v3: self.bsim3v3.clone(),
             bsim4v8: self.bsim4v8.clone(),
+            ekv26s: self.ekv26s.clone(),
+            ekv3s: self.ekv3s.clone(),
             vdmoses: self.vdmoses.clone(),
             jfets: self.jfets.clone(),
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
+            generic_switches: self.generic_switches.clone(),
             behavioral_sources: self.behavioral_sources.clone(),
             xspice_instances: self.xspice_instances.clone(),
             xspice_digital_values: self.xspice_digital_values.clone(),
@@ -241,10 +278,13 @@ impl CircuitData {
         self.b3soi_pd = snapshot.b3soi_pd;
         self.bsim3v3 = snapshot.bsim3v3;
         self.bsim4v8 = snapshot.bsim4v8;
+        self.ekv26s = snapshot.ekv26s;
+        self.ekv3s = snapshot.ekv3s;
         self.vdmoses = snapshot.vdmoses;
         self.jfets = snapshot.jfets;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
+        self.generic_switches = snapshot.generic_switches;
         self.behavioral_sources = snapshot.behavioral_sources;
         self.xspice_instances = snapshot.xspice_instances;
         self.xspice_digital_values = snapshot.xspice_digital_values;
@@ -267,6 +307,8 @@ impl CircuitData {
         self.b3soi_pd.update_all(voltages);
         self.bsim3v3.update_all(voltages);
         self.bsim4v8.update_all(voltages);
+        self.ekv26s.update_all(voltages);
+        self.ekv3s.update_all(voltages);
         self.vdmoses.update_all(voltages);
         let mut order: Vec<usize> = (0..self.jfets.len()).collect();
         order.sort_by_key(|&idx| (self.jfets[idx].model_order(), std::cmp::Reverse(idx)));
@@ -320,6 +362,19 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
     ) {
+        if let Err(err) = self.try_stamp_nonlinear(matrix, rhs, voltages) {
+            panic!("{err}");
+        }
+    }
+
+    /// Checked nonlinear stamping path for simulator analyses that can report
+    /// external model diagnostics instead of unwinding.
+    pub fn try_stamp_nonlinear(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) -> Result<(), String> {
         use crate::device::NonlinearDevice;
         self.diodes.stamp_all_direct(matrix, rhs, voltages);
         self.bjts.stamp_all_direct(matrix, rhs, voltages);
@@ -342,6 +397,8 @@ impl CircuitData {
         // BSIM4 rides the identical path (b4ld.c ceqdrn/ceqbd/ceqbs/ceqj*
         // rows through the stamper's RHS hook).
         self.bsim4v8.stamp_all(&mut stamper, &mut [], voltages);
+        self.ekv26s.stamp_all(&mut stamper, &mut [], voltages);
+        self.ekv3s.stamp_all(&mut stamper, &mut [], voltages);
         self.vdmoses.stamp_all(&mut stamper, &mut [], voltages);
         for vswitch in &self.vswitches {
             vswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
@@ -353,7 +410,7 @@ impl CircuitData {
         {
             let veriloga_devices = self.veriloga_devices_mut();
             veriloga_devices.update_all_voltages(voltages);
-            veriloga_devices.stamp_all(
+            veriloga_devices.try_stamp_all(
                 voltages,
                 |row, col, value| matrix.add(row, col, value),
                 |index, value| {
@@ -361,7 +418,21 @@ impl CircuitData {
                         *slot += value;
                     }
                 },
-            );
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Stamp expression-controlled generic switches for the given analysis time.
+    pub fn stamp_generic_switches(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+    ) {
+        let mut stamper = StaticMatrixStamper { matrix, rhs };
+        for switch in &mut self.generic_switches {
+            switch.stamp_time_dependent(time, &mut stamper);
         }
     }
 
@@ -388,6 +459,8 @@ impl CircuitData {
             && self.b3soi_pd.all_converged(criteria)
             && self.bsim3v3.all_converged(criteria)
             && self.bsim4v8.all_converged(criteria)
+            && self.ekv26s.all_converged(criteria)
+            && self.ekv3s.all_converged(criteria)
             && self.vdmoses.all_converged(criteria)
             && self.jfets.iter().all(|jfet| jfet.is_converged(criteria))
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))

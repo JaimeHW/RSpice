@@ -42,7 +42,7 @@ impl HbSolver {
         self.initialize_diode_voltages(state);
 
         // Step 1: Try direct DC Newton with minimal GMIN
-        if self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol) {
+        if self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol)? {
             return Ok(self.extract_dc_solution(state));
         }
 
@@ -55,7 +55,7 @@ impl HbSolver {
                 dc_max_iter,
                 dc_reltol * 10.0, // Relaxed tolerance during stepping
                 dc_abstol * 10.0,
-            ) {
+            )? {
                 // Converged at this GMIN level - refine to target
                 let mut current_gmin = gmin_level;
                 let mut last_good_x = self.extract_dc_solution(state);
@@ -70,7 +70,7 @@ impl HbSolver {
                         dc_max_iter,
                         dc_reltol,
                         dc_abstol,
-                    ) {
+                    )? {
                         last_good_x = self.extract_dc_solution(state);
                         last_good_gmin = current_gmin;
                         refine_failures = 0; // Reset failure count on success
@@ -92,7 +92,7 @@ impl HbSolver {
                 }
 
                 // Verify final residual at the best achievable GMIN
-                self.compute_dc_residual(state, last_good_gmin.max(target_gmin));
+                self.compute_dc_residual(state, last_good_gmin.max(target_gmin))?;
                 if state.residual_norm < dc_abstol || state.dc_rows_converged(dc_reltol, dc_abstol)
                 {
                     return Ok(self.extract_dc_solution(state));
@@ -137,7 +137,7 @@ impl HbSolver {
                 dc_max_iter / 2,
                 dc_reltol * 10.0,
                 dc_abstol * 10.0,
-            ) {
+            )? {
                 source_stepper.advance_on_success();
             } else if !source_stepper.reduce_on_failure() {
                 break;
@@ -149,7 +149,7 @@ impl HbSolver {
 
         // Final DC solve with full sources
         if source_stepper.is_complete()
-            && self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol)
+            && self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol)?
         {
             return Ok(self.extract_dc_solution(state));
         }
@@ -223,12 +223,12 @@ impl HbSolver {
         max_iterations: usize,
         tol: Value,
         abstol: Value,
-    ) -> bool {
+    ) -> Result<bool, HbError> {
         for iteration in 0..max_iterations {
             state.iteration = iteration;
 
             // Compute DC residual
-            self.compute_dc_residual(state, gmin);
+            self.compute_dc_residual(state, gmin)?;
 
             // Check convergence per KCL row: |res| <= abstol + reltol*scale
             // with the scale built from that row's own current contributions.
@@ -236,11 +236,11 @@ impl HbSolver {
             // lets a microamp imbalance at a high-impedance node hide under
             // the amp scale of stiff Norton source rows.
             if state.residual_norm < abstol || state.dc_rows_converged(tol, abstol) {
-                return true;
+                return Ok(true);
             }
 
             // Build DC Jacobian
-            let jacobian = self.build_dc_jacobian(state, gmin);
+            let jacobian = self.build_dc_jacobian(state, gmin)?;
 
             // Solve for delta_x: J * delta = -residual (standard Newton-Raphson)
             // We need -R because: R(x) = 0, Taylor: R(x+delta) ≈ R(x) + J*delta = 0
@@ -258,18 +258,22 @@ impl HbSolver {
 
             let delta_x = match self.solve_real_linear_system(&jacobian, &neg_residual) {
                 Ok(d) => d,
-                Err(_) => return false, // Singular Jacobian
+                Err(_) => return Ok(false), // Singular Jacobian
             };
 
             // Line search with DC voltage limiting
-            self.apply_dc_line_search(state, &delta_x, gmin, tol);
+            self.apply_dc_line_search(state, &delta_x, gmin, tol)?;
         }
 
-        false
+        Ok(false)
     }
 
     /// Compute DC residual: R = I_source_dc - G*V_dc - I_nonlinear(V_dc) - gmin*V_dc
-    fn compute_dc_residual(&mut self, state: &mut HbSolverState, gmin: Value) {
+    fn compute_dc_residual(
+        &mut self,
+        state: &mut HbSolverState,
+        gmin: Value,
+    ) -> Result<(), HbError> {
         let n = self.num_nodes;
 
         // Initialize residual with DC sources; the per-row scale accumulates
@@ -345,7 +349,7 @@ impl HbSolver {
         if !self.veriloga_nonlinear_devices.is_empty() {
             for device in &mut self.veriloga_nonlinear_devices {
                 device.device.update_all_voltages(&v_dc);
-                let values = device.device.evaluate();
+                let values = device.try_evaluate("DC residual evaluation")?;
                 for (program_idx, value) in values.iter().enumerate() {
                     let Some(rows) = device.rhs_rows.get(program_idx) else {
                         continue;
@@ -372,10 +376,15 @@ impl HbSolver {
             })
             .sum();
         state.residual_norm = norm_sq.sqrt();
+        Ok(())
     }
 
     /// Build DC Jacobian: J = -G - dI_nonlinear/dV - gmin*I
-    fn build_dc_jacobian(&mut self, state: &HbSolverState, gmin: Value) -> Vec<Vec<Value>> {
+    fn build_dc_jacobian(
+        &mut self,
+        state: &HbSolverState,
+        gmin: Value,
+    ) -> Result<Vec<Vec<Value>>, HbError> {
         let n = self.num_nodes;
         let mut jacobian = vec![vec![0.0; n]; n];
 
@@ -429,7 +438,7 @@ impl HbSolver {
         if !self.veriloga_nonlinear_devices.is_empty() {
             for device in &mut self.veriloga_nonlinear_devices {
                 device.device.update_all_voltages(&v_dc);
-                let jac_entries = device.device.compute_jacobian();
+                let jac_entries = device.try_compute_jacobian("DC Jacobian evaluation")?;
                 for entry in jac_entries {
                     let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
                         continue;
@@ -447,7 +456,7 @@ impl HbSolver {
             }
         }
 
-        jacobian
+        Ok(jacobian)
     }
 
     /// Apply DC line search with voltage limiting
@@ -457,7 +466,7 @@ impl HbSolver {
         delta_x: &[Value],
         gmin: Value,
         _tol: Value,
-    ) {
+    ) -> Result<(), HbError> {
         let n = self.num_nodes;
         let mut alpha = 1.0;
         let min_alpha = 0.001;
@@ -513,7 +522,7 @@ impl HbSolver {
             }
 
             // Compute new residual
-            self.compute_dc_residual(state, gmin);
+            self.compute_dc_residual(state, gmin)?;
 
             // Track best result
             if state.residual_norm < best_residual {
@@ -523,7 +532,7 @@ impl HbSolver {
 
             // Armijo condition
             if state.residual_norm <= orig_residual + armijo_c * alpha * grad_dot_delta {
-                return; // Accepted step
+                return Ok(()); // Accepted step
             }
 
             alpha *= 0.5;
@@ -537,7 +546,8 @@ impl HbSolver {
                 state.x[node][0] = Complex64::new(new_v, 0.0);
             }
         }
-        self.compute_dc_residual(state, gmin);
+        self.compute_dc_residual(state, gmin)?;
+        Ok(())
     }
 
     /// Solve real linear system using Gaussian elimination with partial pivoting

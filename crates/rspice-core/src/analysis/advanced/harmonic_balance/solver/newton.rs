@@ -36,24 +36,29 @@ impl HbSolver {
         // Step 0: Solve DC operating point first
         // This establishes the nonlinear device operating points and provides a much
         // better initial guess than starting from zero or a random guess.
-        if let Ok(_dc_solution) = self.solve_dc_operating_point(state) {
-            // DC solution is now stored in state.x[node][0]
-            // Initialize harmonic components to zero (small-signal around DC)
-            // This is the standard HB initialization approach
-            for node in 0..self.num_nodes {
-                if node < state.x.len() {
-                    for k in 1..state.x[node].len() {
-                        // Keep harmonics at zero - full Newton will find them
-                        state.x[node][k] = Complex64::new(0.0, 0.0);
+        match self.solve_dc_operating_point(state) {
+            Ok(_dc_solution) => {
+                // DC solution is now stored in state.x[node][0]
+                // Initialize harmonic components to zero (small-signal around DC)
+                // This is the standard HB initialization approach
+                for node in 0..self.num_nodes {
+                    if node < state.x.len() {
+                        for k in 1..state.x[node].len() {
+                            // Keep harmonics at zero - full Newton will find them
+                            state.x[node][k] = Complex64::new(0.0, 0.0);
+                        }
                     }
                 }
             }
+            Err(HbError::ConvergenceFailed { .. } | HbError::SingularMatrix) => {}
+            Err(err) => return Err(err),
         }
-        // If DC solve fails, continue with existing fallback strategy
-        // The full Newton may still succeed with source stepping
+        // If the DC seed does not converge, continue with the existing
+        // fallback strategy. Deterministic model/runtime faults have already
+        // returned above.
 
         // Step 1: Try direct Newton first
-        if self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol) {
+        if self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)? {
             state.converged = true;
             return Ok(());
         }
@@ -68,7 +73,7 @@ impl HbSolver {
                 self.config.max_iterations,
                 tol * 10.0,
                 abstol,
-            ) {
+            )? {
                 // Converged at higher GMIN - now refine with progressively lower GMIN
                 // Save state before refinement in case we need to restore
                 let mut last_good_state = state.x.clone();
@@ -84,7 +89,7 @@ impl HbSolver {
                         self.config.max_iterations,
                         tol,
                         abstol,
-                    ) {
+                    )? {
                         // Success - update last good state
                         last_good_state = state.x.clone();
                         last_good_residual = state.residual_norm;
@@ -96,7 +101,7 @@ impl HbSolver {
                     }
                 }
                 // Recompute residual with target GMIN to check tolerance
-                self.compute_full_residual_with_gmin(state, gmin);
+                self.compute_full_residual_with_gmin(state, gmin)?;
                 if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
                     state.converged = true;
                     return Ok(());
@@ -146,7 +151,7 @@ impl HbSolver {
                 self.config.max_iterations / 2,
                 tol * 10.0,
                 abstol,
-            );
+            )?;
 
             total_iterations += state.iteration;
 
@@ -165,7 +170,7 @@ impl HbSolver {
 
         // If source stepping completed, do final Newton with original sources
         if source_stepper.is_complete()
-            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)
+            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)?
         {
             state.converged = true;
             state.iteration = total_iterations;
@@ -189,7 +194,7 @@ impl HbSolver {
                 self.config.max_iterations / 4,
                 tol * 100.0, // Relaxed tolerance during stepping
                 abstol,
-            );
+            )?;
 
             ptran_iterations += state.iteration;
 
@@ -204,7 +209,7 @@ impl HbSolver {
 
         // If pseudo-transient completed, do final high-accuracy Newton
         if ptran.is_complete()
-            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)
+            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)?
         {
             state.converged = true;
             state.iteration = total_iterations + ptran_iterations;
@@ -225,19 +230,19 @@ impl HbSolver {
         max_iter: usize,
         tol: Value,
         abstol: Value,
-    ) -> bool {
+    ) -> Result<bool, HbError> {
         for iter in 0..max_iter {
             state.iteration = iter;
             state.total_iterations += 1;
 
             // 1. Compute full residual: linear + nonlinear + GMIN contributions
-            self.compute_full_residual_with_gmin(state, gmin);
+            self.compute_full_residual_with_gmin(state, gmin)?;
 
             // 2. Check convergence: per-row KCL test. A global norm hides a
             // microamp imbalance at a high-impedance node behind the amp
             // scale of stiff source rows, accepting grossly wrong bias.
             if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
-                return true;
+                return Ok(true);
             }
 
             // 3+4. Build the Jacobian and solve J * dX = -R. The exact path
@@ -248,33 +253,38 @@ impl HbSolver {
             let delta_x = if self.config.use_exact_jacobian {
                 match self.solve_jacobian_system_exact(state, gmin) {
                     Ok(dx) => dx,
-                    Err(_) => return false, // Singular matrix
+                    Err(HbError::SingularMatrix) => return Ok(false),
+                    Err(err) => return Err(err),
                 }
             } else {
-                let jacobian = self.build_full_jacobian_with_gmin(state, gmin);
+                let jacobian = self.build_full_jacobian_with_gmin(state, gmin)?;
                 match self.solve_jacobian_system(&jacobian, state) {
                     Ok(dx) => dx,
-                    Err(_) => return false, // Singular matrix
+                    Err(HbError::SingularMatrix) => return Ok(false),
+                    Err(err) => return Err(err),
                 }
             };
 
             // 5. Apply line search for robust convergence
-            if self
-                .apply_line_search_with_gmin(state, &delta_x, gmin)
-                .is_err()
-            {
-                return false;
+            match self.apply_line_search_with_gmin(state, &delta_x, gmin) {
+                Ok(()) => {}
+                Err(HbError::SingularMatrix) => return Ok(false),
+                Err(err) => return Err(err),
             }
         }
 
-        false // Max iterations reached
+        Ok(false) // Max iterations reached
     }
 
     /// Compute full residual including GMIN contribution
     ///
     /// Residual = I_source - Y*V - gmin*V - I_nonlinear
     /// (KCL: sum of currents INTO node = 0)
-    fn compute_full_residual_with_gmin(&mut self, state: &mut HbSolverState, gmin: Value) {
+    fn compute_full_residual_with_gmin(
+        &mut self,
+        state: &mut HbSolverState,
+        gmin: Value,
+    ) -> Result<(), HbError> {
         // Start with linear residual (I_source - Y*V)
         self.compute_linear_residual(state);
 
@@ -291,8 +301,9 @@ impl HbSolver {
         // Subtract nonlinear device currents (evaluated in time domain via FFT)
         // Note: add_nonlinear_residual adds currents with correct sign already
         if self.has_nonlinear_devices() {
-            self.add_nonlinear_residual(state);
+            self.add_nonlinear_residual(state)?;
         }
+        Ok(())
     }
 
     /// Build Jacobian with GMIN on diagonal
@@ -302,8 +313,8 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         gmin: Value,
-    ) -> Vec<Vec<Complex64>> {
-        let mut jac = self.build_full_jacobian(state);
+    ) -> Result<Vec<Vec<Complex64>>, HbError> {
+        let mut jac = self.build_full_jacobian(state)?;
 
         // Subtract GMIN from all diagonal entries (consistent with residual -= gmin*V)
         let n = self.num_nodes;
@@ -317,7 +328,7 @@ impl HbSolver {
             }
         }
 
-        jac
+        Ok(jac)
     }
 
     /// Apply line search with GMIN and PN voltage limiting
@@ -363,7 +374,7 @@ impl HbSolver {
                 }
             }
 
-            self.compute_full_residual_with_gmin(state, gmin);
+            self.compute_full_residual_with_gmin(state, gmin)?;
 
             if state.residual_norm < initial_norm * (1.0 - armijo_c * alpha) {
                 return Ok(());
@@ -395,7 +406,7 @@ impl HbSolver {
                 }
             }
         }
-        self.compute_full_residual_with_gmin(state, gmin);
+        self.compute_full_residual_with_gmin(state, gmin)?;
 
         Ok(())
     }
@@ -403,7 +414,7 @@ impl HbSolver {
     /// Compute full residual including linear and nonlinear contributions
 
     /// Add nonlinear device contributions to residual
-    fn add_nonlinear_residual(&mut self, state: &mut HbSolverState) {
+    fn add_nonlinear_residual(&mut self, state: &mut HbSolverState) -> Result<(), HbError> {
         let n_time = self.fft.size();
 
         // Convert spectral voltages to time domain
@@ -439,7 +450,7 @@ impl HbSolver {
                 }
                 for device in &mut self.veriloga_nonlinear_devices {
                     device.device.update_all_voltages(&circuit_voltages);
-                    let values = device.device.evaluate();
+                    let values = device.try_evaluate("time-domain residual evaluation")?;
                     for (program_idx, value) in values.iter().enumerate() {
                         let Some(rows) = device.rhs_rows.get(program_idx) else {
                             continue;
@@ -504,6 +515,7 @@ impl HbSolver {
         }
 
         state.compute_residual_norm();
+        Ok(())
     }
 
     /// Build full Jacobian matrix for Newton iteration
@@ -513,7 +525,10 @@ impl HbSolver {
     /// - Off-diagonal blocks: nonlinear coupling via FFT convolution
     ///
     /// For efficiency, we flatten to a single [n*h x n*h] complex matrix
-    fn build_full_jacobian(&mut self, state: &HbSolverState) -> Vec<Vec<Complex64>> {
+    fn build_full_jacobian(
+        &mut self,
+        state: &HbSolverState,
+    ) -> Result<Vec<Vec<Complex64>>, HbError> {
         let n = self.num_nodes;
         let h = self.num_harmonics + 1;
         let size = n * h;
@@ -563,10 +578,10 @@ impl HbSolver {
 
         // --- Nonlinear part: requires FFT-based evaluation ---
         if self.has_nonlinear_devices() {
-            self.add_nonlinear_jacobian(&mut jac, state);
+            self.add_nonlinear_jacobian(&mut jac, state)?;
         }
 
-        jac
+        Ok(jac)
     }
 
     /// Add nonlinear Jacobian contributions via FFT (Toeplitz/convolution)
@@ -576,7 +591,11 @@ impl HbSolver {
     ///
     /// This is the implementation that exactly matches the
     /// FFT-based residual computation, ensuring proper Newton convergence.
-    fn add_nonlinear_jacobian(&mut self, jac: &mut [Vec<Complex64>], state: &HbSolverState) {
+    fn add_nonlinear_jacobian(
+        &mut self,
+        jac: &mut [Vec<Complex64>],
+        state: &HbSolverState,
+    ) -> Result<(), HbError> {
         let n = self.num_nodes;
         let h = self.num_harmonics + 1;
         let n_time = self.fft.size();
@@ -614,7 +633,8 @@ impl HbSolver {
                 }
                 for device in &mut self.veriloga_nonlinear_devices {
                     device.device.update_all_voltages(&circuit_voltages);
-                    let jac_entries = device.device.compute_jacobian();
+                    let jac_entries =
+                        device.try_compute_jacobian("time-domain Jacobian evaluation")?;
                     for entry in jac_entries {
                         let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
                             continue;
@@ -736,6 +756,7 @@ impl HbSolver {
                 }
             }
         }
+        Ok(())
     }
 
     /// Solve the Newton step with the EXACT Jacobian in real-split form.
@@ -774,7 +795,7 @@ impl HbSolver {
 
         // Toeplitz part (linear + GMIN + nonlinear G and charge), expanded
         // from the existing complex assembly.
-        let jac_c = self.build_full_jacobian_with_gmin(state, gmin);
+        let jac_c = self.build_full_jacobian_with_gmin(state, gmin)?;
         let mut a = vec![vec![0.0; size]; size];
         for i in 0..n {
             for k in 0..h {
@@ -805,7 +826,7 @@ impl HbSolver {
         // Hankel part: H = -(G[k+m]) and -(jw_k * C[k+m]), m >= 1.
         if self.has_nonlinear_devices() {
             let extended = 2 * self.num_harmonics;
-            let g_spectra = self.conductance_spectra(state, extended);
+            let g_spectra = self.conductance_spectra(state, extended)?;
             let c_spectra = self.capacitance_spectra(state, extended);
 
             let mut add_hankel = |i: usize, j: usize, k: usize, m: usize, hval: Complex64| {

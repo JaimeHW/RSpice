@@ -49,12 +49,12 @@ impl Engine {
                     dev.name, model.cap_mod
                 )));
             }
-            if !(0..=1).contains(&model.cvcharge_mod) {
+            if !model.cvcharge_mod_supported_for_charges() {
                 return Err(SimulationError::Circuit(format!(
                     "{analysis} analysis requires native BSIM4 charge model equations; BSIM4 '{}' \
-                     selects CVCHARGEMOD={} (only CVCHARGEMOD=0 or 1 is implemented for \
+                     selects CVCHARGEMOD={} (only integer CVCHARGEMOD=0, 1, 2, or 3 is implemented for \
                      charge-based analyses; DC operating point is supported)",
-                    dev.name, model.cvcharge_mod
+                    dev.name, model.cvcharge_mod_value
                 )));
             }
         }
@@ -127,12 +127,49 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn ensure_supported_ekv3_dynamic_charges(
+        circuit: &crate::CircuitData,
+        analysis: &str,
+    ) -> Result<(), SimulationError> {
+        for dev in &circuit.ekv3s.devices {
+            if analysis.eq_ignore_ascii_case("Noise") {
+                continue;
+            }
+            return Err(SimulationError::Circuit(format!(
+                "{analysis} analysis requires native EKV3 dynamic charge/stability equations; \
+                 EKV3 '{}' is supported for the VA-Models source-backed LEVEL=301 \
+                 NMOS150 DC operating-point/DC sweep slice and the Xyce-validated LEVEL=301 \
+                 NMOS150 VANOISE small-signal/noise slice. AC, transient, STB, and pole-zero \
+                 remain fail-closed until validated against Xyce dynamic oracles",
+                dev.name
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn ensure_supported_dynamic_charges(
         circuit: &crate::CircuitData,
         analysis: &str,
     ) -> Result<(), SimulationError> {
         Self::ensure_supported_bsim4_dynamic_charges(circuit, analysis)?;
-        Self::ensure_supported_b3soi_dynamic_charges(circuit, analysis)
+        Self::ensure_supported_b3soi_dynamic_charges(circuit, analysis)?;
+        Self::ensure_supported_ekv3_dynamic_charges(circuit, analysis)
+    }
+
+    pub(crate) fn ensure_supported_ac_dynamic_charges(
+        circuit: &crate::CircuitData,
+    ) -> Result<(), SimulationError> {
+        Self::ensure_supported_bsim4_dynamic_charges(circuit, "AC")?;
+        Self::ensure_supported_b3soi_dynamic_charges(circuit, "AC")?;
+        Self::ensure_supported_ekv3_dynamic_charges(circuit, "AC")
+    }
+
+    pub(crate) fn ensure_supported_transient_dynamic_charges(
+        circuit: &crate::CircuitData,
+    ) -> Result<(), SimulationError> {
+        Self::ensure_supported_bsim4_dynamic_charges(circuit, "Transient")?;
+        Self::ensure_supported_b3soi_dynamic_charges(circuit, "Transient")?;
+        Self::ensure_supported_ekv3_dynamic_charges(circuit, "Transient")
     }
 }
 
@@ -253,7 +290,7 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn crate::abort_signal::AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        if circuit.has_nonlinear_devices() {
+        if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
             let hints = self.collect_node_voltage_hints(netlist, circuit);
             if hints.is_empty() {
                 self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], abort)

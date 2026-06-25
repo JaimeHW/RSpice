@@ -17,6 +17,24 @@ use std::f64::consts::PI;
 const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 
+struct AcImagStamper<'a> {
+    matrix: &'a mut ComplexMatrix,
+}
+
+impl MatrixStamper for AcImagStamper<'_> {
+    #[inline]
+    fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+        if row > 0 && col > 0 {
+            self.matrix.add_imag(row - 1, col - 1, value);
+        }
+    }
+
+    #[inline]
+    fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {
+        // Small-signal AC uses only dQ/dx matrix terms.
+    }
+}
+
 impl Engine {
     #[inline]
     fn ac_node_voltage(voltages: &[Value], node: NodeId) -> Value {
@@ -467,7 +485,7 @@ impl Engine {
         circuit: &CircuitData,
         op_voltages: &[Value],
         frequency_hz: Value,
-    ) {
+    ) -> Result<(), SimulationError> {
         struct AcRealStamper<'a> {
             matrix: &'a mut ComplexMatrix,
         }
@@ -517,6 +535,17 @@ impl Engine {
         circuit
             .bsim4v8
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        // EKV26 native AC uses the DC current Jacobian for real small-signal
+        // conductances and the intrinsic terminal-charge Jacobian below.
+        circuit
+            .ekv26s
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        // EKV3 uses its ekv3_rf external DC derivatives as the low-frequency
+        // real small-signal term; the VANOISE fixture applies cancellation and
+        // frequency shaping in `stamp_nonlinear_capacitances`.
+        circuit
+            .ekv3s
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         circuit
             .vdmoses
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
@@ -529,6 +558,9 @@ impl Engine {
         for sw in &circuit.iswitches {
             sw.stamp_nonlinear(op_voltages, &mut stamper, &mut rhs_dummy);
         }
+        for sw in &circuit.generic_switches {
+            sw.stamp_current_conductance(&mut stamper);
+        }
         #[cfg(feature = "veriloga")]
         {
             let omega = 2.0 * std::f64::consts::PI * frequency_hz;
@@ -537,17 +569,33 @@ impl Engine {
                 // point. Verilog-A device stamping exposes the Jacobian
                 // through matrix callbacks.
                 let mut cloned = device.clone();
-                cloned.stamp(
-                    op_voltages,
-                    |row, col, value| matrix.add_real(row, col, value),
-                    |_index, _value| {},
-                );
+                cloned.set_analysis_type(1);
+                let device_name = cloned.name.to_string();
+                cloned
+                    .try_stamp(
+                        op_voltages,
+                        |row, col, value| matrix.add_real(row, col, value),
+                        |_index, _value| {},
+                    )
+                    .map_err(|err| {
+                        SimulationError::Circuit(format!(
+                            "Verilog-A device '{device_name}' AC stamping failed: {err}"
+                        ))
+                    })?;
+                let device_name = cloned.name.to_string();
                 // Reactive (ddt charge/flux) part: jw * dQ/dx
-                cloned.stamp_reactive(op_voltages, |row, col, charge_deriv| {
-                    matrix.add_imag(row, col, omega * charge_deriv);
-                });
+                cloned
+                    .try_stamp_reactive(op_voltages, |row, col, charge_deriv| {
+                        matrix.add_imag(row, col, omega * charge_deriv);
+                    })
+                    .map_err(|err| {
+                        SimulationError::Circuit(format!(
+                            "Verilog-A device '{device_name}' AC reactive stamping failed: {err}"
+                        ))
+                    })?;
             }
         }
+        Ok(())
     }
 
     #[inline]
@@ -768,14 +816,14 @@ impl Engine {
     /// workspace keeps its sparsity pattern and shared symbolic
     /// factorization across calls, so a sweep pays the structure cost once
     /// instead of once per point.
-    fn fill_small_signal_ac_matrix_with_vbic_delay_mode(
+    fn try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
         op_voltages: &[Value],
         omega: Value,
         include_vbic_dynamic_stamp: bool,
         include_vbic_delay_branches: bool,
-    ) {
+    ) -> Result<(), SimulationError> {
         let has_nonlinear = circuit.has_nonlinear_devices();
         let size = circuit.matrix_size();
         let frequency_hz = omega / (2.0 * PI);
@@ -818,7 +866,7 @@ impl Engine {
 
         // Nonlinear device Jacobian (real part) evaluated at DC operating point.
         if has_nonlinear {
-            Self::stamp_nonlinear_small_signal_real(ac_matrix, circuit, op_voltages, frequency_hz);
+            Self::stamp_nonlinear_small_signal_real(ac_matrix, circuit, op_voltages, frequency_hz)?;
             if include_vbic_dynamic_stamp {
                 for bjt in &circuit.bjts.devices {
                     Self::stamp_vbic_bjt_dynamic_ac(
@@ -911,6 +959,19 @@ impl Engine {
             if nb > 0 {
                 ac_matrix.add_imag(nb - 1, nb - 1, jwcgb);
             }
+
+            let (_vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(op_voltages);
+            let (_, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
+            if cbs.is_finite() && cbs > 0.0 {
+                let (pos, neg) = mos.body_source_charge_nodes();
+                Self::stamp_imag_two_terminal(ac_matrix, pos, neg, omega * cbs);
+            }
+
+            let (_, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
+            if cbd.is_finite() && cbd > 0.0 {
+                let (pos, neg) = mos.body_drain_charge_nodes();
+                Self::stamp_imag_two_terminal(ac_matrix, pos, neg, omega * cbd);
+            }
         }
 
         // B3SOI/BSIM3/BSIM4 coupled capacitance matrices: the mode-assembled
@@ -921,23 +982,10 @@ impl Engine {
                 || !circuit.b3soi_fd.is_empty()
                 || !circuit.b3soi_pd.is_empty()
                 || !circuit.bsim3v3.is_empty()
-                || !circuit.bsim4v8.is_empty())
+                || !circuit.bsim4v8.is_empty()
+                || !circuit.ekv26s.is_empty()
+                || !circuit.ekv3s.is_empty())
         {
-            struct AcImagStamper<'a> {
-                matrix: &'a mut ComplexMatrix,
-            }
-            impl MatrixStamper for AcImagStamper<'_> {
-                #[inline]
-                fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
-                    if row > 0 && col > 0 {
-                        self.matrix.add_imag(row - 1, col - 1, value);
-                    }
-                }
-                #[inline]
-                fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {
-                    // Capacitance stamp only; AC sources fill the RHS.
-                }
-            }
             let mut stamper = AcImagStamper { matrix: ac_matrix };
             for dev in &circuit.b3soi.devices {
                 if dev.charges_suppressed() {
@@ -998,6 +1046,17 @@ impl Engine {
             for dev in &circuit.bsim4v8.devices {
                 let (charge, mode) = dev.charge_at(op_voltages);
                 dev.stamp_ac_charge_matrix(&charge, mode, omega, &mut stamper);
+            }
+            for dev in &circuit.ekv26s.devices {
+                dev.stamp_ac_quasi_static_charge_matrix(op_voltages, omega, &mut stamper);
+            }
+        }
+        if omega != 0.0 && !circuit.ekv3s.is_empty() {
+            let frequency_hz = omega / (2.0 * PI);
+            for dev in &circuit.ekv3s.devices {
+                dev.stamp_ac_transadmittance_delta(frequency_hz, |row, col, value| {
+                    ac_matrix.add_real(row - 1, col - 1, value);
+                });
             }
         }
         Self::stamp_bsim3_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
@@ -1187,6 +1246,27 @@ impl Engine {
         for i in 0..size {
             ac_matrix.add_real(i, i, 1e-15);
         }
+        Ok(())
+    }
+
+    fn fill_small_signal_ac_matrix_with_vbic_delay_mode(
+        circuit: &CircuitData,
+        ac_matrix: &mut ComplexMatrix,
+        op_voltages: &[Value],
+        omega: Value,
+        include_vbic_dynamic_stamp: bool,
+        include_vbic_delay_branches: bool,
+    ) {
+        if let Err(err) = Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+            circuit,
+            ac_matrix,
+            op_voltages,
+            omega,
+            include_vbic_dynamic_stamp,
+            include_vbic_delay_branches,
+        ) {
+            panic!("{err}");
+        }
     }
 
     pub(super) fn build_small_signal_ac_matrix(
@@ -1195,6 +1275,16 @@ impl Engine {
         op_voltages: &[Value],
         omega: Value,
     ) -> ComplexMatrix {
+        Self::try_build_small_signal_ac_matrix(circuit, matrix, op_voltages, omega)
+            .unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    pub(super) fn try_build_small_signal_ac_matrix(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        op_voltages: &[Value],
+        omega: Value,
+    ) -> Result<ComplexMatrix, SimulationError> {
         // ngspice-46 includes the VBIC excess-phase network in small-signal
         // analysis: vbicacld.c stamps the full Ixf static coupling and the
         // cqxf1/cqxf2 charges (times omega) onto the xf rows. The delayed
@@ -1202,15 +1292,15 @@ impl Engine {
         // and the official binary fails the pre-xf 2005 AC tables by over
         // 1 dB at 10 GHz on the CEamp deck.
         let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
-        Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
+        Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
             circuit,
             &mut ac_matrix,
             op_voltages,
             omega,
             true,
             true,
-        );
-        ac_matrix
+        )?;
+        Ok(ac_matrix)
     }
 
     pub(super) fn build_small_signal_pz_matrix(
@@ -1308,9 +1398,7 @@ impl Engine {
                     .to_string(),
             ));
         }
-        if frequencies.iter().any(|&frequency| frequency != 0.0) {
-            Self::ensure_supported_dynamic_charges(&circuit, "AC")?;
-        }
+        Self::ensure_supported_ac_dynamic_charges(&circuit)?;
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -1349,14 +1437,14 @@ impl Engine {
                              freq: Value|
          -> Result<AcResult, SimulationError> {
             let omega = 2.0 * PI * freq;
-            Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
+            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
                 circuit,
                 ac_matrix,
                 &dc_solution,
                 omega,
                 true,
                 true,
-            );
+            )?;
             let rhs = Self::build_ac_excitation_rhs(circuit);
             let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
 

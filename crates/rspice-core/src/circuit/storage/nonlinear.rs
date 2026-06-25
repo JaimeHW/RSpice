@@ -419,6 +419,108 @@ impl Bsim4v8s {
     }
 }
 
+/// Native EKV 2.6 LEVEL=260 storage for the Newton solve.
+#[derive(Debug, Clone, Default)]
+pub struct EkvMosfets {
+    pub devices: Vec<EkvMosfet>,
+}
+
+impl EkvMosfets {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, device: EkvMosfet) {
+        self.devices.push(device);
+    }
+
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all EKV 2.6 devices with the current solution.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all EKV 2.6 devices into the matrix for the Newton iteration.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        use crate::device::NonlinearDevice;
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check whether all EKV 2.6 devices have converged.
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        use crate::device::NonlinearDevice;
+        self.devices.iter().all(|d| d.is_converged(criteria))
+    }
+}
+
+/// Native EKV3 LEVEL=301 NMOS150-slice storage for the Newton solve.
+#[derive(Debug, Clone, Default)]
+pub struct Ekv3Mosfets {
+    pub devices: Vec<Ekv3Device>,
+}
+
+impl Ekv3Mosfets {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, device: Ekv3Device) {
+        self.devices.push(device);
+    }
+
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all EKV3 devices with the current solution.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all EKV3 devices into the matrix for the Newton iteration.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        use crate::device::NonlinearDevice;
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check whether all EKV3 devices have converged.
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        use crate::device::NonlinearDevice;
+        self.devices.iter().all(|d| d.is_converged(criteria))
+    }
+}
+
 /// Native VDMOS power MOSFET storage.
 ///
 /// These devices use the generic [`MatrixStamper`] path: their internal

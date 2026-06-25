@@ -62,11 +62,35 @@ impl Engine {
                 step_cmd.param_name.as_deref(),
                 values,
             ),
-            StepTarget::Temp => Err(SimulationError::Circuit(
-                "Engine `.STEP TEMP` execution is handled via temperature-configured runs"
-                    .to_string(),
-            )),
+            StepTarget::Temp => self.run_step_temp(netlist, values),
         }
+    }
+
+    pub(in crate::engine::advanced) fn run_step_temp(
+        &self,
+        netlist: &Netlist,
+        values: &[Value],
+    ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        if values.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut results = Vec::with_capacity(values.len());
+        for &value in values {
+            let mut stepped = netlist.clone();
+            stepped.options.temp = Some(value);
+            stepped.params.set("TEMP", value);
+            stepped.params.set("TEMPER", value);
+
+            match self.run_dc_op(&stepped) {
+                Ok(result) => results.push((value, result)),
+                Err(e) => {
+                    log::warn!("Step TEMP = {} failed: {}", value, e);
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     pub(in crate::engine::advanced) fn run_step_device(

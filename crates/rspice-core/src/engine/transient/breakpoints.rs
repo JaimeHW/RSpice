@@ -195,6 +195,12 @@ impl Engine {
             Self::add_source_spec_breakpoints(breakpoints, spec, tstop, tstep_hint);
         }
 
+        for switch in &circuit.generic_switches {
+            for &time in switch.time_breakpoints() {
+                Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+            }
+        }
+
         for instance in &circuit.xspice_instances {
             if !instance.model_name().eq_ignore_ascii_case("d_source") {
                 continue;

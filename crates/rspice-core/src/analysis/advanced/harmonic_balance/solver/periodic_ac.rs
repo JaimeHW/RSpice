@@ -35,7 +35,7 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         harmonic_count: usize,
-    ) -> Vec<(usize, usize, Vec<Complex64>)> {
+    ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
         let n = self.num_nodes;
         let n_time = self.fft.size();
 
@@ -70,7 +70,8 @@ impl HbSolver {
                 }
                 for device in &mut self.veriloga_nonlinear_devices {
                     device.device.update_all_voltages(&circuit_voltages);
-                    let jac_entries = device.device.compute_jacobian();
+                    let jac_entries =
+                        device.try_compute_jacobian("periodic conductance evaluation")?;
                     for entry in jac_entries {
                         let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
                             continue;
@@ -102,7 +103,7 @@ impl HbSolver {
                 spectra.push((i, j, spectrum));
             }
         }
-        spectra
+        Ok(spectra)
     }
 
     /// Periodic small-signal capacitance spectra around the operating
@@ -233,7 +234,7 @@ impl HbSolver {
 
         let span = (sideband_max - sideband_min).unsigned_abs() as usize;
         let spectra = if self.has_nonlinear_devices() {
-            self.conductance_spectra(state, span.max(self.num_harmonics))
+            self.conductance_spectra(state, span.max(self.num_harmonics))?
         } else {
             Vec::new()
         };
