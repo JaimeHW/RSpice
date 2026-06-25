@@ -34,6 +34,33 @@ pub struct PyNetlist {
     pub(crate) inner: Netlist,
 }
 
+/// Non-fatal parser diagnostic attached to a parsed netlist.
+#[pyclass(name = "ParseDiagnostic")]
+#[derive(Debug, Clone)]
+pub struct PyParseDiagnostic {
+    #[pyo3(get)]
+    pub line: usize,
+    #[pyo3(get)]
+    pub severity: String,
+    #[pyo3(get)]
+    pub code: String,
+    #[pyo3(get)]
+    pub message: String,
+}
+
+impl From<&rspice_core::netlist::ParseDiagnostic> for PyParseDiagnostic {
+    fn from(diagnostic: &rspice_core::netlist::ParseDiagnostic) -> Self {
+        Self {
+            line: diagnostic.line,
+            severity: match diagnostic.severity {
+                rspice_core::netlist::DiagnosticSeverity::Warning => "warning".to_string(),
+            },
+            code: diagnostic.code.clone(),
+            message: diagnostic.message.clone(),
+        }
+    }
+}
+
 /// Prepend a synthetic title unless the content already starts with a
 /// `*` comment line (which SPICE treats as the title here).
 fn ensure_statement_content(content: &str) -> Cow<'_, str> {
@@ -274,6 +301,12 @@ impl PyNetlist {
     #[getter]
     fn title(&self) -> String {
         self.inner.title.clone()
+    }
+
+    /// Non-fatal parser diagnostics for accepted but ignored/downgraded syntax
+    #[getter]
+    fn diagnostics(&self) -> Vec<PyParseDiagnostic> {
+        self.inner.diagnostics.iter().map(Into::into).collect()
     }
 
     /// Names of all device elements, in netlist order
