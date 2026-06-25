@@ -49,3 +49,22 @@ X1 in out simple_res not_a_parameter=1000
         "expected unknown generated parameter diagnostic, got {error}"
     );
 }
+
+#[test]
+fn generated_builtin_rejects_out_of_range_parameters() {
+    let deck = r#"
+v1 in 0 dc 1
+X1 in out simple_res r=0
+.op
+.end
+"#;
+    let netlist = Netlist::parse(deck).expect("parse deck");
+    let error = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect_err("out-of-range generated parameter should fail");
+
+    assert!(
+        error.to_string().contains("parameter 'r' must be > 0.0"),
+        "expected generated range diagnostic, got {error}"
+    );
+}

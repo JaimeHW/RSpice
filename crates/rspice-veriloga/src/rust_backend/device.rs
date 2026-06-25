@@ -33,7 +33,7 @@ pub fn generate_device(
             },
             GeneratedRustFile {
                 relative_path: "state.rs".to_string(),
-                contents: generate_state_file(artifact, &parameter_fields),
+                contents: generate_state_file(artifact, &parameter_fields)?,
             },
             GeneratedRustFile {
                 relative_path: "stamp.rs".to_string(),
@@ -68,7 +68,9 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
     for expression in &artifact.mir.expressions {
         match &expression.kind {
             HirExprKind::AnalogOperator { op } => match op {
-                crate::canonical_ir::HirAnalogOperator::Limexp { .. } => {}
+                crate::canonical_ir::HirAnalogOperator::Limexp { .. } => {
+                    return Err(unsupported(artifact, "convergence-limited limexp operator"));
+                }
                 _ => {
                     return Err(unsupported(
                         artifact,
@@ -140,7 +142,7 @@ fn generate_mod_file() -> String {
 fn generate_state_file(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
-) -> String {
+) -> Result<String, RustBackendError> {
     let mut out = String::new();
     out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str("pub struct Parameters {\n");
@@ -155,12 +157,27 @@ fn generate_state_file(
     out.push_str("        Self {\n");
     for parameter in &artifact.mir.parameters {
         let field = &parameter_fields[parameter.name.as_str()];
-        let default = parameter.default.unwrap_or(0.0);
+        let default = validated_default(
+            artifact,
+            parameter.name.as_str(),
+            parameter.default,
+            parameter.range.as_ref(),
+        )?;
         out.push_str(&format!("            {field}: {},\n", format_f64(default)));
     }
     out.push_str("        }\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
+
+    for parameter in &artifact.mir.parameters {
+        let field = &parameter_fields[parameter.name.as_str()];
+        out.push_str(&generate_parameter_validator(
+            parameter.name.as_str(),
+            field,
+            parameter.range.as_ref(),
+        )?);
+        out.push('\n');
+    }
 
     let node_count = artifact.mir.nodes.len();
     out.push_str("#[derive(Debug, Clone)]\n");
@@ -179,26 +196,166 @@ fn generate_state_file(
     out.push_str("        mapped.copy_from_slice(nodes);\n");
     out.push_str("        Self { nodes: mapped, params: Parameters::default() }\n");
     out.push_str("    }\n\n");
-    out.push_str("    pub fn set_parameter(&mut self, name: &str, value: f64) -> bool {\n");
+    out.push_str(
+        "    pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {\n",
+    );
     out.push_str("        match name.to_ascii_lowercase().as_str() {\n");
     for parameter in &artifact.mir.parameters {
         let field = &parameter_fields[parameter.name.as_str()];
         out.push_str(&format!(
-            "            \"{}\" => {{ self.params.{field} = value; true }}\n",
+            "            \"{}\" => {{ validate_parameter_{field}(value)?; self.params.{field} = value; Ok(()) }}\n",
             parameter.name.to_ascii_lowercase()
         ));
         for alias in &parameter.aliases {
             out.push_str(&format!(
-                "            \"{}\" => {{ self.params.{field} = value; true }}\n",
+                "            \"{}\" => {{ validate_parameter_{field}(value)?; self.params.{field} = value; Ok(()) }}\n",
                 alias.to_ascii_lowercase()
             ));
         }
     }
-    out.push_str("            _ => false,\n");
+    out.push_str(&format!(
+        "            _ => Err(format!(\"unknown parameter '{{}}' for generated Verilog-A model '{}'\", name)),\n",
+        artifact.mir.module_name
+    ));
     out.push_str("        }\n");
     out.push_str("    }\n");
     out.push_str("}\n");
-    out
+    Ok(out)
+}
+
+fn validated_default(
+    artifact: &CanonicalIrArtifact,
+    parameter_name: &str,
+    default: Option<f64>,
+    range: Option<&crate::canonical_ir::HirParamRange>,
+) -> Result<f64, RustBackendError> {
+    let Some(default) = default else {
+        return Err(unsupported(
+            artifact,
+            format!("parameter '{parameter_name}' default that does not fold to a constant"),
+        ));
+    };
+    validate_parameter_value_for_codegen(artifact, parameter_name, default, range)?;
+    Ok(default)
+}
+
+fn validate_parameter_value_for_codegen(
+    artifact: &CanonicalIrArtifact,
+    parameter_name: &str,
+    value: f64,
+    range: Option<&crate::canonical_ir::HirParamRange>,
+) -> Result<(), RustBackendError> {
+    if !value.is_finite() {
+        return Err(unsupported(
+            artifact,
+            format!("non-finite default for parameter '{parameter_name}'"),
+        ));
+    }
+    if let Some(range) = range {
+        if !range_contains(range, value) {
+            return Err(unsupported(
+                artifact,
+                format!("default for parameter '{parameter_name}' violates declared range"),
+            ));
+        }
+        if range.exclude.iter().any(|excluded| !excluded.is_finite()) {
+            return Err(unsupported(
+                artifact,
+                format!("non-finite exclude constraint for parameter '{parameter_name}'"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> bool {
+    if let Some(min) = range.min {
+        if range.min_exclusive {
+            if value <= min {
+                return false;
+            }
+        } else if value < min {
+            return false;
+        }
+    }
+    if let Some(max) = range.max {
+        if range.max_exclusive {
+            if value >= max {
+                return false;
+            }
+        } else if value > max {
+            return false;
+        }
+    }
+    !range.exclude.contains(&value)
+}
+
+fn generate_parameter_validator(
+    parameter_name: &str,
+    field_name: &str,
+    range: Option<&crate::canonical_ir::HirParamRange>,
+) -> Result<String, RustBackendError> {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "fn validate_parameter_{field_name}(value: f64) -> Result<(), String> {{\n"
+    ));
+    out.push_str("    if !value.is_finite() {\n");
+    out.push_str(&format!(
+        "        return Err(format!(\"parameter '{}' must be finite, got {{}}\", value));\n",
+        parameter_name
+    ));
+    out.push_str("    }\n");
+
+    if let Some(range) = range {
+        if let Some(min) = range.min.filter(|value| value.is_finite()) {
+            let op = if range.min_exclusive { ">" } else { ">=" };
+            let condition = if range.min_exclusive { "<=" } else { "<" };
+            out.push_str(&format!(
+                "    if value {condition} {} {{\n",
+                format_f64(min)
+            ));
+            out.push_str(&format!(
+                "        return Err(format!(\"parameter '{}' must be {op} {}, got {{}}\", value));\n",
+                parameter_name,
+                format_f64(min)
+            ));
+            out.push_str("    }\n");
+        }
+        if let Some(max) = range.max.filter(|value| value.is_finite()) {
+            let op = if range.max_exclusive { "<" } else { "<=" };
+            let condition = if range.max_exclusive { ">=" } else { ">" };
+            out.push_str(&format!(
+                "    if value {condition} {} {{\n",
+                format_f64(max)
+            ));
+            out.push_str(&format!(
+                "        return Err(format!(\"parameter '{}' must be {op} {}, got {{}}\", value));\n",
+                parameter_name,
+                format_f64(max)
+            ));
+            out.push_str("    }\n");
+        }
+        for excluded in &range.exclude {
+            if !excluded.is_finite() {
+                return Err(RustBackendError::unsupported(
+                    "<generated>",
+                    parameter_name,
+                    "non-finite parameter exclude constraint",
+                ));
+            }
+            out.push_str(&format!("    if value == {} {{\n", format_f64(*excluded)));
+            out.push_str(&format!(
+                "        return Err(format!(\"parameter '{}' must not equal {}, got {{}}\", value));\n",
+                parameter_name,
+                format_f64(*excluded)
+            ));
+            out.push_str("    }\n");
+        }
+    }
+
+    out.push_str("    Ok(())\n");
+    out.push_str("}\n");
+    Ok(out)
 }
 
 fn generate_stamp_file(

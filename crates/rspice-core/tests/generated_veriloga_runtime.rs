@@ -5,13 +5,14 @@ use rspice_core::solver::StaticMatrix;
 
 #[test]
 fn generated_stamper_linearizes_current_contribution() {
-    let voltages = [0.0, 1.0, 0.5];
+    let voltages = [1.0, 0.5];
     let mut rhs = vec![0.0; 2];
     let mut matrix =
         StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)])
             .expect("static matrix");
 
     let ctx = GeneratedEvalContext::new(&voltages);
+    assert_eq!(ctx.node_voltage(0), 0.0);
     assert_eq!(ctx.node_voltage(1), 1.0);
     assert_eq!(ctx.node_voltage(2), 0.5);
 

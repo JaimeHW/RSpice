@@ -1833,11 +1833,13 @@ impl Engine {
                 }
                 // Flattened tree leaves external subcircuit-backed devices here
                 // (for example, Verilog-A model instances).
-                #[cfg(feature = "veriloga")]
                 ElementKind::Subcircuit {
                     subckt_name,
                     params,
                 } => {
+                    #[cfg(not(any(feature = "veriloga-builtins", feature = "veriloga")))]
+                    let _ = params;
+
                     #[cfg(feature = "veriloga-builtins")]
                     {
                         if let Some(device) =
@@ -1855,92 +1857,93 @@ impl Engine {
                         }
                     }
 
-                    if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name)) {
-                        if element.nodes.len() != model.num_terminals {
-                            return Err(SimulationError::Circuit(format!(
-                                "Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
-                                element.name,
-                                model.num_terminals,
-                                subckt_name,
-                                element.nodes.len()
-                            )));
-                        }
-
-                        let mut node_ids = Vec::with_capacity(model.num_terminals);
-                        for node_name in &element.nodes {
-                            node_ids.push(if node_name.eq_ignore_ascii_case("0") {
-                                0
-                            } else {
-                                circuit.get_or_create_node(node_name)
-                            });
-                        }
-
-                        let mut device = crate::device::veriloga::VerilogADevice::new(
-                            element.name.clone(),
-                            std::sync::Arc::clone(model),
-                            &node_ids,
-                        );
-
-                        // Allocate global circuit node indices for internal Verilog-A nodes.
-                        if device.num_internal_nodes() > 0 {
-                            let mut internal_nodes =
-                                Vec::with_capacity(device.num_internal_nodes());
-                            for idx in 0..device.num_internal_nodes() {
-                                let node_name = format!("{}.__int{}", element.name, idx + 1);
-                                internal_nodes.push(circuit.get_or_create_node(&node_name));
+                    #[cfg(feature = "veriloga")]
+                    {
+                        if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name))
+                        {
+                            if element.nodes.len() != model.num_terminals {
+                                return Err(SimulationError::Circuit(format!(
+                                    "Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
+                                    element.name,
+                                    model.num_terminals,
+                                    subckt_name,
+                                    element.nodes.len()
+                                )));
                             }
-                            device.set_internal_node_indices(&internal_nodes);
-                        }
 
-                        // Allocate system unknowns for branch currents of
-                        // potential (voltage) contributions.
-                        if device.num_branch_unknowns() > 0 {
-                            let mut branch_nodes = Vec::with_capacity(device.num_branch_unknowns());
-                            for idx in 0..device.num_branch_unknowns() {
-                                let node_name = format!("{}.__br{}", element.name, idx + 1);
-                                branch_nodes.push(circuit.get_or_create_node(&node_name));
+                            let mut node_ids = Vec::with_capacity(model.num_terminals);
+                            for node_name in &element.nodes {
+                                node_ids.push(if node_name.eq_ignore_ascii_case("0") {
+                                    0
+                                } else {
+                                    circuit.get_or_create_node(node_name)
+                                });
                             }
-                            device.set_branch_current_indices(&branch_nodes);
-                        }
 
-                        for (name, value) in params {
-                            let resolved = match value {
-                                crate::netlist::ParametricValue::Resolved(v) => *v,
-                                crate::netlist::ParametricValue::Expression(expr) => {
-                                    crate::netlist::expr::eval_expression(expr, &netlist.params)
+                            let mut device = crate::device::veriloga::VerilogADevice::new(
+                                element.name.clone(),
+                                std::sync::Arc::clone(model),
+                                &node_ids,
+                            );
+
+                            // Allocate global circuit node indices for internal Verilog-A nodes.
+                            if device.num_internal_nodes() > 0 {
+                                let mut internal_nodes =
+                                    Vec::with_capacity(device.num_internal_nodes());
+                                for idx in 0..device.num_internal_nodes() {
+                                    let node_name = format!("{}.__int{}", element.name, idx + 1);
+                                    internal_nodes.push(circuit.get_or_create_node(&node_name));
+                                }
+                                device.set_internal_node_indices(&internal_nodes);
+                            }
+
+                            // Allocate system unknowns for branch currents of
+                            // potential (voltage) contributions.
+                            if device.num_branch_unknowns() > 0 {
+                                let mut branch_nodes =
+                                    Vec::with_capacity(device.num_branch_unknowns());
+                                for idx in 0..device.num_branch_unknowns() {
+                                    let node_name = format!("{}.__br{}", element.name, idx + 1);
+                                    branch_nodes.push(circuit.get_or_create_node(&node_name));
+                                }
+                                device.set_branch_current_indices(&branch_nodes);
+                            }
+
+                            for (name, value) in params {
+                                let resolved = match value {
+                                    crate::netlist::ParametricValue::Resolved(v) => *v,
+                                    crate::netlist::ParametricValue::Expression(expr) => {
+                                        crate::netlist::expr::eval_expression(
+                                            expr,
+                                            &netlist.params,
+                                        )
                                         .map_err(|e| {
                                             SimulationError::Circuit(format!(
                                                 "Failed to resolve Verilog-A parameter '{}': {}",
                                                 name, e
                                             ))
                                         })?
+                                    }
+                                };
+                                // `m=` on an instance whose model does not
+                                // declare an m parameter is the standard
+                                // parallel-multiplicity ($mfactor); models
+                                // declaring their own m keep handling it
+                                if !device.set_parameter(name, resolved)
+                                    && name.eq_ignore_ascii_case("m")
+                                {
+                                    device.set_multiplicity(resolved);
                                 }
-                            };
-                            // `m=` on an instance whose model does not
-                            // declare an m parameter is the standard
-                            // parallel-multiplicity ($mfactor); models
-                            // declaring their own m keep handling it
-                            if !device.set_parameter(name, resolved)
-                                && name.eq_ignore_ascii_case("m")
-                            {
-                                device.set_multiplicity(resolved);
                             }
+                            // Dependent parameter defaults must see the instance
+                            // overrides applied above
+                            device.resolve_parameter_defaults();
+                            device.set_temperature(self.config.temperature);
+                            circuit.add_veriloga_device(device);
+                            continue;
                         }
-                        // Dependent parameter defaults must see the instance
-                        // overrides applied above
-                        device.resolve_parameter_defaults();
-                        device.set_temperature(self.config.temperature);
-                        circuit.add_veriloga_device(device);
-                        continue;
                     }
 
-                    return Err(SimulationError::Circuit(format!(
-                        "Unresolved subcircuit instance '{}' referencing '{}'",
-                        element.name, subckt_name
-                    )));
-                }
-                #[cfg(not(feature = "veriloga"))]
-                ElementKind::Subcircuit { subckt_name, .. } => {
                     return Err(SimulationError::Circuit(format!(
                         "Unresolved subcircuit instance '{}' referencing '{}'",
                         element.name, subckt_name

@@ -155,7 +155,7 @@ impl<'a> GeneratedEvalContext<'a> {
         if node == 0 {
             0.0
         } else {
-            self.voltages.get(node).copied().unwrap_or(0.0)
+            self.voltages.get(node - 1).copied().unwrap_or(0.0)
         }
     }
 }
@@ -224,7 +224,7 @@ impl<'a> GeneratedStamper<'a> {
         if node == 0 {
             0.0
         } else {
-            self.voltages.get(node).copied().unwrap_or(0.0)
+            self.voltages.get(node - 1).copied().unwrap_or(0.0)
         }
     }
 }

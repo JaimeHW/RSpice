@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
@@ -23,22 +24,52 @@ fn main() {
 
     let model_root = env::var_os("RSPICE_VERILOGA_BUILTINS_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("models/veriloga")
-        });
+        .unwrap_or_else(default_model_root);
 
     println!("cargo:rerun-if-changed={}", model_root.display());
     if !model_root.exists() {
-        write_registry(&registry_root, &[]).expect("write empty generated Verilog-A registry");
-        return;
+        panic!(
+            "Verilog-A built-ins feature is enabled, but source directory '{}' does not exist. Set RSPICE_VERILOGA_BUILTINS_DIR or add models under the workspace models/veriloga directory.",
+            model_root.display()
+        );
+    }
+    if !model_root.is_dir() {
+        panic!(
+            "Verilog-A built-ins source path '{}' is not a directory",
+            model_root.display()
+        );
     }
 
     let devices = generate_devices(&model_root, &devices_root)
         .unwrap_or_else(|error| panic!("failed to generate Verilog-A built-ins: {error}"));
-    if !devices.is_empty() {
-        println!("cargo:rustc-cfg=rspice_veriloga_builtins_generated");
+    if devices.is_empty() {
+        panic!(
+            "Verilog-A built-ins feature is enabled, but no modules were discovered under '{}'",
+            model_root.display()
+        );
     }
+
+    println!(
+        "cargo:warning=Generated {} Verilog-A built-in device(s): {}",
+        devices.len(),
+        devices
+            .iter()
+            .map(|device| device.public_model_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    println!("cargo:rustc-cfg=rspice_veriloga_builtins_generated");
     write_registry(&registry_root, &devices).expect("write generated Verilog-A registry");
+}
+
+fn default_model_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .expect("rspice-core must live under workspace crates directory")
+        .join("models/veriloga")
 }
 
 fn generate_devices(
@@ -71,7 +102,25 @@ fn generate_devices(
             .cmp(&right.public_model_name)
             .then_with(|| left.folder_name.cmp(&right.folder_name))
     });
+    reject_duplicate_public_names(&devices)?;
     Ok(devices)
+}
+
+fn reject_duplicate_public_names(
+    devices: &[GeneratedRustDevice],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut seen = BTreeMap::new();
+    for device in devices {
+        let key = device.public_model_name.to_ascii_uppercase();
+        if let Some(previous) = seen.insert(key, device) {
+            return Err(format!(
+                "duplicate generated Verilog-A model name '{}': '{}' and '{}' both resolve to the same public model name",
+                device.public_model_name, previous.folder_name, device.folder_name
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn write_registry(
@@ -162,9 +211,7 @@ fn write_registry(
                 device.folder_name
             )?;
             out.push_str("            for (name, value) in params {\n");
-            out.push_str("                if !instance.set_parameter(name, *value) {\n");
-            out.push_str("                    return Err(format!(\"unknown parameter '{}' for generated Verilog-A model '{}'\", name, model_name));\n");
-            out.push_str("                }\n");
+            out.push_str("                instance.set_parameter(name, *value)?;\n");
             out.push_str("            }\n");
             writeln!(
                 out,

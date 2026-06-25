@@ -88,8 +88,8 @@ impl ExprEmitter<'_> {
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Limexp { expr },
             } => {
-                let expr = self.lower(*expr)?;
-                self.emit_value(&base, format!("({}).exp()", expr.value))
+                let _ = expr;
+                return Err(self.unsupported("convergence-limited limexp operator"));
             }
             other => {
                 return Err(self.unsupported(format!("expression kind {other:?}")));
@@ -147,18 +147,6 @@ impl ExprEmitter<'_> {
                     .expect("right operand must be emitted before binary derivative");
                 binary_derivatives(op.as_str(), left, right)
                     .map_err(|_| self.unsupported(format!("binary operator {op}")))?
-            }
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Limexp { expr },
-            } => {
-                let expr = self
-                    .emitted
-                    .get(expr)
-                    .expect("limexp operand must be emitted before derivative");
-                expr.derivatives
-                    .iter()
-                    .map(|derivative| format!("({value_expr} * {derivative})"))
-                    .collect()
             }
             _ => unreachable!("unsupported expression kinds returned earlier"),
         };

@@ -28,7 +28,7 @@ veriloga = [
 # Cranelift JIT for Verilog-A devices (native targets only)
 veriloga-native = ["veriloga", "rspice-veriloga/native"]
 # Build-time generated Verilog-A built-ins compiled into rspice-core.
-veriloga-builtins = ["veriloga"]
+veriloga-builtins = []
 simd = ["wide"]
 
 [lib]

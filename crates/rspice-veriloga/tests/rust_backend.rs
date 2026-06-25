@@ -123,6 +123,37 @@ fn discovery_skips_include_only_files_and_sorts_modules() {
 }
 
 #[test]
+fn discovery_tolerates_macros_comments_and_strings() {
+    let dir = temp_dir("rspice-va-discovery-macros");
+    std::fs::write(
+        dir.join("macro_heavy.va"),
+        r#"
+// module comment_only(p,n);
+`define DECLARE_FAKE module fake_from_macro(p,n)
+module real_device(p,n);
+    inout p,n;
+    electrical p,n;
+    analog begin
+        $strobe("module not_a_device");
+        I(p,n) <+ V(p,n);
+    end
+endmodule
+"#,
+    )
+    .expect("write macro-heavy source");
+
+    let found = discover_veriloga_sources(&dir).expect("discover macro-heavy source");
+    let names: Vec<_> = found
+        .iter()
+        .flat_map(|source| source.modules.iter().cloned())
+        .collect();
+
+    assert_eq!(names, vec!["real_device".to_string()]);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn rust_backend_generates_direct_rust_for_algebraic_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(tiny_resistor_source())
@@ -268,6 +299,27 @@ endmodule
     let rendered = err.to_string();
     assert!(rendered.contains("cap"), "{rendered}");
     assert!(rendered.contains("stateful"), "{rendered}");
+}
+
+#[test]
+fn rust_backend_rejects_limexp_until_limited_runtime_exists() {
+    let src = r#"
+module diode_like(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ limexp(V(p, n));
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(src)
+        .expect("canonical IR");
+    let err = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect_err("limexp must not lower to plain exp");
+
+    let rendered = err.to_string();
+    assert!(rendered.contains("diode_like"), "{rendered}");
+    assert!(rendered.contains("limexp"), "{rendered}");
 }
 
 #[test]
