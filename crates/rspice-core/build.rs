@@ -90,6 +90,36 @@ fn write_registry(
         )?;
     }
     out.push('\n');
+
+    out.push_str("#[derive(Debug, Clone)]\n");
+    out.push_str("pub enum GeneratedBuiltinKind {\n");
+    for (index, device) in devices.iter().enumerate() {
+        writeln!(out, "    Device{index}({}::Instance),", device.folder_name)?;
+    }
+    out.push_str("}\n\n");
+
+    out.push_str("impl GeneratedBuiltinKind {\n");
+    out.push_str(
+        "    pub fn stamp(&mut self, ctx: &super::GeneratedEvalContext<'_>, stamper: &mut super::GeneratedStamper<'_>) {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (ctx, stamper, self);\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry cannot be stamped\")\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            Self::Device{index}(device) => device.stamp(ctx, stamper),"
+            )?;
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
     out.push_str("pub const BUILTIN_NAMES: &[&str] = &[\n");
     for device in devices {
         writeln!(out, "    {:?},", device.public_model_name)?;
@@ -97,6 +127,54 @@ fn write_registry(
     out.push_str("];\n\n");
     out.push_str("pub fn builtin_names() -> &'static [&'static str] {\n");
     out.push_str("    BUILTIN_NAMES\n");
+    out.push_str("}\n");
+    out.push_str("\n");
+    out.push_str("pub fn node_count(model_name: &str) -> Option<usize> {\n");
+    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
+    for device in devices {
+        writeln!(
+            out,
+            "        {:?} => Some({}::Instance::NODE_COUNT),",
+            device.public_model_name.to_ascii_uppercase(),
+            device.folder_name
+        )?;
+    }
+    out.push_str("        _ => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str(
+        "pub fn instantiate(model_name: &str, nodes: &[usize], params: &[(String, crate::Value)]) -> Result<Option<GeneratedBuiltinKind>, String> {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("    let _ = (model_name, nodes, params);\n");
+        out.push_str("    Ok(None)\n");
+    } else {
+        out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
+        for (index, device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "        {:?} => {{",
+                device.public_model_name.to_ascii_uppercase()
+            )?;
+            writeln!(
+                out,
+                "            let mut instance = {}::Instance::new(nodes);",
+                device.folder_name
+            )?;
+            out.push_str("            for (name, value) in params {\n");
+            out.push_str("                if !instance.set_parameter(name, *value) {\n");
+            out.push_str("                    return Err(format!(\"unknown parameter '{}' for generated Verilog-A model '{}'\", name, model_name));\n");
+            out.push_str("                }\n");
+            out.push_str("            }\n");
+            writeln!(
+                out,
+                "            Ok(Some(GeneratedBuiltinKind::Device{index}(instance)))"
+            )?;
+            out.push_str("        }\n");
+        }
+        out.push_str("        _ => Ok(None),\n");
+        out.push_str("    }\n");
+    }
     out.push_str("}\n");
 
     std::fs::write(registry_root.join("registry.rs"), out)?;

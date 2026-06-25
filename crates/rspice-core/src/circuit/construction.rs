@@ -58,6 +58,9 @@ impl CircuitData {
             // Verilog-A devices
             #[cfg(feature = "veriloga")]
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),
+            #[cfg(feature = "veriloga-builtins")]
+            generated_veriloga_devices:
+                crate::device::veriloga_generated::BuiltinVerilogADevices::new(),
         }
     }
 

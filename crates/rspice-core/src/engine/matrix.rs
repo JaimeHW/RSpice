@@ -764,6 +764,24 @@ impl Engine {
             }
         }
 
+        #[cfg(feature = "veriloga-builtins")]
+        for device in circuit.generated_veriloga_devices().iter() {
+            let mut device_nodes: Vec<usize> = device
+                .nodes
+                .iter()
+                .copied()
+                .filter(|node| *node > 0)
+                .collect();
+            device_nodes.sort_unstable();
+            device_nodes.dedup();
+
+            for &row in &device_nodes {
+                for &col in &device_nodes {
+                    triplets.push((row - 1, col - 1, 0.0));
+                }
+            }
+        }
+
         // Add diagonal entries to ensure structure
         for i in 0..size {
             triplets.push((i, i, 1e-12)); // GMIN for numerical stability

@@ -21,6 +21,8 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     xspice_event_queue: EventQueue,
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
+    #[cfg(feature = "veriloga-builtins")]
+    generated_veriloga_devices: crate::device::veriloga_generated::BuiltinVerilogADevices,
 }
 
 impl CircuitData {
@@ -40,6 +42,16 @@ impl CircuitData {
             || !self.iswitches.is_empty()
             || !self.behavioral_sources.is_empty()
             || self.has_xspice_devices()
+            || {
+                #[cfg(feature = "veriloga-builtins")]
+                {
+                    self.has_generated_veriloga_devices()
+                }
+                #[cfg(not(feature = "veriloga-builtins"))]
+                {
+                    false
+                }
+            }
             || {
                 #[cfg(feature = "veriloga")]
                 {
@@ -99,6 +111,16 @@ impl CircuitData {
             || !self.iswitches.is_empty()
             || self.has_xspice_devices()
             || {
+                #[cfg(feature = "veriloga-builtins")]
+                {
+                    self.has_generated_veriloga_devices()
+                }
+                #[cfg(not(feature = "veriloga-builtins"))]
+                {
+                    false
+                }
+            }
+            || {
                 #[cfg(feature = "veriloga")]
                 {
                     self.has_veriloga_devices()
@@ -138,6 +160,12 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         {
             if self.has_veriloga_devices() {
+                return true;
+            }
+        }
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            if self.has_generated_veriloga_devices() {
                 return true;
             }
         }
@@ -228,6 +256,8 @@ impl CircuitData {
             xspice_event_queue: self.xspice_event_queue.clone(),
             #[cfg(feature = "veriloga")]
             veriloga_devices: self.veriloga_devices.clone(),
+            #[cfg(feature = "veriloga-builtins")]
+            generated_veriloga_devices: self.generated_veriloga_devices.clone(),
         }
     }
 
@@ -253,6 +283,10 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         {
             self.veriloga_devices = snapshot.veriloga_devices;
+        }
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            self.generated_veriloga_devices = snapshot.generated_veriloga_devices;
         }
     }
 
@@ -362,6 +396,11 @@ impl CircuitData {
                     }
                 },
             );
+        }
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            self.generated_veriloga_devices_mut()
+                .stamp_all(matrix, rhs, voltages);
         }
     }
 

@@ -1838,6 +1838,23 @@ impl Engine {
                     subckt_name,
                     params,
                 } => {
+                    #[cfg(feature = "veriloga-builtins")]
+                    {
+                        if let Some(device) =
+                            crate::device::veriloga_generated::instantiate_builtin(
+                                subckt_name,
+                                &element.name,
+                                &element.nodes,
+                                params,
+                                &netlist.params,
+                                &mut circuit,
+                            )?
+                        {
+                            circuit.add_generated_veriloga_device(device);
+                            continue;
+                        }
+                    }
+
                     if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name)) {
                         if element.nodes.len() != model.num_terminals {
                             return Err(SimulationError::Circuit(format!(

@@ -65,6 +65,34 @@ impl CircuitData {
         &mut self.veriloga_devices
     }
 
+    #[cfg(feature = "veriloga-builtins")]
+    #[inline]
+    pub fn has_generated_veriloga_devices(&self) -> bool {
+        !self.generated_veriloga_devices.is_empty()
+    }
+
+    #[cfg(feature = "veriloga-builtins")]
+    pub fn add_generated_veriloga_device(
+        &mut self,
+        device: crate::device::veriloga_generated::BuiltinVerilogAInstance,
+    ) {
+        self.generated_veriloga_devices.add(device);
+    }
+
+    #[cfg(feature = "veriloga-builtins")]
+    pub(crate) fn generated_veriloga_devices(
+        &self,
+    ) -> &crate::device::veriloga_generated::BuiltinVerilogADevices {
+        &self.generated_veriloga_devices
+    }
+
+    #[cfg(feature = "veriloga-builtins")]
+    pub(crate) fn generated_veriloga_devices_mut(
+        &mut self,
+    ) -> &mut crate::device::veriloga_generated::BuiltinVerilogADevices {
+        &mut self.generated_veriloga_devices
+    }
+
     /// Evaluate all XSPICE code model instances
     ///
     /// This calls each XspiceInstance::evaluate() with the current simulation

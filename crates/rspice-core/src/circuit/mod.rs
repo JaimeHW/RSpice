@@ -359,6 +359,9 @@ pub struct CircuitData {
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]
     pub(crate) veriloga_devices: crate::device::veriloga::VerilogADevices,
+    #[cfg(feature = "veriloga-builtins")]
+    pub(crate) generated_veriloga_devices:
+        crate::device::veriloga_generated::BuiltinVerilogADevices,
 }
 
 /// Stable probe metadata for inductor-backed branch measurements.
