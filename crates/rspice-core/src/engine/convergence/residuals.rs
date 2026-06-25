@@ -63,30 +63,79 @@ impl Engine {
         let snapshot = circuit.nonlinear_state_snapshot();
         let converged = matrix.with_probe_values(|probe, rhs| {
             linear_stamp(circuit, probe, rhs);
-            self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
-                circuit,
-                probe,
-                rhs,
-                solution,
-                junction_gmin,
-            );
+            if self
+                .try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                    circuit,
+                    probe,
+                    rhs,
+                    solution,
+                    junction_gmin,
+                )
+                .is_err()
+            {
+                return false;
+            }
             self.residual_convergence_met(probe, solution, rhs)
         });
         circuit.restore_nonlinear_state(snapshot);
         converged
     }
 
-    pub(in crate::engine::convergence) fn nonlinear_residual_converged(
+    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin<
+        F,
+    >(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
-    ) -> bool {
+        junction_gmin: Value,
+        mut linear_stamp: F,
+    ) -> Result<bool, SimulationError>
+    where
+        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
+    {
+        let size = circuit.matrix_size();
+        if solution.len() != size || solution.iter().any(|v| !v.is_finite()) {
+            return Ok(false);
+        }
+
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let mut stamp_error = None;
+        let converged = matrix.with_probe_values(|probe, rhs| {
+            linear_stamp(circuit, probe, rhs);
+            if let Err(err) = self
+                .try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                    circuit,
+                    probe,
+                    rhs,
+                    solution,
+                    junction_gmin,
+                )
+            {
+                stamp_error = Some(err);
+                return false;
+            }
+            self.residual_convergence_met(probe, solution, rhs)
+        });
+        circuit.restore_nonlinear_state(snapshot);
+        if let Some(err) = stamp_error {
+            return Err(err);
+        }
+        Ok(converged)
+    }
+
+    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> Result<bool, SimulationError> {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
-        self.nonlinear_residual_converged_with_linear_stamp(
+        self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
                 let node_count = circuit.num_nodes().min(rhs.len());
                 for i in 0..node_count {
@@ -204,13 +253,18 @@ impl Engine {
         let snapshot = circuit.nonlinear_state_snapshot();
         let merit = matrix.with_probe_values(|probe, rhs| {
             linear_stamp(circuit, probe, rhs);
-            self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
-                circuit,
-                probe,
-                rhs,
-                solution,
-                junction_gmin,
-            );
+            if self
+                .try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                    circuit,
+                    probe,
+                    rhs,
+                    solution,
+                    junction_gmin,
+                )
+                .is_err()
+            {
+                return None;
+            }
 
             probe
                 .scaled_residual_inf_norm(

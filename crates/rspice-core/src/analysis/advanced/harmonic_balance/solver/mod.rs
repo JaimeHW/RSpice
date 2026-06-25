@@ -300,6 +300,28 @@ impl HbVerilogADevice {
             jacobian_locs,
         }
     }
+
+    fn runtime_error(&self, phase: &str, err: impl std::fmt::Display) -> HbError {
+        HbError::InvalidCircuit(format!(
+            "Verilog-A device '{}' HB {phase} failed: {err}",
+            self.device.name
+        ))
+    }
+
+    fn try_evaluate(&mut self, phase: &str) -> Result<Vec<Value>, HbError> {
+        self.device
+            .try_evaluate()
+            .map_err(|err| self.runtime_error(phase, err))
+    }
+
+    fn try_compute_jacobian(
+        &mut self,
+        phase: &str,
+    ) -> Result<Vec<rspice_veriloga::device::JacobianEntry>, HbError> {
+        self.device
+            .try_compute_jacobian()
+            .map_err(|err| self.runtime_error(phase, err))
+    }
 }
 
 /// Runtime representation of a nonlinear device for HB Newton iteration

@@ -5,7 +5,7 @@
 
 #![allow(clippy::needless_range_loop)]
 use super::behavioral_expr::prepare_behavioral_expression;
-use super::{Engine, JfetLevel2Model, SimulationError, extract_dc_value};
+use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value};
 use crate::device::JfetChannelModel;
 use crate::netlist::{ElementKind, flatten_netlist};
 use crate::{CircuitData, Netlist};
@@ -46,415 +46,10 @@ pub use veriloga_cache::{
 #[cfg(feature = "veriloga")]
 use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
 
-/// Construct a Jiles-Atherton (magnetic-core) inductor instance and add it,
-/// together with its linear runtime companion, to the circuit.
-fn add_jiles_atherton_inductor_element(
-    circuit: &mut CircuitData,
-    netlist: &Netlist,
-    element: &crate::netlist::Element,
-    value: f64,
-    model: &str,
-    initial_current: Option<f64>,
-) -> Result<(), SimulationError> {
-    if !value.is_finite() || value <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "Jiles-Atherton inductor '{}' has invalid inductance value {}",
-            element.name, value
-        )));
-    }
-
-    let np = circuit.get_or_create_node(&element.nodes[0]);
-    let nn = circuit.get_or_create_node(&element.nodes[1]);
-    let branch = circuit.allocate_branch_named(&element.name);
-
-    let model_def = find_model_def(netlist, model).ok_or_else(|| {
-        SimulationError::Circuit(format!(
-            "Jiles-Atherton inductor '{}' references unknown model '{}'",
-            element.name, model
-        ))
-    })?;
-    ensure_model_type(
-        "Jiles-Atherton inductor",
-        &element.name,
-        model,
-        model_def,
-        &["CORE", "JA", "JILES", "JILESATHERTON"],
-    )?;
-
-    let params = resolve_jiles_atherton_model_params(model_def, value)?;
-    let mut ja = crate::device::passive::JilesAthertonInductor::new(element.name.clone(), np, nn)
-        .with_params(params);
-    if let Some(ic) = initial_current {
-        ja.set_initial_current(ic);
-    }
-
-    let effective_l = ja.effective_inductance();
-    let runtime_l = if effective_l.is_finite() && effective_l > 0.0 {
-        effective_l
-    } else {
-        value
-    };
-
-    if let Some(ic) = initial_current {
-        circuit
-            .inductors
-            .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
-    } else {
-        circuit
-            .inductors
-            .add(element.name.clone(), np, nn, branch, runtime_l);
-    }
-
-    let inductor_index = circuit.inductors.len().saturating_sub(1);
-    circuit.add_jiles_atherton_inductor(inductor_index, branch, ja);
-
-    Ok(())
-}
-
-/// `true` when a model card's type names a magnetic-core (Jiles-Atherton)
-/// model rather than a linear inductor card.
-fn is_magnetic_core_model_type(model_type: &str) -> bool {
-    model_type.eq_ignore_ascii_case("CORE")
-        || model_type.eq_ignore_ascii_case("JA")
-        || model_type.eq_ignore_ascii_case("JILES")
-        || model_type.eq_ignore_ascii_case("JILESATHERTON")
-}
-
-/// MOS model levels with a native bulk-MOSFET implementation: Berkeley
-/// MOS1/MOS2/MOS3/MOS6 (1/2/3/6) and the legacy BSIM1/BSIM2 ports (4/5). Levels
-/// 8/9/49 (BSIM3v3.3), 14/54 (BSIM4 v4.8) and 55-57 (BSIM3-SOI) are routed
-/// to dedicated devices before this check applies.
-fn native_bulk_mos_level(level: i32) -> bool {
-    matches!(level, 1..=6)
-}
-
-fn bjt_level_matches(level: f64, expected: f64) -> bool {
-    level.is_finite() && level == expected
-}
-
-fn is_native_vbic_bjt_level(level: f64) -> bool {
-    bjt_level_matches(level, 4.0)
-        || bjt_level_matches(level, 11.0)
-        || bjt_level_matches(level, 12.0)
-}
-
-fn supported_bjt_level(level: f64) -> bool {
-    bjt_level_matches(level, 0.0)
-        || bjt_level_matches(level, 1.0)
-        || is_native_vbic_bjt_level(level)
-}
-
-fn bjt_level_descriptor(level: f64) -> String {
-    if level.is_finite() && (level - level.round()).abs() <= 1e-9 {
-        format!("LEVEL={:.0}", level.round())
-    } else {
-        format!("LEVEL={level}")
-    }
-}
-
-fn validate_bjt_model_level(
-    element_name: &str,
-    model: &str,
-    params: &HashMap<String, f64>,
-    expr_params: &[(String, String)],
-    string_params: &[(String, String)],
-) -> Result<(), SimulationError> {
-    let level = params.get("LEVEL").copied();
-    if let Some(level_value) = level
-        && !level_value.is_finite()
-    {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' has invalid LEVEL={level_value}"
-        )));
-    }
-
-    let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
-    reject_unsupported_vbic13_params(
-        element_name,
-        model,
-        params,
-        expr_params,
-        string_params,
-        native_vbic_level,
-    )?;
-
-    let Some(level) = level else {
-        return Ok(());
-    };
-
-    if !supported_bjt_level(level) {
-        let descriptor = bjt_level_descriptor(level);
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' requests {descriptor}, which has no native \
-             implementation. Supported BJT model levels: legacy Gummel-Poon (no LEVEL or \
-             LEVEL=1) and LEVEL=4/11/12 (VBIC). Add native support for the requested advanced \
-             BJT family before running this card."
-        )));
-    }
-
-    Ok(())
-}
-
-const VBIC13_PARAMS: &[&str] = &["VBBE", "NBBE", "IBBE", "TVBBE1", "TVBBE2", "TNBBE", "EBBE"];
-
-fn canonical_vbic13_param(name: &str) -> Option<&'static str> {
-    VBIC13_PARAMS
-        .iter()
-        .copied()
-        .find(|param| param.eq_ignore_ascii_case(name))
-}
-
-fn push_unique_vbic13_param(list: &mut Vec<&'static str>, param: &'static str) {
-    if !list.contains(&param) {
-        list.push(param);
-    }
-}
-
-fn reject_unsupported_vbic13_params(
-    element_name: &str,
-    model: &str,
-    params: &HashMap<String, f64>,
-    expr_params: &[(String, String)],
-    string_params: &[(String, String)],
-    native_vbic_level: bool,
-) -> Result<(), SimulationError> {
-    let mut present: Vec<&'static str> = Vec::new();
-    for param in VBIC13_PARAMS
-        .iter()
-        .copied()
-        .filter(|param| params.contains_key(*param))
-    {
-        push_unique_vbic13_param(&mut present, param);
-    }
-    for (name, _) in expr_params {
-        if let Some(param) = canonical_vbic13_param(name) {
-            push_unique_vbic13_param(&mut present, param);
-        }
-    }
-    for (name, _) in string_params {
-        if let Some(param) = canonical_vbic13_param(name) {
-            push_unique_vbic13_param(&mut present, param);
-        }
-    }
-    if present.is_empty() {
-        return Ok(());
-    }
-
-    let present_list = present.join(", ");
-    if !native_vbic_level {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter(s) {present_list}; \
-             these are unsupported on legacy GP routing, accepted only on native VBIC \
-             LEVEL=4, LEVEL=11, or LEVEL=12 cards, and must not be silently ignored"
-        )));
-    }
-
-    for (name, expr) in expr_params {
-        let Some(param) = canonical_vbic13_param(name) else {
-            continue;
-        };
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses unresolved VBIC13 parameter {param}={expr}; \
-             accepted VBIC13 compatibility parameters must be finite numeric literals"
-        )));
-    }
-    for (name, value) in string_params {
-        let Some(param) = canonical_vbic13_param(name) else {
-            continue;
-        };
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses non-numeric VBIC13 parameter {param}=\"{value}\"; \
-             accepted VBIC13 compatibility parameters must be finite numeric literals"
-        )));
-    }
-
-    for param in &present {
-        if !params.contains_key(*param) {
-            continue;
-        }
-        let value = params
-            .get(*param)
-            .copied()
-            .expect("present VBIC13 parameter has a value");
-        if !value.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' uses non-finite VBIC13 parameter {param}={value}; \
-                 accepted VBIC13 parameters must be finite numeric literals"
-            )));
-        }
-    }
-
-    let vbbe = params.get("VBBE").copied().unwrap_or(0.0);
-    if vbbe < 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter VBBE={vbbe}; \
-             VBBE must be nonnegative for native VBIC13 reverse B-E breakdown"
-        )));
-    }
-
-    let nbbe = params.get("NBBE").copied().unwrap_or(1.0);
-    if nbbe <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter NBBE={nbbe}; \
-             NBBE must be positive for native VBIC13 reverse B-E breakdown"
-        )));
-    }
-
-    let ibbe = params.get("IBBE").copied().unwrap_or(1e-6);
-    if ibbe <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "BJT '{element_name}': model '{model}' uses VBIC13 parameter IBBE={ibbe}; \
-             IBBE must be positive for native VBIC13 reverse B-E breakdown"
-        )));
-    }
-
-    if vbbe > 0.0 {
-        for (name, expr) in expr_params {
-            if name.eq_ignore_ascii_case("WBE") {
-                return Err(SimulationError::Circuit(format!(
-                    "BJT '{element_name}': model '{model}' uses unresolved WBE={expr} with \
-                     active VBIC13 reverse B-E breakdown; WBE must be a finite numeric literal \
-                     for the native split path"
-                )));
-            }
-        }
-        for (name, value) in string_params {
-            if name.eq_ignore_ascii_case("WBE") {
-                return Err(SimulationError::Circuit(format!(
-                    "BJT '{element_name}': model '{model}' uses non-numeric WBE=\"{value}\" with \
-                     active VBIC13 reverse B-E breakdown; WBE must be a finite numeric literal \
-                     for the native split path"
-                )));
-            }
-        }
-        let wbe = params.get("WBE").copied().unwrap_or(1.0);
-        if !wbe.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' uses active VBIC13 reverse B-E breakdown \
-                 with WBE={wbe}; WBE must be finite for the native split path"
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-fn checked_integer_model_level(
-    device_kind: &str,
-    element_name: &str,
-    model: &str,
-    params: &HashMap<String, f64>,
-) -> Result<Option<i32>, SimulationError> {
-    let Some(level) = params.get("LEVEL").copied() else {
-        return Ok(None);
-    };
-
-    let rounded = level.round();
-    if !level.is_finite() || (level - rounded).abs() > 1e-9 {
-        return Err(SimulationError::Circuit(format!(
-            "{device_kind} '{element_name}': model '{model}' has invalid LEVEL={level}; LEVEL selectors must be finite integers"
-        )));
-    }
-
-    Ok(Some(rounded as i32))
-}
-
-/// Warn about nodes with no conductive path to ground: the unconditional
-/// matrix gmin keeps such systems numerically solvable, so without this
-/// notice a forgotten connection simulates silently with a meaningless bias.
-/// Capacitors and current sources do not conduct DC; every other element's
-/// terminals are treated as connected, which never produces a false alarm.
-fn warn_floating_nodes(flat_elements: &[crate::netlist::Element]) {
-    use crate::netlist::ElementKind;
-    use std::collections::HashMap;
-
-    let canonical = |node: &str| -> String {
-        let lower = node.to_ascii_lowercase();
-        if lower == "gnd" {
-            "0".to_string()
-        } else {
-            lower
-        }
-    };
-
-    let mut parent: HashMap<String, String> = HashMap::new();
-    fn find(parent: &mut HashMap<String, String>, node: &str) -> String {
-        let mut current = node.to_string();
-        loop {
-            let up = parent
-                .entry(current.clone())
-                .or_insert_with(|| current.clone())
-                .clone();
-            if up == current {
-                return current;
-            }
-            let grand = parent.get(&up).cloned().unwrap_or_else(|| up.clone());
-            parent.insert(current, grand);
-            current = up;
-        }
-    }
-
-    let mut all_nodes: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for element in flat_elements {
-        let conducts = !matches!(
-            element.kind,
-            ElementKind::Capacitor { .. } | ElementKind::CurrentSource(_)
-        );
-        let nodes: Vec<String> = element.nodes.iter().map(|n| canonical(n)).collect();
-        for node in &nodes {
-            if seen.insert(node.clone()) {
-                all_nodes.push(node.clone());
-            }
-        }
-        if conducts && nodes.len() >= 2 {
-            let first = find(&mut parent, &nodes[0]);
-            for other in &nodes[1..] {
-                let root = find(&mut parent, other);
-                if root != first {
-                    parent.insert(root, first.clone());
-                }
-            }
-        }
-    }
-
-    if !seen.contains("0") {
-        // No ground reference at all; other validation owns that report.
-        return;
-    }
-    let ground_root = find(&mut parent, "0");
-    let floating: Vec<&String> = all_nodes
-        .iter()
-        .filter(|node| node.as_str() != "0" && find(&mut parent, node) != ground_root)
-        .collect();
-    if floating.is_empty() {
-        return;
-    }
-    let shown: Vec<&str> = floating.iter().take(8).map(|s| s.as_str()).collect();
-    let suffix = if floating.len() > shown.len() {
-        format!(" (and {} more)", floating.len() - shown.len())
-    } else {
-        String::new()
-    };
-    log::warn!(
-        "node(s) {}{} have no conductive path to ground (capacitors and current sources \
-         do not conduct DC); their bias is set by the matrix gmin only and is not \
-         physically meaningful",
-        shown.join(", "),
-        suffix
-    );
-}
-
-/// Diagnostic descriptor for well-known MOS model levels.
-fn mos_level_descriptor(level: i32) -> String {
-    match level {
-        3 => "LEVEL=3 (MOS3)".to_string(),
-        8 | 9 | 49 | 53 => format!("LEVEL={level} (BSIM3v3)"),
-        14 | 54 => format!("LEVEL={level} (BSIM4)"),
-        18 => "LEVEL=18 (VDMOS)".to_string(),
-        _ => format!("LEVEL={level}"),
-    }
-}
+mod model_policy;
+use model_policy::*;
+mod advanced_mos;
+use advanced_mos::{Bsim3v3SharedModel, Bsim4v8SharedModel};
 
 fn validate_source_file_inputs(
     source_name: &str,
@@ -553,10 +148,6 @@ impl Engine {
         }
 
         warn_floating_nodes(&flat_elements);
-
-        // Deduplicates the loud simplified-MOS warnings to one per model card.
-        let mut simplified_mos_warned: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
 
         for element in &flat_elements {
             match &element.kind {
@@ -819,6 +410,20 @@ impl Engine {
                     let mut diode =
                         crate::device::Diode::spice_defaults(element.name.clone(), anode, cathode);
 
+                    // Junction temperature: instance TEMP is absolute (C),
+                    // DTEMP offsets the circuit temperature; the model TNOM
+                    // (or .options tnom) anchors the legacy SPICE scaling.
+                    let tnom_k = crate::analysis::temperature::celsius_to_kelvin(
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
+                    let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
+                        crate::analysis::temperature::celsius_to_kelvin(t)
+                    } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
+                        self.config.temperature + dt
+                    } else {
+                        self.config.temperature
+                    };
+
                     // Look up model and apply parameters
                     let rs_given;
                     if let Some(device_model) = find_model_def(netlist, model) {
@@ -830,6 +435,13 @@ impl Engine {
                             &["D", "DIODE"],
                         )?;
                         let params_map = model_params_upper_map(&device_model.params);
+                        validate_diode_model_level(
+                            &element.name,
+                            model,
+                            &params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
                         rs_given = params_map.contains_key("RS");
                         diode = diode.with_model_params(&params_map);
                     } else if let Some(params_map) =
@@ -872,20 +484,6 @@ impl Engine {
                         diode.apply_junction_scaling(junction_scale);
                     }
                     diode.multiplicity = mult;
-
-                    // Junction temperature: instance TEMP is absolute (C),
-                    // DTEMP offsets the circuit temperature; the model TNOM
-                    // (or .options tnom) anchors the scaling.
-                    let tnom_k = crate::analysis::temperature::celsius_to_kelvin(
-                        netlist.options.tnom.unwrap_or(27.0),
-                    );
-                    let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
-                        crate::analysis::temperature::celsius_to_kelvin(t)
-                    } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
-                        self.config.temperature + dt
-                    } else {
-                        self.config.temperature
-                    };
                     diode.set_temperature(temp_k, tnom_k);
 
                     // Series resistance participates in the solution as an
@@ -922,7 +520,7 @@ impl Engine {
                     model,
                     bjt_type,
                     instance_params,
-                    ..
+                    deferred_params: _,
                 } => {
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
                     let base = circuit.get_or_create_node(&element.nodes[1]);
@@ -932,19 +530,42 @@ impl Engine {
                         .get(3)
                         .map(|n| circuit.get_or_create_node(n))
                         .unwrap_or(0);
-
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
                     let resolved_bjt_type = if let Some(device_model) = model_def {
                         resolve_bjt_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(
-                                "BJT '{}' references model '{}' with incompatible type '{}'; expected NPN or PNP",
+                                "BJT '{}' references model '{}' with incompatible type '{}'; expected NPN, PNP, or LPNP",
                                 element.name, model, device_model.model_type
                             ))
                         })?
                     } else {
                         *bjt_type
                     };
+
+                    if let Some(device_model) = model_def {
+                        let params_map = model_params_upper_map(&device_model.params);
+                        if is_lpnp_bjt_model_type(&device_model.model_type) {
+                            let level = params_map.get("LEVEL").copied().unwrap_or(1.0);
+                            if !legacy_gummel_poon_bjt_level(level) {
+                                let descriptor = bjt_level_descriptor(level);
+                                return Err(SimulationError::Circuit(format!(
+                                    "BJT '{}': model '{}' uses LPNP with {descriptor}; \
+                                     LPNP is a legacy Gummel-Poon lateral-PNP alias and is \
+                                     supported only for no LEVEL or LEVEL=0/1/2 until separate \
+                                     reference-backed validation exists",
+                                    element.name, model
+                                )));
+                            }
+                        }
+                        validate_bjt_model_level(
+                            &element.name,
+                            model,
+                            &params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
+                    }
 
                     let mut bjt = match resolved_bjt_type {
                         crate::netlist::BjtType::Npn => crate::device::Bjt::new_npn(
@@ -1078,7 +699,7 @@ impl Engine {
                     mos_type: _mos_type,
                     compact_syntax,
                     instance_params,
-                    ..
+                    deferred_params,
                 } => {
                     // Resolve NMOS/PMOS from model card when available.
                     let model_def = find_binned_model_def(netlist, model, instance_params);
@@ -1107,14 +728,18 @@ impl Engine {
                             element.name, model
                         )));
                     };
-                    let level = params_map
-                        .as_ref()
-                        .map(|params| {
-                            checked_integer_model_level("MOSFET", &element.name, model, params)
-                        })
-                        .transpose()?
-                        .flatten()
-                        .unwrap_or(1);
+                    let level = match (params_map.as_ref(), model_def) {
+                        (Some(params), Some(device_model)) => checked_integer_model_level(
+                            "MOSFET",
+                            &element.name,
+                            model,
+                            params,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?,
+                        _ => None,
+                    }
+                    .unwrap_or(1);
                     let is_vdmos_compatible = level == 18
                         || model_def.is_some_and(|def| is_vdmos_model_type(&def.model_type));
 
@@ -1130,29 +755,68 @@ impl Engine {
                     // 55 -> FD (fully depleted), 56 -> DD (dynamic depletion),
                     // 57 -> PD (partially depleted). Xyce LEVEL=10 (BSIMSOI3)
                     // uses SOIMOD to select the same native family.
-                    if is_bsimsoi_level(level)
-                        && let Some(params_map) = params_map.as_ref()
-                    {
-                        let native_level =
-                            native_bsimsoi_level_for(level, params_map, instance_params)
-                                .map_err(|err| {
-                                    SimulationError::Circuit(format!(
-                                        "MOSFET '{}': model '{}' {err}",
-                                        element.name, model
-                                    ))
-                                })?
-                                .expect("is_bsimsoi_level must map to a native SOI level");
-                        match native_level {
-                            55 => {
-                                Self::build_b3soi_fd(
-                                    &mut circuit,
-                                    element,
-                                    resolved_mos_type,
-                                    params_map,
-                                    instance_params,
-                                    self.config.temperature,
-                                )?;
-                                continue;
+                    if is_bsimsoi_level(level) {
+                        if let Some(params_map) = params_map.as_ref() {
+                            let device_model = model_def
+                                .expect("native BSIMSOI params map derives from model card");
+                            reject_deferred_native_mos_model_params(
+                                &element.name,
+                                model,
+                                "BSIMSOI",
+                                params_map,
+                                &device_model.expr_params,
+                                &device_model.string_params,
+                            )?;
+                            let native_level =
+                                native_bsimsoi_level_for(level, params_map, instance_params)
+                                    .map_err(|err| {
+                                        SimulationError::Circuit(format!(
+                                            "MOSFET '{}': model '{}' {err}",
+                                            element.name, model
+                                        ))
+                                    })?
+                                    .expect("is_bsimsoi_level must map to a native SOI level");
+                            match native_level {
+                                55 => {
+                                    Self::build_b3soi_fd(
+                                        &mut circuit,
+                                        element,
+                                        resolved_mos_type,
+                                        model,
+                                        params_map,
+                                        instance_params,
+                                        deferred_params,
+                                        self.config.temperature,
+                                    )?;
+                                    continue;
+                                }
+                                56 => {
+                                    Self::build_b3soi_dd(
+                                        &mut circuit,
+                                        element,
+                                        resolved_mos_type,
+                                        model,
+                                        params_map,
+                                        instance_params,
+                                        deferred_params,
+                                        self.config.temperature,
+                                    )?;
+                                    continue;
+                                }
+                                57 => {
+                                    Self::build_b3soi_pd(
+                                        &mut circuit,
+                                        element,
+                                        resolved_mos_type,
+                                        model,
+                                        params_map,
+                                        instance_params,
+                                        deferred_params,
+                                        self.config.temperature,
+                                    )?;
+                                    continue;
+                                }
+                                _ => {}
                             }
                             56 => {
                                 Self::build_b3soi_dd(
@@ -1180,16 +844,62 @@ impl Engine {
                         }
                     }
 
-                    // BSIM3v3.3: LEVEL=8/49 (ngspice) and LEVEL=9 (Xyce)
-                    // cards route to the native port.
+                    // BSIM3v3.3: LEVEL=8/49 (ngspice) and BSIM3-shaped
+                    // LEVEL=9 (Xyce) cards route to the native port. ngspice
+                    // also uses LEVEL=9 for MOS9, so BestAvailable dispatch
+                    // keeps MOS9-shaped cards on the Berkeley MOS path below.
+                    if matches!(level, 8 | 49)
+                        && let (Some(params_map), Some(device_model)) =
+                            (params_map.as_ref(), model_def)
+                        && let Some(version_family) =
+                            bsim3_level8_49_version_family(params_map, &device_model.string_params)
+                    {
+                        match version_family {
+                            Bsim3VersionFamily::V32(version) => {
+                                return Err(SimulationError::Circuit(format!(
+                                    "MOSFET '{}': BSIM3v32 LEVEL={level} VERSION={version} \
+                                     requires a distinct native BSIM3v32 port; RSpice's \
+                                     BSIM3v3.3 native evaluator must not be used as a \
+                                     VERSION={version} compatibility fallback",
+                                    element.name
+                                )));
+                            }
+                            Bsim3VersionFamily::UnsupportedPre33(version) => {
+                                return Err(SimulationError::Circuit(format!(
+                                    "MOSFET '{}': unsupported BSIM3 pre-3.3 LEVEL={level} \
+                                     VERSION={version}; supported native BSIM3v3.3 cards use \
+                                     VERSION>=3.3, while BSIM3v32 VERSION=3.2/3.22/3.23/3.24 \
+                                     requires a distinct native port",
+                                    element.name
+                                )));
+                            }
+                            Bsim3VersionFamily::V33OrLater => {}
+                        }
+                    }
                     // One shared model card + temperature block per .model;
                     // size knots are memoized across instances exactly as
                     // ngspice reuses pSizeDependParamKnot.
-                    if matches!(level, 8 | 9 | 49)
+                    let level9_is_bsim3 = matches!((level, params_map.as_ref(), model_def), (9, Some(params), Some(device_model))
+                    if level9_selects_bsim3(
+                        params,
+                        &device_model.expr_params,
+                        &device_model.string_params,
+                        self.config.spice_dialect,
+                    ));
+                    if (matches!(level, 8 | 49) || level9_is_bsim3)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        let model_key =
-                            model_def.map_or_else(|| model.clone(), |def| def.name.clone());
+                        let device_model =
+                            model_def.expect("native BSIM3 params map derives from model card");
+                        reject_deferred_native_mos_model_params(
+                            &element.name,
+                            model,
+                            "BSIM3",
+                            params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
+                        let model_key = device_model.name.clone();
                         let tnom_default_k = crate::analysis::temperature::celsius_to_kelvin(
                             netlist.options.tnom.unwrap_or(27.0),
                         );
@@ -1200,6 +910,7 @@ impl Engine {
                             &model_key,
                             params_map,
                             instance_params,
+                            deferred_params,
                             self.config.temperature,
                             tnom_default_k,
                             &mut bsim3v3_models,
@@ -1215,8 +926,17 @@ impl Engine {
                     if matches!(level, 14 | 54)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        let model_key =
-                            model_def.map_or_else(|| model.clone(), |def| def.name.clone());
+                        let device_model =
+                            model_def.expect("native BSIM4 params map derives from model card");
+                        reject_deferred_native_mos_model_params(
+                            &element.name,
+                            model,
+                            "BSIM4",
+                            params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
+                        let model_key = device_model.name.clone();
                         let tnom_default_k = crate::analysis::temperature::celsius_to_kelvin(
                             netlist.options.tnom.unwrap_or(27.0),
                         );
@@ -1234,10 +954,87 @@ impl Engine {
                         continue;
                     }
 
+                    // EKV 2.6 LEVEL=260. This is a native Xyce-compatible
+                    // four-terminal DC slice; unsupported EKV card options fail
+                    // closed rather than falling through to Berkeley MOS.
+                    if native_ekv26_level(level)
+                        && let Some(params_map) = params_map.as_ref()
+                    {
+                        let device_model =
+                            model_def.expect("native EKV26 params map derives from model card");
+                        let model_key = device_model.name.clone();
+                        reject_deferred_native_mos_model_params(
+                            &element.name,
+                            &model_key,
+                            "EKV26",
+                            params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
+                        validate_ekv26_native_params(
+                            &element.name,
+                            &model_key,
+                            params_map,
+                            instance_params,
+                            deferred_params,
+                        )?;
+                        Self::build_ekv26(
+                            &mut circuit,
+                            element,
+                            resolved_mos_type,
+                            &model_key,
+                            params_map,
+                            instance_params,
+                            self.config.temperature,
+                        )?;
+                        continue;
+                    }
+
+                    // EKV3 LEVEL=301. The native support is deliberately
+                    // narrow: VA-Models NMOS150 ekv3_rf DC plus the Xyce
+                    // VANOISE regression slice. Unsupported EKV3 surfaces fail
+                    // closed rather than using simplified MOS.
+                    if native_ekv3_level(level)
+                        && let Some(params_map) = params_map.as_ref()
+                    {
+                        let device_model =
+                            model_def.expect("native EKV3 params map derives from model card");
+                        let model_key = device_model.name.clone();
+                        reject_deferred_native_mos_model_params(
+                            &element.name,
+                            &model_key,
+                            "EKV3",
+                            params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
+                        Self::build_ekv3(
+                            &mut circuit,
+                            element,
+                            resolved_mos_type,
+                            &model_key,
+                            params_map,
+                            instance_params,
+                            self.config.temperature,
+                        )?;
+                        continue;
+                    }
+
                     // Native VDMOS accepts both compatibility fronts:
                     // Xyce MOS LEVEL=18 (`.model ... NMOS/PMOS level=18`)
                     // and ngspice VDMOS (`.model ... VDMOS nchan/pchan`).
                     if is_vdmos_compatible && let Some(params_map) = params_map.as_ref() {
+                        let device_model =
+                            model_def.expect("native VDMOS params map derives from model card");
+                        let model_key = device_model.name.clone();
+                        reject_deferred_native_mos_model_params(
+                            &element.name,
+                            &model_key,
+                            "VDMOS",
+                            params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
                         Self::build_vdmos(
                             &mut circuit,
                             element,
@@ -1256,32 +1053,31 @@ impl Engine {
                     // through to the simplified short-channel approximation
                     // silently: a BSIM3/BSIM4 card evaluated with ~15 honored
                     // parameters yields plausible-looking but wrong currents,
-                    // which is strictly worse than an error. Unsupported
-                    // levels require an explicit `.options allow_simplified_mos=1`
-                    // opt-in.
+                    // which is strictly worse than an error.
                     if !native_bulk_mos_level(level) {
                         let descriptor = mos_level_descriptor(level);
-                        if netlist.options.allow_simplified_mos == Some(true) {
-                            if simplified_mos_warned.insert(model.clone()) {
-                                log::warn!(
-                                    "MOSFET model '{model}' ({descriptor}): not implemented \
-                                     natively; running the simplified short-channel \
-                                     approximation because `.options allow_simplified_mos` \
-                                     is set. Results will NOT match {descriptor}."
-                                );
-                            }
-                        } else {
+                        if known_advanced_mos_level_without_native(level) {
                             return Err(SimulationError::Circuit(format!(
                                 "MOSFET '{}': model '{}' requests {} which has no native \
-                                 implementation. Supported levels: 1, 2, 3, 6 (Berkeley \
-                                 MOS1/MOS2/MOS3/MOS6), 4/5 (legacy BSIM1/BSIM2), 8/9/49 \
-                                 (BSIM3v3.3), 14/54 (BSIM4 v4.8), 18 (native VDMOS), \
-                                10 (Xyce BSIMSOI3), 55-57 (BSIM3-SOI FD/DD/PD). To knowingly run a simplified ~15-parameter \
-                                 approximation instead, set \
-                                 `.options allow_simplified_mos=1`.",
+                                 implementation yet. Known advanced CMC/HiSIM model families must \
+                                 not run through the simplified MOS approximation; CMC models are \
+                                 future Verilog-A-to-Rust codegen targets and require \
+                                 reference-backed validation before running this card.",
                                 element.name, model, descriptor
                             )));
                         }
+                        return Err(SimulationError::Circuit(format!(
+                            "MOSFET '{}': model '{}' requests {} which has no native \
+                             implementation. Supported levels: 1, 2, 3, 6 (Berkeley \
+                            MOS1/MOS2/MOS3/MOS6), 4/5 (legacy BSIM1/BSIM2), \
+                            9 (ngspice MOS9), 8/49 plus Xyce-style 9 \
+                            (BSIM3v3.3), 14/54 (BSIM4 v4.8), 10 (Xyce BSIMSOI3), \
+                            55-57 (BSIM3-SOI FD/DD/PD), 18 (native VDMOS), \
+                            260 (EKV 2.6), and 301 (EKV3). \
+                            Unsupported MOS levels must fail closed until native support \
+                            and reference-backed validation are added.",
+                            element.name, model, descriptor
+                        )));
                     }
 
                     let bulk_node_name = if is_bsimsoi_level(level) && element.nodes.len() > 4 {
@@ -1510,8 +1306,22 @@ impl Engine {
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
                         let params_map = model_params_upper_map(&device_model.params);
-                        let level =
-                            checked_integer_model_level("JFET", &element.name, model, &params_map)?;
+                        let level = checked_integer_model_level(
+                            "JFET",
+                            &element.name,
+                            model,
+                            &params_map,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?;
+                        if let Some(level) = level
+                            && !matches!(level, 1 | 2)
+                        {
+                            return Err(SimulationError::Circuit(format!(
+                                "JFET '{}' model '{}' requests unsupported LEVEL={level}; supported native JFET levels are legacy LEVEL=1/no LEVEL and ngspice/Xyce LEVEL=2",
+                                element.name, model
+                            )));
+                        }
                         if level == Some(2) {
                             jfet = match self.config.resolved_jfet_level2_model() {
                                 JfetLevel2Model::DialectDefault => unreachable!(
@@ -1596,17 +1406,34 @@ impl Engine {
                         .unwrap_or(usize::MAX);
                     let params_map =
                         model_def.map(|device_model| model_params_upper_map(&device_model.params));
-                    let mesfet_level = params_map
-                        .as_ref()
-                        .map(|params| {
-                            checked_integer_model_level("MESFET", &element.name, model, params)
-                        })
-                        .transpose()?
-                        .flatten();
-                    // ngspice selects HFET1 either by the NHFET/PHFET model
-                    // type or by NMF/PMF with LEVEL=5 (the z-device level
-                    // map: 1 = MES, 2-4 = MESA, 5 = HFET1).
-                    let card_is_hfet_level = mesfet_level == Some(5);
+                    let mesfet_level = match (params_map.as_ref(), model_def) {
+                        (Some(params), Some(device_model)) => checked_integer_model_level(
+                            "MESFET",
+                            &element.name,
+                            model,
+                            params,
+                            &device_model.expr_params,
+                            &device_model.string_params,
+                        )?,
+                        _ => None,
+                    };
+                    if let Some(level) = mesfet_level
+                        && !matches!(level, 0..=6)
+                    {
+                        return Err(SimulationError::Circuit(format!(
+                            "MESFET '{}' model '{}' requests unsupported LEVEL={level}; \
+                             supported native MESFET/HFET levels are no LEVEL/LEVEL=0/1 \
+                             (legacy MESFET), LEVEL=2/3/4 (MESA), LEVEL=5 (HFET1), \
+                             and LEVEL=6 (HFET2)",
+                            element.name, model
+                        )));
+                    }
+                    // ngspice selects the HFET-family equations either by the
+                    // NHFET/PHFET model type or by NMF/PMF with LEVEL=5/6
+                    // (the z-device level map: 1 = MES, 2-4 = MESA,
+                    // 5 = HFET1, 6 = HFET2).
+                    let card_is_hfet_level =
+                        mesfet_level.is_some_and(|level| matches!(level, 5 | 6));
                     let use_hfet_defaults = model_def
                         .map(|device_model| {
                             device_model.model_type.eq_ignore_ascii_case("NHFET")
@@ -1620,7 +1447,7 @@ impl Engine {
                     let resolved_mesfet_type = if let Some(device_model) = model_def {
                         resolve_mesfet_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(
-                                "MESFET '{}' references model '{}' with incompatible type '{}'; expected NMF or PMF",
+                                "MESFET '{}' references model '{}' with incompatible type '{}'; expected NMF, PMF, NHFET, or PHFET",
                                 element.name, model, device_model.model_type
                             ))
                         })?
@@ -1862,9 +1689,9 @@ impl Engine {
                     {
                         if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name))
                         {
-                            if element.nodes.len() != model.num_terminals {
+                            if element.nodes.len() > model.num_terminals {
                                 return Err(SimulationError::Circuit(format!(
-                                    "Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
+                                    "Verilog-A instance '{}' expects at most {} terminals for model '{}', found {}",
                                     element.name,
                                     model.num_terminals,
                                     subckt_name,
@@ -1881,11 +1708,17 @@ impl Engine {
                                 });
                             }
 
-                            let mut device = crate::device::veriloga::VerilogADevice::new(
+                            let mut device = crate::device::veriloga::VerilogADevice::try_new(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),
                                 &node_ids,
-                            );
+                            )
+                            .map_err(|err| {
+                                SimulationError::Circuit(format!(
+                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    element.name, err
+                                ))
+                            })?;
 
                             // Allocate global circuit node indices for internal Verilog-A nodes.
                             if device.num_internal_nodes() > 0 {
@@ -1938,7 +1771,12 @@ impl Engine {
                             }
                             // Dependent parameter defaults must see the instance
                             // overrides applied above
-                            device.resolve_parameter_defaults();
+                            device.try_resolve_parameter_defaults().map_err(|err| {
+                                SimulationError::Circuit(format!(
+                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    element.name, err
+                                ))
+                            })?;
                             device.set_temperature(self.config.temperature);
                             circuit.add_veriloga_device(device);
                             continue;
@@ -1976,7 +1814,15 @@ impl Engine {
                         model_def,
                         &["SW", "VSWITCH", "VSW"],
                     )?;
-                    let params_map = model_params_upper_map(&model_def.params);
+                    let params_map = resolve_supported_model_params_upper_map(
+                        netlist,
+                        model_def,
+                        "Voltage-controlled switch",
+                        &element.name,
+                        model,
+                        VSWITCH_MODEL_PARAMS,
+                        self.config.temperature,
+                    )?;
 
                     let mut sw = crate::device::VoltageSwitch::new(
                         element.name.clone(),
@@ -2012,7 +1858,15 @@ impl Engine {
                         model_def,
                         &["CSW", "ISWITCH", "ISW"],
                     )?;
-                    let params_map = model_params_upper_map(&model_def.params);
+                    let params_map = resolve_supported_model_params_upper_map(
+                        netlist,
+                        model_def,
+                        "Current-controlled switch",
+                        &element.name,
+                        model,
+                        ISWITCH_MODEL_PARAMS,
+                        self.config.temperature,
+                    )?;
 
                     let mut sw = crate::device::CurrentSwitch::new(
                         element.name.clone(),
@@ -2027,6 +1881,56 @@ impl Engine {
                     let iswitch_idx = circuit.iswitches.len();
                     circuit.iswitches.push(sw);
                     circuit.add_iswitch_pending(iswitch_idx, control_element.clone());
+                }
+                ElementKind::GenericSwitch {
+                    model,
+                    control_expression,
+                    initial_state,
+                } => {
+                    let np = circuit.get_or_create_node(&element.nodes[0]);
+                    let nn = circuit.get_or_create_node(&element.nodes[1]);
+
+                    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Generic switch '{}' references unknown model '{}'",
+                            element.name, model
+                        ))
+                    })?;
+                    ensure_model_type(
+                        "Generic switch",
+                        &element.name,
+                        model,
+                        model_def,
+                        &["SW", "SWITCH"],
+                    )?;
+                    let params_map = resolve_supported_model_params_upper_map(
+                        netlist,
+                        model_def,
+                        "Generic switch",
+                        &element.name,
+                        model,
+                        GENERIC_SWITCH_MODEL_PARAMS,
+                        self.config.temperature,
+                    )?;
+
+                    let mut sw = crate::device::GenericSwitch::new(
+                        element.name.clone(),
+                        np,
+                        nn,
+                        control_expression,
+                    )
+                    .map_err(SimulationError::Circuit)?
+                    .with_params(&params_map);
+                    if sw.has_solution_references() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Generic switch '{}' CONTROL expression references circuit nodes or branch currents; native SWITCH CONTROL currently supports time/constant expressions only",
+                            element.name
+                        )));
+                    }
+                    if let Some(state) = initial_state {
+                        sw = sw.with_initial_state(map_switch_state(*state));
+                    }
+                    circuit.generic_switches.push(sw);
                 }
                 ElementKind::TransmissionLine {
                     z0,
@@ -2508,865 +2412,4 @@ impl Engine {
 
         Ok(circuit)
     }
-
-    /// Build and register a BSIMSOI dynamic-depletion (level 56) instance.
-    ///
-    /// Node topology (b3soiddset.c:975-1037):
-    /// - 4-terminal `m d g s e`: floating body. An internal body node
-    ///   `<name>.__body.internal` is allocated; `bodyMod = 0`, `float = 1`.
-    /// - 5-terminal `m d g s e p`: ideal body tie. The external `p` node *is* the
-    ///   body node; `bodyMod = 2`, no internal node.
-    ///
-    /// Positive `RSH * NRD/NRS` allocates drain/source prime nodes connected by
-    /// ordinary linear resistors. Positive `RTH0` with `SHMOD=1` allocates the
-    /// ngspice self-heating temperature-rise node. Resistive body ties
-    /// (bodyMod==1) are deferred with the FD sibling.
-    fn build_b3soi_dd(
-        circuit: &mut CircuitData,
-        element: &crate::netlist::Element,
-        mos_type: crate::netlist::MosType,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        temperature_kelvin: f64,
-    ) -> Result<(), SimulationError> {
-        use crate::device::mosfet::b3soi::dd::temp::B3SoiDdGeometry;
-        use crate::device::{B3SoiDd, B3SoiDdModel, BodyMode};
-
-        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
-        // `config.temperature` is already in Kelvin (`TEMP_REFERENCE`).
-        let temp_k = temperature_kelvin;
-
-        // ngspice TNOM defaults to 27C; the model card may override it (Celsius).
-        let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
-        let tnom_k = crate::analysis::temperature::celsius_to_kelvin(tnom_c);
-
-        let model = std::sync::Arc::new(B3SoiDdModel::from_params(params_map, is_pmos, tnom_k));
-
-        let node_drain_external = circuit.get_or_create_node(&element.nodes[0]);
-        let node_gate = circuit.get_or_create_node(&element.nodes[1]);
-        let node_source_external = circuit.get_or_create_node(&element.nodes[2]);
-        let node_e = circuit.get_or_create_node(&element.nodes[3]);
-
-        let (node_body, node_p, body_mode) = if element.nodes.len() > 4 {
-            // Ideal body tie: P is the body node.
-            let p = circuit.get_or_create_node(&element.nodes[4]);
-            (p, p, BodyMode::TiedIdeal)
-        } else {
-            // Floating body: allocate an internal body node.
-            let body = circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
-            (body, 0, BodyMode::Floating)
-        };
-
-        // Instance geometry (W/L plus optional area/perimeter/squares).
-        let l = instance_param(instance_params, &["L"]).unwrap_or(0.0);
-        let w = instance_param(instance_params, &["W"]).unwrap_or(0.0);
-        let geom = B3SoiDdGeometry {
-            l,
-            w,
-            drain_area: instance_param(instance_params, &["AD"]).unwrap_or(0.0),
-            source_area: instance_param(instance_params, &["AS"]).unwrap_or(0.0),
-            drain_squares: instance_param(instance_params, &["NRD"]).unwrap_or(0.0),
-            source_squares: instance_param(instance_params, &["NRS"]).unwrap_or(0.0),
-            drain_perimeter: instance_param(instance_params, &["PD"]).unwrap_or(0.0),
-            source_perimeter: instance_param(instance_params, &["PS"]).unwrap_or(0.0),
-            body_squares: instance_param(instance_params, &["NRB"]).unwrap_or(0.0),
-            rth0: instance_param(instance_params, &["RTH0"])
-                .or_else(|| params_map.get("RTH0").copied())
-                .unwrap_or(0.0),
-            cth0: instance_param(instance_params, &["CTH0"])
-                .or_else(|| params_map.get("CTH0").copied())
-                .unwrap_or(0.0),
-        };
-
-        let drain_resistance = model.sheet_resistance * geom.drain_squares;
-        let node_drain = if drain_resistance.is_finite() && drain_resistance > 0.0 {
-            let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rd", element.name),
-                node_drain_external,
-                dint,
-                drain_resistance,
-            );
-            dint
-        } else {
-            node_drain_external
-        };
-        let source_resistance = model.sheet_resistance * geom.source_squares;
-        let node_source = if source_resistance.is_finite() && source_resistance > 0.0 {
-            let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rs", element.name),
-                node_source_external,
-                sint,
-                source_resistance,
-            );
-            sint
-        } else {
-            node_source_external
-        };
-        let node_temp = if model.sh_mod == 1 && geom.rth0 != 0.0 {
-            circuit.get_or_create_node(&format!("{}.__temp.internal", element.name))
-        } else {
-            0
-        };
-
-        let mut device = B3SoiDd::new(
-            element.name.clone(),
-            node_drain,
-            node_gate,
-            node_source,
-            node_e,
-            node_body,
-            node_p,
-            node_temp,
-            body_mode,
-            model,
-            geom,
-            temp_k,
-        )
-        .map_err(SimulationError::Circuit)?;
-
-        // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
-        if let Some(debug) = instance_param(instance_params, &["DEBUG"]) {
-            device.set_debug_mod(debug.round() as i32);
-        }
-        circuit.b3soi.add(device);
-        Ok(())
-    }
-
-    /// Build and register a BSIMSOI fully-depleted (level 55) instance.
-    ///
-    /// Node topology (b3soifdset.c): FD never solves the body as a circuit node.
-    /// - 4-terminal `m d g s e`: floating body, `bNode = 0` — no internal node is
-    ///   created (the body voltage is pinned to `Vbs0eff` in the load).
-    /// - 5-terminal `m d g s e b`: body contact present. The external `b` node is
-    ///   read for the initial guess but the load still pins `Vbs = Vbs0eff`.
-    ///
-    /// Positive `RSH * NRD/NRS` allocates drain/source prime nodes connected by
-    /// ordinary linear resistors. Self-heating allocates an internal
-    /// temperature-rise node when `SHMOD=1` and `RTH0` is nonzero.
-    fn build_b3soi_fd(
-        circuit: &mut CircuitData,
-        element: &crate::netlist::Element,
-        mos_type: crate::netlist::MosType,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        temperature_kelvin: f64,
-    ) -> Result<(), SimulationError> {
-        use crate::device::B3SoiFd;
-        use crate::device::B3SoiFdModel;
-        use crate::device::mosfet::b3soi::fd::BodyMode;
-        use crate::device::mosfet::b3soi::fd::temp::B3SoiFdGeometry;
-
-        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
-        let temp_k = temperature_kelvin;
-        let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
-        let tnom_k = crate::analysis::temperature::celsius_to_kelvin(tnom_c);
-
-        let model = std::sync::Arc::new(B3SoiFdModel::from_params(params_map, is_pmos, tnom_k));
-
-        let node_drain_external = circuit.get_or_create_node(&element.nodes[0]);
-        let node_gate = circuit.get_or_create_node(&element.nodes[1]);
-        let node_source_external = circuit.get_or_create_node(&element.nodes[2]);
-        let node_e = circuit.get_or_create_node(&element.nodes[3]);
-
-        let (node_body, body_mode) = if element.nodes.len() > 4 {
-            // Body contact: read its node for the initial guess only.
-            let b = circuit.get_or_create_node(&element.nodes[4]);
-            (b, BodyMode::TiedIdeal)
-        } else {
-            // Floating body: FD allocates no body node.
-            (0, BodyMode::Floating)
-        };
-
-        let l = instance_param(instance_params, &["L"]).unwrap_or(0.0);
-        let w = instance_param(instance_params, &["W"]).unwrap_or(0.0);
-        let geom = B3SoiFdGeometry {
-            l,
-            w,
-            drain_area: instance_param(instance_params, &["AD"]).unwrap_or(0.0),
-            source_area: instance_param(instance_params, &["AS"]).unwrap_or(0.0),
-            drain_squares: instance_param(instance_params, &["NRD"]).unwrap_or(0.0),
-            source_squares: instance_param(instance_params, &["NRS"]).unwrap_or(0.0),
-            drain_perimeter: instance_param(instance_params, &["PD"]).unwrap_or(0.0),
-            source_perimeter: instance_param(instance_params, &["PS"]).unwrap_or(0.0),
-            body_squares: instance_param(instance_params, &["NRB"]).unwrap_or(0.0),
-            rth0: instance_param(instance_params, &["RTH0"])
-                .or_else(|| params_map.get("RTH0").copied())
-                .unwrap_or(0.0),
-            cth0: instance_param(instance_params, &["CTH0"])
-                .or_else(|| params_map.get("CTH0").copied())
-                .unwrap_or(0.0),
-        };
-
-        let drain_resistance = model.sheet_resistance * geom.drain_squares;
-        let node_drain = if drain_resistance.is_finite() && drain_resistance > 0.0 {
-            let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rd", element.name),
-                node_drain_external,
-                dint,
-                drain_resistance,
-            );
-            dint
-        } else {
-            node_drain_external
-        };
-        let source_resistance = model.sheet_resistance * geom.source_squares;
-        let node_source = if source_resistance.is_finite() && source_resistance > 0.0 {
-            let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rs", element.name),
-                node_source_external,
-                sint,
-                source_resistance,
-            );
-            sint
-        } else {
-            node_source_external
-        };
-
-        let node_temp = if model.sh_mod == 1 && geom.rth0 != 0.0 {
-            circuit.get_or_create_node(&format!("{}.__temp.internal", element.name))
-        } else {
-            0
-        };
-
-        let mut device = B3SoiFd::new(
-            element.name.clone(),
-            node_drain,
-            node_gate,
-            node_source,
-            node_e,
-            node_temp,
-            node_body,
-            body_mode,
-            model,
-            geom,
-            temp_k,
-        )
-        .map_err(SimulationError::Circuit)?;
-
-        // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
-        if let Some(debug) = instance_param(instance_params, &["DEBUG"]) {
-            device.set_debug_mod(debug.round() as i32);
-        }
-        circuit.b3soi_fd.add(device);
-        Ok(())
-    }
-
-    /// Build and register a BSIMSOI partially-depleted (level 57) instance.
-    ///
-    /// Node topology (b3soipdset.c) matches DD: a 4-terminal `m d g s e` device
-    /// has a floating body modeled with an internal node
-    /// `<name>.__body.internal` (`bodyMod = 0`); a 5-terminal `m d g s e b`
-    /// device is a body tie. With `rbody == rbsh == 0` it is an ideal tie
-    /// (`bodyMod = 2`, the external `b` *is* the body node); otherwise it is a
-    /// nonideal tie (`bodyMod = 1`) whose body resistor is folded into the body
-    /// stamping. The supported PD decks use `rbody = 1`, so 5-terminal `t4` is a
-    /// nonideal tie.
-    fn build_b3soi_pd(
-        circuit: &mut CircuitData,
-        element: &crate::netlist::Element,
-        mos_type: crate::netlist::MosType,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        temperature_kelvin: f64,
-    ) -> Result<(), SimulationError> {
-        use crate::device::B3SoiPd;
-        use crate::device::B3SoiPdModel;
-        use crate::device::mosfet::b3soi::pd::BodyMode;
-        use crate::device::mosfet::b3soi::pd::temp::B3SoiPdGeometry;
-
-        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
-        let temp_k = temperature_kelvin;
-        let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
-        let tnom_k = crate::analysis::temperature::celsius_to_kelvin(tnom_c);
-
-        let model = std::sync::Arc::new(B3SoiPdModel::from_params(params_map, is_pmos, tnom_k));
-
-        let node_drain_external = circuit.get_or_create_node(&element.nodes[0]);
-        let node_gate = circuit.get_or_create_node(&element.nodes[1]);
-        let node_source_external = circuit.get_or_create_node(&element.nodes[2]);
-        let node_e = circuit.get_or_create_node(&element.nodes[3]);
-
-        let rbody = params_map.get("RBODY").copied().unwrap_or(0.0);
-        let rbsh = params_map.get("RBSH").copied().unwrap_or(0.0);
-        let ideal_tie = rbody == 0.0 && rbsh == 0.0;
-
-        let (node_body, node_p, body_mode) = if element.nodes.len() > 4 {
-            let b = circuit.get_or_create_node(&element.nodes[4]);
-            if ideal_tie {
-                // Ideal body tie: the external contact is the body node.
-                (b, b, BodyMode::TiedIdeal)
-            } else {
-                // Nonideal body tie: an internal body node sits behind the body
-                // resistor; the external contact is the `p` node.
-                let body = circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
-                (body, b, BodyMode::TiedResistive)
-            }
-        } else {
-            // Floating body: allocate an internal body node.
-            let body = circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
-            (body, 0, BodyMode::Floating)
-        };
-
-        let l = instance_param(instance_params, &["L"]).unwrap_or(0.0);
-        let w = instance_param(instance_params, &["W"]).unwrap_or(0.0);
-        let geom = B3SoiPdGeometry {
-            l,
-            w,
-            drain_area: instance_param(instance_params, &["AD"]).unwrap_or(0.0),
-            source_area: instance_param(instance_params, &["AS"]).unwrap_or(0.0),
-            drain_squares: instance_param(instance_params, &["NRD"]).unwrap_or(1.0),
-            source_squares: instance_param(instance_params, &["NRS"]).unwrap_or(1.0),
-            drain_perimeter: instance_param(instance_params, &["PD"]).unwrap_or(0.0),
-            source_perimeter: instance_param(instance_params, &["PS"]).unwrap_or(0.0),
-            body_squares: instance_param(instance_params, &["NRB"]).unwrap_or(1.0),
-            rth0: instance_param(instance_params, &["RTH0"])
-                .or_else(|| params_map.get("RTH0").copied())
-                .unwrap_or(0.0),
-            cth0: instance_param(instance_params, &["CTH0"])
-                .or_else(|| params_map.get("CTH0").copied())
-                .unwrap_or(0.0),
-            nseg: instance_param(instance_params, &["NSEG"]).unwrap_or(1.0),
-        };
-
-        // B3SOIPD creates drain/source prime nodes when RSH and NRD/NRS are
-        // positive (b3soipdset.c:1118-1159). The intrinsic device below is
-        // evaluated at those primes; the fixed sheet resistance is an ordinary
-        // linear resistor between the external terminal and its prime.
-        let drain_resistance = model.sheet_resistance * geom.drain_squares;
-        let node_drain = if drain_resistance.is_finite() && drain_resistance > 0.0 {
-            let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rd", element.name),
-                node_drain_external,
-                dint,
-                drain_resistance,
-            );
-            dint
-        } else {
-            node_drain_external
-        };
-        let source_resistance = model.sheet_resistance * geom.source_squares;
-        let node_source = if source_resistance.is_finite() && source_resistance > 0.0 {
-            let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rs", element.name),
-                node_source_external,
-                sint,
-                source_resistance,
-            );
-            sint
-        } else {
-            node_source_external
-        };
-        let node_temp = if model.sh_mod == 1 && geom.rth0 != 0.0 {
-            circuit.get_or_create_node(&format!("{}.__temp.internal", element.name))
-        } else {
-            0
-        };
-
-        let mut device = B3SoiPd::new(
-            element.name.clone(),
-            node_drain,
-            node_gate,
-            node_source,
-            node_e,
-            node_body,
-            node_p,
-            node_temp,
-            body_mode,
-            model,
-            geom,
-            temp_k,
-        )
-        .map_err(SimulationError::Circuit)?;
-
-        // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
-        if let Some(debug) = instance_param(instance_params, &["DEBUG"]) {
-            device.set_debug_mod(debug.round() as i32);
-        }
-        circuit.b3soi_pd.add(device);
-        Ok(())
-    }
-
-    /// Build and register a native BSIM3v3.3 (MOS level 8/9/49) instance.
-    ///
-    /// Topology is the standard 4-terminal bulk MOSFET `m d g s b`. Series
-    /// drain/source resistance follows b3temp.c: a conductance of
-    /// `1 / (RSH * NRD)` (resp. NRS) exists only when both factors are
-    /// positive; it is lowered to an ordinary linear resistor of
-    /// `RSH * NRD / M` ohms at an internal prime node, and the device's
-    /// drain/source point at the primes (ngspice stamps `m *
-    /// drainConductance` between dNode and dNodePrime, b3ld.c:3050).
-    #[allow(clippy::too_many_arguments)]
-    fn build_bsim3v3(
-        circuit: &mut CircuitData,
-        element: &crate::netlist::Element,
-        mos_type: crate::netlist::MosType,
-        model_key: &str,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        temperature_kelvin: f64,
-        tnom_default_k: f64,
-        shared: &mut HashMap<String, Bsim3v3SharedModel>,
-    ) -> Result<(), SimulationError> {
-        use crate::device::Bsim3v3Device;
-        use crate::device::mosfet::bsim3v3::{
-            Bsim3v3, Bsim3v3Geometry, Bsim3v3Model, Bsim3v3ModelTemp, SizeDepCache,
-        };
-
-        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
-        // BSIM3v3.3 has no instance TEMP/DTEMP (b3set.c); every instance
-        // evaluates at the circuit temperature, like ngspice's CKTtemp.
-        let temp_k = temperature_kelvin;
-
-        let entry = match shared.entry(model_key.to_string()) {
-            std::collections::hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
-            std::collections::hash_map::Entry::Vacant(vacant) => {
-                let model = std::sync::Arc::new(Bsim3v3Model::from_params(
-                    params_map,
-                    is_pmos,
-                    tnom_default_k,
-                ));
-                let model_temp = std::sync::Arc::new(Bsim3v3ModelTemp::new(&model, temp_k));
-                vacant.insert(Bsim3v3SharedModel {
-                    model,
-                    model_temp,
-                    size_cache: SizeDepCache::new(),
-                })
-            }
-        };
-
-        let multiplier = instance_param(instance_params, &["M"])
-            .filter(|m| m.is_finite() && *m > 0.0)
-            .unwrap_or(1.0);
-        let defaults = Bsim3v3Geometry::default();
-        let geom = Bsim3v3Geometry {
-            l: instance_param(instance_params, &["L"]).unwrap_or(defaults.l),
-            w: instance_param(instance_params, &["W"]).unwrap_or(defaults.w),
-            m: multiplier,
-            drain_area: instance_param(instance_params, &["AD"]).unwrap_or(0.0),
-            source_area: instance_param(instance_params, &["AS"]).unwrap_or(0.0),
-            drain_squares: instance_param(instance_params, &["NRD"])
-                .unwrap_or(defaults.drain_squares),
-            source_squares: instance_param(instance_params, &["NRS"])
-                .unwrap_or(defaults.source_squares),
-            drain_perimeter: instance_param(instance_params, &["PD"]).unwrap_or(0.0),
-            source_perimeter: instance_param(instance_params, &["PS"]).unwrap_or(0.0),
-            delvto: instance_param(instance_params, &["DELVTO", "DELVT0"]).unwrap_or(0.0),
-            mulu0: instance_param(instance_params, &["MULU0"]).unwrap_or(1.0),
-            ..defaults
-        };
-
-        let core = Bsim3v3::new_shared(
-            element.name.clone(),
-            std::sync::Arc::clone(&entry.model),
-            std::sync::Arc::clone(&entry.model_temp),
-            &mut entry.size_cache,
-            geom,
-        )
-        .map_err(SimulationError::Circuit)?;
-
-        let drain_external = circuit.get_or_create_node(&element.nodes[0]);
-        let gate = circuit.get_or_create_node(&element.nodes[1]);
-        let source_external = circuit.get_or_create_node(&element.nodes[2]);
-        let bulk_external = circuit.get_or_create_node(&element.nodes[3]);
-
-        // Internal prime nodes only when the series conductance exists
-        // (drain_conductance = 1/(RSH*NRD) > 0, b3temp.c:811-851).
-        let drain = if core.inst.drain_conductance > 0.0 {
-            let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rd", element.name),
-                drain_external,
-                dint,
-                1.0 / (core.inst.drain_conductance * multiplier),
-            );
-            dint
-        } else {
-            drain_external
-        };
-        let source = if core.inst.source_conductance > 0.0 {
-            let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rs", element.name),
-                source_external,
-                sint,
-                1.0 / (core.inst.source_conductance * multiplier),
-            );
-            sint
-        } else {
-            source_external
-        };
-        let charge_deficit = if core.model.nqs_mod != 0 {
-            circuit.get_or_create_node(&format!("{}.__charge", element.name))
-        } else {
-            0
-        };
-
-        circuit.bsim3v3.add(Bsim3v3Device::new(
-            element.name.clone(),
-            drain,
-            gate,
-            source,
-            bulk_external,
-            charge_deficit,
-            multiplier,
-            core,
-        ));
-        Ok(())
-    }
-
-    /// Build and register the native VDMOS power MOSFET.
-    ///
-    /// The same internal device backs Xyce MOS LEVEL=18 and ngspice's
-    /// `.model ... VDMOS` compatibility syntax. The current native core is a
-    /// source-referenced power MOSFET; Xyce's explicit bulk terminal is parsed
-    /// and retained as circuit syntax, but the VDMOS conduction model itself
-    /// uses source/body-referenced equations.
-    fn build_vdmos(
-        circuit: &mut CircuitData,
-        element: &crate::netlist::Element,
-        mos_type: crate::netlist::MosType,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        circuit_temperature_kelvin: f64,
-        default_tnom_kelvin: f64,
-    ) -> Result<(), SimulationError> {
-        if element.nodes.len() < 4 {
-            return Err(SimulationError::Circuit(format!(
-                "VDMOS '{}' requires drain, gate, source, and model/body syntax",
-                element.name
-            )));
-        }
-
-        let drain = circuit.get_or_create_node(&element.nodes[0]);
-        let gate = circuit.get_or_create_node(&element.nodes[1]);
-        let source = circuit.get_or_create_node(&element.nodes[2]);
-        let _bulk = circuit.get_or_create_node(&element.nodes[3]);
-
-        let mut vdmos = match mos_type {
-            crate::netlist::MosType::Nmos => {
-                crate::device::Vdmos::new_nvdmos(element.name.clone(), drain, gate, source)
-            }
-            crate::netlist::MosType::Pmos => {
-                crate::device::Vdmos::new_pvdmos(element.name.clone(), drain, gate, source)
-            }
-        }
-        .with_params(params_map)
-        .with_instance_params(params_map, instance_params);
-        let tnom_kelvin = params_map
-            .get("TNOM")
-            .copied()
-            .map(crate::analysis::temperature::celsius_to_kelvin)
-            .unwrap_or(default_tnom_kelvin);
-        let temp_kelvin = if let Some(temp_celsius) = instance_param(instance_params, &["TEMP"]) {
-            crate::analysis::temperature::celsius_to_kelvin(temp_celsius)
-        } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
-            circuit_temperature_kelvin + dtemp
-        } else {
-            circuit_temperature_kelvin
-        };
-        vdmos.set_temperature(temp_kelvin, tnom_kelvin);
-        vdmos.set_bulk_node(_bulk);
-
-        let has_xyce_drift = vdmos.xyce_level18
-            && (vdmos.xyce_drift_param_a > 0.0 || vdmos.xyce_drift_param_b > 0.0);
-        let has_drain_resistance = vdmos.rd.is_finite() && vdmos.rd > 1e-12;
-        let drain_drift = if has_xyce_drift {
-            if has_drain_resistance {
-                circuit.get_or_create_node(&format!("{}.__ddrift", element.name))
-            } else {
-                circuit.get_or_create_node(&format!("{}.__dint", element.name))
-            }
-        } else {
-            drain
-        };
-        let drain_int = if has_drain_resistance {
-            circuit.get_or_create_node(&format!("{}.__dint", element.name))
-        } else if has_xyce_drift {
-            drain_drift
-        } else {
-            drain
-        };
-        let source_int = if vdmos.rs.is_finite() && vdmos.rs > 1e-12 {
-            circuit.get_or_create_node(&format!("{}.__sint", element.name))
-        } else {
-            source
-        };
-        let d1_prime = if vdmos.d1_rs.is_finite() && vdmos.d1_rs > 1e-12 {
-            circuit.get_or_create_node(&format!("{}.__d1prime", element.name))
-        } else {
-            source
-        };
-
-        if drain_int != drain || source_int != source {
-            vdmos.set_internal_nodes(drain_int, source_int);
-        }
-        if drain_drift != drain {
-            vdmos.set_drain_drift_node(drain_drift);
-        }
-        if d1_prime != source {
-            vdmos.set_d1_prime_node(d1_prime);
-        }
-
-        circuit.vdmoses.add(vdmos);
-        Ok(())
-    }
-
-    /// Build and register a native BSIM4 v4.8 (MOS level 14/54) instance.
-    ///
-    /// Topology is the standard 4-terminal bulk MOSFET `m d g s b` (the
-    /// canonical mode set collapses every optional internal node of
-    /// b4set.c). Fixed series drain/source resistance follows b4temp.c:
-    /// explicit `NRD`/`NRS` wins, otherwise `RGEOMOD=1..8` may derive the
-    /// resistance from implicit S/D geometry when the square count is not
-    /// given. The conductance is lowered to an ordinary linear resistor at
-    /// an internal prime node, and the device's drain/source point at the
-    /// primes (ngspice stamps `m * drainConductance` between dNode and
-    /// dNodePrime). `RDSMOD=1` forces prime nodes and stamps its
-    /// bias-dependent external branches in the BSIM4 device. `RGATEMOD=1`
-    /// similarly lowers to a linear external-gate resistor and routes the
-    /// intrinsic device through a gate-prime node; `RGATEMOD=2` allocates the
-    /// same prime node but lets the BSIM4 device stamp the bias-dependent
-    /// gate-resistance branch natively. `RGATEMOD=3` additionally allocates a
-    /// middle-gate node for the native gate network. `RBODYMOD=1/2` allocates
-    /// the body-prime, drain-body, and source-body nodes used by the native DC
-    /// substrate network. Unsupported NQS combinations surface the module's
-    /// typed construction error.
-    #[allow(clippy::too_many_arguments)]
-    fn build_bsim4v8(
-        circuit: &mut CircuitData,
-        element: &crate::netlist::Element,
-        mos_type: crate::netlist::MosType,
-        model_key: &str,
-        params_map: &HashMap<String, f64>,
-        instance_params: &[(String, f64)],
-        temperature_kelvin: f64,
-        tnom_default_k: f64,
-        shared: &mut HashMap<String, Bsim4v8SharedModel>,
-    ) -> Result<(), SimulationError> {
-        use crate::device::Bsim4v8Device;
-        use crate::device::mosfet::bsim4v8::{
-            Bsim4v8, Bsim4v8Geometry, Bsim4v8Model, Bsim4v8ModelTemp, SizeDepCache,
-        };
-
-        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
-        // ngspice-46's BSIM4 parses an instance DTEMP but never uses it
-        // (see the module docs); every instance evaluates at the circuit
-        // temperature, like ngspice's CKTtemp.
-        let temp_k = temperature_kelvin;
-
-        let entry = match shared.entry(model_key.to_string()) {
-            std::collections::hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
-            std::collections::hash_map::Entry::Vacant(vacant) => {
-                let model = std::sync::Arc::new(Bsim4v8Model::from_params(
-                    params_map,
-                    is_pmos,
-                    tnom_default_k,
-                ));
-                // The charge model implements CAPMOD=0/1/2 (including the
-                // BSIM4 default CAPMOD=2) with CVCHARGEMOD=0/1. Reject unknown
-                // CVCHARGEMOD selectors
-                // up front when intrinsic charge is active; XPART<0
-                // (intrinsic charge suppression) remains honored.
-                if !(0..=1).contains(&model.cvcharge_mod) && model.xpart >= 0.0 {
-                    return Err(SimulationError::Circuit(format!(
-                        "MOSFET '{}': BSIM4 model '{}' requests CVCHARGEMOD={} which is \
-                         not implemented (only CVCHARGEMOD=0 or 1)",
-                        element.name, model_key, model.cvcharge_mod
-                    )));
-                }
-                let model_temp = std::sync::Arc::new(Bsim4v8ModelTemp::new(&model, temp_k));
-                vacant.insert(Bsim4v8SharedModel {
-                    model,
-                    model_temp,
-                    size_cache: SizeDepCache::new(),
-                })
-            }
-        };
-
-        let multiplier = instance_param(instance_params, &["M"])
-            .filter(|m| m.is_finite() && *m > 0.0)
-            .unwrap_or(1.0);
-        let defaults = Bsim4v8Geometry::default();
-        let given = |names: &[&str]| instance_param(instance_params, names);
-        let geom = Bsim4v8Geometry {
-            l: given(&["L"]).unwrap_or(defaults.l),
-            w: given(&["W"]).unwrap_or(defaults.w),
-            nf: given(&["NF"])
-                .filter(|nf| nf.is_finite() && *nf >= 1.0)
-                .unwrap_or(defaults.nf),
-            m: multiplier,
-            geo_mod: given(&["GEOMOD"]).map_or(defaults.geo_mod, |v| v as i32),
-            geo_mod_given: given(&["GEOMOD"]).is_some(),
-            rgeo_mod: given(&["RGEOMOD"]).map_or(defaults.rgeo_mod, |v| v as i32),
-            rgeo_mod_given: given(&["RGEOMOD"]).is_some(),
-            min_sd: given(&["MIN"]).map_or(defaults.min_sd, |v| v as i32),
-            drain_area: given(&["AD"]).unwrap_or(0.0),
-            drain_area_given: given(&["AD"]).is_some(),
-            source_area: given(&["AS"]).unwrap_or(0.0),
-            source_area_given: given(&["AS"]).is_some(),
-            drain_perimeter: given(&["PD"]).unwrap_or(0.0),
-            drain_perimeter_given: given(&["PD"]).is_some(),
-            source_perimeter: given(&["PS"]).unwrap_or(0.0),
-            source_perimeter_given: given(&["PS"]).is_some(),
-            drain_squares: given(&["NRD"]).unwrap_or(defaults.drain_squares),
-            drain_squares_given: given(&["NRD"]).is_some(),
-            source_squares: given(&["NRS"]).unwrap_or(defaults.source_squares),
-            source_squares_given: given(&["NRS"]).is_some(),
-            delvto: given(&["DELVTO", "DELVT0"]).unwrap_or(0.0),
-            mulu0: given(&["MULU0"]).unwrap_or(1.0),
-            dtemp: given(&["DTEMP"]).unwrap_or(0.0),
-            sa: given(&["SA"]).unwrap_or(0.0),
-            sb: given(&["SB"]).unwrap_or(0.0),
-            sd: given(&["SD"]).unwrap_or(0.0),
-            sc: given(&["SC"]).unwrap_or(0.0),
-            sc_given: given(&["SC"]).is_some(),
-            sca: given(&["SCA"]).unwrap_or(0.0),
-            sca_given: given(&["SCA"]).is_some(),
-            scb: given(&["SCB"]).unwrap_or(0.0),
-            scb_given: given(&["SCB"]).is_some(),
-            scc: given(&["SCC"]).unwrap_or(0.0),
-            scc_given: given(&["SCC"]).is_some(),
-            off: given(&["OFF"]).is_some_and(|v| v != 0.0),
-            ic_vds: given(&["ICVDS", "IC"]).unwrap_or(0.0),
-            ic_vgs: given(&["ICVGS"]).unwrap_or(0.0),
-            ic_vbs: given(&["ICVBS"]).unwrap_or(0.0),
-        };
-
-        let core = Bsim4v8::new_shared(
-            element.name.clone(),
-            std::sync::Arc::clone(&entry.model),
-            std::sync::Arc::clone(&entry.model_temp),
-            &mut entry.size_cache,
-            geom,
-        )
-        .map_err(SimulationError::Circuit)?;
-
-        let drain_external = circuit.get_or_create_node(&element.nodes[0]);
-        let gate_external = circuit.get_or_create_node(&element.nodes[1]);
-        let source_external = circuit.get_or_create_node(&element.nodes[2]);
-        let bulk_external = circuit.get_or_create_node(&element.nodes[3]);
-
-        // RDSMOD=1 forces prime nodes and stamps the nonlinear external
-        // branches inside the BSIM4 device. RDSMOD=0 keeps the older lowering
-        // of fixed RSH*NRD/NRS conductance to ordinary linear resistors.
-        let rds_mod = core.model.rds_mod == 1;
-        let drain = if rds_mod {
-            circuit.get_or_create_node(&format!("{}.__dint", element.name))
-        } else if core.inst.drain_conductance > 0.0 {
-            let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rd", element.name),
-                drain_external,
-                dint,
-                1.0 / (core.inst.drain_conductance * multiplier),
-            );
-            dint
-        } else {
-            drain_external
-        };
-        let source = if rds_mod {
-            circuit.get_or_create_node(&format!("{}.__sint", element.name))
-        } else if core.inst.source_conductance > 0.0 {
-            let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
-                format!("{}.__rs", element.name),
-                source_external,
-                sint,
-                1.0 / (core.inst.source_conductance * multiplier),
-            );
-            sint
-        } else {
-            source_external
-        };
-        let (gate_mid, gate) = match core.model.rgate_mod {
-            1 => {
-                let gint = circuit.get_or_create_node(&format!("{}.__gint", element.name));
-                circuit.resistors.add(
-                    format!("{}.__rg", element.name),
-                    gate_external,
-                    gint,
-                    1.0 / (core.inst.gate_conductance * multiplier),
-                );
-                (gate_external, gint)
-            }
-            2 => {
-                let gint = circuit.get_or_create_node(&format!("{}.__gint", element.name));
-                (gate_external, gint)
-            }
-            3 => {
-                let gmid = circuit.get_or_create_node(&format!("{}.__gmid", element.name));
-                let gint = circuit.get_or_create_node(&format!("{}.__gint", element.name));
-                circuit.resistors.add(
-                    format!("{}.__rg", element.name),
-                    gate_external,
-                    gmid,
-                    1.0 / (core.inst.gate_conductance * multiplier),
-                );
-                (gmid, gint)
-            }
-            _ => (gate_external, gate_external),
-        };
-        let rbody_mod = core.model.rbody_mod != 0;
-        let bulk = if rbody_mod {
-            circuit.get_or_create_node(&format!("{}.__body", element.name))
-        } else {
-            bulk_external
-        };
-        let drain_body = if rbody_mod {
-            circuit.get_or_create_node(&format!("{}.__dbody", element.name))
-        } else {
-            bulk
-        };
-        let source_body = if rbody_mod {
-            circuit.get_or_create_node(&format!("{}.__sbody", element.name))
-        } else {
-            bulk
-        };
-        let charge_deficit = if core.model.trnqs_mod != 0 {
-            circuit.get_or_create_node(&format!("{}.__charge", element.name))
-        } else {
-            0
-        };
-
-        circuit.bsim4v8.add(Bsim4v8Device::new(
-            element.name.clone(),
-            drain_external,
-            drain,
-            gate_external,
-            gate_mid,
-            gate,
-            source_external,
-            source,
-            bulk_external,
-            bulk,
-            drain_body,
-            source_body,
-            charge_deficit,
-            multiplier,
-            core,
-        ));
-        Ok(())
-    }
-}
-
-/// Per-`.model` shared BSIM3v3.3 state: the parsed card, its temperature
-/// block, and the (W, L)-keyed size-dependent parameter knots.
-struct Bsim3v3SharedModel {
-    model: std::sync::Arc<crate::device::Bsim3v3Model>,
-    model_temp: std::sync::Arc<crate::device::mosfet::bsim3v3::Bsim3v3ModelTemp>,
-    size_cache: crate::device::mosfet::bsim3v3::SizeDepCache,
-}
-
-/// Per-`.model` shared BSIM4 v4.8 state: the parsed card, its temperature
-/// block, and the (W, L, NF)-keyed size-dependent parameter knots.
-struct Bsim4v8SharedModel {
-    model: std::sync::Arc<crate::device::Bsim4v8Model>,
-    model_temp: std::sync::Arc<crate::device::mosfet::bsim4v8::Bsim4v8ModelTemp>,
-    size_cache: crate::device::mosfet::bsim4v8::SizeDepCache,
 }

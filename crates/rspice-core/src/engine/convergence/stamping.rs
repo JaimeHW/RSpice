@@ -26,15 +26,28 @@ impl Engine {
         rhs: &mut [Value],
         solution: &[Value],
     ) {
+        if let Err(err) = self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, rhs, solution) {
+            panic!("{err}");
+        }
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn try_stamp_nonlinear_devices_for_dc(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
         let junction_gmin =
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
-        self.stamp_nonlinear_devices_for_dc_with_junction_gmin(
+        self.try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
             circuit,
             matrix,
             rhs,
             solution,
             junction_gmin,
-        );
+        )
     }
 
     #[inline]
@@ -46,7 +59,27 @@ impl Engine {
         solution: &[Value],
         junction_gmin: Value,
     ) {
-        self.stamp_nonlinear_devices_for_operating_point(
+        if let Err(err) = self.try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            junction_gmin,
+        ) {
+            panic!("{err}");
+        }
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        junction_gmin: Value,
+    ) -> Result<(), SimulationError> {
+        self.try_stamp_nonlinear_devices_for_operating_point(
             circuit,
             matrix,
             rhs,
@@ -54,7 +87,7 @@ impl Engine {
             0.0,
             crate::xspice::AnalysisType::DcOp,
             junction_gmin,
-        );
+        )
     }
 
     #[inline]
@@ -65,30 +98,48 @@ impl Engine {
         rhs: &mut [Value],
         solution: &[Value],
     ) {
+        if let Err(err) =
+            self.try_stamp_static_probe_nonlinear_devices_for_dc(circuit, matrix, rhs, solution)
+        {
+            panic!("{err}");
+        }
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn try_stamp_static_probe_nonlinear_devices_for_dc(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
         let junction_gmin =
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
-        self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+        self.try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
             circuit,
             matrix,
             rhs,
             solution,
             junction_gmin,
-        );
+        )
     }
 
     #[inline]
-    pub(in crate::engine::convergence) fn stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+    pub(in crate::engine::convergence) fn try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
         junction_gmin: Value,
-    ) {
+    ) -> Result<(), SimulationError> {
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.update_jfet_static_linearizations(solution);
-        circuit.stamp_nonlinear(matrix, rhs, solution);
+        circuit.stamp_generic_switches(matrix, rhs, 0.0);
+        circuit
+            .try_stamp_nonlinear(matrix, rhs, solution)
+            .map_err(SimulationError::Circuit)?;
         circuit.stamp_behavioral(matrix, rhs, solution, 0.0);
         if circuit.has_xspice_devices() {
             circuit.evaluate_xspice_with_analysis(
@@ -99,10 +150,11 @@ impl Engine {
             );
             circuit.stamp_xspice(matrix, rhs);
         }
+        Ok(())
     }
 
     #[inline]
-    pub(in crate::engine::convergence) fn stamp_nonlinear_devices_for_operating_point(
+    pub(in crate::engine::convergence) fn try_stamp_nonlinear_devices_for_operating_point(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
@@ -111,15 +163,19 @@ impl Engine {
         time: Value,
         analysis: crate::xspice::AnalysisType,
         junction_gmin: Value,
-    ) {
+    ) -> Result<(), SimulationError> {
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
-        circuit.stamp_nonlinear(matrix, rhs, solution);
+        circuit.stamp_generic_switches(matrix, rhs, time);
+        circuit
+            .try_stamp_nonlinear(matrix, rhs, solution)
+            .map_err(SimulationError::Circuit)?;
         circuit.stamp_behavioral(matrix, rhs, solution, time);
         if circuit.has_xspice_devices() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
             circuit.stamp_xspice(matrix, rhs);
         }
+        Ok(())
     }
 
     #[inline]
@@ -203,5 +259,6 @@ impl Engine {
             .voltage_sources
             .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.update_transient_rhs(rhs, time);
+        circuit.stamp_generic_switches(matrix, rhs, time);
     }
 }

@@ -50,7 +50,7 @@ impl CircuitData {
             let op = mosfet.op_values();
             entries.push(DeviceOpEntry {
                 name: mosfet.name.clone(),
-                device_kind: "MOSFET",
+                device_kind: mosfet.device_kind(),
                 region: Some(op.region),
                 params: vec![
                     ("id", op.id),
@@ -166,6 +166,37 @@ impl CircuitData {
             });
         }
 
+        for dev in &self.ekv26s.devices {
+            let op = dev.op_values();
+            entries.push(DeviceOpEntry {
+                name: dev.name.clone(),
+                device_kind: "EKV26",
+                region: None,
+                params: vec![
+                    ("id", op.id),
+                    ("vgs", op.vgs),
+                    ("vds", op.vds),
+                    ("vbs", op.vbs),
+                ],
+            });
+        }
+
+        for dev in &self.ekv3s.devices {
+            let op = dev.op_values();
+            entries.push(DeviceOpEntry {
+                name: dev.name.clone(),
+                device_kind: "EKV3",
+                region: None,
+                params: vec![
+                    ("id", op.id),
+                    ("vgs", op.vgs),
+                    ("vds", op.vds),
+                    ("vbs", op.vbs),
+                    ("gm", op.gm),
+                ],
+            });
+        }
+
         for vdmos in &self.vdmoses.devices {
             let (id, vgs, vds, diode_id, power, region) = vdmos.op_values();
             entries.push(DeviceOpEntry {
@@ -216,7 +247,9 @@ impl CircuitData {
                 crate::device::JfetChannelModel::ShichmanHodges => "JFET",
                 crate::device::JfetChannelModel::ParkerSkellern => "JFET2",
                 crate::device::JfetChannelModel::XyceModifiedShockley => "JFET2_XYCE",
-                _ => "MESFET",
+                crate::device::JfetChannelModel::LegacyMesfet => "MESFET",
+                crate::device::JfetChannelModel::Hfet1 if jfet.params.hfet_level == 6 => "HFET2",
+                crate::device::JfetChannelModel::Hfet1 => "HFET1",
             };
             entries.push(DeviceOpEntry {
                 name: jfet.name.clone(),
@@ -240,6 +273,15 @@ impl CircuitData {
     /// Read-only access to linear resistor storage (names, nodes, conductances).
     pub fn resistor_storage(&self) -> &Resistors {
         &self.resistors
+    }
+
+    /// Native diode terminal nodes by instance name, if present.
+    pub fn diode_terminal_nodes(&self, name: &str) -> Option<(NodeId, NodeId)> {
+        self.diodes
+            .devices
+            .iter()
+            .find(|diode| diode.name.eq_ignore_ascii_case(name))
+            .map(|diode| (diode.node_anode, diode.node_cathode))
     }
 
     /// Read-only access to capacitor storage (names, nodes, capacitances, ICs).
@@ -294,6 +336,8 @@ impl CircuitData {
             + self.diodes.len()
             + self.bjts.len()
             + self.mosfets.len()
+            + self.ekv26s.len()
+            + self.ekv3s.len()
             + self.vdmoses.len()
             + self.jfets.len()
             + self.vcvs.len()

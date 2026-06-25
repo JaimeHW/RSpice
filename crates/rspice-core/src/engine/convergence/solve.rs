@@ -112,6 +112,7 @@ impl Engine {
             .linear_presolve_for_guess(circuit, matrix)
             .unwrap_or_else(|| vec![0.0; size]);
 
+        Self::apply_b3soi_pd_initial_guess_correction(&mut initial_guess, circuit);
         for &(node_id, voltage) in node_hints {
             if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
                 continue;
@@ -202,7 +203,7 @@ impl Engine {
             // Stamp linear devices
             circuit.stamp_dc_direct(matrix, &mut rhs);
             // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
-            self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
+            self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             // Solve linearized system
             let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
             // Voltage-limiting style damping is critical for strongly-coupled
@@ -278,7 +279,7 @@ impl Engine {
             }
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && self.nonlinear_residual_converged(circuit, matrix, &new_solution);
+                && self.try_nonlinear_residual_converged(circuit, matrix, &new_solution)?;
             solution = new_solution;
             if voltage_converged && device_converged && nonlinear_residual_converged {
                 if hit_voltage_limit {
@@ -721,7 +722,7 @@ impl Engine {
             Self::stamp_transient_operating_point_linear(
                 circuit, matrix, &mut rhs, time, gmin_floor,
             );
-            self.stamp_nonlinear_devices_for_operating_point(
+            self.try_stamp_nonlinear_devices_for_operating_point(
                 circuit,
                 matrix,
                 &mut rhs,
@@ -729,7 +730,7 @@ impl Engine {
                 time,
                 crate::xspice::AnalysisType::Transient,
                 junction_gmin,
-            );
+            )?;
 
             let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
             let mut new_solution = if requires_conservative_nonlinear_limiting

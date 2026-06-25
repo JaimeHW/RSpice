@@ -379,7 +379,12 @@ impl Engine {
                 probe.add(i, i, gmin_floor);
             }
             circuit.stamp_dc_direct(probe, rhs);
-            self.stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution);
+            if self
+                .try_stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution)
+                .is_err()
+            {
+                return false;
+            }
             let residual_norm = probe
                 .scaled_residual_inf_norm(
                     solution,

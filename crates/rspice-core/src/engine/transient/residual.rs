@@ -26,6 +26,7 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) b3soi_history: &'a B3SoiTransientHistory,
     pub(super) bsim3_history: &'a Bsim3TransientHistory,
     pub(super) bsim4_history: &'a Bsim4TransientHistory,
+    pub(super) ekv26_history: &'a Ekv26TransientHistory,
     pub(super) suppress_gate_charge: bool,
     pub(super) tline_dc_refs: &'a [(Value, Value)],
     pub(super) coupled_tline_refs: &'a [CoupledTlineReferenceState],
@@ -179,6 +180,16 @@ impl Engine {
             dt,
             ctx.bsim4_history,
         );
+        Self::stamp_ekv26_transient_companions(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            ctx.method,
+            ctx.trap_order,
+            dt,
+            ctx.ekv26_history,
+        );
         Self::stamp_tline_companions(circuit, matrix, rhs, time, ctx.tline_dc_refs);
         Self::stamp_coupled_tline_companions(
             circuit,
@@ -188,6 +199,7 @@ impl Engine {
             dt,
             ctx.coupled_tline_refs,
         );
+        circuit.stamp_generic_switches(matrix, rhs, time);
 
         if circuit.has_nonlinear_devices() {
             #[cfg(feature = "veriloga")]
@@ -395,6 +407,9 @@ Q1 C B E 0 QN
         let mut bsim4_history = Engine::initialize_bsim4_history(&circuit, &base);
         bsim4_history.accepted_dt_prev = dt;
         bsim4_history.accepted_dt_prev_prev = dt;
+        let mut ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
+        ekv26_history.accepted_dt_prev = dt;
+        ekv26_history.accepted_dt_prev_prev = dt;
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         circuit.set_semiconductor_junction_gmin(
             engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target),
@@ -421,6 +436,7 @@ Q1 C B E 0 QN
             b3soi_history: &b3soi_history,
             bsim3_history: &bsim3_history,
             bsim4_history: &bsim4_history,
+            ekv26_history: &ekv26_history,
             suppress_gate_charge: false,
             tline_dc_refs: &tline_dc_refs,
             coupled_tline_refs: &coupled_tline_refs,
@@ -815,6 +831,7 @@ Q1 C B E 0 QN
             let b3soi_history = Engine::initialize_b3soi_history(&circuit, &base);
             let bsim3_history = Engine::initialize_bsim3_history(&circuit, &base);
             let bsim4_history = Engine::initialize_bsim4_history(&circuit, &base);
+            let ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
             let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
             circuit.set_semiconductor_junction_gmin(
                 engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target),
@@ -838,6 +855,7 @@ Q1 C B E 0 QN
                 b3soi_history: &b3soi_history,
                 bsim3_history: &bsim3_history,
                 bsim4_history: &bsim4_history,
+                ekv26_history: &ekv26_history,
                 suppress_gate_charge: false,
                 tline_dc_refs: &tline_dc_refs,
                 coupled_tline_refs: &coupled_tline_refs,

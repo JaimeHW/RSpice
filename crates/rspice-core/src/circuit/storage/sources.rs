@@ -761,6 +761,12 @@ pub struct CurrentSources {
 }
 
 impl CurrentSources {
+    #[inline]
+    fn finite_dc_value(&self, index: usize) -> Value {
+        let value = self.dc_values[index];
+        if value.is_finite() { value } else { 0.0 }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -859,7 +865,7 @@ impl CurrentSources {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
-            let current = self.dc_values[i];
+            let current = self.finite_dc_value(i);
 
             if np > 0 {
                 rhs[np - 1] -= current;
@@ -876,7 +882,7 @@ impl CurrentSources {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
-            let current = self.dc_values[i] * scale;
+            let current = self.finite_dc_value(i) * scale;
 
             if np > 0 {
                 rhs[np - 1] -= current;
@@ -903,8 +909,8 @@ impl CurrentSources {
                 time,
                 self.transient_context,
             );
-            let delta = value - self.dc_values[i];
-            if delta == 0.0 {
+            let delta = value - self.finite_dc_value(i);
+            if !delta.is_finite() || delta == 0.0 {
                 continue;
             }
 
@@ -943,8 +949,8 @@ impl CurrentSources {
             .filter_map(|(idx, spec)| spec.as_ref().map(|spec| (idx, spec)))
             .map(|(idx, spec)| {
                 (VoltageSources::evaluate_source_at_time_with_context(spec, time, context)
-                    - self.dc_values[idx])
-                    .abs()
+                    - self.finite_dc_value(idx))
+                .abs()
             })
             .fold(0.0, Value::max)
     }
@@ -1089,5 +1095,29 @@ mod tests {
         );
 
         assert_close(value, 5.0 / 6.0);
+    }
+
+    #[test]
+    fn current_source_pwl_without_dc_uses_zero_transient_baseline() {
+        let mut sources = CurrentSources::new();
+        sources.add_with_ac_and_spec(
+            "is".to_string(),
+            1,
+            0,
+            Value::NAN,
+            0.0,
+            0.0,
+            Some(SourceSpec::Pwl {
+                points: vec![(0.0, 0.0), (1.0e-6, 1.0e-3)],
+            }),
+        );
+
+        let mut rhs = vec![0.0];
+        sources.stamp_all(&mut rhs);
+        assert_eq!(rhs[0], 0.0);
+
+        sources.update_transient_rhs(&mut rhs, 0.5e-6);
+        assert_close(rhs[0], -0.5e-3);
+        assert_close(sources.max_dc_to_transient_delta(0.5e-6), 0.5e-3);
     }
 }

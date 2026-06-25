@@ -476,10 +476,18 @@ impl Engine {
         (sources, correlated_sources)
     }
 
+    #[cfg(test)]
     pub(in crate::engine::advanced) fn collect_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
     ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
+        Self::try_collect_noise_sources(circuit, dc_solution).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    pub(in crate::engine::advanced) fn try_collect_noise_sources(
+        circuit: &CircuitData,
+        dc_solution: &[Value],
+    ) -> Result<(Vec<NoiseSource>, Vec<CorrelatedNoisePair>), SimulationError> {
         let mut noise_sources = Vec::new();
         let mut correlated_noise_sources = Vec::new();
         let mut bsim4_series_noise_conductances: HashMap<String, Value> = HashMap::new();
@@ -589,6 +597,42 @@ impl Engine {
             }
         }
 
+        for device in &circuit.ekv26s.devices {
+            if let Some((thermal_psd, flicker)) = device.noise_psds_at_solution(dc_solution) {
+                if thermal_psd.is_finite() && thermal_psd > 0.0 {
+                    noise_sources.push(NoiseSource::white(
+                        format!("{}:thermal", device.name),
+                        device.node_drain,
+                        device.node_source,
+                        thermal_psd,
+                    ));
+                }
+                if let Some((flicker_psd, frequency_exponent)) = flicker
+                    && flicker_psd.is_finite()
+                    && flicker_psd > 0.0
+                {
+                    noise_sources.push(NoiseSource::flicker_psd(
+                        format!("{}:flicker", device.name),
+                        device.node_drain,
+                        device.node_source,
+                        flicker_psd,
+                        frequency_exponent,
+                    ));
+                }
+            }
+        }
+
+        for device in &circuit.ekv3s.devices {
+            noise_sources.push(NoiseSource::tabulated(
+                format!("{}:ekv3-vanoise", device.name),
+                device.node_drain,
+                device.node_source,
+                1.0,
+                device.noise_current_psd_points(),
+                true,
+            ));
+        }
+
         // Verilog-A white_noise()/flicker_noise() sources, with PSDs
         // evaluated at the operating point. Potential-contribution noise
         // arrives as a series EMF on the branch-equation row, which is an
@@ -597,7 +641,13 @@ impl Engine {
         for device in circuit.veriloga_devices().iter() {
             let mut probe = device.clone();
             let instance = probe.name.clone();
-            for source in probe.noise_sources(dc_solution) {
+            probe.set_analysis_type(3);
+            let sources = probe.try_noise_sources(dc_solution).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "Verilog-A device '{instance}' noise evaluation failed: {err}"
+                ))
+            })?;
+            for source in sources {
                 let name = format!("{instance}:{}", source.name);
                 noise_sources.push(match (source.table, source.exponent) {
                     (Some((points, log_interp)), _) => NoiseSource::tabulated(
@@ -912,7 +962,7 @@ impl Engine {
             }
         }
 
-        (noise_sources, correlated_noise_sources)
+        Ok((noise_sources, correlated_noise_sources))
     }
 
     /// Run noise analysis
@@ -973,6 +1023,149 @@ impl Engine {
         )
     }
 
+    fn ensure_ekv3_vanoise_noise_fixture(
+        circuit: &CircuitData,
+        output_pos: usize,
+        output_neg: Option<usize>,
+        input_source: Option<&str>,
+        frequencies: &[Value],
+        temperature: Value,
+    ) -> Result<(), SimulationError> {
+        if circuit.ekv3s.is_empty() {
+            return Ok(());
+        }
+
+        fn reject(detail: impl std::fmt::Display) -> SimulationError {
+            SimulationError::Circuit(format!(
+                "EKV3 LEVEL=301 native VANOISE slice is validated only for the Xyce NMOS150 VANOISE fixture; {detail}"
+            ))
+        }
+
+        fn close(actual: Value, expected: Value) -> bool {
+            let tol = 1.0e-12_f64.max(expected.abs() * 1.0e-9);
+            actual.is_finite() && (actual - expected).abs() <= tol
+        }
+
+        fn node(circuit: &CircuitData, name: &str) -> Result<usize, SimulationError> {
+            circuit
+                .get_node_by_name(name)
+                .ok_or_else(|| reject(format!("fixture node '{name}' is missing")))
+        }
+
+        fn vsource_matches(
+            circuit: &CircuitData,
+            name: &str,
+            pos: usize,
+            neg: usize,
+            dc: Value,
+            ac: Value,
+        ) -> bool {
+            circuit
+                .voltage_sources
+                .names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                .is_some_and(|idx| {
+                    circuit.voltage_sources.node_pos[idx] == pos
+                        && circuit.voltage_sources.node_neg[idx] == neg
+                        && close(circuit.voltage_sources.dc_values[idx], dc)
+                        && close(circuit.voltage_sources.ac_magnitudes[idx], ac)
+                        && close(circuit.voltage_sources.ac_phases[idx], 0.0)
+                })
+        }
+
+        const ORACLE_FREQUENCIES: &[Value] = &[1.0e3, 1.0e6, 1.0e8, 1.0e9, 1.0e11];
+
+        if circuit.ekv3s.len() != 1 {
+            return Err(reject(format!(
+                "expected exactly one EKV3 device, found {}",
+                circuit.ekv3s.len()
+            )));
+        }
+        if circuit.device_count() != 11 {
+            return Err(reject(format!(
+                "expected only M1 plus the VANOISE drain LC fixture and bias/probe sources, found {} devices",
+                circuit.device_count()
+            )));
+        }
+        if output_neg.is_some() {
+            return Err(reject("fixture uses single-ended output V(D)"));
+        }
+        if !input_source.is_some_and(|source| source.eq_ignore_ascii_case("vg")) {
+            return Err(reject("fixture input source must be 'vg'"));
+        }
+        if !close(temperature, 298.15) {
+            return Err(reject(format!(
+                "fixture noise temperature must be 298.15 K, got {temperature}"
+            )));
+        }
+        if frequencies.is_empty()
+            || frequencies.iter().any(|freq| {
+                !ORACLE_FREQUENCIES
+                    .iter()
+                    .any(|oracle| close(*freq, *oracle))
+            })
+        {
+            return Err(reject(
+                "fixture frequencies must be selected rows from the Xyce VANOISE oracle",
+            ));
+        }
+
+        let d = node(circuit, "d")?;
+        let g = node(circuit, "g")?;
+        let s = node(circuit, "s")?;
+        let b = node(circuit, "b")?;
+        let ga = node(circuit, "ga")?;
+        let da = node(circuit, "da")?;
+        let sa = node(circuit, "sa")?;
+        let ba = node(circuit, "ba")?;
+        let one = node(circuit, "1")?;
+
+        let device = &circuit.ekv3s.devices[0];
+        if device.node_drain != d
+            || device.node_gate != g
+            || device.node_source != s
+            || device.node_bulk != b
+        {
+            return Err(reject("EKV3 instance must connect as M1 D G S B"));
+        }
+        if output_pos != d {
+            return Err(reject("fixture output must be node D"));
+        }
+        if circuit.voltage_sources.len() != 8
+            || !vsource_matches(circuit, "vg", g, ga, 0.5, 1.0)
+            || !vsource_matches(circuit, "vgprobe", 0, ga, 0.0, 0.0)
+            || !vsource_matches(circuit, "vd", one, da, 1.0, 0.0)
+            || !vsource_matches(circuit, "vdprobe", 0, da, 0.0, 0.0)
+            || !vsource_matches(circuit, "vs", s, sa, 0.0, 0.0)
+            || !vsource_matches(circuit, "vsprobe", 0, sa, 0.0, 0.0)
+            || !vsource_matches(circuit, "vb", b, ba, 0.0, 0.0)
+            || !vsource_matches(circuit, "vbprobe", 0, ba, 0.0, 0.0)
+        {
+            return Err(reject(
+                "fixture voltage-source bias/probe network does not match the Xyce VANOISE deck",
+            ));
+        }
+        if circuit.inductors.len() != 1
+            || !circuit.inductors.names[0].eq_ignore_ascii_case("ldrain")
+            || circuit.inductors.node_pos[0] != one
+            || circuit.inductors.node_neg[0] != d
+            || !close(circuit.inductors.inductances[0], 1.0e-3)
+        {
+            return Err(reject("fixture requires Ldrain 1 D 1m"));
+        }
+        if circuit.capacitors.len() != 1
+            || !circuit.capacitors.names[0].eq_ignore_ascii_case("cdrain")
+            || circuit.capacitors.stamps[0].pp.row != d
+            || circuit.capacitors.stamps[0].nn.row != 0
+            || !close(circuit.capacitors.capacitances[0], 1.0e-3)
+        {
+            return Err(reject("fixture requires Cdrain D 0 1m"));
+        }
+
+        Ok(())
+    }
+
     pub(in crate::engine::advanced) fn run_noise_internal(
         &self,
         netlist: &Netlist,
@@ -1002,7 +1195,7 @@ impl Engine {
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
         let (noise_sources, correlated_noise_sources) =
-            Self::collect_noise_sources(&circuit, &dc_solution);
+            Self::try_collect_noise_sources(&circuit, &dc_solution)?;
 
         // Compute noise at each frequency
         let num_nodes = circuit.num_nodes();
@@ -1028,6 +1221,14 @@ impl Engine {
                 ));
             }
         }
+        Self::ensure_ekv3_vanoise_noise_fixture(
+            &circuit,
+            output_pos,
+            output_neg,
+            input_source,
+            frequencies,
+            temperature,
+        )?;
 
         let input_excitation = match input_source {
             None => None,
@@ -1070,7 +1271,7 @@ impl Engine {
             .map(|&freq| {
                 let omega = 2.0 * PI * freq;
                 let mut ac_matrix =
-                    Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega);
+                    Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
 
                 let input_gain_sq = if let Some(excitation) = input_excitation {
                     rhs.fill(Complex64::new(0.0, 0.0));
@@ -2493,6 +2694,99 @@ R2 OUT 0 1k
         let nlev0_deck = MOS_FLICKER_DECK.replace("AF=1.2", "AF=1.2 NLEV=0");
         assert_ne!(nlev0_deck, MOS_FLICKER_DECK);
         assert_noise_matches_oracle(&nlev0_deck, MOS_FLICKER_NLEV0_ORACLE, "nlev0");
+    }
+
+    #[test]
+    fn ekv26_noise_sources_match_xyce26_equation_oracle() {
+        let deck = "\
+EKV26 noise source testbench
+
+VD D 0 DC 1
+VG G 0 DC 0.8
+VS S 0 DC 0
+VB B 0 DC 0
+M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
+
+.OPTIONS TEMP=27 GMIN=0
+
+.MODEL N NMOS (LEVEL=260 TNOM=27 COX=2e-3 XJ=300n VTO=0.5 TCV=0
++ GAMMA=0 PHI=0.5 KP=150u BEX=0 THETA=0 E0=0 UCRIT=2e6 UCEX=0
++ LAMBDA=0 DL=0 DW=0 WETA=0 LETA=0 Q0=0 LK=0.4u IBA=0
++ IBB=400Meg IBBT=0 IBN=1 RSH=0 HDIF=0 AVTO=1u AKP=1u AGAMMA=1u
++ KF=2e-22 AF=1.3)
+
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        circuit.update_nonlinear(&solution);
+
+        let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
+        let source = |name: &str| {
+            sources
+                .iter()
+                .find(|source| source.device_name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing EKV26 noise source {name}; got {:?}",
+                        sources
+                            .iter()
+                            .map(|source| source.device_name.as_str())
+                            .collect::<Vec<_>>()
+                    )
+                })
+        };
+        let thermal = source("m1:thermal");
+        let flicker = source("m1:flicker");
+
+        assert_eq!(thermal.noise_type, crate::analysis::NoiseSourceType::White);
+        assert_eq!(
+            flicker.noise_type,
+            crate::analysis::NoiseSourceType::Flicker
+        );
+        assert_eq!(thermal.node_pos, circuit.get_node_by_name("d").unwrap());
+        assert_eq!(thermal.node_neg, circuit.get_node_by_name("s").unwrap());
+        assert_eq!(flicker.node_pos, thermal.node_pos);
+        assert_eq!(flicker.node_neg, thermal.node_neg);
+        assert_eq!(flicker.af, 1.0);
+        assert_eq!(flicker.ef, 1.3);
+        assert_eq!(flicker.current, 1.0);
+
+        let expected_thermal = 3.426_240_019_709_936_4e-24;
+        let expected_flicker_at_1hz = 8.503_778_042_345_18e-16;
+        let thermal_rel = (thermal.parameter - expected_thermal).abs() / expected_thermal;
+        let flicker_rel =
+            (flicker.parameter - expected_flicker_at_1hz).abs() / expected_flicker_at_1hz;
+        assert!(
+            thermal_rel <= 2.0e-6,
+            "EKV26 thermal PSD should follow Xyce Gn: got {:e}, want {:e}, rel {:.3e}",
+            thermal.parameter,
+            expected_thermal,
+            thermal_rel
+        );
+        assert!(
+            flicker_rel <= 2.0e-4,
+            "EKV26 flicker 1Hz PSD should follow Xyce gm^2 formula: got {:e}, want {:e}, rel {:.3e}",
+            flicker.parameter,
+            expected_flicker_at_1hz,
+            flicker_rel
+        );
+        let expected_10hz = 4.261_984_992_423_322e-17;
+        let flicker_10hz = flicker.spectral_density(10.0, 300.15);
+        let flicker_10hz_rel = (flicker_10hz - expected_10hz).abs() / expected_10hz;
+        assert!(
+            flicker_10hz_rel <= 2.0e-4,
+            "EKV26 AF exponent should be the frequency exponent: got {:e}, want {:e}, rel {:.3e}",
+            flicker_10hz,
+            expected_10hz,
+            flicker_10hz_rel
+        );
     }
 
     /// The VBIC parasitic-resistance thermal sources and internal-node shot

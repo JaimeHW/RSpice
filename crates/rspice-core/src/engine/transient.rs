@@ -31,421 +31,27 @@ fn newton_merit_debug_enabled() -> bool {
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
-use companion_stamps::TwoTerminalStampSlots;
+pub(self) use companion_stamps::TwoTerminalStampSlots;
+mod charge_stamper;
+pub(self) use charge_stamper::StaticMatrixChargeStamper;
 mod globalization;
 mod noise;
 mod rescue;
 mod residual;
 mod startup;
 mod state;
+mod state_advanced_mos;
+mod state_commit;
+mod state_recovery;
+mod state_transmission_lines;
 mod step_control;
 mod truncation;
 mod vbic;
 
 pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
 
-/// Maximum voltage limit for solution values (matching DC solver)
-///
-/// Commercial simulators like Spectre/HSPICE use similar limits to prevent
-/// Newton-Raphson divergence on stiff nonlinear circuits (e.g., BJT exponential I-V).
-/// This value matches the DC solver's MAX_VOLTAGE in convergence.rs for consistency.
-const MAX_VOLTAGE: Value = 1000.0;
-/// Conservative magnitude limit for branch-state unknowns (currents and auxiliary
-/// MNA variables). These states can legitimately exceed node-voltage scales in
-/// tightly coupled passive networks, so they need a separate guardrail.
-const MAX_BRANCH_STATE_MAGNITUDE: Value = 1e12;
-/// Maximum allowed per-iteration node update during Newton damping.
-///
-/// This bound controls nonlinear solve trust-region size.
-const MAX_NEWTON_ITER_DELTA_V: Value = 1e-2;
-/// Initial global trust-region limit for the ngspice legacy-BJT backend.
-///
-/// Legacy BJTs use ngspice-style local pnjlim limiting internally; this wider
-/// nodal leash lets sharp switching steps converge without removing the global
-/// guardrail completely.
-const LEGACY_NGSPICE_BJT_NEWTON_ITER_DELTA_V: Value = 1.5e-2;
-/// Largest node trust-region used after repeated finite Newton corrections.
-///
-/// Device-local junction limiting still governs semiconductor branch voltages;
-/// this cap only prevents the global MNA node update limiter from turning a
-/// valid large-signal transition into hundreds of identical 10 mV iterations.
-const MAX_ADAPTIVE_NEWTON_ITER_DELTA_V: Value = STARTUP_RECOVERY_DELTA_V;
-/// Number of failed Newton retries at a timepoint before the global node
-/// trust region is re-engaged as a rescue.
-///
-/// ngspice never clamps node updates globally during transient stepping, so
-/// the first attempts at each timepoint run pure Newton (with device-level
-/// junction limiting) to preserve ngspice waveform and timestep parity. Only
-/// when a point has already failed repeatedly does the conservative damping
-/// return as a robustness fallback.
-const CONSERVATIVE_LIMITING_RETRY_THRESHOLD: usize = 2;
-/// Maximum allowed node update when committing force-accepted steps.
-///
-/// This remains tight to avoid committing nonphysical jumps into reactive history.
-const MAX_FORCE_ACCEPT_DELTA_V: Value = 5e-2;
-/// Relaxed trust-region limit used only during early startup when DC OP failed and
-/// transient had to begin from a linearized seed.
-const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
-/// Minimum failed retries required at the effective minimum timestep before a
-/// timepoint may be force-accepted.
-const MIN_RETRIES_AT_MINIMUM_TIMESTEP: usize = 1;
-/// Failed Newton retries at a timepoint before the gmin-continuation rescue
-/// is attempted (see `transient/rescue.rs`). The first retries stay on the
-/// plain dt-cut path so ordinary stiffness keeps ngspice-parity stepping;
-/// a knife edge that survives two cuts is dt-independent and goes to
-/// continuation before the cut cascade can poison the charge history.
-const TRANSIENT_GMIN_RESCUE_MIN_RETRIES: usize = 2;
-/// Source edge magnitude that triggers transient source-step capping.
-const SOURCE_ACTIVE_DELTA: Value = 1e-2;
-/// Largest single source movement to allow on proactive nonlinear ramp tracking.
-const SOURCE_RAMP_TRACKING_DELTA: Value = 5e-2;
-/// Local ngspice `NIiter()` raises any smaller iteration limit to 100.
-const NGSPICE_NIITER_MIN_ITERATIONS: usize = 100;
-/// Safety cap for synthesized transmission-line arrival breakpoints.
-const MAX_PROPAGATED_TLINE_BREAKPOINTS: usize = 200_000;
-/// Safety cap for dynamically scheduled transmission-line arrival breakpoints.
-const MAX_DYNAMIC_TLINE_BREAKPOINTS: usize = 200_000;
-const VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL: Value = 1e-15;
-const VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL: Value = 1e-12;
-const BJT_VBIC_TRUNCATION_BRANCH_COUNT: usize = BJT_DYNAMIC_CHARGE_COUNT - 3;
-const BJT_VCX_STATE_INDEX: usize = 0;
-const BJT_VCI_STATE_INDEX: usize = 1;
-const BJT_VBX_STATE_INDEX: usize = 2;
-const BJT_VBI_STATE_INDEX: usize = 3;
-const BJT_VEI_STATE_INDEX: usize = 4;
-const BJT_VBP_STATE_INDEX: usize = 5;
-const BJT_VSI_STATE_INDEX: usize = 6;
-const BJT_THERMAL_STATE_INDEX: usize = BJT_INTERNAL_STATE_DIM - 3;
-const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
-const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
-const BJT_QBE_BRANCH_INDEX: usize = 0;
-const BJT_QBC_BRANCH_INDEX: usize = 2;
-const BJT_QBCX_BRANCH_INDEX: usize = 3;
-const BJT_QBCP_BRANCH_INDEX: usize = 7;
-const BJT_DELAY_XF1_STATE_INDEX: usize = BJT_INTERNAL_STATE_DIM - 2;
-const BJT_DELAY_XF2_STATE_INDEX: usize = BJT_INTERNAL_STATE_DIM - 1;
-const BJT_STATIC_CORE_STATE_DIM: usize = BJT_INTERNAL_STATE_DIM - 2;
-const BJT_EXT_C_INDEX: usize = 0;
-const BJT_EXT_B_INDEX: usize = 1;
-const BJT_EXT_E_INDEX: usize = 2;
-const BJT_EXT_S_INDEX: usize = 3;
-
-#[derive(Debug, Clone, Default)]
-struct JfetTransientHistory {
-    vgs_prev: Vec<Value>,
-    vgs_prev_prev: Vec<Value>,
-    qgs_prev: Vec<Value>,
-    qgs_prev_prev: Vec<Value>,
-    qgs_prev_prev_prev: Vec<Value>,
-    cqgs_prev: Vec<Value>,
-    vgd_prev: Vec<Value>,
-    vgd_prev_prev: Vec<Value>,
-    qgd_prev: Vec<Value>,
-    qgd_prev_prev: Vec<Value>,
-    qgd_prev_prev_prev: Vec<Value>,
-    cqgd_prev: Vec<Value>,
-    vds_prev: Vec<Value>,
-    vds_prev_prev: Vec<Value>,
-    qds_prev: Vec<Value>,
-    qds_prev_prev: Vec<Value>,
-    qds_prev_prev_prev: Vec<Value>,
-    cqds_prev: Vec<Value>,
-    jfet2_vgstrap_prev: Vec<Value>,
-    jfet2_vgdtrap_prev: Vec<Value>,
-    jfet2_power_prev: Vec<Value>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-/// Junction charge history for diodes (ngspice `DIOcapCharge` state):
-/// the depletion+diffusion charge is integrated with the same companion
-/// discipline as the JFET/MOSFET gate charges.
-#[derive(Debug, Clone, Default)]
-struct DiodeTransientHistory {
-    vd_prev: Vec<Value>,
-    vd_prev_prev: Vec<Value>,
-    qd_prev: Vec<Value>,
-    qd_prev_prev: Vec<Value>,
-    qd_prev_prev_prev: Vec<Value>,
-    cqd_prev: Vec<Value>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-#[derive(Debug, Clone, Default)]
-struct BjtTransientHistory {
-    vbe_prev: Vec<Value>,
-    vbe_prev_prev: Vec<Value>,
-    ibe_prev: Vec<Value>,
-    vbc_prev: Vec<Value>,
-    vbc_prev_prev: Vec<Value>,
-    ibc_prev: Vec<Value>,
-    vcs_prev: Vec<Value>,
-    vcs_prev_prev: Vec<Value>,
-    ics_prev: Vec<Value>,
-    charge_q_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
-    charge_q_prev_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
-    charge_q_prev_prev_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
-    charge_cq_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
-    dynamic_internal_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,
-    dynamic_internal_prev_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,
-    dynamic_linear_prev: Vec<VbicPredictorLinearBranchState>,
-    dynamic_linear_prev_prev: Vec<VbicPredictorLinearBranchState>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TrapezoidalOrderTrial {
-    limit: Value,
-    promote: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct VbicTransientLinearization {
-    g_ii: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-    g_ie: [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-    g_ei: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-    g_ee: [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-    z_i: [Value; BJT_INTERNAL_STATE_DIM],
-    z_e: [Value; BJT_EXTERNAL_STATE_DIM],
-}
-
-type VbicDynamicStateEvaluation = (
-    BjtChargeSnapshot,
-    VbicTransientLinearization,
-    [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-    [Value; BJT_INTERNAL_STATE_DIM],
-    Value,
-);
-
-type VbicBestEffortSolve = (
-    BjtChargeSnapshot,
-    VbicTransientLinearization,
-    [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-    Value,
-);
-
-#[derive(Debug, Clone, Copy, Default)]
-struct VbicPredictorLinearBranchState {
-    vrcx: Value,
-    vrci: Value,
-    vrbx: Value,
-    vrbi: Value,
-    vre: Value,
-    vrbp: Value,
-    vrs: Value,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VbicCachedSnapshotReuse {
-    SeedOnly,
-    NewtonBypass,
-}
-
-#[derive(Debug, Clone, Default)]
-struct MosfetTransientHistory {
-    vgs_prev: Vec<Value>,
-    vgs_prev_prev: Vec<Value>,
-    capgs_prev_half: Vec<Value>,
-    qgs_prev: Vec<Value>,
-    qgs_prev_prev: Vec<Value>,
-    qgs_prev_prev_prev: Vec<Value>,
-    cqgs_prev: Vec<Value>,
-    vgd_prev: Vec<Value>,
-    vgd_prev_prev: Vec<Value>,
-    capgd_prev_half: Vec<Value>,
-    qgd_prev: Vec<Value>,
-    qgd_prev_prev: Vec<Value>,
-    qgd_prev_prev_prev: Vec<Value>,
-    cqgd_prev: Vec<Value>,
-    vgb_prev: Vec<Value>,
-    vgb_prev_prev: Vec<Value>,
-    capgb_prev_half: Vec<Value>,
-    qgb_prev: Vec<Value>,
-    qgb_prev_prev: Vec<Value>,
-    qgb_prev_prev_prev: Vec<Value>,
-    cqgb_prev: Vec<Value>,
-    vbs_j_prev: Vec<Value>,
-    vbs_j_prev_prev: Vec<Value>,
-    qbs_prev: Vec<Value>,
-    qbs_prev_prev: Vec<Value>,
-    cqbs_prev: Vec<Value>,
-    vbd_j_prev: Vec<Value>,
-    vbd_j_prev_prev: Vec<Value>,
-    qbd_prev: Vec<Value>,
-    qbd_prev_prev: Vec<Value>,
-    cqbd_prev: Vec<Value>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-#[derive(Debug, Clone, Default)]
-struct VdmosTransientHistory {
-    vgs_prev: Vec<Value>,
-    vgs_prev_prev: Vec<Value>,
-    qgs_prev: Vec<Value>,
-    qgs_prev_prev: Vec<Value>,
-    qgs_prev_prev_prev: Vec<Value>,
-    cqgs_prev: Vec<Value>,
-    vgd_prev: Vec<Value>,
-    vgd_prev_prev: Vec<Value>,
-    qgd_prev: Vec<Value>,
-    qgd_prev_prev: Vec<Value>,
-    qgd_prev_prev_prev: Vec<Value>,
-    cqgd_prev: Vec<Value>,
-    vgb_prev: Vec<Value>,
-    vgb_prev_prev: Vec<Value>,
-    qgb_prev: Vec<Value>,
-    qgb_prev_prev: Vec<Value>,
-    qgb_prev_prev_prev: Vec<Value>,
-    cqgb_prev: Vec<Value>,
-    vds_prev: Vec<Value>,
-    vds_prev_prev: Vec<Value>,
-    qds_prev: Vec<Value>,
-    qds_prev_prev: Vec<Value>,
-    qds_prev_prev_prev: Vec<Value>,
-    cqds_prev: Vec<Value>,
-    vbs_prev: Vec<Value>,
-    vbs_prev_prev: Vec<Value>,
-    qbs_prev: Vec<Value>,
-    qbs_prev_prev: Vec<Value>,
-    qbs_prev_prev_prev: Vec<Value>,
-    cqbs_prev: Vec<Value>,
-    vbd_prev: Vec<Value>,
-    vbd_prev_prev: Vec<Value>,
-    qbd_prev: Vec<Value>,
-    qbd_prev_prev: Vec<Value>,
-    qbd_prev_prev_prev: Vec<Value>,
-    cqbd_prev: Vec<Value>,
-    vd1_prev: Vec<Value>,
-    vd1_prev_prev: Vec<Value>,
-    qd1_prev: Vec<Value>,
-    qd1_prev_prev: Vec<Value>,
-    qd1_prev_prev_prev: Vec<Value>,
-    cqd1_prev: Vec<Value>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-/// Per-instance B3SOIDD (BSIMSOI level 56) charge-integration history.
-///
-/// The SOI charge model integrates the coupled node charges (qg/qb/qd/qe) with
-/// the engine's integration coefficient, mirroring ngspice's `NIintegrate` on
-/// `B3SOIDDq{g,b,d,e}`. DD and FD self-heating also integrate
-/// `qth = Cth*delTemp`.
-/// We keep the last two accepted charges (for Gear/Trap2 history) and the last
-/// integrated charge-current `cq*` per node. The SOI body and thermal charges
-/// feed LTE exactly as the gate charges do.
-#[derive(Debug, Clone, Default)]
-struct B3SoiTransientHistory {
-    qg_prev: Vec<Value>,
-    qg_prev_prev: Vec<Value>,
-    qg_prev_prev_prev: Vec<Value>,
-    cqg_prev: Vec<Value>,
-    qb_prev: Vec<Value>,
-    qb_prev_prev: Vec<Value>,
-    qb_prev_prev_prev: Vec<Value>,
-    cqb_prev: Vec<Value>,
-    qd_prev: Vec<Value>,
-    qd_prev_prev: Vec<Value>,
-    qd_prev_prev_prev: Vec<Value>,
-    cqd_prev: Vec<Value>,
-    qe_prev: Vec<Value>,
-    qe_prev_prev: Vec<Value>,
-    qe_prev_prev_prev: Vec<Value>,
-    cqe_prev: Vec<Value>,
-    qth_prev: Vec<Value>,
-    qth_prev_prev: Vec<Value>,
-    qth_prev_prev_prev: Vec<Value>,
-    cqth_prev: Vec<Value>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-/// Per-instance BSIM3v3.3 (MOS level 8/49) charge-integration history.
-///
-/// Mirrors [`B3SoiTransientHistory`] over the three composite CKTstate
-/// charges ngspice integrates for BSIM3 (`BSIM3qg`, `BSIM3qd = qdrn - qbd`,
-/// `BSIM3qb = qbulk + qbd + qbs` — the junction depletion charges are folded
-/// in, b3ld.c:2796-2801), with the last integrated charge-current `cq*` per
-/// state. `b3trunc.c` runs `CKTterr` over exactly these three states.
-#[derive(Debug, Clone, Default)]
-struct Bsim3TransientHistory {
-    qg_prev: Vec<Value>,
-    qg_prev_prev: Vec<Value>,
-    qg_prev_prev_prev: Vec<Value>,
-    cqg_prev: Vec<Value>,
-    qb_prev: Vec<Value>,
-    qb_prev_prev: Vec<Value>,
-    qb_prev_prev_prev: Vec<Value>,
-    cqb_prev: Vec<Value>,
-    qd_prev: Vec<Value>,
-    qd_prev_prev: Vec<Value>,
-    qd_prev_prev_prev: Vec<Value>,
-    cqd_prev: Vec<Value>,
-    qcheq_prev: Vec<Value>,
-    qcheq_prev_prev: Vec<Value>,
-    qcheq_prev_prev_prev: Vec<Value>,
-    cqcheq_prev: Vec<Value>,
-    qcdump_prev: Vec<Value>,
-    qcdump_prev_prev: Vec<Value>,
-    qcdump_prev_prev_prev: Vec<Value>,
-    cqcdump_prev: Vec<Value>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-/// Per-instance BSIM4 v4.8 (MOS level 14/54) charge-integration history.
-///
-/// The same base shape as [`Bsim3TransientHistory`]: b4ld.c integrates
-/// `BSIM4qg`, `BSIM4qd`, and `BSIM4qb`. When `rbodyMod>0`, `qb` becomes the
-/// intrinsic bulk charge and b4ld.c also integrates separate junction states
-/// `qbs`/`qbd`; when `rgateMod=3`, it also integrates middle-gate overlap
-/// charge `qgmid`. `b4trunc.c` runs `CKTterr` over those extra states too.
-#[derive(Debug, Clone, Default)]
-struct Bsim4TransientHistory {
-    qg_prev: Vec<Value>,
-    qg_prev_prev: Vec<Value>,
-    qg_prev_prev_prev: Vec<Value>,
-    cqg_prev: Vec<Value>,
-    qgmid_prev: Vec<Value>,
-    qgmid_prev_prev: Vec<Value>,
-    qgmid_prev_prev_prev: Vec<Value>,
-    cqgmid_prev: Vec<Value>,
-    qb_prev: Vec<Value>,
-    qb_prev_prev: Vec<Value>,
-    qb_prev_prev_prev: Vec<Value>,
-    cqb_prev: Vec<Value>,
-    qd_prev: Vec<Value>,
-    qd_prev_prev: Vec<Value>,
-    qd_prev_prev_prev: Vec<Value>,
-    cqd_prev: Vec<Value>,
-    qbs_prev: Vec<Value>,
-    qbs_prev_prev: Vec<Value>,
-    qbs_prev_prev_prev: Vec<Value>,
-    cqbs_prev: Vec<Value>,
-    qbd_prev: Vec<Value>,
-    qbd_prev_prev: Vec<Value>,
-    qbd_prev_prev_prev: Vec<Value>,
-    cqbd_prev: Vec<Value>,
-    qcheq_prev: Vec<Value>,
-    qcheq_prev_prev: Vec<Value>,
-    qcheq_prev_prev_prev: Vec<Value>,
-    cqcheq_prev: Vec<Value>,
-    qcdump_prev: Vec<Value>,
-    qcdump_prev_prev: Vec<Value>,
-    qcdump_prev_prev_prev: Vec<Value>,
-    cqcdump_prev: Vec<Value>,
-    accepted_dt_prev: Value,
-    accepted_dt_prev_prev: Value,
-}
-
-#[derive(Debug, Clone, Default)]
-struct CoupledTlineReferenceState {
-    near_modal: Vec<Value>,
-    far_modal: Vec<Value>,
-}
+mod history;
+pub(self) use history::*;
 
 impl Engine {
     /// Run transient time-domain analysis
@@ -635,7 +241,7 @@ impl Engine {
             let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit);
             return Ok((result, checkpoint));
         }
-        Self::ensure_supported_dynamic_charges(&circuit, "Transient")?;
+        Self::ensure_supported_transient_dynamic_charges(&circuit)?;
         let hinted_max_step = circuit
             .transient_max_step_hint
             .map_or(max_step, |hint| max_step.min(hint));
@@ -775,6 +381,7 @@ impl Engine {
             && circuit.jfets.is_empty()
             && circuit.vswitches.is_empty()
             && circuit.iswitches.is_empty()
+            && circuit.generic_switches.is_empty()
             && !circuit.has_xspice_devices()
             && {
                 #[cfg(feature = "veriloga")]
@@ -839,6 +446,7 @@ impl Engine {
             tstop,
             &mut breakpoints,
         );
+        breakpoints.discard_through(resume_time);
         let initial_step = Self::ngspice_t0_breakpoint_limited_initial_timestep(
             Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
             breakpoints.next_after(resume_time),
@@ -1054,6 +662,9 @@ impl Engine {
         let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
         bsim4_history.accepted_dt_prev = hinted_max_step;
         bsim4_history.accepted_dt_prev_prev = hinted_max_step;
+        let mut ekv26_history = Self::initialize_ekv26_history(&circuit, &solution);
+        ekv26_history.accepted_dt_prev = hinted_max_step;
+        ekv26_history.accepted_dt_prev_prev = hinted_max_step;
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
@@ -1163,6 +774,7 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
+                        &mut ekv26_history,
                     );
                     lte_estimator =
                         LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
@@ -1482,6 +1094,7 @@ impl Engine {
                         b3soi_history: &b3soi_history,
                         bsim3_history: &bsim3_history,
                         bsim4_history: &bsim4_history,
+                        ekv26_history: &ekv26_history,
                         suppress_gate_charge,
                         tline_dc_refs: &tline_dc_refs,
                         coupled_tline_refs: &coupled_tline_refs,
@@ -1811,6 +1424,7 @@ impl Engine {
                                 b3soi_history: &b3soi_history,
                                 bsim3_history: &bsim3_history,
                                 bsim4_history: &bsim4_history,
+                                ekv26_history: &ekv26_history,
                                 suppress_gate_charge,
                                 tline_dc_refs: &tline_dc_refs,
                                 coupled_tline_refs: &coupled_tline_refs,
@@ -1899,6 +1513,7 @@ impl Engine {
                             b3soi_history: &b3soi_history,
                             bsim3_history: &bsim3_history,
                             bsim4_history: &bsim4_history,
+                            ekv26_history: &ekv26_history,
                             suppress_gate_charge,
                             tline_dc_refs: &tline_dc_refs,
                             coupled_tline_refs: &coupled_tline_refs,
@@ -2252,6 +1867,23 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_ekv26_truncation_limit = if !circuit.ekv26s.is_empty() {
+                        Self::ekv26_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &ekv26_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
@@ -2319,7 +1951,10 @@ impl Engine {
                                     ),
                                     force_accept_mosfet_truncation_limit,
                                 ),
-                                force_accept_vdmos_truncation_limit,
+                                Self::min_truncation_limit(
+                                    force_accept_vdmos_truncation_limit,
+                                    force_accept_ekv26_truncation_limit,
+                                ),
                             ),
                             force_accept_b3soi_truncation_limit,
                         ),
@@ -2351,6 +1986,7 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
+                        &mut ekv26_history,
                         None,
                         None,
                         suppress_gate_charge,
@@ -2578,6 +2214,24 @@ impl Engine {
                 } else {
                     None
                 };
+            let ekv26_truncation_limit =
+                if !first_accepted_transient_step && !circuit.ekv26s.is_empty() {
+                    Self::ekv26_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &ekv26_history,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let b3soi_truncation_limit =
                 if !first_accepted_transient_step && circuit.has_b3soi_devices() {
                     Self::b3soi_ngspice_truncation_limit(
@@ -2648,11 +2302,14 @@ impl Engine {
                             ),
                             mosfet_truncation_limit,
                         ),
-                        vdmos_truncation_limit,
+                        Self::min_truncation_limit(vdmos_truncation_limit, ekv26_truncation_limit),
                     ),
                     b3soi_truncation_limit,
                 ),
-                Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
+                Self::min_truncation_limit(
+                    Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
+                    None,
+                ),
             );
             let ltra_truncation_limit = if !first_accepted_transient_step {
                 Self::ltra_candidate_truncation_limit(&circuit, &new_solution, t + dt)
@@ -2708,7 +2365,7 @@ impl Engine {
                     // clean stderr at the default log level.
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::debug!(
-                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ltra={:?}, method={:?}, order={}",
+                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ekv26={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
                             limit,
@@ -2718,6 +2375,7 @@ impl Engine {
                             diode_truncation_limit,
                             mosfet_truncation_limit,
                             vdmos_truncation_limit,
+                            ekv26_truncation_limit,
                             ltra_truncation_limit,
                             current_method,
                             step_trap_order
@@ -3040,6 +2698,23 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_ekv26_truncation_limit = if !circuit.ekv26s.is_empty() {
+                        Self::ekv26_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &ekv26_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
@@ -3107,7 +2782,10 @@ impl Engine {
                                     ),
                                     force_accept_mosfet_truncation_limit,
                                 ),
-                                force_accept_vdmos_truncation_limit,
+                                Self::min_truncation_limit(
+                                    force_accept_vdmos_truncation_limit,
+                                    force_accept_ekv26_truncation_limit,
+                                ),
                             ),
                             force_accept_b3soi_truncation_limit,
                         ),
@@ -3139,6 +2817,7 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
+                        &mut ekv26_history,
                         None,
                         None,
                         suppress_gate_charge,
@@ -3299,6 +2978,7 @@ impl Engine {
                         &diode_history,
                         &mosfet_history,
                         &vdmos_history,
+                        &ekv26_history,
                         &lte_estimator,
                         &vbic_snapshot_cache,
                         self.voltage_abstol(),
@@ -3329,6 +3009,7 @@ impl Engine {
                 &mut b3soi_history,
                 &mut bsim3_history,
                 &mut bsim4_history,
+                &mut ekv26_history,
                 Some(&vbic_snapshot_cache),
                 mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,

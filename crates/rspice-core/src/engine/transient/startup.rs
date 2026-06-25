@@ -35,6 +35,7 @@ impl Engine {
                 matrix.add(i, i, 1e-6);
             }
             circuit.stamp_dc_direct(matrix, &mut rhs);
+            circuit.stamp_generic_switches(matrix, &mut rhs, 0.0);
             if circuit.has_nonlinear_devices() {
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
@@ -95,6 +96,7 @@ impl Engine {
                 .voltage_sources
                 .update_transient_rhs(&mut rhs, time, |br_ordinal| num_nodes + br_ordinal);
             circuit.current_sources.update_transient_rhs(&mut rhs, time);
+            circuit.stamp_generic_switches(matrix, &mut rhs, time);
 
             if circuit.has_nonlinear_devices() {
                 circuit.update_nonlinear(&solution);

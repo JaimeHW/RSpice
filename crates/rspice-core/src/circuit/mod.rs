@@ -19,7 +19,7 @@ use thiserror::Error;
 mod storage;
 pub use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Capacitors, CurrentSources, Diodes,
-    Inductors, Mosfets, Resistors, Vdmoses, VoltageSources,
+    Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, Resistors, Vdmoses, VoltageSources,
 };
 mod construction;
 mod external_models;
@@ -308,6 +308,8 @@ pub struct CircuitData {
     pub(crate) b3soi_pd: B3SoiPds,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
+    pub(crate) ekv26s: EkvMosfets,
+    pub(crate) ekv3s: Ekv3Mosfets,
     pub(crate) vdmoses: Vdmoses,
     pub(crate) jfets: Vec<crate::device::Jfet>,
 
@@ -328,6 +330,7 @@ pub struct CircuitData {
     // Advanced device storage
     pub(crate) vswitches: Vec<crate::device::VoltageSwitch>,
     pub(crate) iswitches: Vec<crate::device::CurrentSwitch>,
+    pub(crate) generic_switches: Vec<crate::device::GenericSwitch>,
     pub(crate) tlines: Vec<crate::device::TransmissionLine>,
     pub(crate) coupled_tlines: Vec<crate::device::CoupledTransmissionLine>,
     pub(crate) couplings: Vec<crate::device::InductorCoupling>,

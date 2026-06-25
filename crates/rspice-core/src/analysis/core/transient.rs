@@ -216,10 +216,20 @@ impl BreakpointManager {
             .find(|&t| t > time + self.tolerance)
     }
 
+    /// Treat breakpoints at or before `time` as already handled.
+    pub fn discard_through(&mut self, time: Value) {
+        while self.current_index < self.breakpoints.len()
+            && self.breakpoints[self.current_index] <= time + self.tolerance
+        {
+            self.current_index += 1;
+        }
+    }
+
     /// Check if current time is exactly at a breakpoint
     pub fn at_breakpoint(&self, time: Value) -> bool {
         self.breakpoints
             .iter()
+            .skip(self.current_index)
             .any(|&bp| (time - bp).abs() < self.tolerance)
     }
 
@@ -229,6 +239,7 @@ impl BreakpointManager {
     pub fn snap_to_breakpoint(&self, time: Value) -> Value {
         self.breakpoints
             .iter()
+            .skip(self.current_index)
             .find(|&&bp| (time - bp).abs() < self.tolerance)
             .copied()
             .unwrap_or(time)
@@ -395,6 +406,19 @@ mod breakpoint_manager_tests {
 
         assert_eq!(dt, 1.0);
         assert!(!lands_on_breakpoint);
+    }
+
+    #[test]
+    fn discard_through_prevents_t0_breakpoint_from_snapping_startup_steps_backwards() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(2.0e-18);
+        breakpoints.add(0.0);
+        breakpoints.add(2.0e-6);
+
+        breakpoints.discard_through(0.0);
+
+        assert!(!breakpoints.at_breakpoint(1.0e-18));
+        assert_eq!(breakpoints.snap_to_breakpoint(1.0e-18), 1.0e-18);
+        assert_eq!(breakpoints.next_after(0.0), Some(2.0e-6));
     }
 }
 

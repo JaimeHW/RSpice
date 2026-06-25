@@ -343,7 +343,9 @@ impl Engine {
 
                 // Solve DC at this point
                 // Key optimization: use previous solution as initial guess for faster convergence
-                let solution = if circuit.has_nonlinear_devices() {
+                let solution = if circuit.has_nonlinear_devices()
+                    || !circuit.generic_switches.is_empty()
+                {
                     if let Some(seed) = prev_solution.as_deref() {
                         let previous_value = prev_sweep_value.unwrap_or(sweep_value);
                         let start_state = circuit.nonlinear_state_snapshot();

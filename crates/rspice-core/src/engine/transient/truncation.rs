@@ -1322,6 +1322,70 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// LTE truncation limit for native EKV 2.6 intrinsic terminal charges.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn ekv26_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &Ekv26TransientHistory,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
+            return None;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for (idx, dev) in circuit.ekv26s.devices.iter().enumerate() {
+            let q_curr = dev.dynamic_charge_vector_at_solution(candidate_solution);
+            for row in 0..EKV26_DYNAMIC_CHARGE_COUNT {
+                let q_prev = history.q_prev[idx][row];
+                let q_prev_prev = history.q_prev_prev[idx][row];
+                let q_prev_prev_prev = history.q_prev_prev_prev[idx][row];
+                let cq_prev = history.cq_prev[idx][row];
+                let cq_curr = Self::jfet_companion_ccap(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    q_curr[row],
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
+                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                    q_curr[row],
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                    dt,
+                    history.accepted_dt_prev,
+                    history.accepted_dt_prev_prev,
+                    effective_method,
+                    trap_order,
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                ) else {
+                    continue;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            }
+        }
+
+        found_branch.then_some(limit)
+    }
+
     /// Signal-activity step limit: rescale the candidate step so that no
     /// nonlinear-device terminal voltage moves more than `bound` volts in one
     /// step.
@@ -1436,6 +1500,7 @@ impl Engine {
         diode_history: &DiodeTransientHistory,
         mosfet_history: &MosfetTransientHistory,
         vdmos_history: &VdmosTransientHistory,
+        ekv26_history: &Ekv26TransientHistory,
         suppress_gate_charge: bool,
         voltage_abstol: Value,
         reltol: Value,
@@ -1550,7 +1615,23 @@ impl Engine {
         } else {
             None
         };
-
+        let ekv26_limit = if !circuit.ekv26s.is_empty() {
+            Self::ekv26_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                method,
+                trap_order,
+                dt,
+                ekv26_history,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            )
+            .filter(|limit| limit.is_finite() && *limit > 0.0)
+        } else {
+            None
+        };
         Self::min_truncation_limit(
             Self::min_truncation_limit(
                 Self::min_truncation_limit(
@@ -1562,7 +1643,7 @@ impl Engine {
                 ),
                 mosfet_limit,
             ),
-            vdmos_limit,
+            Self::min_truncation_limit(vdmos_limit, ekv26_limit),
         )
     }
 
@@ -1723,6 +1804,7 @@ impl Engine {
         diode_history: &DiodeTransientHistory,
         mosfet_history: &MosfetTransientHistory,
         vdmos_history: &VdmosTransientHistory,
+        ekv26_history: &Ekv26TransientHistory,
         voltage_lte_estimator: &LteEstimator,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
@@ -1759,6 +1841,7 @@ impl Engine {
             diode_history,
             mosfet_history,
             vdmos_history,
+            ekv26_history,
             false,
             voltage_abstol,
             reltol,
@@ -2058,6 +2141,7 @@ M1 d g s 0 VTRUNC W=1 L=1u
         let mut diode_history = Engine::initialize_diode_history(&circuit, &base);
         let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
         let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
+        let mut ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
         let dt = 1.0e-9;
         bjt_history.accepted_dt_prev = dt;
         bjt_history.accepted_dt_prev_prev = dt;
@@ -2069,6 +2153,8 @@ M1 d g s 0 VTRUNC W=1 L=1u
         mosfet_history.accepted_dt_prev_prev = dt;
         vdmos_history.accepted_dt_prev = dt;
         vdmos_history.accepted_dt_prev_prev = dt;
+        ekv26_history.accepted_dt_prev = dt;
+        ekv26_history.accepted_dt_prev_prev = dt;
 
         let gate = circuit.get_node_by_name("g").expect("gate node");
         let mut candidate = base.clone();
@@ -2086,6 +2172,7 @@ M1 d g s 0 VTRUNC W=1 L=1u
             &diode_history,
             &mosfet_history,
             &vdmos_history,
+            &ekv26_history,
             false,
             1.0e-9,
             1.0e-3,
@@ -2097,6 +2184,82 @@ M1 d g s 0 VTRUNC W=1 L=1u
         assert!(
             limit.is_some_and(|limit| limit.is_finite() && limit > 0.0),
             "VDMOS-only charge deck must contribute a truncation limit, got {limit:?}"
+        );
+    }
+
+    #[test]
+    fn ekv26_charge_history_participates_in_device_truncation_limit() {
+        let deck = "\
+EKV26 truncation coverage
+.OPTIONS TEMP=27
+.MODEL n NMOS LEVEL=260 TNOM=27 COX=4.379e-3 XJ=22.53n VTO=570.6m TCV=1.194m \
+        GAMMA=670.7m PHI=450m KP=232.1u BEX=-1.828 E0=42.216MEG UCRIT=3.146E6 \
+        LAMBDA=228.3m DL=-60.86n DW=-209.7n WETA=2.001 LETA=264.6m AVTO=0
+M1 d g s b n W=10u L=1u AS=0 AD=0 PS=0 PD=0
+VD d 0 1
+VG g 0 0.8
+VS s 0 0
+VB b 0 -1
+.OP
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+
+        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base);
+        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base);
+        let mut diode_history = Engine::initialize_diode_history(&circuit, &base);
+        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
+        let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
+        let mut ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
+        let dt = 1.0e-9;
+        bjt_history.accepted_dt_prev = dt;
+        bjt_history.accepted_dt_prev_prev = dt;
+        jfet_history.accepted_dt_prev = dt;
+        jfet_history.accepted_dt_prev_prev = dt;
+        diode_history.accepted_dt_prev = dt;
+        diode_history.accepted_dt_prev_prev = dt;
+        mosfet_history.accepted_dt_prev = dt;
+        mosfet_history.accepted_dt_prev_prev = dt;
+        vdmos_history.accepted_dt_prev = dt;
+        vdmos_history.accepted_dt_prev_prev = dt;
+        ekv26_history.accepted_dt_prev = dt;
+        ekv26_history.accepted_dt_prev_prev = dt;
+
+        let gate = circuit.get_node_by_name("g").expect("gate node");
+        let mut candidate = base.clone();
+        candidate[gate - 1] += 0.1;
+
+        let limit = Engine::ngspice_device_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &bjt_history,
+            &[],
+            &jfet_history,
+            &diode_history,
+            &mosfet_history,
+            &vdmos_history,
+            &ekv26_history,
+            false,
+            1.0e-9,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        );
+
+        assert!(
+            limit.is_some_and(|limit| limit.is_finite() && limit > 0.0),
+            "EKV26-only charge deck must contribute a truncation limit, got {limit:?}"
         );
     }
 
@@ -2127,6 +2290,7 @@ J1 d g s PS area=1
         let mut diode_history = Engine::initialize_diode_history(&circuit, &base);
         let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
         let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
+        let mut ekv26_history = Engine::initialize_ekv26_history(&circuit, &base);
         let dt = 1.0e-9;
         bjt_history.accepted_dt_prev = dt;
         bjt_history.accepted_dt_prev_prev = dt;
@@ -2138,6 +2302,8 @@ J1 d g s PS area=1
         mosfet_history.accepted_dt_prev_prev = dt;
         vdmos_history.accepted_dt_prev = dt;
         vdmos_history.accepted_dt_prev_prev = dt;
+        ekv26_history.accepted_dt_prev = dt;
+        ekv26_history.accepted_dt_prev_prev = dt;
 
         let drain = circuit.get_node_by_name("d").expect("drain node");
         let mut candidate = base.clone();
@@ -2155,6 +2321,7 @@ J1 d g s PS area=1
             &diode_history,
             &mosfet_history,
             &vdmos_history,
+            &ekv26_history,
             true,
             1.0e-9,
             1.0e-3,

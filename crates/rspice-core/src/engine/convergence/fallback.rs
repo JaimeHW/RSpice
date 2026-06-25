@@ -38,6 +38,39 @@ impl Engine {
         guess
     }
 
+    pub(in crate::engine::convergence) fn apply_b3soi_pd_initial_guess_correction(
+        guess: &mut [Value],
+        circuit: &CircuitData,
+    ) {
+        #[inline]
+        fn voltage(guess: &[Value], node: usize) -> Value {
+            if node > 0 {
+                guess.get(node - 1).copied().unwrap_or(0.0)
+            } else {
+                0.0
+            }
+        }
+
+        #[inline]
+        fn set_voltage(guess: &mut [Value], node: usize, value: Value) {
+            if node > 0
+                && let Some(slot) = guess.get_mut(node - 1)
+            {
+                *slot = value;
+            }
+        }
+
+        for dev in &circuit.b3soi_pd.devices {
+            if dev.body_mode != crate::device::mosfet::b3soi::pd::BodyMode::Floating {
+                continue;
+            }
+
+            let source = voltage(guess, dev.node_source);
+            let vbs_seed = dev.sized.vth0.abs().max(0.5);
+            set_voltage(guess, dev.node_body, source + vbs_seed / dev.mtype);
+        }
+    }
+
     pub(in crate::engine::convergence) fn prefer_lower_merit_scaled_seed(
         &self,
         circuit: &mut CircuitData,
