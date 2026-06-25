@@ -1,5 +1,7 @@
+mod device;
 mod discover;
 mod error;
+mod expr;
 mod files;
 mod names;
 
@@ -56,11 +58,6 @@ impl RustTranspiler {
         &self,
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDevice, RustBackendError> {
-        let _ = &self.options;
-        Err(RustBackendError::unsupported(
-            artifact.metadata.source_package.as_str(),
-            artifact.mir.module_name.as_str(),
-            "device lowering is not implemented yet",
-        ))
+        device::generate_device(artifact, &self.options)
     }
 }

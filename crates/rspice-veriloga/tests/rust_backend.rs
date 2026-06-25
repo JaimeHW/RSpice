@@ -1,6 +1,7 @@
+use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::rust_backend::{
     GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames, RustTranspiler,
-    discover_veriloga_sources, write_generated_device,
+    RustTranspileOptions, discover_veriloga_sources, write_generated_device,
 };
 
 #[test]
@@ -121,6 +122,132 @@ fn discovery_skips_include_only_files_and_sorts_modules() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn rust_backend_generates_direct_rust_for_algebraic_current() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(tiny_resistor_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile simple resistor");
+
+    assert_eq!(generated.module_name, "tiny_res");
+    assert_eq!(generated.public_model_name, "tiny_res");
+    assert_eq!(generated.files.len(), 3);
+    assert!(
+        generated
+            .files
+            .iter()
+            .any(|file| file.relative_path == "mod.rs")
+    );
+    assert!(
+        generated
+            .files
+            .iter()
+            .any(|file| file.relative_path == "state.rs")
+    );
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("ctx.node_voltage(self.nodes[0])"));
+    assert!(stamp.contains("ctx.node_voltage(self.nodes[1])"));
+    assert!(stamp.contains("self.params.r"));
+    assert!(stamp.contains("eq0_value"));
+    assert!(stamp.contains("eq0_d_n0"));
+    assert!(stamp.contains("eq0_d_n1"));
+    assert!(stamp.contains("stamper.stamp_current"));
+    assert!(!stamp.contains("Bytecode"));
+    assert!(!stamp.contains("Interpreter"));
+    assert!(!stamp.contains("HashMap"));
+}
+
+#[test]
+fn generated_algebraic_current_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(tiny_resistor_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+        .transpile(&artifact)
+        .expect("transpile simple resistor");
+    let temp = temp_dir("rspice-rust-backend-compile");
+
+    write_generated_device(&temp, &generated).expect("write generated device");
+    let lib = temp.join("compile_smoke.rs");
+    std::fs::write(
+        &lib,
+        format!(
+            r#"
+pub mod runtime {{
+    pub struct GeneratedEvalContext<'a> {{
+        voltages: &'a [f64],
+    }}
+
+    impl<'a> GeneratedEvalContext<'a> {{
+        pub fn new(voltages: &'a [f64]) -> Self {{
+            Self {{ voltages }}
+        }}
+
+        pub fn node_voltage(&self, node: usize) -> f64 {{
+            self.voltages[node]
+        }}
+    }}
+
+    pub struct GeneratedStamper<'a> {{
+        pub touched: &'a mut f64,
+    }}
+
+    impl<'a> GeneratedStamper<'a> {{
+        pub fn stamp_current(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            derivatives: &[(usize, f64)],
+        ) {{
+            *self.touched += value + derivatives.iter().map(|(_, value)| *value).sum::<f64>();
+        }}
+    }}
+}}
+
+#[path = "{}"]
+pub mod generated_device;
+"#,
+            temp.join(&generated.folder_name)
+                .join("mod.rs")
+                .display()
+                .to_string()
+                .replace('\\', "\\\\")
+        ),
+    )
+    .expect("write compile smoke file");
+
+    let output = std::process::Command::new(std::env::var("RUSTC").unwrap_or("rustc".to_string()))
+        .arg("--edition=2024")
+        .arg("--crate-type=lib")
+        .arg(&lib)
+        .arg("-o")
+        .arg(temp.join("compile_smoke.rlib"))
+        .output()
+        .expect("run rustc");
+
+    assert!(
+        output.status.success(),
+        "generated rust did not compile\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
 fn temp_dir(prefix: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "{prefix}-{}",
@@ -131,4 +258,15 @@ fn temp_dir(prefix: &str) -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     dir
+}
+
+fn tiny_resistor_source() -> &'static str {
+    r#"
+module tiny_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#
 }

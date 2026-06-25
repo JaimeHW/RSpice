@@ -30,19 +30,81 @@ pub fn sanitize_identifier(input: &str) -> String {
     let mut out = String::with_capacity(input.len().max(1));
     for ch in input.chars() {
         if ch == '_' || ch.is_ascii_alphanumeric() {
-            if out.is_empty() && ch.is_ascii_digit() {
-                out.push('_');
-            }
             out.push(ch.to_ascii_lowercase());
         } else {
             out.push('_');
         }
     }
 
-    let out = out.trim_matches('_').to_string();
+    let mut out = out.trim_matches('_').to_string();
     if out.is_empty() {
-        "_model".to_string()
-    } else {
-        out
+        return "_model".to_string();
     }
+    if out
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| byte.is_ascii_digit())
+    {
+        out.insert(0, '_');
+    }
+    if is_rust_keyword(&out) {
+        out.push('_');
+    }
+    out
+}
+
+fn is_rust_keyword(value: &str) -> bool {
+    matches!(
+        value,
+        "as" | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "async"
+            | "await"
+            | "dyn"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+            | "try"
+    )
 }
