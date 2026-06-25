@@ -172,7 +172,7 @@ pub struct SimulationProgress {
     pub status: SimulationStatus,
 
     /// When the simulation started
-    pub start_time: Option<Instant>,
+    pub(crate) start_time: Option<Instant>,
 
     /// Total elapsed time
     pub elapsed: Duration,

@@ -49,10 +49,6 @@ rustfft = "6.2"
 # Complex number support
 num-complex = "0.4"
 
-# GPU rendering
-wgpu = "23"
-bytemuck = { version = "1.14", features = ["derive"] }
-
 # Image encoding for GPU output
 png = "0.17"
 base64 = "0.22"
@@ -73,7 +69,6 @@ winit = "0.30"
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = "0.29"
 eframe = { version = "0.29", default-features = false, features = ["wgpu", "persistence"] }
-egui-wgpu = "0.29"
 
 # SVG parsing for component symbols (lightweight, pure Rust)
 usvg = { version = "0.44", default-features = false }

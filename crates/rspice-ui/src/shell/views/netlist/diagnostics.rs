@@ -91,6 +91,23 @@ pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
+pub(super) fn parser_diagnostics(netlist: &rspice_core::Netlist) -> Vec<Diagnostic> {
+    netlist
+        .diagnostics
+        .iter()
+        .map(|diagnostic| Diagnostic {
+            severity: match diagnostic.severity {
+                rspice_core::netlist::DiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
+            },
+            span: None,
+            line: diagnostic.line.checked_sub(1),
+            column: None,
+            message: diagnostic.message.clone(),
+            fix: None,
+        })
+        .collect()
+}
+
 fn contains_external_include(buffer: &str) -> bool {
     buffer.lines().any(|line| {
         let trimmed = line.trim_start();
@@ -180,5 +197,22 @@ mod tests {
         assert!(diagnostics[0].message.contains("NCHH"));
         assert_eq!(diagnostics[0].line, Some(1));
         assert_eq!(diagnostics[0].fix.as_ref().unwrap().replacement, "nch");
+    }
+
+    #[test]
+    fn parser_warnings_convert_to_editor_diagnostics() {
+        let src = "deck\nV1 in 0 1\nR1 in 0 1k\n.options vendorcompat=1\n.end\n";
+        let netlist = rspice_core::Netlist::parse(src).expect("deck parses with warning");
+        let diagnostics = parser_diagnostics(&netlist);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        assert_eq!(diagnostics[0].line, Some(3));
+        assert!(
+            diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains("vendorcompat")
+        );
     }
 }

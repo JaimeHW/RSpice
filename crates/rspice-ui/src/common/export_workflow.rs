@@ -40,7 +40,13 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
     /// Browser builds will route exports through a download blob instead of a
     /// native save dialog; until that lands the action declines gracefully.
     #[cfg(target_arch = "wasm32")]
-    fn show_save_dialog(&self, _config: SaveDialogConfig<'_>) -> Option<PathBuf> {
+    fn show_save_dialog(&self, config: SaveDialogConfig<'_>) -> Option<PathBuf> {
+        let _ = (
+            config.title,
+            config.default_name,
+            config.filter_name,
+            config.filter_extensions,
+        );
         None
     }
 

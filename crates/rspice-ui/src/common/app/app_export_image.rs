@@ -8,7 +8,9 @@
 
 use egui::Context;
 
-use super::{ConsoleMessage, RSpiceApp};
+#[cfg(not(target_arch = "wasm32"))]
+use super::ConsoleMessage;
+use super::RSpiceApp;
 
 impl RSpiceApp {
     /// Pump the export request and any screenshot that arrived this frame.

@@ -281,10 +281,11 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
 /// IO; errors inside included files still surface at run time.
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
     match rspice_core::Netlist::parse(buffer) {
-        Ok(netlist) => (
-            diagnostics::unknown_reference_diagnostics(buffer),
-            Some(harvest_symbols(&netlist)),
-        ),
+        Ok(netlist) => {
+            let mut diagnostics = diagnostics::parser_diagnostics(&netlist);
+            diagnostics.extend(diagnostics::unknown_reference_diagnostics(buffer));
+            (diagnostics, Some(harvest_symbols(&netlist)))
+        }
         Err(rspice_core::netlist::ParseError::Syntax { line, message }) => (
             vec![Diagnostic {
                 // Parser lines are 1-based; `line == 0` means "unlocated".

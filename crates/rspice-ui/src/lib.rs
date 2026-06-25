@@ -14,7 +14,6 @@
 //! - `panels/` - Side panels (project browser, properties)
 //! - `properties/` - Property editing and design variables
 //! - `common/` - Shared components (menu bar, status bar, theme)
-//! - `viewers/` - Specialized viewer selection
 //! - `services/` - Backend services (file I/O, simulation runner)
 //! - `state/` - Application state management
 //! - `utils/` - Utility functions
