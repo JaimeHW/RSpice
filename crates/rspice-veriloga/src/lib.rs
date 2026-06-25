@@ -75,6 +75,7 @@ pub mod ir;
 pub mod lexer;
 pub mod parser;
 pub mod preprocessor;
+pub mod rust_backend;
 pub mod semantic;
 pub mod source;
 pub mod stdlib;

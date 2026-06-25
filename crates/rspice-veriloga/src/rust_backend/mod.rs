@@ -1,0 +1,60 @@
+mod error;
+
+pub use error::RustBackendError;
+
+use crate::canonical_ir::CanonicalIrArtifact;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedRustFile {
+    pub relative_path: String,
+    pub contents: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedRustDevice {
+    pub module_name: String,
+    pub public_model_name: String,
+    pub folder_name: String,
+    pub files: Vec<GeneratedRustFile>,
+    pub source_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RustTranspileOptions {
+    pub runtime_path: String,
+}
+
+impl Default for RustTranspileOptions {
+    fn default() -> Self {
+        Self {
+            runtime_path: "crate::device::veriloga_generated".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RustTranspiler {
+    options: RustTranspileOptions,
+}
+
+impl RustTranspiler {
+    pub fn new(options: RustTranspileOptions) -> Self {
+        Self { options }
+    }
+
+    pub fn options(&self) -> &RustTranspileOptions {
+        &self.options
+    }
+
+    pub fn transpile(
+        &self,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<GeneratedRustDevice, RustBackendError> {
+        let _ = &self.options;
+        Err(RustBackendError::unsupported(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            "device lowering is not implemented yet",
+        ))
+    }
+}
