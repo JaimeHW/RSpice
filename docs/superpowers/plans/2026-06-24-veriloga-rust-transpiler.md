@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status update (2026-06-25):** This plan is historical. The generated
+> built-in path now exists behind `veriloga-builtins`, but the implemented build
+> integration materializes generated source under
+> `crates/rspice-core/src/device/veriloga_generated/` instead of including an
+> `OUT_DIR` registry. Use the crate READMEs and current source as the active
+> contract.
+
 **Goal:** Build the first production-grade Rust transpiler path that turns canonical Verilog-A IR into per-device generated Rust source and wires generated built-ins into the simulator build.
 
 **Architecture:** `rspice-veriloga` owns the transpiler, deterministic source emission, diagnostics, and build-discovery helpers. `rspice-core` owns a small generated-device runtime ABI, an `OUT_DIR` registry inclusion point, and circuit-builder lookup. The first executable slice supports fast, analytic, allocation-free DC stamping for algebraic current contributions, then leaves hard compile-time diagnostics for unsupported constructs until later operator-specific tasks add them.

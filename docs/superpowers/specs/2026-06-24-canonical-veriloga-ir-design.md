@@ -1,5 +1,10 @@
 # Canonical Verilog-A IR Design
 
+> **Status update (2026-06-25):** Canonical IR has moved from design into the
+> `rspice-veriloga` implementation, and a first Rust backend now consumes it for
+> feature-gated generated built-ins. The non-goals below describe the original
+> IR slice, not the current repository state.
+
 ## Purpose
 
 RSpice needs a single canonical compiler target for Verilog-A device support. The current `rspice-veriloga` pipeline lowers analyzed modules into `DeviceIR`, then immediately emits bytecode-oriented `CompiledModel` programs with an optional Cranelift JIT layered over that bytecode. That structure has served as an enabling path, but it is not the right long-term commercial contract for generated Rust devices, an optimized custom x64/ARM JIT, reproducible model artifacts, or supportable diagnostics.

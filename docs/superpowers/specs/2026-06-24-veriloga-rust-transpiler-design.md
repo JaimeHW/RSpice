@@ -1,5 +1,12 @@
 # Verilog-A Rust Transpiler Design
 
+> **Status update (2026-06-25):** The first implementation diverged from this
+> original `OUT_DIR` inclusion sketch. Current `rspice-core` builds generated
+> built-ins behind `veriloga-builtins` using a materialized source-tree registry
+> under `crates/rspice-core/src/device/veriloga_generated/`. Treat the `OUT_DIR`
+> layout below as historical design context, not the current implementation
+> contract.
+
 ## Purpose
 
 RSpice needs a build-time Rust backend for bundled Verilog-A device models. When the simulator is compiled, the build must discover RSpice's built-in Verilog-A source files, compile them through the canonical IR, transpile each device model into Rust source, and include that generated source in the normal simulator binary. Built-in devices should not compile on first use, should not depend on the bytecode interpreter, and should not depend on Cranelift.

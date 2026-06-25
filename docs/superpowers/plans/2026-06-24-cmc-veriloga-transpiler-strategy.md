@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status update (2026-06-25):** The generator/build infrastructure described
+> here has started landing behind `rspice-core`'s `veriloga-builtins` feature,
+> with generated source materialized under
+> `crates/rspice-core/src/device/veriloga_generated/`. This remains
+> feature-gated qualification work; the model policy below is still active, but
+> do not read this plan as a completed CMC product-support claim.
+
 **Goal:** Stop hand-writing native implementations for devices that have redistributable CMC Verilog-A sources under `models/veriloga/cmc/`, and instead build a Verilog-A to Rust transpiler that generates native Rust device implementations from those sources.
 
 **Architecture:** CMC Verilog-A packages are the source of truth for modern compact models such as PSP, HICUM/L2, MEXTRAM, BSIM-CMG, BSIM-IMG, BSIM-BULK, ASM-HEMT, MVSG, and JUNCAP/diode CMC. The existing Verilog-A parser/semantic pipeline remains the front end; a new Rust codegen backend emits checked-in or cached generated Rust modules with the same simulator-facing contracts as hand-native devices. Historical hand-native CMC slices are not active product code and should only be used as external reference material for generated implementations.
