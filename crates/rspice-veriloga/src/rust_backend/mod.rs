@@ -1,7 +1,9 @@
+mod discover;
 mod error;
 mod files;
 mod names;
 
+pub use discover::{VerilogASourceCandidate, discover_veriloga_sources};
 pub use error::RustBackendError;
 pub use files::write_generated_device;
 pub use names::{RustDeviceNames, sanitize_identifier};

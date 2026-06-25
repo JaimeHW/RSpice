@@ -1,6 +1,6 @@
 use rspice_veriloga::rust_backend::{
     GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames, RustTranspiler,
-    write_generated_device,
+    discover_veriloga_sources, write_generated_device,
 };
 
 #[test]
@@ -90,6 +90,35 @@ fn generated_device_writer_rejects_paths_outside_device_folder() {
     assert!(err.to_string().contains("unsafe generated relative path"));
 
     let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn discovery_skips_include_only_files_and_sorts_modules() {
+    let dir = temp_dir("rspice-va-discovery");
+    std::fs::write(dir.join("defs.include"), "`define GAIN 1.0\n").expect("write include");
+    std::fs::write(dir.join("disciplines.vams"), "nature Voltage; endnature\n")
+        .expect("write vams");
+    std::fs::write(
+        dir.join("b.va"),
+        "module beta(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\n",
+    )
+    .expect("write beta");
+    std::fs::write(
+        dir.join("a.va"),
+        "module alpha(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\n",
+    )
+    .expect("write alpha");
+
+    let found = discover_veriloga_sources(&dir).expect("discover sources");
+    let names: Vec<_> = found
+        .iter()
+        .flat_map(|source| source.modules.iter().cloned())
+        .collect();
+
+    assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+    assert_eq!(found.len(), 2);
+
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 fn temp_dir(prefix: &str) -> std::path::PathBuf {
