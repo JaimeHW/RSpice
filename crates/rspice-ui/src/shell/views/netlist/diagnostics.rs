@@ -267,4 +267,21 @@ mod tests {
         assert_eq!(&src[diagnostics[0].span.clone().unwrap()], "nch");
         assert!(diagnostics[0].fix.is_none());
     }
+
+    #[test]
+    fn parser_warnings_convert_to_editor_diagnostics() {
+        let src = "deck\nV1 in 0 1\nR1 in 0 1k\n.options vendorcompat=1\n.end\n";
+        let netlist = rspice_core::Netlist::parse(src).expect("deck parses with warning");
+        let diagnostics = parser_diagnostics(&netlist);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        assert_eq!(diagnostics[0].line, Some(3));
+        assert!(
+            diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains("vendorcompat")
+        );
+    }
 }
