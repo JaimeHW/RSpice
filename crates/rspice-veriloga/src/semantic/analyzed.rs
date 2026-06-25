@@ -136,6 +136,7 @@ pub struct AnalyzedBranch {
 #[derive(Debug, Clone)]
 pub struct AnalyzedContribution {
     pub branch: SmolStr,
+    pub declared_branch: Option<SmolStr>,
     pub is_current: bool,
     /// Indirect (implicit-equation) contribution: `expression` holds the
     /// constraint residual `lhs - rhs` that the unknown source drives to

@@ -818,29 +818,6 @@ impl Engine {
                                 }
                                 _ => {}
                             }
-                            56 => {
-                                Self::build_b3soi_dd(
-                                    &mut circuit,
-                                    element,
-                                    resolved_mos_type,
-                                    params_map,
-                                    instance_params,
-                                    self.config.temperature,
-                                )?;
-                                continue;
-                            }
-                            57 => {
-                                Self::build_b3soi_pd(
-                                    &mut circuit,
-                                    element,
-                                    resolved_mos_type,
-                                    params_map,
-                                    instance_params,
-                                    self.config.temperature,
-                                )?;
-                                continue;
-                            }
-                            _ => {}
                         }
                     }
 
