@@ -4,7 +4,8 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use rspice_veriloga::rust_backend::{
-    GeneratedRustDevice, RustTranspiler, discover_veriloga_sources, write_generated_device,
+    GeneratedRustDevice, RustTranspiler, cleanup_stale_generated_device_folders,
+    discover_veriloga_sources, write_generated_device, write_text_file_if_changed,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
@@ -12,13 +13,10 @@ fn main() {
     println!("cargo:rerun-if-env-changed=RSPICE_VERILOGA_BUILTINS_DIR");
     println!("cargo:rustc-check-cfg=cfg(rspice_veriloga_builtins_generated)");
 
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set"));
-    let registry_root = out_dir.join("veriloga_builtins");
-    let devices_root = registry_root.join("devices");
+    let generated_root = generated_source_root();
 
     let enabled = env::var_os("CARGO_FEATURE_VERILOGA_BUILTINS").is_some();
     if !enabled {
-        write_registry(&registry_root, &[]).expect("write empty generated Verilog-A registry");
         return;
     }
 
@@ -27,6 +25,7 @@ fn main() {
         .unwrap_or_else(default_model_root);
 
     println!("cargo:rerun-if-changed={}", model_root.display());
+    println!("cargo:rerun-if-changed={}", generated_root.display());
     if !model_root.exists() {
         panic!(
             "Verilog-A built-ins feature is enabled, but source directory '{}' does not exist. Set RSPICE_VERILOGA_BUILTINS_DIR or add models under the workspace models/veriloga directory.",
@@ -40,7 +39,7 @@ fn main() {
         );
     }
 
-    let devices = generate_devices(&model_root, &devices_root)
+    let devices = generate_devices(&model_root, &generated_root)
         .unwrap_or_else(|error| panic!("failed to generate Verilog-A built-ins: {error}"));
     if devices.is_empty() {
         panic!(
@@ -60,7 +59,12 @@ fn main() {
     );
 
     println!("cargo:rustc-cfg=rspice_veriloga_builtins_generated");
-    write_registry(&registry_root, &devices).expect("write generated Verilog-A registry");
+    write_registry(&generated_root, &devices).expect("write generated Verilog-A registry");
+}
+
+fn generated_source_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    manifest_dir.join("src/device/veriloga_generated")
 }
 
 fn default_model_root() -> PathBuf {
@@ -92,7 +96,6 @@ fn generate_devices(
                 println!("cargo:rerun-if-changed={}", dependency.display());
             }
             let device = transpiler.transpile(&compiled.artifact)?;
-            write_generated_device(devices_root, &device)?;
             devices.push(device);
         }
     }
@@ -103,6 +106,13 @@ fn generate_devices(
             .then_with(|| left.folder_name.cmp(&right.folder_name))
     });
     reject_duplicate_public_names(&devices)?;
+    cleanup_stale_generated_device_folders(
+        devices_root,
+        devices.iter().map(|device| device.folder_name.as_str()),
+    )?;
+    for device in &devices {
+        write_generated_device(devices_root, device)?;
+    }
     Ok(devices)
 }
 
@@ -134,7 +144,7 @@ fn write_registry(
     for device in devices {
         writeln!(
             out,
-            "#[allow(non_snake_case)]\n#[path = \"devices/{}/mod.rs\"]\npub mod {};",
+            "#[allow(non_snake_case)]\n#[path = \"{}/mod.rs\"]\npub mod {};",
             device.folder_name, device.folder_name
         )?;
     }
@@ -235,6 +245,19 @@ fn write_registry(
     for device in devices {
         writeln!(
             out,
+            "        {:?} => Some({}::Instance::TERMINAL_COUNT),",
+            device.public_model_name.to_ascii_uppercase(),
+            device.folder_name
+        )?;
+    }
+    out.push_str("        _ => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("pub fn total_node_count(model_name: &str) -> Option<usize> {\n");
+    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
+    for device in devices {
+        writeln!(
+            out,
             "        {:?} => Some({}::Instance::NODE_COUNT),",
             device.public_model_name.to_ascii_uppercase(),
             device.folder_name
@@ -244,10 +267,38 @@ fn write_registry(
     out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str(
-        "pub fn instantiate(model_name: &str, nodes: &[usize], params: &[(String, crate::Value)]) -> Result<Option<GeneratedBuiltinKind>, String> {\n",
+        "pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> {\n",
+    );
+    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
+    for device in devices {
+        writeln!(
+            out,
+            "        {:?} => Some(&{}::Instance::INTERNAL_NODE_NAMES),",
+            device.public_model_name.to_ascii_uppercase(),
+            device.folder_name
+        )?;
+    }
+    out.push_str("        _ => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("pub fn branch_count(model_name: &str) -> Option<usize> {\n");
+    out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
+    for device in devices {
+        writeln!(
+            out,
+            "        {:?} => Some({}::Instance::BRANCH_COUNT),",
+            device.public_model_name.to_ascii_uppercase(),
+            device.folder_name
+        )?;
+    }
+    out.push_str("        _ => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str(
+        "pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params: &[(String, crate::Value)]) -> Result<Option<GeneratedBuiltinKind>, String> {\n",
     );
     if devices.is_empty() {
-        out.push_str("    let _ = (model_name, nodes, params);\n");
+        out.push_str("    let _ = (model_name, nodes, branches, params);\n");
         out.push_str("    Ok(None)\n");
     } else {
         out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
@@ -262,8 +313,17 @@ fn write_registry(
                 "            let mut instance = {}::Instance::new(nodes);",
                 device.folder_name
             )?;
+            out.push_str("            instance.set_branch_indices(branches);\n");
             out.push_str("            for (name, value) in params {\n");
-            out.push_str("                instance.set_parameter(name, *value)?;\n");
+            out.push_str(
+                "                if let Err(error) = instance.set_parameter(name, *value) {\n",
+            );
+            out.push_str("                    if name.eq_ignore_ascii_case(\"m\") {\n");
+            out.push_str("                        instance.set_multiplicity(*value);\n");
+            out.push_str("                    } else {\n");
+            out.push_str("                        return Err(error);\n");
+            out.push_str("                    }\n");
+            out.push_str("                }\n");
             out.push_str("            }\n");
             writeln!(
                 out,
@@ -276,6 +336,6 @@ fn write_registry(
     }
     out.push_str("}\n");
 
-    std::fs::write(registry_root.join("registry.rs"), out)?;
+    write_text_file_if_changed(registry_root.join("registry.rs"), &out)?;
     Ok(())
 }

@@ -399,8 +399,9 @@ impl CircuitData {
         }
         #[cfg(feature = "veriloga-builtins")]
         {
+            let num_nodes = self.num_nodes;
             self.generated_veriloga_devices_mut()
-                .stamp_all(matrix, rhs, voltages);
+                .stamp_all(matrix, rhs, voltages, num_nodes);
         }
     }
 

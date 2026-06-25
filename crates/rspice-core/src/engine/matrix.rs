@@ -772,6 +772,14 @@ impl Engine {
                 .copied()
                 .filter(|node| *node > 0)
                 .collect();
+            device_nodes.extend(
+                device
+                    .branches
+                    .iter()
+                    .copied()
+                    .filter(|branch| *branch > 0)
+                    .map(|branch| circuit.get_branch_matrix_index(branch)),
+            );
             device_nodes.sort_unstable();
             device_nodes.dedup();
 

@@ -554,9 +554,10 @@ impl Engine {
         if circuit.has_generated_veriloga_devices() {
             let omega = 2.0 * std::f64::consts::PI * frequency_hz;
             let mut generated = circuit.generated_veriloga_devices().clone();
+            let num_nodes = circuit.num_nodes();
             generated.set_timepoint(0.0, 0.0);
-            generated.stamp_ac_real_all(matrix, op_voltages);
-            generated.stamp_reactive_all(matrix, op_voltages, omega);
+            generated.stamp_ac_real_all(matrix, op_voltages, num_nodes);
+            generated.stamp_reactive_all(matrix, op_voltages, num_nodes, omega);
         }
     }
 

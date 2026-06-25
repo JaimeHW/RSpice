@@ -1842,7 +1842,7 @@ impl Engine {
 
                     #[cfg(feature = "veriloga-builtins")]
                     {
-                        if let Some(device) =
+                        if let Some(mut device) =
                             crate::device::veriloga_generated::instantiate_builtin(
                                 subckt_name,
                                 &element.name,
@@ -1852,6 +1852,7 @@ impl Engine {
                                 &mut circuit,
                             )?
                         {
+                            device.set_temperature(self.config.temperature);
                             circuit.add_generated_veriloga_device(device);
                             continue;
                         }

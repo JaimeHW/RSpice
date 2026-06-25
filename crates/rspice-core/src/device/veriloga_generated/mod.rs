@@ -8,7 +8,7 @@ use crate::Value;
 use crate::solver::{ComplexMatrix, StaticMatrix};
 
 pub mod builtins {
-    include!(concat!(env!("OUT_DIR"), "/veriloga_builtins/registry.rs"));
+    include!("registry.rs");
 }
 
 #[derive(Debug, Clone)]
@@ -16,6 +16,8 @@ pub struct BuiltinVerilogAInstance {
     pub model_name: &'static str,
     pub instance_name: String,
     pub nodes: Vec<usize>,
+    pub branches: Vec<usize>,
+    temperature: Value,
     kind: builtins::GeneratedBuiltinKind,
 }
 
@@ -52,9 +54,22 @@ impl BuiltinVerilogADevices {
         self.devices.iter()
     }
 
-    pub fn stamp_all(&mut self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_all(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+    ) {
         for device in &mut self.devices {
-            device.stamp(matrix, rhs, voltages);
+            device.stamp(matrix, rhs, voltages, num_nodes);
+        }
+    }
+
+    #[inline]
+    pub fn set_temperature(&mut self, temperature: Value) {
+        for device in &mut self.devices {
+            device.set_temperature(temperature);
         }
     }
 
@@ -72,9 +87,14 @@ impl BuiltinVerilogADevices {
         }
     }
 
-    pub fn stamp_ac_real_all(&mut self, matrix: &mut ComplexMatrix, voltages: &[Value]) {
+    pub fn stamp_ac_real_all(
+        &mut self,
+        matrix: &mut ComplexMatrix,
+        voltages: &[Value],
+        num_nodes: usize,
+    ) {
         for device in &mut self.devices {
-            device.stamp_ac_real(matrix, voltages);
+            device.stamp_ac_real(matrix, voltages, num_nodes);
         }
     }
 
@@ -82,20 +102,34 @@ impl BuiltinVerilogADevices {
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
+        num_nodes: usize,
         omega: Value,
     ) {
         for device in &mut self.devices {
-            device.stamp_reactive(matrix, voltages, omega);
+            device.stamp_reactive(matrix, voltages, num_nodes, omega);
         }
     }
 }
 
 impl BuiltinVerilogAInstance {
     #[inline]
-    pub fn stamp(&mut self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
-        let ctx = GeneratedEvalContext::new(voltages);
-        let mut stamper = GeneratedStamper::new(matrix, rhs, voltages);
+    pub fn stamp(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+    ) {
+        let ctx = GeneratedEvalContext::new(voltages, self.temperature, num_nodes);
+        let mut stamper = GeneratedStamper::new(matrix, rhs, voltages, num_nodes);
         self.kind.stamp(&ctx, &mut stamper);
+    }
+
+    #[inline]
+    pub fn set_temperature(&mut self, temperature: Value) {
+        if temperature.is_finite() && temperature > 0.0 {
+            self.temperature = temperature;
+        }
     }
 
     #[inline]
@@ -109,16 +143,27 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub fn stamp_ac_real(&mut self, matrix: &mut ComplexMatrix, voltages: &[Value]) {
-        let ctx = GeneratedEvalContext::new(voltages);
-        let mut stamper = GeneratedStamper::new_ac_real(matrix, voltages);
+    pub fn stamp_ac_real(
+        &mut self,
+        matrix: &mut ComplexMatrix,
+        voltages: &[Value],
+        num_nodes: usize,
+    ) {
+        let ctx = GeneratedEvalContext::new(voltages, self.temperature, num_nodes);
+        let mut stamper = GeneratedStamper::new_ac_real(matrix, voltages, num_nodes);
         self.kind.stamp(&ctx, &mut stamper);
     }
 
     #[inline]
-    pub fn stamp_reactive(&mut self, matrix: &mut ComplexMatrix, voltages: &[Value], omega: Value) {
-        let ctx = GeneratedEvalContext::new(voltages);
-        let mut stamper = GeneratedReactiveStamper::new(matrix, omega);
+    pub fn stamp_reactive(
+        &mut self,
+        matrix: &mut ComplexMatrix,
+        voltages: &[Value],
+        num_nodes: usize,
+        omega: Value,
+    ) {
+        let ctx = GeneratedEvalContext::new(voltages, self.temperature, num_nodes);
+        let mut stamper = GeneratedReactiveStamper::new(matrix, num_nodes, omega);
         self.kind.stamp_reactive(&ctx, &mut stamper);
     }
 }
@@ -150,7 +195,11 @@ pub fn instantiate_builtin(
         )));
     }
 
-    let mut nodes = Vec::with_capacity(node_names.len());
+    let internal_node_names = builtins::internal_node_names(descriptor_name).unwrap_or(&[]);
+    let total_nodes = builtins::total_node_count(descriptor_name)
+        .unwrap_or(expected_nodes + internal_node_names.len());
+
+    let mut nodes = Vec::with_capacity(total_nodes);
     for node_name in node_names {
         nodes.push(if node_name.eq_ignore_ascii_case("0") {
             0
@@ -158,6 +207,15 @@ pub fn instantiate_builtin(
             circuit.get_or_create_node(node_name)
         });
     }
+    for internal_name in internal_node_names {
+        let node_name = format!("{instance_name}.__{internal_name}.internal");
+        nodes.push(circuit.get_or_create_node(&node_name));
+    }
+    debug_assert_eq!(
+        nodes.len(),
+        total_nodes,
+        "generated Verilog-A node metadata is internally inconsistent"
+    );
 
     let mut resolved = Vec::with_capacity(params.len());
     for (name, value) in params {
@@ -175,8 +233,14 @@ pub fn instantiate_builtin(
         resolved.push((name.clone(), value));
     }
 
+    let branch_count = builtins::branch_count(descriptor_name).unwrap_or(0);
+    let mut branches = Vec::with_capacity(branch_count);
+    for _ in 0..branch_count {
+        branches.push(circuit.allocate_branch());
+    }
+
     let Some(kind) =
-        builtins::instantiate(descriptor_name, &nodes, &resolved).map_err(|error| {
+        builtins::instantiate(descriptor_name, &nodes, &branches, &resolved).map_err(|error| {
             crate::engine::SimulationError::Circuit(format!(
                 "Failed to instantiate generated Verilog-A instance '{}': {}",
                 instance_name, error
@@ -190,6 +254,8 @@ pub fn instantiate_builtin(
         model_name: descriptor_name,
         instance_name: instance_name.to_string(),
         nodes,
+        branches,
+        temperature: crate::constants::TEMP_REFERENCE,
         kind,
     }))
 }
@@ -197,12 +263,18 @@ pub fn instantiate_builtin(
 #[derive(Debug, Clone, Copy)]
 pub struct GeneratedEvalContext<'a> {
     voltages: &'a [Value],
+    temperature: Value,
+    num_nodes: usize,
 }
 
 impl<'a> GeneratedEvalContext<'a> {
     #[inline]
-    pub fn new(voltages: &'a [Value]) -> Self {
-        Self { voltages }
+    pub fn new(voltages: &'a [Value], temperature: Value, num_nodes: usize) -> Self {
+        Self {
+            voltages,
+            temperature,
+            num_nodes,
+        }
     }
 
     #[inline]
@@ -213,6 +285,28 @@ impl<'a> GeneratedEvalContext<'a> {
             self.voltages.get(node - 1).copied().unwrap_or(0.0)
         }
     }
+
+    #[inline]
+    pub fn temperature(&self) -> Value {
+        self.temperature
+    }
+
+    #[inline]
+    pub fn thermal_voltage(&self) -> Value {
+        crate::constants::thermal_voltage(self.temperature)
+    }
+
+    #[inline]
+    pub fn branch_current(&self, branch_ordinal: usize) -> Value {
+        if branch_ordinal == 0 {
+            0.0
+        } else {
+            self.voltages
+                .get(self.num_nodes + branch_ordinal - 1)
+                .copied()
+                .unwrap_or(0.0)
+        }
+    }
 }
 
 enum GeneratedMatrixTarget<'a> {
@@ -220,28 +314,70 @@ enum GeneratedMatrixTarget<'a> {
     AcReal(&'a mut ComplexMatrix),
 }
 
-pub struct GeneratedStamper<'a> {
-    matrix: GeneratedMatrixTarget<'a>,
-    rhs: Option<&'a mut [Value]>,
-    voltages: &'a [Value],
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedDerivative {
+    axis: GeneratedDerivativeAxis,
+    value: Value,
 }
 
-impl<'a> GeneratedStamper<'a> {
+impl GeneratedDerivative {
     #[inline]
-    pub fn new(matrix: &'a mut StaticMatrix, rhs: &'a mut [Value], voltages: &'a [Value]) -> Self {
+    pub const fn node(node: usize, value: Value) -> Self {
         Self {
-            matrix: GeneratedMatrixTarget::Static(matrix),
-            rhs: Some(rhs),
-            voltages,
+            axis: GeneratedDerivativeAxis::Node(node),
+            value,
         }
     }
 
     #[inline]
-    pub fn new_ac_real(matrix: &'a mut ComplexMatrix, voltages: &'a [Value]) -> Self {
+    pub const fn branch(branch_ordinal: usize, value: Value) -> Self {
+        Self {
+            axis: GeneratedDerivativeAxis::Branch(branch_ordinal),
+            value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GeneratedDerivativeAxis {
+    Node(usize),
+    Branch(usize),
+}
+
+pub struct GeneratedStamper<'a> {
+    matrix: GeneratedMatrixTarget<'a>,
+    rhs: Option<&'a mut [Value]>,
+    voltages: &'a [Value],
+    num_nodes: usize,
+}
+
+impl<'a> GeneratedStamper<'a> {
+    #[inline]
+    pub fn new(
+        matrix: &'a mut StaticMatrix,
+        rhs: &'a mut [Value],
+        voltages: &'a [Value],
+        num_nodes: usize,
+    ) -> Self {
+        Self {
+            matrix: GeneratedMatrixTarget::Static(matrix),
+            rhs: Some(rhs),
+            voltages,
+            num_nodes,
+        }
+    }
+
+    #[inline]
+    pub fn new_ac_real(
+        matrix: &'a mut ComplexMatrix,
+        voltages: &'a [Value],
+        num_nodes: usize,
+    ) -> Self {
         Self {
             matrix: GeneratedMatrixTarget::AcReal(matrix),
             rhs: None,
             voltages,
+            num_nodes,
         }
     }
 
@@ -251,11 +387,11 @@ impl<'a> GeneratedStamper<'a> {
         pos: Option<usize>,
         neg: Option<usize>,
         value: Value,
-        derivatives: &[(usize, Value)],
+        derivatives: &[GeneratedDerivative],
     ) {
         let mut equivalent = value;
-        for &(node, derivative) in derivatives {
-            equivalent -= derivative * self.node_voltage(node);
+        for derivative in derivatives {
+            equivalent -= derivative.value * self.axis_value(derivative.axis);
         }
 
         if let Some(row) = pos {
@@ -272,20 +408,20 @@ impl<'a> GeneratedStamper<'a> {
         row_node: usize,
         row_sign: Value,
         equivalent: Value,
-        derivatives: &[(usize, Value)],
+        derivatives: &[GeneratedDerivative],
     ) {
         if row_node == 0 {
             return;
         }
         let row = row_node - 1;
-        for &(col_node, derivative) in derivatives {
-            if col_node > 0 {
+        for derivative in derivatives {
+            if let Some(col) = self.axis_matrix_index(derivative.axis) {
                 match &mut self.matrix {
                     GeneratedMatrixTarget::Static(matrix) => {
-                        matrix.add(row, col_node - 1, row_sign * derivative);
+                        matrix.add(row, col, row_sign * derivative.value);
                     }
                     GeneratedMatrixTarget::AcReal(matrix) => {
-                        matrix.add_real(row, col_node - 1, row_sign * derivative);
+                        matrix.add_real(row, col, row_sign * derivative.value);
                     }
                 }
             }
@@ -298,24 +434,106 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
-    fn node_voltage(&self, node: usize) -> Value {
-        if node == 0 {
-            0.0
-        } else {
-            self.voltages.get(node - 1).copied().unwrap_or(0.0)
+    pub fn stamp_potential_branch(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        branch_ordinal: usize,
+        multiplicity: Value,
+    ) {
+        let Some(branch) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        if let Some(node) = pos.filter(|node| *node > 0) {
+            self.add_real(node - 1, branch, multiplicity);
+            self.add_real(branch, node - 1, 1.0);
+        }
+        if let Some(node) = neg.filter(|node| *node > 0) {
+            self.add_real(node - 1, branch, -multiplicity);
+            self.add_real(branch, node - 1, -1.0);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential(
+        &mut self,
+        branch_ordinal: usize,
+        value: Value,
+        derivatives: &[GeneratedDerivative],
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        let mut equivalent = value;
+        for derivative in derivatives {
+            equivalent -= derivative.value * self.axis_value(derivative.axis);
+        }
+
+        for derivative in derivatives {
+            if let Some(col) = self.axis_matrix_index(derivative.axis) {
+                self.add_real(row, col, -derivative.value);
+            }
+        }
+        if let Some(rhs) = &mut self.rhs
+            && let Some(slot) = rhs.get_mut(row)
+        {
+            *slot += equivalent;
+        }
+    }
+
+    #[inline]
+    fn axis_value(&self, axis: GeneratedDerivativeAxis) -> Value {
+        match axis {
+            GeneratedDerivativeAxis::Node(node) => {
+                if node == 0 {
+                    0.0
+                } else {
+                    self.voltages.get(node - 1).copied().unwrap_or(0.0)
+                }
+            }
+            GeneratedDerivativeAxis::Branch(branch) => self
+                .branch_matrix_index(branch)
+                .and_then(|index| self.voltages.get(index).copied())
+                .unwrap_or(0.0),
+        }
+    }
+
+    #[inline]
+    fn branch_matrix_index(&self, branch_ordinal: usize) -> Option<usize> {
+        (branch_ordinal > 0).then_some(self.num_nodes + branch_ordinal - 1)
+    }
+
+    #[inline]
+    fn axis_matrix_index(&self, axis: GeneratedDerivativeAxis) -> Option<usize> {
+        match axis {
+            GeneratedDerivativeAxis::Node(node) => (node > 0).then_some(node - 1),
+            GeneratedDerivativeAxis::Branch(branch) => self.branch_matrix_index(branch),
+        }
+    }
+
+    #[inline]
+    fn add_real(&mut self, row: usize, col: usize, value: Value) {
+        match &mut self.matrix {
+            GeneratedMatrixTarget::Static(matrix) => matrix.add(row, col, value),
+            GeneratedMatrixTarget::AcReal(matrix) => matrix.add_real(row, col, value),
         }
     }
 }
 
 pub struct GeneratedReactiveStamper<'a> {
     matrix: &'a mut ComplexMatrix,
+    num_nodes: usize,
     omega: Value,
 }
 
 impl<'a> GeneratedReactiveStamper<'a> {
     #[inline]
-    pub fn new(matrix: &'a mut ComplexMatrix, omega: Value) -> Self {
-        Self { matrix, omega }
+    pub fn new(matrix: &'a mut ComplexMatrix, num_nodes: usize, omega: Value) -> Self {
+        Self {
+            matrix,
+            num_nodes,
+            omega,
+        }
     }
 
     #[inline]
@@ -323,7 +541,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
         &mut self,
         pos: Option<usize>,
         neg: Option<usize>,
-        derivatives: &[(usize, Value)],
+        derivatives: &[GeneratedDerivative],
     ) {
         if let Some(row) = pos {
             self.stamp_current_reactive_row(row, 1.0, derivatives);
@@ -338,17 +556,47 @@ impl<'a> GeneratedReactiveStamper<'a> {
         &mut self,
         row_node: usize,
         row_sign: Value,
-        derivatives: &[(usize, Value)],
+        derivatives: &[GeneratedDerivative],
     ) {
         if row_node == 0 {
             return;
         }
         let row = row_node - 1;
-        for &(col_node, derivative) in derivatives {
-            if col_node > 0 {
+        for derivative in derivatives {
+            if let Some(col) = self.axis_matrix_index(derivative.axis) {
                 self.matrix
-                    .add_imag(row, col_node - 1, row_sign * self.omega * derivative);
+                    .add_imag(row, col, row_sign * self.omega * derivative.value);
             }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive(
+        &mut self,
+        branch_ordinal: usize,
+        derivatives: &[GeneratedDerivative],
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        for derivative in derivatives {
+            if let Some(col) = self.axis_matrix_index(derivative.axis) {
+                self.matrix
+                    .add_imag(row, col, -self.omega * derivative.value);
+            }
+        }
+    }
+
+    #[inline]
+    fn branch_matrix_index(&self, branch_ordinal: usize) -> Option<usize> {
+        (branch_ordinal > 0).then_some(self.num_nodes + branch_ordinal - 1)
+    }
+
+    #[inline]
+    fn axis_matrix_index(&self, axis: GeneratedDerivativeAxis) -> Option<usize> {
+        match axis {
+            GeneratedDerivativeAxis::Node(node) => (node > 0).then_some(node - 1),
+            GeneratedDerivativeAxis::Branch(branch) => self.branch_matrix_index(branch),
         }
     }
 }
