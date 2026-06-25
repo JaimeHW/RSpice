@@ -95,6 +95,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Core classes
     m.add_class::<netlist::PyNetlist>()?;
+    m.add_class::<netlist::PyParseDiagnostic>()?;
     m.add_class::<engine::PyEngine>()?;
 
     // Configuration classes

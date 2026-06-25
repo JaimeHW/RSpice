@@ -20,6 +20,15 @@ pub struct NetlistSummary {
     pub model_count: usize,
     pub subcircuit_count: usize,
     pub parameter_count: usize,
+    pub diagnostics: Vec<WasmDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WasmDiagnostic {
+    pub line: usize,
+    pub severity: String,
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,6 +70,17 @@ fn serialize_to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
         .map_err(|err| JsValue::from_str(&format!("serialization failed: {err}")))
 }
 
+fn diagnostic_summary(diagnostic: &rspice_core::netlist::ParseDiagnostic) -> WasmDiagnostic {
+    WasmDiagnostic {
+        line: diagnostic.line,
+        severity: match diagnostic.severity {
+            rspice_core::netlist::DiagnosticSeverity::Warning => "warning".to_string(),
+        },
+        code: diagnostic.code.clone(),
+        message: diagnostic.message.clone(),
+    }
+}
+
 fn complex_series_from_slice(values: &[rspice_core::Complex64]) -> ComplexSeries {
     ComplexSeries {
         real: values.iter().map(|value| value.re).collect(),
@@ -77,6 +97,7 @@ pub fn summarize_netlist(source: &str) -> WasmResult<NetlistSummary> {
         model_count: netlist.models.len(),
         subcircuit_count: netlist.subcircuits.len(),
         parameter_count: netlist.params.all_params().len(),
+        diagnostics: netlist.diagnostics.iter().map(diagnostic_summary).collect(),
     })
 }
 
@@ -177,4 +198,30 @@ pub fn run_transient_analysis_js(
     let result =
         run_transient_analysis(source, tstop, max_step).map_err(|err| JsValue::from_str(&err))?;
     serialize_to_js(&result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_includes_nonfatal_parser_diagnostics() {
+        let summary = summarize_netlist(
+            "diagnostic deck\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .options vendorcompat=1\n\
+             .end\n",
+        )
+        .expect("deck parses with warning");
+
+        assert_eq!(summary.diagnostics.len(), 1);
+        assert_eq!(summary.diagnostics[0].line, 4);
+        assert!(
+            summary.diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains("vendorcompat")
+        );
+    }
 }
