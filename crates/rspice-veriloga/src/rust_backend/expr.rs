@@ -169,11 +169,42 @@ impl ExprEmitter<'_> {
                 self.emit_value(&base, value)
             }
             HirExprKind::Binary { op, left, right } => {
-                let left = self.lower(*left)?;
-                let right = self.lower(*right)?;
-                let value = binary_value(op.as_str(), &left.value, &right.value)
-                    .map_err(|_| self.unsupported(format!("binary operator {op}")))?;
-                self.emit_value(&base, value)
+                if let Some(operator) = comparison_operator(op.as_str()) {
+                    let left = self.lower(*left)?;
+                    let right = self.lower(*right)?;
+                    self.emit_value(
+                        &base,
+                        format!(
+                            "if {} {operator} {} {{ 1.0 }} else {{ 0.0 }}",
+                            left.value, right.value
+                        ),
+                    )
+                } else if op.as_str() == "And" || op.as_str() == "Or" {
+                    let condition = self.lower_condition(id)?;
+                    self.emit_value(&base, format!("if {condition} {{ 1.0 }} else {{ 0.0 }}"))
+                } else {
+                    let left = self.lower(*left)?;
+                    let right = self.lower(*right)?;
+                    let value = binary_value(op.as_str(), &left.value, &right.value)
+                        .map_err(|_| self.unsupported(format!("binary operator {op}")))?;
+                    self.emit_value(&base, value)
+                }
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                let condition = self.lower_condition(*condition)?;
+                let then_value = self.lower(*then_expr)?;
+                let else_value = self.lower(*else_expr)?;
+                self.emit_value(
+                    &base,
+                    format!(
+                        "if {condition} {{ {} }} else {{ {} }}",
+                        then_value.value, else_value.value
+                    ),
+                )
             }
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 self.lower_ddt_value(id, args.as_slice(), &base)?
@@ -248,16 +279,48 @@ impl ExprEmitter<'_> {
                     .collect::<Result<Vec<_>, _>>()?
             }
             HirExprKind::Binary { op, left, right } => {
-                let left = self
+                if comparison_operator(op.as_str()).is_some()
+                    || op.as_str() == "And"
+                    || op.as_str() == "Or"
+                {
+                    zero_derivatives(node_count)
+                } else {
+                    let left = self
+                        .emitted
+                        .get(left)
+                        .expect("left operand must be emitted before binary derivative");
+                    let right = self
+                        .emitted
+                        .get(right)
+                        .expect("right operand must be emitted before binary derivative");
+                    binary_derivatives(op.as_str(), left, right)
+                        .map_err(|_| self.unsupported(format!("binary operator {op}")))?
+                }
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                let condition = self.lower_condition(*condition)?;
+                let then_value = self
                     .emitted
-                    .get(left)
-                    .expect("left operand must be emitted before binary derivative");
-                let right = self
+                    .get(then_expr)
+                    .expect("then expression must be emitted before conditional derivative");
+                let else_value = self
                     .emitted
-                    .get(right)
-                    .expect("right operand must be emitted before binary derivative");
-                binary_derivatives(op.as_str(), left, right)
-                    .map_err(|_| self.unsupported(format!("binary operator {op}")))?
+                    .get(else_expr)
+                    .expect("else expression must be emitted before conditional derivative");
+                then_value
+                    .derivatives
+                    .iter()
+                    .zip(&else_value.derivatives)
+                    .map(|(then_derivative, else_derivative)| {
+                        format!(
+                            "if {condition} {{ {then_derivative} }} else {{ {else_derivative} }}"
+                        )
+                    })
+                    .collect()
             }
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 self.ddt_derivatives(id, args.as_slice())?
@@ -316,6 +379,51 @@ impl ExprEmitter<'_> {
                     .expect("right operand must be emitted before binary reactive derivative");
                 reactive_binary(op.as_str(), left, right)
                     .map_err(|_| self.unsupported(format!("binary operator {op}")))?
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                let condition = self.lower_condition(*condition)?;
+                let then_value = self.emitted.get(then_expr).expect(
+                    "then expression must be emitted before conditional reactive derivative",
+                );
+                let else_value = self.emitted.get(else_expr).expect(
+                    "else expression must be emitted before conditional reactive derivative",
+                );
+                let has_reactive = then_value.has_reactive || else_value.has_reactive;
+                if has_reactive {
+                    let zero_derivatives = zero_derivatives(node_count);
+                    let then_derivatives = if then_value.has_reactive {
+                        &then_value.reactive_derivatives
+                    } else {
+                        &zero_derivatives
+                    };
+                    let else_derivatives = if else_value.has_reactive {
+                        &else_value.reactive_derivatives
+                    } else {
+                        &zero_derivatives
+                    };
+                    ReactiveValue {
+                        has_reactive: true,
+                        value: format!(
+                            "if {condition} {{ {} }} else {{ {} }}",
+                            then_value.reactive_value, else_value.reactive_value
+                        ),
+                        derivatives: then_derivatives
+                            .iter()
+                            .zip(else_derivatives)
+                            .map(|(then_derivative, else_derivative)| {
+                                format!(
+                                    "if {condition} {{ {then_derivative} }} else {{ {else_derivative} }}"
+                                )
+                            })
+                            .collect(),
+                    }
+                } else {
+                    ReactiveValue::none(zero_derivatives(node_count))
+                }
             }
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 self.ddt_reactive_value(args.as_slice())?
@@ -513,6 +621,45 @@ impl ExprEmitter<'_> {
     fn emit_value(&mut self, base: &str, expression: String) -> String {
         self.lines.push(format!("let {base}: f64 = {expression};"));
         base.to_string()
+    }
+
+    fn lower_condition(&mut self, id: ExprId) -> Result<String, RustBackendError> {
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(id))
+            .ok_or_else(|| {
+                self.internal(format!("condition expression {id} is outside MIR arena"))
+            })?;
+        match &expression.kind {
+            HirExprKind::Binary { op, left, right }
+                if comparison_operator(op.as_str()).is_some() =>
+            {
+                let left = self.lower(*left)?;
+                let right = self.lower(*right)?;
+                let operator = comparison_operator(op.as_str()).expect("checked above");
+                Ok(format!("({} {operator} {})", left.value, right.value))
+            }
+            HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
+                let left = self.lower_condition(*left)?;
+                let right = self.lower_condition(*right)?;
+                Ok(format!("({left} && {right})"))
+            }
+            HirExprKind::Binary { op, left, right } if op.as_str() == "Or" => {
+                let left = self.lower_condition(*left)?;
+                let right = self.lower_condition(*right)?;
+                Ok(format!("({left} || {right})"))
+            }
+            HirExprKind::Unary { op, operand } if op.as_str() == "Not" => {
+                let operand = self.lower_condition(*operand)?;
+                Ok(format!("(!{operand})"))
+            }
+            _ => {
+                let value = self.lower(id)?;
+                Ok(format!("({} != 0.0)", value.value))
+            }
+        }
     }
 
     fn lower_intrinsic_value(
@@ -1139,6 +1286,18 @@ fn is_intrinsic_name(name: &str) -> bool {
 
 fn is_binary_intrinsic_name(name: &str) -> bool {
     matches!(name, "pow" | "min" | "max" | "hypot" | "atan2")
+}
+
+fn comparison_operator(op: &str) -> Option<&'static str> {
+    match op {
+        "Eq" => Some("=="),
+        "Ne" => Some("!="),
+        "Lt" => Some("<"),
+        "Le" => Some("<="),
+        "Gt" => Some(">"),
+        "Ge" => Some(">="),
+        _ => None,
+    }
 }
 
 fn format_f64(value: f64) -> String {

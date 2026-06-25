@@ -406,6 +406,67 @@ fn generated_intrinsic_math_rust_compiles_with_runtime_stub() {
     assert_generated_rust_compiles(&generated);
 }
 
+#[test]
+fn rust_backend_lowers_conditional_expressions_with_selected_derivatives() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(conditional_device_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile conditional device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("if "), "{stamp}");
+    assert!(stamp.contains(" > "), "{stamp}");
+    assert!(stamp.contains("eq0_d_n0"), "{stamp}");
+    assert!(stamp.contains("eq0_d_n1"), "{stamp}");
+    assert!(!stamp.contains("Interpreter"), "{stamp}");
+}
+
+#[test]
+fn generated_conditional_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(conditional_device_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile conditional device");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_lowers_numeric_comparisons_as_one_zero_values() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(comparison_value_device_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile comparison-valued device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("1.0"), "{stamp}");
+    assert!(stamp.contains("0.0"), "{stamp}");
+    assert!(stamp.contains("=="), "{stamp}");
+    assert!(stamp.contains("eq0_d_n0"), "{stamp}");
+}
+
 fn assert_generated_rust_compiles(generated: &GeneratedRustDevice) {
     let temp = temp_dir("rspice-rust-backend-compile");
 
@@ -614,6 +675,28 @@ module math_device(p, n);
         + ln(abs(V(p, n)) + 2.0)
         + pow(abs(V(p, n)) + 1.0, 2.0)
         + floor(V(p, n));
+endmodule
+"#
+}
+
+fn conditional_device_source() -> &'static str {
+    r#"
+module conditional_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real rpos = 1000.0 from (0:inf);
+    parameter real rneg = 2000.0 from (0:inf);
+    analog I(p, n) <+ (V(p, n) > 0.0) ? V(p, n) / rpos : V(p, n) / rneg;
+endmodule
+"#
+}
+
+fn comparison_value_device_source() -> &'static str {
+    r#"
+module comparison_value(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ (V(p, n) == 0.0);
 endmodule
 "#
 }
