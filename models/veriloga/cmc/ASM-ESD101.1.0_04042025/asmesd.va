@@ -1,0 +1,272 @@
+/*
+ASM ESD version 101.1.0 model code released by Sourabh Khandelwal on 04/04/2025.
+Copyright 2025 Sourabh Khandelwal
+Copyright 2024 Sourabh Khandelwal
+Copyright 2023 Sourabh Khandelwal
+Copyright 2022 Sourabh Khandelwal
+Copyright 2021 Sourabh Khandelwal
+*/
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+`include "asmesd_macros.include"
+`define ASMESD
+
+module asmesd(c,b,e,dt);
+    inout c,b,e,dt;
+    electrical c,b,e,ci,bi,ei;
+    thermal dt, dt1;
+    electrical tt, tbb;
+
+    analog function real ln_exp_plus_1;
+        input x; real x;
+        begin
+            if (x >= 37) begin
+                ln_exp_plus_1 = x;
+            end else if (x <= -37) begin
+                ln_exp_plus_1 = exp(x);
+            end else begin
+                ln_exp_plus_1 = ln(exp(x) + 1);
+            end
+        end
+    endfunction
+
+    analog function integer sign;
+        input arg;
+        real  arg;
+        sign = arg >= 0 ? +1 : -1;
+    endfunction
+
+    branch (b,bi) br_bbi;
+    branch (e,ei) br_eei;
+    branch (c,ci) br_cci;
+    branch (e,ci) br_eci;
+    branch (ci,ei) br_ciei;
+    branch (bi,ei) br_biei;
+    branch (bi,ci) br_bici;
+    branch (b,ci) br_bci;
+    branch (dt) rth;
+    branch (dt) ith;
+    branch (tt) itt;
+    branch (tt) rtt;
+    branch (tt) ctt;
+    branch (tbb) itbb;
+    branch (tbb) rtbb;
+    branch (tbb) ctbb;
+
+`include "asmesd_parameters.include"
+
+    // variable declaration
+    real arg,le,lebv,weff;
+    real dv0,dvh,pwq,qlo,qhi;
+    real ttype,Tdev,Tnom,Tamb,rT,lnrT,Vt;
+    real bf_t,br_t,tbeta,is_t,ise_t,isc_t,cje_t,cjc_t,cjs_t,vje_t,vjc_t,vjs_t;
+    real ijbv_t, ijbvc_t, bvr_t, theexp_t;
+    real cje_i, cjc_i, cjs_i;
+    real ifwd,ibe2,Ibe,ibwd,ibc2,Ibc,iKq1,Kq2,iKqb,Itzf,Itr,Itzf_f;
+    real itrev;
+    real re_nom,rc_nom,rb_nom,Rb,Rc,Re,tff,Qde,Qdc,Qjs,Qje,qjcx,Qjcx,qjci,Qjci;
+    real Qxf1;
+    real ovaf,ovar,oikf,oikr,argt,fourkt,twoq,flicker_Pwr,noipwr_Rb,noipwr_re,noipwr_rc;
+    real Veci,Vbiei,Vbici,Vbci;
+    real Vbbi, Veei;
+    real fact1,fact2,egfet,arg0,pbfact,pbo,gmaold,gmanew,cjt;
+    real argbv, argbvvt, argtr, isr_t;
+    real Fbwm, Vbc, Dkqb;
+    real Vtff,Vtff1;
+    real vbesat,veesat;
+    real t0, d_ratio;
+    analog begin
+        begin: voltages
+            Tamb = $temperature + Temp(dt) + dtemp;
+            Tdev = `CLAMP((Tamb),(`TMIN+`P_CELSIUS0),(`TMAX+`P_CELSIUS0));
+            if ($port_connected(dt)==0) begin
+                $strobe("DT node not connected");
+            end
+            if (Tdev>tfail) begin
+                $strobe("Device temperature has reached failure");
+            end
+
+            weff = n*l;
+            Vbc   = type*V(br_bici);
+            Fbwm  = 1.0 + kbwm*pow(-min(Vbc,0.0),xbwm);
+            Tnom = tnom+`P_CELSIUS0;
+            Vt = `KBoQ*Tdev;
+            rT = Tdev/Tnom;
+            lnrT = ln(rT);
+            tbeta = exp(xtb*lnrT);
+            bf_t = bf*tbeta*Fbwm;
+            br_t = br*tbeta;
+            ovaf = ((vaf)>(0)?(1/vaf):(0));
+            ovar = ((var)>(0)?(1/var):(0));
+            oikf = ((ikf)>(0)?(1.0/ikf):(0));
+            oikr = ((ikr)>(0)?(1/ikr):(0));
+            argt = xti*lnrT+eg*(rT-1)/Vt;
+            argtr = xtir*lnrT;
+            is_t = is*exp(argt);
+            isr_t = isr*exp(argtr);
+            ise_t = ise*exp(argt/ne)/tbeta;
+            isc_t = isc*exp(argt/nc)/tbeta;
+            ijbv_t = ijbv*(1.0 + xjbv*(rT-1.0));
+            bvr_t = bvr*(1.0 + xbvr*(rT-1.0));
+            theexp_t = theexp*(1.0 + xtheexp*(rT-1.0));
+            ijbvc_t = ijbvc*(1.0 + xjbvc*(rT-1.0));
+            cje_i = cje;
+            cjc_i = cjc;
+            cjs_i = cjs;
+            `TEMPCJ(cje_i,vje,mje,cje_t,vje_t)
+            `TEMPCJ(cjc_i,vjc,mjc,cjc_t,vjc_t)
+            `TEMPCJ(cjs_i,vjs,mjs,cjs_t,vjs_t)
+
+            ttype = type;
+            Veci = ttype*V(br_eci);
+            Vbiei = ttype*V(br_biei);
+            Vbici = ttype*V(br_bici);
+            Vbci = ttype*V(br_bci);
+            Vbbi  = ttype*V(br_bbi);
+            Veei  = ttype*V(br_eei);
+
+            begin : model_evaluation
+
+                //currents
+                `IDIO(is_t,nf,nbv,bvr_t,ijbv_t,ther,theexp_t,Vbiei,  ifwd)
+                `IDIOR(isr_t,ntr,vtr,Vbiei,  itrev)
+                `IDIO(ise_t,ne,nbvc,bvr_t,0.0,ther,theexp_t,Vbiei,  ibe2)
+                `IDIO(is_t,nr,nbvc,bvr_t,ijbvc_t,ther,theexp_t,Vbici,  ibwd)
+                `IDIO(isc_t,nc,nbvc,bvr_t,0.0,ther,theexp, Vbici,  ibc2)
+                I(itbb) <+ -(Vbiei - V(tbb))*(1.0);
+                I(rtbb) <+ V(tbb)*1e-6;
+                I(ctbb) <+ cthbb*ddt(V(tbb));
+                d_ratio = abs(min(V(tbb),Vbiei)/max(abs(Vbiei),1e-9));
+                Ibe = (ifwd-itrev)/bf_t+ibe2;
+                Ibc = ibwd/br_t+ibc2;
+                oikf = oikf*(1.0 + Vbici*ikbwm);
+                Kq2 = ifwd*oikf+ibwd*oikr;
+                iKq1 = 1.0-Vbiei*ovar-Vbici*ovaf;
+                Dkqb = 1.0 + pow(abs(1.0 + 4.0*Kq2),xkf);
+                iKqb = 2*iKq1/Dkqb;
+                Itr = ibwd*iKqb;
+                Itzf = ifwd*iKqb;
+                Itzf_f = ifwd*iKqb*d_ratio*cdelay + (1.0-cdelay)*ifwd*iKqb;
+
+                //bias dependent base resistance
+                vbesat = 1.0 + pow(abs(Vbbi/vsatb),mexp);
+                veesat = 1.0 + pow(abs(Veei/vsate),mexpe);
+                Rb = rb*exp(lnrT*arb)*pow(vbesat,1.0/mexp);
+                Rc = rc*exp(lnrT*arc);
+                Re = re*exp(lnrT*are)*pow(veesat,1.0/mexpe);
+
+                //effective transit time
+                Vtff = pow(abs(V(b,e)/vtf0),texp);
+                Vtff1 = pow((1.0 + Vtff),1.0/texp)-1.0;
+                tff = tf*(1.0 + atff*Vtff1);
+
+                //diffusion charges
+                Qde = tff*ifwd;
+                Qdc = tr*Itr;
+
+                // charge transit time model
+                if (rbmod==1) begin
+                    I(itt) <+ -(ifwd/bf_t)*tff;
+                    I(rtt) <+ V(tt)*1.0;
+                    I(ctt) <+ (tff)*ddt(V(tt));
+                    Rb = Rb/(1.0 + pow((abs(V(tt))/qtt0),qexp));
+                end else begin
+                    Rb = Rb;
+                    V(tt) <+ 0.0;
+                end
+                if (extmod == 1) begin
+                    Rb = Rb + rbe;
+                    Rc = Rc + rce;
+                    Re = Re + ree;
+                end
+
+                //junction charges
+                `QJZ(Qjs,cjs_t,Veci,vjs_t,mjs)
+                `QJ(Qje,cje_t,Vbiei,vje_t,mje,fc)
+                `QJ(qjcx,cjc_t,Vbci,vjc_t,mjc,fc)
+                Qjcx = (1-xcjc)*qjcx;
+                `QJ(qjci,cjc_t,Vbici,vjc_t,mjc,fc)
+                Qjci = xcjc*qjci;
+                // excess phase calculation (Klose-Wieder charge partitioning)
+                if (ptf != 0 && tf != 0) begin
+                    Qxf1 = ttype*ptf*`M_PI/180*tf*Itzf;
+                end else begin
+                    Qxf1 = 0;
+                end
+
+                if (shmod == 1 && rth0>0) begin
+                    Pwr(ith) <+ -1.0*abs(Ibe*V(b,e))-abs(Ibc*V(b,c));
+                    Pwr(rth) <+ Temp(rth)/rth0;
+                    Pwr(rth) <+ ddt(Temp(rth)*cth0);
+                    Temp(dt1) <+ 0.0;
+                end else if (shmod == 2 && rth0>0 && rth1>0) begin
+                    Pwr(ith) <+ -1.0*abs(Ibe*V(b,e))-abs(Ibc*V(b,c));
+                    Pwr(dt,dt1) <+ Temp(dt,dt1)/rth0;
+                    Pwr(dt)    <+ ddt(cth0*Temp(dt));
+                    Pwr(dt1)   <+ Temp(dt1)/rth1;
+                    Pwr(dt1)   <+ ddt(cth1*Temp(dt1));
+                end else if (shmod==-1) begin
+                    Pwr(ith) <+ -1.0*abs(Ibe*V(b,e))-abs(Ibc*V(b,c));
+                    Temp(dt1) <+ 0.0 ;
+                end else begin
+                    Temp(dt) <+ 0.0 ;
+                    Temp(dt1) <+ 0.0 ;
+                end
+            end
+
+            fourkt = 4.0 * `KB * Tdev; //for thermal noise
+            begin : load_sources
+                I(br_biei) <+ `Gmin*V(br_biei);
+                I(br_bici) <+ `Gmin*V(br_bici);
+                I(br_ciei) <+ `Gmin*V(br_ciei);
+                rb_nom = (rb + extmod*rbe)/weff;
+                re_nom = (re + extmod*ree)/weff;
+                rc_nom = (rc + extmod*rce)/weff;
+                if ((rb_nom > 0.0) && (rb_nom >= minr)) begin
+                    I(br_bbi)  <+ V(br_bbi)/(`MAX(Rb/weff,minr));
+                    noipwr_Rb = (((Rb/weff)>=(minr))?(fourkt/(Rb/weff)):(0));
+                    I(br_bbi) <+ white_noise(noipwr_Rb, "Rb");
+                end else begin
+                    V(br_bbi) <+ 0.0;
+                end
+                if ((re_nom > 0.0) && (re_nom >= minr)) begin
+                    I(br_eei)  <+ V(br_eei)/(`MAX(Re/weff,minr));
+                    noipwr_re = (((Re/weff)>=(minr))?(fourkt/(Re/weff)):(0));
+                    I(br_eei) <+ white_noise(noipwr_re, "Re");
+                end else begin
+                    V(br_eei)  <+ 0.0;
+                end
+                if ((rc_nom > 0.0) && (rc_nom >= minr)) begin
+                    I(br_cci)  <+ V(br_cci)/(`MAX(Rc/weff,minr));
+                    noipwr_rc = (((Rc/weff)>=(minr))?(fourkt/(Rc/weff)):(0));
+                    I(br_cci) <+ white_noise(noipwr_rc, "Rc");
+                end else begin
+                    V(br_cci)  <+ 0.0;
+                end
+                I(br_biei) <+ ttype*Ibe*weff;
+                I(br_bici) <+ ttype*Ibc*weff;
+                I(br_ciei) <+ ttype*(-Itr*weff);
+                I(br_ciei) <+ ttype*Itzf_f*weff;
+                I(br_biei) <+ ddt(ttype*Qje*weff);
+                I(br_biei) <+ ddt(ttype*Qde*weff);
+                I(br_bci)  <+ ddt(ttype*Qjcx*weff);
+                I(br_bici) <+ ddt(ttype*Qjci*weff);
+                I(br_bici) <+ ddt(ttype*Qdc*weff);
+                I(br_eci)  <+ ddt(ttype*Qjs*weff);
+                I(br_biei) <+ ddt((-Qxf1*weff));
+                I(br_bici) <+ ddt((Qxf1*weff));
+            end //of load sources
+
+            //flicker noise
+            flicker_Pwr = (((af > 0) && (kf > 0))>(0)?(kf*pow(abs(Ibe),af)):(0));
+            I(br_biei) <+ flicker_noise(sign(ttype*Ibe)*flicker_Pwr,1.0, "flicker_Ibe");
+
+            //shot noise
+            twoq = 2.0 * `QQ;
+            I(br_biei) <+ white_noise(twoq*abs(Ibe),"Ibe");
+            I(br_ciei) <+ white_noise(twoq*abs(Itzf-Itr),"It");
+        end //voltages
+    end //analog
+endmodule

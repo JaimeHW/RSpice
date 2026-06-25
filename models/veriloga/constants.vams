@@ -38,6 +38,10 @@
 `define P_CELSIUSOFFSET 273.15
 `define P_CELSIUS0      273.15
 
+// Legacy compact-model aliases from older constants.vams revisions
+`define P_Q_NIST1998 1.602176462e-19
+`define P_K_NIST1998 1.3806503e-23
+
 // Semiconductor constants
 // Avogadro's number (1/mol)
 `define P_N_AVOGADRO  6.02214076e23

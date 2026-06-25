@@ -1,0 +1,138 @@
+/*
+ASM ESD version 101.1.0 model code released by Sourabh Khandelwal on 04/04/2025.
+Copyright 2025 Sourabh Khandelwal
+Copyright 2024 Sourabh Khandelwal
+Copyright 2023 Sourabh Khandelwal
+Copyright 2022 Sourabh Khandelwal
+Copyright 2021 Sourabh Khandelwal
+*/
+`define Gmin $simparam("gmin",0.0)
+// Constants
+`define KB 1.3806226e-23 // Boltzmann constant (J/K)
+`define QQ 1.6021918e-19 // mag. of electronic charge (C)
+`define KBoQ 8.6170869e-05 //KB over QQ: `KB/`QQ
+`define Dexp_lim 80.0
+`define TMAX 1026.85
+`define TMIN -100.0
+`define MIN_R $simparam("minr",1.0e-3)
+`define OPI2 0.10132118 //1/PI/PI
+`define egta 7.0200e-04
+`define egtb 1.1080e+03
+`define REFTEMP 300.15 //27 degrees C
+`define Eg300 1.1150877
+`define Eg0 1.16
+// Macro definitions
+`define OPP(nam,uni,des)               (*units=uni,                   desc=des*)           real    nam;
+`define OPM(nam,uni,des)               (* desc=des, units=uni, multiplicity="multiply" *)  real    nam;
+`define OPD(nam,uni,des)               (* desc=des, units=uni, multiplicity="divide"   *)  real    nam;
+`define MPRnb(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter real    nam=def;
+`define MPRex(nam,def,uni,exc,    des) (*units=uni,                   desc=des*) parameter real    nam=def exclude exc;
+`define MPRcc(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter real    nam=def from[lwr:upr];
+`define MPRoo(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter real    nam=def from(lwr:upr);
+`define MPRco(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter real    nam=def from[lwr:upr);
+`define MPRoc(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter real    nam=def from(lwr:upr];
+`define MPRcz(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter real    nam=def from[  0:inf);
+`define MPRoz(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter real    nam=def from(  0:inf);
+`define MPInb(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter integer nam=def;
+`define MPIex(nam,def,uni,exc,    des) (*units=uni,                   desc=des*) parameter integer nam=def exclude exc;
+`define MPIcc(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter integer nam=def from[lwr:upr];
+`define MPIoo(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter integer nam=def from(lwr:upr);
+`define MPIco(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter integer nam=def from[lwr:upr);
+`define MPIoc(nam,def,uni,lwr,upr,des) (*units=uni,                   desc=des*) parameter integer nam=def from(lwr:upr];
+`define MPIcz(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter integer nam=def from[  0:inf);
+`define MPIoz(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter integer nam=def from(  0:inf);
+`define MPIsw(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter integer nam=def from[ -1:  2];
+`define MPIty(nam,def,uni,        des) (*units=uni,                   desc=des*) parameter integer nam=def from[ -1:  1] exclude 0;
+`define IPRnb(nam,def,uni,        des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def ;
+`define IPRex(nam,def,uni,exc,    des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def exclude exc;
+`define IPRcc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def from[lwr:upr];
+`define IPRoo(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def from(lwr:upr);
+`define IPRco(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def from[lwr:upr);
+`define IPRoc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def from(lwr:upr];
+`define IPRcz(nam,def,uni,        des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def from[  0:inf);
+`define IPRoz(nam,def,uni,        des) (*units=uni, type="instance",  desc=des*) parameter real    nam=def from(  0:inf);
+`define IPInb(nam,def,uni,        des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def;
+`define IPIex(nam,def,uni,exc,    des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def exclude exc;
+`define IPIcc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def from[lwr:upr];
+`define IPIoo(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def from(lwr:upr);
+`define IPIco(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def from[lwr:upr);
+`define IPIoc(nam,def,uni,lwr,upr,des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def from(lwr:upr];
+`define IPIcz(nam,def,uni,        des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def from[  0:inf);
+`define IPIoz(nam,def,uni,        des) (*units=uni, type="instance",  desc=des*) parameter integer nam=def from(  0:inf);
+
+// Junction charge and capacitance calculation
+`define QJ(qjj,cj0,V,P,M,FC) \
+dv0 = -P*FC; \
+dvh = V+dv0; \
+if (dvh>0.0) begin \
+    pwq = exp((-1.0-M)*ln(1.0-FC)); \
+    qlo = P*(1.0-pwq*(1.0-FC)*(1.0-FC))/(1.0-M); \
+    qhi = dvh*(1.0-FC+0.5*M*dvh/P)*pwq; \
+end else begin \
+    qlo = P*(1.0-exp((1.0-M)*ln(1.0-V/P)))/(1.0-M); \
+    qhi = 0.0; \
+end \
+qjj = cj0*(qlo+qhi);
+
+// Junction charge with no linearization factor (FC=0, substrate)
+`define QJZ(qjj,cj0,V,P,M) \
+if (V <= 0) begin \
+    qjj = cj0*P*(1.0-exp((1.0-M)*ln(1.0-V/P)))/(1.0-M); \
+end else begin \
+    qjj = cj0*V*(1+0.5*M*V/P); \
+end
+
+// diode current with limitation
+`define IDIO(isat,nn,nbv,bvr,ijbv,ther,theexp,ud,  id) \
+if (isat > 0.0) begin \
+    arg = ud/(nn*Vt); \
+    argbv = (-ud-bvr)/(nbv*Vt); \
+    argbvvt = (-bvr)/(nbv*Vt); \
+    if (arg > `Dexp_lim) begin \
+        le = (1.0 + (arg - `Dexp_lim)); \
+        arg = `Dexp_lim; \
+    end else begin \
+        le = 1.0; \
+    end \
+    le = le*exp(arg); \
+    lebv = ln_exp_plus_1(argbv) - ln_exp_plus_1(argbvvt); \
+    id = isat*(le-1.0) - ijbv*lebv/(1.0 + ther*pow(abs(ud),theexp)); \
+end else begin \
+    id = 0.0; \
+end
+
+ // Diode reverse current due to tunneling
+`define IDIOR(isatr,nnr,vtr,ud, idr) \
+if (isatr > 0.0) begin \
+    t0  = max((vtr-ud),0.001); \
+    arg = (-1.0*ud*vtr)/(nnr*Vt*(t0)); \
+    if (arg > `Dexp_lim) begin \
+        le = (1.0 + (arg - `Dexp_lim)); \
+        arg = `Dexp_lim; \
+    end else begin \
+        le = 1.0; \
+    end \
+    le = le*exp(arg); \
+    idr = isatr*(le-1.0); \
+end else begin \
+    idr = 0.0; \
+end
+
+// Temperature update of junction capacitance parameters
+`define TEMPCJ(cj,vj,mj,cj_t,vj_t) \
+fact1 = Tnom/`REFTEMP; \
+fact2 = Tdev/`REFTEMP; \
+egfet = `Eg0-`egta*Tdev*Tdev/(`egtb+Tdev); \
+arg0 = -egfet/(`KB*(Tdev+Tdev))+`Eg300/(`KB*(`REFTEMP+`REFTEMP)); \
+pbfact = -(Vt+Vt)*(1.5*ln(fact2)+`QQ*arg0); \
+pbo = (vj-pbfact)/fact1; \
+gmaold = (vj-pbo)/pbo; \
+cjt = cj/(1+mj*(4e-4*(Tnom-`REFTEMP)-gmaold)); \
+vj_t = fact2*pbo+pbfact; \
+gmanew = (vj_t-pbo)/pbo; \
+cj_t = cjt*(1+mj*(4e-4*(Tdev-`REFTEMP)-gmanew)); \
+
+// Max and Min functions
+`define MAX(x,y) ((x)>(y)?(x):(y))
+`define MIN(x,y) ((x)<(y)?(x):(y))
+`define CLAMP(val,min,max) `MIN(max,`MAX(val,min))

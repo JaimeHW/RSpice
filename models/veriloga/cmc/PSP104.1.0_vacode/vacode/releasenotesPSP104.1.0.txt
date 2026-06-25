@@ -1,0 +1,316 @@
+﻿
+======================================================================================
+======================================================================================
+                      Silicon Integration Initiative (Si2)
+                    Compact Model Coalition In-Code Statement
+
+  Software is distributed as is, completely without warranty or service support. The
+  Commissariat a l'energie atomique et aux energies alternatives (CEA), NXP
+  Semiconductors, and Delft University of Technology, along with their employees are
+  not liable for the condition or performance of the software.
+
+  NXP Semiconductors, Delft University of Technology, and CEA own the copyright and
+  grant users a perpetual, irrevocable, worldwide, non-exclusive, royalty-free license
+  with respect to the software as set forth below.
+  
+  NXP Semiconductors, Delft University of Technology, and CEA hereby disclaim all
+  implied warranties.
+
+  NXP Semiconductors, Delft University of Technology, and CEA grant the users the right
+  to modify, copy, and redistribute the software and documentation, both within the
+  user's organization and externally, subject to the following restrictions:
+  
+    1. The users agree not to charge for the NXP Semiconductors, Delft University of
+       Technology, and CEA-developed code itself but may charge for additions,
+       extensions, or support.
+
+    2. In any product based on the software, the users agree to acknowledge NXP
+       Semiconductors, Delft University of Technology, and CEA that developed the
+       software. This acknowledgement shall appear in the product documentation.
+
+    3. Redistributions to others of source code and documentation must retain the
+       copyright notice, disclaimer, and list of conditions.
+
+    4. Redistributions to others in binary form must reproduce the copyright notice,
+       disclaimer, and list of conditions in the documentation and/or other materials
+       provided with the distribution.
+
+  CMC In-Code Statement Revision: 104.1.0 (PSP), 2026/03/18
+                                  200.7.0 (JUNCAP), 2026/03/18
+
+======================================================================================
+======================================================================================
+
+  Authors: G.D.J. Smit, A.J. Scholten, and D.B.M. Klaassen (NXP Semiconductors)
+           T. Bédécarrats, O. Rozeau, S. Martinie and T. Poiroux (CEA-Leti)
+
+  Former contributers:
+           G. Gildenblat, W. Yao, Z. Zhu, X. Li and W. Wu (Arizona State University)
+           R. van Langevelde (Philips Research)
+           R. van der Toorn (Delft University of Technology)
+           J.C. Barbé (CEA-Leti)
+
+  The most recent version of the model code, the documentation, and contact
+  information can be found on:
+
+       http://www.cea.fr/cea-tech/leti/pspsupport
+       
+======================================================================================
+======================================================================================
+
+This package consists of the following files:
+
+     - releasenotesPSP104.txt         This file
+
+     - psp104.va                      Main file for PSP model
+     - psp104t.va                     Main file for PSP model with self heating
+     - psp104_nqs.va                  Main file for PSP model with NQS-effects
+     - juncap200.va                   Main file for JUNCAP2 stand-alone model
+
+     - Common104_macrodefs.include    Common macro definitions
+     - PSP104_macrodefs.include       Macro definitions for PSP
+     - PSP104_module.include          Actual model code for intrinsic MOS model
+     - PSP104_parlist.include         Model parameter list for PSP model
+     - PSP104_scaling.include         Geometry scaling equations for PSP model
+     - PSP104_opvar.include           Definition and calculation of .DC OP variables
+     - PSP104_nqs_macrodefs.include   All macro definitions for PSP-NQS
+     - JUNCAP200_macrodefs.include    Macro definitions for JUNCAP2 model
+     - JUNCAP200_parlist.include      JUNCAP2 parameter list
+     - JUNCAP200_varlist.include      JUNCAP2 variable declarations
+     - JUNCAP200_InitModel.include    JUNCAP2 model initialization code
+
+     - discipline.h                   Definition of electrical and thermal analog nodes and branches
+
+======================================================================================
+======================================================================================
+
+Usage
+-----
+
+Depending which model one wants to use, one should compile one of the four .va-files
+(psp104.va, psp104t.va, psp104_nqs.va, and juncap200.va). The module names are
+"PSP104VA", "PSP104TVA", and "PSPNQS104VA" (for QS, self heating, and NQS,
+respectively), and "JUNCAP200" for the JUNCAP2-model.
+
+
+======================================================================================
+======================================================================================
+
+Release notes VA-code of PSP 104.1.0 (March 2026)
+----------------------------------------------------
+
+This release includes bug fixes only.
+Changes include:
+   -  PSP104_macrodefs.include:
+      -  line 62-63: 		(PSP046) Addition of smoothing value macros for gate-dependent breakdown voltage an BBT current of gate-edge component of JUNCAP
+	  -  line 289 and 291:	(PSP046) Replacement of MULT_i by MULT_inst and addittion of MULT_I factor
+	  -  line 509-523       (PSP064) New nscr computation
+	  -  line 714           (PSP063) New x_inf computation
+   -  PSP104_module.include:
+      -  line  134-136:		(PSP046) Addition of instance parameters declaration  MULT_I, MULT_Q and MULT_FN
+	  -  line  162: 		(PSP046) Replacement of MULT_i by MULT_inst in variable declaration
+	  -  line  178: 		(PSP053-PSP061) Addition of variable declaration IMAXII_p, GC2OVD_p, GC3OVD_p
+	  -  line  197: 		(PSP053-PSP061) Addition of variable declaration IMAXII_i, GC2OVD_i, GC3OVD_i
+	  -  line  244: 		(PSP053) Addition of variable declaration GCQOVD
+	  -  lines 472-474:		(PSP053) Addition of a if block to set GCQOVD
+	  -  line  647: 		(PSP054) Removing of local variable declaration qjunbot, qjunsti and qjungat in the JuncapExpress context.
+	  -  lines 653-654: 	(PSP054) Removing of qprefbot, qpref2bot and  vbiinvbot from the argument list of macros JuncapExpressInit1 and JuncapExpressInit2
+	       and 660-661
+	  -  lines 941-944: 	(PSP053) Replacment of "*OV" variables by "*OVD" variables.
+	  -  lines 1090-1093:	(PSP061) New block for Impact Ionization clipping to IMAXII value
+	  -  lines 1426			(PSP054) Addition of local variable declaration nu and vjtmp
+	  -  lines 1431-1432	(PSP054) Initialization of nu and vjtmp
+	  -  lines 1459-1472: 	(PSP016) Addition of computational block to include gate-dependent breakdown voltage an BBT current of gate-edge component of JUNCAP
+		   and 1475-1488
+	  -  lines 1473, 1489:	(PSP054) Updates of the juncapcommon macro arguments compliant with its new version (to support 2nd region charge model of gate-edge component)
+	  -  lines 1521-1537: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I factor in current assignation
+	  -  lines 1548-1549:   (PSP046) inclusion of MULT_inst and MULT_I on gmin current contribution 
+	  -  lines 1579-1581: 	(PSP046) Removing of MULT_i in Pwr assignation
+	  -  lines 1610-1617: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_Q factor in displacement current assignation
+	  -  line  1646: 		(PSP046) removing of the MULT_I > 0.0 test in the "if" block condition.
+	  -  lines 1648, 1656: 	(PSP046) addition of a if block with a test on MULT_FN > 0.
+	  -  lines 1659, 1684: 	(PSP046) addition of a if block with a test on MULT_I > 0.
+	  -  line  1686: 		(PSP046) Addition of tests MULT_I > 0 and MULT_Q > 0 in the "if" block condition.
+	  -  lines 1768-1778: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I and MULT_FN factor in noise current assignation
+  -  PSP104_parlist.include:
+	  -  line  144: 		(PSP061) Addition of local model parameter declaration IMAXII
+	  -  lines 156-157: 	(PSP053) Addition of local model parameter declarations GC2OVD and GC3OVD
+	  -  line  144: 		(PSP061) Addition of global model parameter declaration IMAXIIO
+	  -  lines 427-428: 	(PSP053) Addition of global model parameter declarations GC2OVDO and GC3OVDO
+  -  PSP104_scaling.include:
+      -  line  134:		 	(PSP061) new lines for IMAXII_p assignation
+	  -  lines 150-155: 	(PSP053) new block for GC2OVD_p and GC3OVD_p assignation in a local context
+	  -  line  343:		 	(PSP061) new lines for IMAXIIO_p assignation
+	  -  lines 359-364: 	(PSP053) new block for GC2OVD_p and GC3OVD_p assignation in a global context
+	  -  line  721:		 	(PSP053) new lines for IMAXII_i assignation
+	  -  lines 731-732: 	(PSP053) new lines for GC2OVD_i and GC3OVD_i assignation
+	  -  line  799: 		(PSP046) Replacement of MULT_i by MULT_inst
+	  -  lines 817-818: 	(PSP053) new lines for GC2OVD_i and GC3OVD_i assignation in case of symmetrical S/D junctions
+  -  PSP104_opvar.include: 
+      -  lines 524-542: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I factor in current OP variabes
+	  -  lines 561-568: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I factor in conductance OP variabes
+	  -  lines 569-589: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_Q factor in capacitance OP variabes
+	  -  lines 599-609: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I or MULT_FN factors in noise OP variabes
+	  -  line  628: 		(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I in dissipated power OP variable.
+
+PSP104.1.0 is backward compatible with PSP104.0.1
+
+======================================================================================
+======================================================================================
+
+Release notes VA-code of JUNCAP 200.7.0 (March 2026)
+----------------------------------------------------
+
+This release includes bug fixe only on verilog-A code.
+Changes include:
+
+   -  JUNCAP200_InitModel.include:
+      In "JUNCAP200_InitModel_Model" macro:
+      -  lines 97-103:  	(PSP054) New block to compute the switch variable value swgat2nd for 2nd region charge model of gate-edge component at source side.
+	  -  lines 105-121: 	(PSP054) New block to assign 1st-order variables realted to 2nd region charge model of gate-edge component at source side in case of swgat2nd==1.0
+	  In "JUNCAP200_InitModel_Model_Drain_Junction" macro:
+	  -  lines 171-180: 	(PSP054) Assignation of *D_i variables related to 2nd region charge model, Vg-dependent breakdown voltage model and Vg-dependent BBT current model of gate-edge component,
+								in case of symmetric S/D junctions
+	  -  lines 225-234: 	(PSP054) Assignation of *D_i variables related to 2nd region charge model, Vg-dependent breakdown voltage model and Vg-dependent BBT current model of gate-edge component,
+								in case of asymmetric S/D junctions
+	  -  lines 282-287: 	(PSP054) new block to compute the switch variable value swgat2nd_d for 2nd region charge model of gate-edge component at drain side.
+	  -  lines 289-305: 	(PSP054) new block to assign 1st-order variables related to 2nd region charge model of gate-edge component at drain side in case of swgat2nd_d==1.0
+	  In "JUNCAP200_InitModel_Instance" macro:
+	  -  lines 388-413: 	(PSP054) new block to assign 2nd-order variables realted to 2nd region charge model of gate-edge component at source side in case of swgat2nd==1.0
+	  In "JUNCAP200_InitModel_Instance_Drain_Junction" macro:
+	  -  lines 486-512: 	(PSP054) new block to assign 2nd-order variables related to 2nd region charge model of gate-edge component at drain side in case of swgat2nd_d==1.0
+	  
+   -  JUNCAP200_parlist.include
+      -  Lines 79-84:		(PSP054) Addition of parameter declarations related to 2nd region charge model of gate-edge component at source side
+								FCJORGAT2, FVBIRGAT2, FPGAT2, FPHIGGAT2, VTRGAT and ANUGAT, in case of JUNCAP stand-alone.
+	  -  Lines 126-132:		(PSP054) Addition of parameter declarations related to 2nd region charge model of gate-edge component at source side
+								FCJORGAT2, FVBIRGAT2, FPGAT2, FPHIGGAT2, VTRGAT and ANUGAT, in case of JUNCAP not stand-alone.
+	  -  Lines 133-137:		(PSP016) Addition of parameter declarations related to Vg-dependent breakdown voltage model and Vg-dependent BBT current model of gate-edge component at source-side
+								ADVBRGAT, BDVBRGAT, ADBBTGAT and BDBBTGAT, in case of JUNCAP not stand-alone.
+	  -  Lines 184-189:		(PSP054) Addition of parameter declarations related to 2nd region charge model of gate-edge component at drain side
+								FCJORGAT2D, FVBIRGAT2D, FPGAT2D, FPHIGGAT2D, VTRGATD and ANUGATD, in case of JUNCAP not stand-alone.
+	  -  Lines 190-193:		(PSP016) Addition of parameter declarations related to Vg-dependent breakdown voltage model and Vg-dependent BBT current model of gate-edge component at drain side
+								ADVBRGATD, BDVBRGATD, ADBBTGATD and BDBBTGATD, in case of JUNCAP not stand-alone.
+			
+   -  JUNCAP200_varlist.include
+	  -  Lines 50-52: 		(PSP054) Addition of variable declarations related to 2nd region charge model of gate-edge component.
+	  -  Line  77: 			(PSP054) Addition of "*D_i" variable declarations related to 2nd region charge model of gate-edge component at drain side, in case of JUNCAP not standalone
+	  -  Lines 97-99: 		(PSP054) Addition of variable declarations related to 2nd region charge model of gate-edge component at drain side, in case of JUNCAP not standalone
+	  -  Line  101: 		(PSP016) Addition of "*D_i" variable declarations related to Vg-dependent breakdown voltage model and Vg-dependent BBT current model of gate-edge component at drain side, in case of JUNCAP not standalone
+	  -  Line  102: 		(PSP016) Addition of variable declarations related to Vg-dependent breakdown voltage model and Vg-dependent BBT current model of gate-edge component at drain side, in case of JUNCAP not standalone
+	  
+   -  JUNCAP200_macrodefs.include
+	  -  Lines 73-81: 		(PSP016) Addition of new parameters clipping values
+	  -  Lines 73-81: 		(PSP054) Addition of new parameters clipping values
+	  -  Lines 274-277: 	(PSP054) new macro definition "juncapQfunction", which takes over the charge calculation of the obsolete macro "juncapfunction"
+      -  Lines 279-334: 	(PSP054) new macro definition "juncapIfunction", which takes over the current calculation of the obsolete macro "juncapfunction"
+	  -  Lines 343: 		(PSP054) renaming of the obsolete macro "juncapcommon" into "juncapcommoninit"
+	  -  Lines 349-350  	(JUN002) modification related to the bug fix due to the division by z = 0.
+			and 355:
+	  -  Lines 369-401: 	(PSP054) macro redefinition "juncapcommon", which calls "juncapcommoninit", "juncapQfunction" and "juncapIfunction".
+	  -  Lines 390-399: 	(PSP054) implementation into the macro "juncapcommon" of the 2nd region charge model of gate-edge component.
+	  -  Lines 415-431: 	(PSP054) new macro definition "juncapexpresscommon" which takes over only the current calculation of the obsolete macro "juncapcommon"
+	  In "JuncapExpressInit1" macro:
+	  -  Line  437: 		(PSP054) removing of charge related argument from argument list.
+	  -  Lines 448, 450 	(PSP054) substitutions of "juncapcommon" macro calls by "juncapexpresscommon" macro calls
+			and  452:
+	  In "JuncapExpressInit2" macro:
+	  -  Line  456: 		(PSP054) removing of charge related argument from argument list.
+	  -  Line  458, 460: 	(PSP054) substitutions of "juncapcommon" macro calls by "juncapexpresscommon" macro calls
+	  
+   -  juncap200.va
+	  -  Lines 70-71:       (PSP046) Addtion of instance parameter declarations MULT_I and MULT_Q
+	  -  Lines 85, 145: 	(PSP046) substitution of MULT_i by MULT_inst
+	  -  Line  189: 		(PSP054) removing of local charge-related variable declaration, in case of juncap express call.
+	  -  Line  195: 		(PSP054) removing of charge-related argument from argument list of macro "JuncapExpressInit1"
+	  -  Line  196: 		(PSP054) removing of charge-related argument from argument list of macro "JuncapExpressInit2"
+	  -  Line  223: 		(PSP054) declaration of local variable nu, vjtmp used in the 2nd region charge model of gate-edge component.
+	  -  Lines 227-228:		(PSP054) initialization of nu and vjtmp.
+	  -  Line  242: 		(PSP054) addition of argument related to the  2nd region charge model of gate-edge component into the new "juncpcommon" macro argument list
+	  -  Line  254: 		(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I factor in current assignation
+	  -  Line  262: 		(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_Q factor in displacement current assignation
+	  -  Line  271: 		(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I factor in noise current assignation
+	  -  Lines 281-283: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_Q factor in capacitance OP variable calculations
+	  -  Lines 287-301: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I factor in current OP variable calculations
+	  -  Line  302: 		(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_I factor in noise OP variable calculations
+	  -  Lines 303-305: 	(PSP046) Replacement of MULT_i by MULT_inst, and inclusion of MULT_Q factor in capacitance OP variable calculations
+	  
+JUNCAP200.7.0 is backward compatible with JUNCAP200.6.3.
+
+
+=====================================================================================
+======================================================================================
+The authors want to thank Laurent Lemaitre and Colin McAndrew (Freescale)
+for their help with ADMS and the implementation of the model code. Geoffrey
+Coram (Analog Devices) is acknowledged for input concerning the Verilog-A
+implementation of the model.
+
+=====================================================================================
+=====================================================================================
+=====================================================================================
+=====================================================================================
+
+Vampyre 1.9.8 output on psp104.va (same for psp104_nqs and psp104t.va)
+-----------------------------------------------------------------------
+
+Reading psp104.va
+Reading discipline.h
+Reading Common104_macrodefs.include
+Reading JUNCAP200_macrodefs.include
+Reading JUNCAP200_InitModel.include
+Reading PSP104_macrodefs.include
+Reading PSP104_opvar.include
+Reading PSP104_module.include
+Reading PSP104_parlist.include
+Reading JUNCAP200_parlist.include
+Reading JUNCAP200_varlist.include
+Reading PSP104_scaling.include
+WARNING in file PSP104_parlist.include, line 31: Parameter 'LEVEL' was never used
+STYLE in file psp104.va, line 49: Parameters should be declared in lowercase
+WARNING in file psp104.va, line 49: Variable 'initial_instance.JUNCAPexpressInit.vj' was never used
+ERROR in file PSP104_module.include, line 1768: Charge contribution missing MULT_Q
+ERROR in file PSP104_module.include, line 1769: Charge contribution missing MULT_Q
+ERROR in file PSP104_module.include, line 1770: Current contribution missing MULT_I
+
+Module: PSP104VA
+
+Instance parameters (36)
+
+Model parameters (889)
+
+Operating-point variables (100)
+
+
+
+=====================================================================================
+=====================================================================================
+
+Vampyre 1.9.8 output on juncap200.va
+------------------------------------
+
+Reading juncap200.va
+Reading discipline.h
+Reading Common104_macrodefs.include
+Reading JUNCAP200_macrodefs.include
+Reading JUNCAP200_InitModel.include
+Reading JUNCAP200_parlist.include
+Reading JUNCAP200_varlist.include
+STYLE in file juncap200.va, line 48: Port names should be lowercase ('a' not 'A')
+STYLE in file juncap200.va, line 48: Port names should be lowercase ('k' not 'K')
+WARNING in file juncap200.va, line 59: Parameter 'LEVEL' was never used
+STYLE in file juncap200.va, line 312: Parameters should be declared in lowercase
+WARNING in file juncap200.va, line 312: Variable 'initial_instance.JUNCAPexpressInit.vj' was never used
+
+Module: JUNCAP200
+
+Instance parameters (9):
+    AB, CFACTOR, IFACTOR, LG, LS, MULT, MULT_I, MULT_Q, TRISE
+
+Model parameters (56)
+
+Operating-point variables (19):
+    cj, cjbot, cjgat, cjosbot, cjosgat, cjossti, cjsti, idsatsbot,
+    idsatsgat, idsatssti, ij, ijbot, ijgat, ijsti, si, vak, vbisbot,
+    vbisgat, vbissti
+
+

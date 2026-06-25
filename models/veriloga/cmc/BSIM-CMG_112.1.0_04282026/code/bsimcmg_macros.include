@@ -1,0 +1,277 @@
+// *  BSIM-CMG 112.1.0 released on 04/28/2026                            *
+// *  BSIM Common Multi-Gate Model (Verilog-A)                                *
+// ****************************************************************************
+
+// ****************************************************************************
+// *  Copyright © 2026 University of California                               *
+// *                                                                          *
+// *  Project director: Prof. Sayeef Salahuddin                               *
+// *                    Prof. Chenming Hu                                     *
+// *                                                                          *
+// *  Developers: https://www.bsim.berkeley.edu/models/bsimcmg/auth_cmg/      *
+// ****************************************************************************
+
+// Model types
+`define ntype 1
+`define ptype -1
+
+// Numerical constants
+`define EXPL_THRESHOLD 80.0
+`define MAX_EXPL 5.540622384e34
+`define MIN_EXPL 1.804851387e-35
+`define N_MINLOG 1.0e-38
+`define LN_N_MINLOG -87.498233534
+`define DELTA_1 0.02
+`define CONSTCtoK 273.15
+`define REFTEMP 300.15
+`define ONE_OV_3 0.333333333
+`define TWO_OV_3 0.666666667
+`define FOUR_OV_3 1.333333333
+
+// Physical constants
+`define q 1.60219e-19
+`define EPS0 8.8542e-12
+`define HBAR 1.05457e-34
+`define MEL 9.11e-31
+`define KboQ 8.617087e-5
+
+// // Clamped exponential
+// `define lexp(x) ((x > `EXPL_THRESHOLD) ? `MAX_EXPL * (1.0 + x - `EXPL_THRESHOLD) : (x < -`EXPL_THRESHOLD) ? `MIN_EXPL : exp(x))
+
+// // Clamped logarithm
+// `define llnf(x) ((x > `N_MINLOG) ? ln(x) : `LN_N_MINLOG)
+
+// // Hyperbolic smoothing
+// `define hypsmooth(x, c) ((x < -1e4 * (c)) ? (-(c) * (c) / (x)) : (0.5 * (x + sqrt((x) * (x) + 4.0 * (c) * (c)))))
+
+// // Hyperbolic smoothing with a maximum value
+// `define hypmax(x, xmin, c) (xmin + 0.5 * (x - (xmin) - c + sqrt((x - (xmin) - c) * (x - (xmin) - c) - 4.0 * (xmin) * c)))
+
+// // Smoothing with a minimum value
+// `define smoothminx(x, x0, deltax) (0.5 * (x + x0 + sqrt((x - (x0)) * (x - (x0)) + 0.25 * deltax * deltax)))
+
+// // Smoothing with a maximum value
+// `define smoothmaxx(x, x0, deltax) (0.5 * (x + x0 - sqrt((x - (x0)) * (x - (x0)) + 0.25 * deltax * deltax)) + 0.25 * deltax)
+
+// // Smoothing with a maximum value
+// `define smoothmaxx2(x, x0, deltax) (0.5 * (x + x0 - sqrt((x - (x0)) * (x - (x0)) + 0.25 * deltax * deltax)))
+
+// //Gamma function
+// `define gammafunc(x) (0.0385 * exp(-4.6 * (x-1)) + 7.5893e-7 * pow(2*(x) - 3, 8) + 6.9583e-5 * pow(2*(x-1), 6) - 6.583e-4 * pow(2*(x-1), 5) + 0.0065 * pow(2*(x-1), 4) - 0.026 * pow(2*(x-1), 3) + 0.1371 * pow(2*(x-1), 2) - 0.194 * 2*(x-1) + 0.959)
+
+// Temperature dependence
+`define tempdep(param_t, param_i, t_term) \
+begin \
+    if (tempmod != 0) begin \
+        param_t = param_i + hypmax(t_term * delTemp, -param_i, 1.0e-6); \
+    end else begin \
+        param_t = param_i * hypsmooth((1.0 + t_term * delTemp - 1.0e-6), 1.0e-3); \
+    end \
+end
+
+// Quadratic temperature dependence
+`define tempdep2(param_t, param_i, t_term1, t_term2) \
+begin \
+    if (tempmod != 0) begin \
+        param_t = param_i + hypmax((t_term1 * delTemp + t_term2 * delTemp * delTemp), -param_i, 1.0e-6); \
+    end else begin \
+        param_t = param_i * hypsmooth((1.0 + t_term1 * delTemp + t_term2 * delTemp * delTemp - 1.0e-6), 1.0e-3); \
+    end \
+end
+
+// Binning equations
+`define binning(param_i, r_term, l_term, n_term, p_term, w_term, wl_term) \
+begin \
+    param_i = r_term + Inv_L * l_term + Inv_NFIN * n_term + Inv_LNFIN * p_term + Inv_W * w_term + Inv_WL * wl_term; \
+end
+
+// nfin scaling
+`define nfin_scaling(param_i, n1_term, n2_term) \
+begin \
+    if (n1_term != 0.0) begin \
+        param_i = param_i * (1.0 + n1_term / nfin * llnf(1.0 + nfin / n2_term)); \
+    end \
+end
+
+// nfinnom scaling
+`define nfinnom_scaling(param_i, lt_term) \
+begin \
+    param_i = param_i * (1.0 + (nfin - nfinnom) * lt_term * Leff); \
+end
+
+// Length scaling
+`define length_scaling(param, a_term, b_term) \
+begin \
+    param = param + a_term * lexp(-Leff / b_term); \
+end
+
+// Length scaling for CV
+`define length_scaling_CV(param, a_term, b_term) \
+begin \
+    param = param + a_term * lexp(-LeffCV / b_term); \
+end
+
+// Junction capacitance
+`define juncap_bias_indep(SJ, PB_t, MJ, MJ2, vec, pb2) \
+begin \
+    if (SJ > 0.0) begin \
+        vec = PB_t * (1.0 - pow((1.0 / SJ), (1.0 / MJ))); \
+        pb2 = PB_t * SJ * MJ2 / MJ / pow((1.0 - vec / PB_t), -(1.0 + MJ)); \
+    end \
+end
+
+`define junction_cap(block_name, vex, vec, pb2, Cz, PB, SJ, MJ, MJ2, Qej) \
+begin: block_name \
+    real T1, T2, T3, T4, T5; \
+    real arg, sarg, Qec; \
+    \
+    if (Cz > 0.0) begin \
+        T1 = vex / PB; \
+        if (T1 < 0.9) begin \
+            if (SJ > 0.0) begin \
+                if (vex > vec) begin \
+                    arg = 1.0 - T1; \
+                    if (MJ != 1) begin \
+                        if (MJ == 0.5) begin \
+                            sarg = 1.0 / sqrt(arg); \
+                        end else begin \
+                            sarg = pow(arg, -MJ); \
+                        end \
+                        Qej = PB * Cz * (1.0 - arg * sarg) / (1.0 - MJ); \
+                    end else begin \
+                        Qej = -PB * Cz * llnf(arg); \
+                    end \
+                end else begin \
+                    arg = 1.0 - vec / PB; \
+                    if (MJ != 1) begin \
+                        if (MJ == 0.5) begin \
+                            sarg = 1.0 / sqrt(arg); \
+                        end else begin \
+                            sarg = pow(arg, -MJ); \
+                        end \
+                        Qec = PB * Cz * (1.0 - arg * sarg) / (1.0 - MJ); \
+                    end else begin \
+                        Qec = -PB * Cz * llnf(arg); \
+                    end \
+                    arg = 1.0 - (vex - vec) / pb2; \
+                    if (MJ2 != 1) begin \
+                        if (MJ2 == 0.5) begin \
+                            sarg = 1.0 / sqrt(arg); \
+                        end else begin \
+                            sarg = pow(arg, -MJ2); \
+                        end \
+                        Qej = Qec + SJ * pb2 * Cz * (1.0 - arg * sarg) / (1.0 - MJ2); \
+                    end else begin \
+                        Qej = Qec - SJ * pb2 * Cz * llnf(arg); \
+                    end \
+                end \
+            end else begin \
+                arg = 1.0 - T1; \
+                if (MJ != 1) begin \
+                    if (MJ == 0.5) begin \
+                        sarg = 1.0 / sqrt(arg); \
+                    end else begin \
+                        sarg = pow(arg, -MJ); \
+                    end \
+                    Qej = PB * Cz * (1.0 - arg * sarg) / (1.0 - MJ); \
+                end else begin \
+                    Qej = -PB * Cz * llnf(arg); \
+                end \
+            end \
+        end else begin \
+            if (MJ != 1) begin \
+                if (MJ == 0.5) begin \
+                    T2 = 1.0 / sqrt(0.1); \
+                end else begin \
+                    T2 = pow(0.1, -MJ); \
+                end \
+                T3 = 1.0 / (1.0 - MJ); \
+                T5 = T3 * (1.0 - 0.05 * MJ * (1.0 + MJ) * T2); \
+            end else begin \
+                T2 = 10.0; \
+                T5 = 1.5 - ln(0.1); \
+            end \
+            T4 = T2 * (T1 - 1.0) * (5.0 * MJ * (T1 - 1.0) + (1.0 + MJ)); \
+            Qej = PB * Cz * (T4 + T5); \
+        end \
+    end else begin \
+        Qej = 0.0; \
+    end \
+end
+
+// Geometry-dependent fringe capacitance
+`define cfringe_2d(Hg, Hc, Wfin, Cf1, Cgg) \
+begin \
+    Hr = 2.3 + 0.2 * (Hg + toxp) / Hc; \
+    Lr = 1.05; \
+    Hgdelta = abs(Hg + toxp - Hc); \
+    Lmax = lsp * Lr; \
+    y = min(Hc, Hg + toxp); \
+    x = lsp / (Hr + 1.0); \
+    Cnon = 1.7e12; \
+    CcgSat = epssp * (y - x) / lsp; \
+    TT1 = Cnon * CcgSat; \
+    if (TT1 > `EXPL_THRESHOLD) begin \
+        Ccg1 = CcgSat; \
+    end else begin \
+        Ccg1 = 1.0 / Cnon * ln_one_plus_exp(TT1); \
+    end \
+    r1cf = 0.5 * min(Hc / (Hg + toxp), (Hg + toxp) / Hc); \
+    Rcf = Hgdelta * r1cf; \
+    Ccg2 = epssp * 2.0 / `M_PI * llnf((lsp + 0.5 * `M_PI * Rcf) / lsp); \
+    Ccg = Wfin * (Ccg1 + Ccg2); \
+    x = Lmax / Hg; \
+    C1 = 4.0 / (sqrt(2.0 * (x + 1.0)) * `M_PI); \
+    C2 = sqrt(toxp * toxp + 2.0 * Hg * toxp + Hg * Hg * (x + 1.0)) * sqrt(x + 1.0) + toxp + Hg * x + Hg; \
+    C3 = toxp * sqrt((x + 1.0) * (x + 4.0)) + toxp * (x + 2.0); \
+    Cfglog = epssp * (C1 * llnf(C2 / C3) + 12.27); \
+    dcf = Hr * Lr; \
+    TT0 = sqrt(dcf * dcf + 1.0); \
+    TT1 = sqrt((dcf * dcf + 1.0) * ((dcf * toxp) * (dcf * toxp) + 2.0 * dcf * Lmax * toxp + (dcf * dcf + 1.0) * Lmax * Lmax)) + dcf * toxp + dcf * dcf * Lmax + Lmax; \
+    TT2 = (TT0 + 1.0) * (dcf * toxp); \
+    Cfgsat = 2.0 * epssp * sqrt(2.0) / `M_PI * (Cf1) * dcf / TT0 * llnf(TT1 / TT2); \
+    delta = 1.2e-12; \
+    TT1 = Cfgsat - Cfglog - delta; \
+    Cfg = Wfin * (Cfgsat - 0.5 * (TT1 + sqrt(TT1 * TT1 + 4.0 * delta * Cfgsat))); \
+    Cgg = Ccg + Cfg; \
+end
+
+//  Macros for the model/instance parameters
+//  OPP: operating point parameter, includes units and description for printing
+//  MPRxx: model parameter real
+//  MPIxx: model parameter integer
+//  IPRxx: instance parameter real
+//  IPIxx: instance parameter integer
+//  BPRxx: both model and instance parameter real
+//  BPIxx: both model and instance parameter integer
+//     ||
+//     cc: closed lower bound, closed upper bound
+//     oo: open lower bound, open upper bound
+//     co: closed lower bound, open upper bound
+//     oc: open lower bound, closed upper bound
+//     cz: closed lower bound = 0, open upper bound = inf
+//     oz: open lower bound = 0, open upper bound = inf
+//     nb: no bounds
+//     ex: no bounds with exclude
+//     sw: switch (integer only, values 0 = false and 1 = true)
+//     ty: switch (integer only, values -1 = p-type and +1 = n-type)
+`define OPP(nam, uni, des) (* units = uni, desc = des *) real nam;
+`define OPM(nam,uni,des)   (* units=uni, desc=des, multiplicity="multiply" *)  real    nam;
+`define OPD(nam,uni,des)   (* units=uni, desc=des, multiplicity="divide"   *)  real    nam;
+`define BPRco(nam, def, uni, lwr, upr, des) (* units = uni, type = "instance", desc = des *) parameter real nam = def from[lwr : upr);
+`define BPRoc(nam, def, uni, lwr, upr, des) (* units = uni, type = "instance", desc = des *) parameter real nam = def from(lwr : upr];
+`define BPRoz(nam, def, uni, des) (* units = uni, type = "instance", desc = des *) parameter real nam = def from(0.0 : inf);
+`define BPRcz(nam, def, uni, des) (* units = uni, type = "instance", desc = des *) parameter real nam = def from[0.0 : inf);
+`define BPRnb(nam, def, uni, des) (* units = uni, type = "instance", desc = des *) parameter real nam = def;
+`define BPRoo(nam, def, uni, lwr, upr, des) (* units = uni, type = "instance", desc = des *) parameter real nam = def from(lwr : upr);
+`define BPIcc(nam, def, uni, lwr, upr, des) (* units = uni, type = "instance", desc = des *) parameter integer nam = def from[lwr : upr];
+`define IPIco(nam, def, uni, lwr, upr, des) (* units = uni, type = "instance", desc = des *) parameter integer nam = def from[lwr : upr);
+`define MPRnb(nam, def, uni, des) (* units = uni, desc = des *) parameter real nam = def;
+`define MPRex(nam, def, uni, exc, des) (* units = uni, desc = des *) parameter real nam = def exclude exc;
+`define MPRcc(nam, def, uni, lwr, upr, des) (* units = uni, desc = des *) parameter real nam = def from[lwr : upr];
+`define MPRoo(nam, def, uni, lwr, upr, des) (* units = uni, desc = des *) parameter real nam = def from(lwr : upr);
+`define MPRco(nam, def, uni, lwr, upr, des) (* units = uni, desc = des *) parameter real nam = def from[lwr : upr);
+`define MPRcz(nam, def, uni, des) (* units = uni, desc = des *) parameter real nam = def from[0.0 : inf);
+`define MPRoz(nam, def, uni, des) (* units = uni, desc = des *) parameter real nam = def from(0.0 : inf);
+`define MPIcc(nam, def, uni, lwr, upr, des) (* units = uni, desc = des *) parameter integer nam = def from[lwr : upr];
+`define MPIty(nam, def, uni, des) (* units = uni, desc = des *) parameter integer nam = def from[ -1: 1] exclude 0;

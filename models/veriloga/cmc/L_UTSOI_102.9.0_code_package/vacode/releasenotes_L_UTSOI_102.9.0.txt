@@ -1,0 +1,103 @@
+﻿======================================================================================
+======================================================================================
+
+  L_UTSOI 102.9.0 "release notes"
+
+  Authors: S. Martinie, T. Bedecarrats, O. Rozeau, T. Poiroux, M-A. Jaud
+
+  The most recent version of the model code, the documentation, and contact
+  information can be found on:
+
+       https://www.cea.fr/cea-tech/leti/l-utsoisupport
+       
+======================================================================================
+======================================================================================
+
+This package consists of the following files:
+
+     - releasenotes_L_UTSOI_102.9.0.txt     This file
+
+     - L_UTSOI_102.va                       Main file for l_utsoi model
+     - L_UTSOI_102_nqs.va                   Main file for l_utsoi model with NQS-effects
+
+     - L_UTSOI_102_macrodefs.include        Macro definitions for l_utsoi
+     - L_UTSOI_102_module.include           Actual model code for intrinsic MOS model
+
+     - discipline.h                         Definition of electrical and thermal analog nodes and branches
+
+======================================================================================
+======================================================================================
+
+Release notes vA-code of L_UTSOI 102.9.0 (January 2026)
+----------------------------------------------------
+
+Changes from L-UTSOI102.8 to L-UTSOI102.9:
+
+Bug fixes
+- BF1: NQS calculation: The second pole implementation has been updated to reduce large stamping values.
+- BF2: Update the descriptions of the parameters and the unused macro.
+
+Accuracy and predictability improvements
+- AP1: Introduction of gate resistance (introduction of RG for local model and RGO, RINT, RVPOLY, RSHG for global mode).
+- AP2: Introduction of source, drain and well resistance (introduction of RSE, RDE and RWELL for local model and RSH, RSHD and RWELLO for global mode).
+
+Changes in model inputs and outputs
+- IO1: MOS gate, source, drain and well resistance OP-variables has been updated in accordance with introduction of parasitic resistances.
+- IO2: Introduction of MULT_I, MULT_Q and MULT_FN.
+- IO3: Introduction of NGCON, XGW, NRS and NRD.
+
+=====================================================================================
+=====================================================================================
+
+Vampyre 1.9.7 output on L_UTSOI_102.va
+-----------------------------------------------------------------------
+
+Reading L_UTSOI_102.va
+Reading discipline.h
+STYLE in file discipline.h, line 1: MS-DOS file format (\r\n)
+Reading L_UTSOI_102_macrodef.include
+Reading L_UTSOI_102_module.include
+WARNING in file L_UTSOI_102.va, line 66: Mixed-case port name 'Tnode'
+WARNING in file L_UTSOI_102_module.include, line 98: Parameter 'VERSION' was never used
+STYLE in file L_UTSOI_102.va, line 70: Parameters should be declared in lowercase
+WARNING in file L_UTSOI_102.va, line 70: Operating-point variable 'type' differs only in case from parameter 'TYPE'
+WARNING in file L_UTSOI_102.va, line 70: Operating-point variable 'csd' differs only in case from parameter 'CSD'
+ERROR in file L_UTSOI_102_module.include, line 2784: Charge contribution missing MULT_Q
+ERROR in file L_UTSOI_102_module.include, line 2785: Charge contribution missing MULT_Q
+ERROR in file L_UTSOI_102_module.include, line 2788: Current contribution missing MULT_I
+
+Module: l_utsoi
+
+Instance parameters (21)
+
+Model parameters (472)
+
+Operating-point variables (53)
+
+-----------------------------------------------------------------------
+
+Vampyre 1.9.7 output on L_UTSOI_102_nqs.va
+-----------------------------------------------------------------------
+
+Reading L_UTSOI_102_nqs.va
+Reading discipline.h
+STYLE in file discipline.h, line 1: MS-DOS file format (\r\n)
+Reading L_UTSOI_102_macrodef.include
+Reading L_UTSOI_102_module.include
+WARNING in file L_UTSOI_102_nqs.va, line 66: Mixed-case port name 'Tnode'
+WARNING in file L_UTSOI_102_module.include, line 98: Parameter 'VERSION' was never used
+STYLE in file L_UTSOI_102_nqs.va, line 70: Parameters should be declared in lowercase
+WARNING in file L_UTSOI_102_nqs.va, line 70: Operating-point variable 'type' differs only in case from parameter 'TYPE'
+WARNING in file L_UTSOI_102_nqs.va, line 70: Operating-point variable 'csd' differs only in case from parameter 'CSD'
+ERROR in file L_UTSOI_102_module.include, line 2688: Current contribution uses MULT_Q instead of MULT_I
+ERROR in file L_UTSOI_102_module.include, line 2784: Charge contribution missing MULT_Q
+ERROR in file L_UTSOI_102_module.include, line 2785: Charge contribution missing MULT_Q
+ERROR in file L_UTSOI_102_module.include, line 2788: Current contribution missing MULT_I
+
+Module: l_utsoi
+
+Instance parameters (21)
+
+Model parameters (482)
+
+Operating-point variables (53)
