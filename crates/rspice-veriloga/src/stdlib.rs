@@ -209,6 +209,10 @@ pub const CONSTANTS_VAMS: &str = r#"
 // Zero Celsius in kelvin
 `define P_CELSIUS0  273.15
 
+// Legacy compact-model aliases from older constants.vams revisions.
+`define P_Q_NIST1998 1.602176462e-19
+`define P_K_NIST1998 1.3806503e-23
+
 `endif
 "#;
 

@@ -226,6 +226,8 @@ pub enum IrExpr {
     /// this instance represents. The simulator scales flow contributions
     /// automatically; reading it supports models that need fine control.
     Mfactor,
+    /// Whether an external terminal was connected on this instance.
+    PortConnected(usize),
     /// Binary operation
     Binary(BinaryOp, Box<IrExpr>, Box<IrExpr>),
     /// Unary operation
@@ -1014,6 +1016,7 @@ impl DeviceIR {
                 | IrExpr::Temperature
                 | IrExpr::Vt
                 | IrExpr::Mfactor
+                | IrExpr::PortConnected(_)
                 | IrExpr::Analysis(_) => false,
             }
         }
@@ -1180,8 +1183,15 @@ impl DeviceIR {
         shadows: &autodiff::ShadowContext,
     ) -> Vec<Derivative> {
         let mut derivatives = Vec::new();
+        let active_axes = autodiff::expression_axes(expr, shadows, num_nodes);
+        if active_axes == 0 {
+            return derivatives;
+        }
 
         for wrt in autodiff::axes(num_nodes, num_branches) {
+            if !autodiff::mask_contains_axis(active_axes, &wrt, num_nodes) {
+                continue;
+            }
             let deriv_expr = autodiff::differentiate_with_shadows(expr, &wrt, shadows);
             let simplified = autodiff::simplify(deriv_expr);
 
@@ -1219,7 +1229,8 @@ impl DeviceIR {
             | IrExpr::ParamGiven(_)
             | IrExpr::Temperature
             | IrExpr::Vt
-            | IrExpr::Mfactor => true,
+            | IrExpr::Mfactor
+            | IrExpr::PortConnected(_) => true,
             IrExpr::Var(name) => static_vars.contains(name),
             // An indexed read is static when the index is static and every
             // element it could select is static
@@ -1356,6 +1367,14 @@ pub mod autodiff {
         } else {
             1 << ordinal
         }
+    }
+
+    pub(crate) fn mask_contains_axis(
+        mask: AxisMask,
+        wrt: &DerivativeWrt,
+        num_nodes: usize,
+    ) -> bool {
+        mask & axis_bit(wrt, num_nodes) != 0
     }
 
     /// Bit for a unified node index appearing in a probe (the ground
@@ -1515,6 +1534,7 @@ pub mod autodiff {
             | IrExpr::Temperature
             | IrExpr::Vt
             | IrExpr::Mfactor
+            | IrExpr::PortConnected(_)
             | IrExpr::Analysis(_) => 0,
             IrExpr::Binary(op, l, r) => match op {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
@@ -1567,6 +1587,14 @@ pub mod autodiff {
             | IrExpr::FlickerNoise { .. }
             | IrExpr::NoiseTable { .. } => 0,
         }
+    }
+
+    pub(crate) fn expression_axes(
+        expr: &IrExpr,
+        shadows: &ShadowContext,
+        num_nodes: usize,
+    ) -> AxisMask {
+        derivative_axes(expr, &shadows.shadowed, num_nodes)
     }
 
     /// Accumulate per-variable dependency axes over an item tree
@@ -2167,9 +2195,13 @@ pub mod autodiff {
                 _ => IrExpr::Const(0.0),
             },
 
-            IrExpr::Param(_) | IrExpr::Temperature | IrExpr::Vt | IrExpr::Time => {
-                IrExpr::Const(0.0)
-            }
+            IrExpr::Param(_)
+            | IrExpr::ParamGiven(_)
+            | IrExpr::Temperature
+            | IrExpr::Vt
+            | IrExpr::Time
+            | IrExpr::Mfactor
+            | IrExpr::PortConnected(_) => IrExpr::Const(0.0),
 
             IrExpr::Binary(op, left, right) => {
                 let dl = differentiate(left);

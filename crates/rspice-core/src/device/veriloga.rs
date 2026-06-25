@@ -58,6 +58,14 @@ pub trait VerilogADeviceExt {
         rhs_add: impl FnMut(usize, Value),
     );
 
+    /// Checked stamping variant for solver paths that can return diagnostics.
+    fn try_stamp_into_matrix(
+        &mut self,
+        circuit_voltages: &[Value],
+        matrix_add: impl FnMut(usize, usize, Value),
+        rhs_add: impl FnMut(usize, Value),
+    ) -> Result<(), String>;
+
     /// Get the total number of nodes (terminals + internal)
     fn total_nodes(&self) -> usize;
 }
@@ -70,6 +78,16 @@ impl VerilogADeviceExt for VerilogADevice {
         rhs_add: impl FnMut(usize, Value),
     ) {
         self.stamp(circuit_voltages, matrix_add, rhs_add);
+    }
+
+    fn try_stamp_into_matrix(
+        &mut self,
+        circuit_voltages: &[Value],
+        matrix_add: impl FnMut(usize, usize, Value),
+        rhs_add: impl FnMut(usize, Value),
+    ) -> Result<(), String> {
+        self.try_stamp(circuit_voltages, matrix_add, rhs_add)
+            .map_err(|err| format!("Verilog-A device '{}' stamping failed: {err}", self.name))
     }
 
     fn total_nodes(&self) -> usize {
@@ -161,9 +179,27 @@ impl VerilogADevices {
         M: FnMut(usize, usize, Value),
         R: FnMut(usize, Value),
     {
-        for device in &mut self.devices {
-            device.stamp(circuit_voltages, &mut matrix_add, &mut rhs_add);
+        if let Err(err) = self.try_stamp_all(circuit_voltages, &mut matrix_add, &mut rhs_add) {
+            panic!("{err}");
         }
+    }
+
+    /// Checked variant of [`Self::stamp_all`] for simulator paths that can
+    /// return model diagnostics instead of unwinding.
+    pub fn try_stamp_all<M, R>(
+        &mut self,
+        circuit_voltages: &[Value],
+        mut matrix_add: M,
+        mut rhs_add: R,
+    ) -> Result<(), String>
+    where
+        M: FnMut(usize, usize, Value),
+        R: FnMut(usize, Value),
+    {
+        for device in &mut self.devices {
+            device.try_stamp_into_matrix(circuit_voltages, &mut matrix_add, &mut rhs_add)?;
+        }
+        Ok(())
     }
 
     /// Get total number of internal nodes across all devices

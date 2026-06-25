@@ -32,6 +32,72 @@ fn zi_root_error(message: String) -> crate::error::CompileError {
     .into()
 }
 
+fn reject_flow_ddx_probe(access: &str) -> CompileResult<()> {
+    if matches!(access, "I" | "Pwr" | "F" | "Tau" | "MMF" | "Flow") {
+        return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+            "ddx with a flow probe (differentiate w.r.t. a potential instead)".into(),
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn validate_arg_range(
+    name: &str,
+    actual: usize,
+    min: usize,
+    max: Option<usize>,
+) -> CompileResult<()> {
+    let too_many = match max {
+        Some(max) => actual > max,
+        None => false,
+    };
+    if actual < min || too_many {
+        let expected = match max {
+            Some(max) if min == max => min.to_string(),
+            Some(max) => format!("{min}..{max}"),
+            None => format!("{min}+"),
+        };
+        return Err(
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "{name} expects {expected} argument(s), got {actual}"
+            )))
+            .into(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_analysis_name(name: &str) -> CompileResult<String> {
+    let normalized = name.to_ascii_lowercase();
+    match normalized.as_str() {
+        "dc" | "ac" | "tran" | "transient" | "noise" | "ic" | "static" => Ok(normalized),
+        _ => Err(
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "analysis() unknown analysis name '{name}'"
+            )))
+            .into(),
+        ),
+    }
+}
+
+fn optional_string_arg(
+    function_name: &str,
+    arg: Option<&Expression>,
+    role: &str,
+) -> CompileResult<Option<String>> {
+    match arg {
+        None => Ok(None),
+        Some(Expression::StringLit(s)) => Ok(Some(s.value.to_string())),
+        Some(_) => Err(
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "{function_name} {role} argument must be a string literal"
+            )))
+            .into(),
+        ),
+    }
+}
+
 /// Sentinel node index for the global reference (ground) node.
 ///
 /// `V(a)` measures the potential of `a` against this reference, never
@@ -186,6 +252,22 @@ impl<'a> ExprConverter<'a> {
         self.ctx.array(name)
     }
 
+    fn const_cross_direction(&self, arg: &Expression, name: &str) -> CompileResult<i32> {
+        match autodiff_fold(self.convert(arg)?) {
+            IrExpr::Const(v) if matches!(v, -1.0 | 0.0 | 1.0) => Ok(v as i32),
+            IrExpr::Const(v) => Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                format!("{name} direction must be -1, 0, or 1, got {v}"),
+            ))
+            .into()),
+            _ => Err(
+                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                    "{name} direction argument must be a constant -1, 0, or 1"
+                )))
+                .into(),
+            ),
+        }
+    }
+
     /// Convert an AST expression to an IR expression
     pub fn convert(&self, expr: &Expression) -> CompileResult<IrExpr> {
         match expr {
@@ -274,6 +356,7 @@ impl<'a> ExprConverter<'a> {
     fn convert_system_function(&self, func: &SystemFunction) -> CompileResult<IrExpr> {
         match func.name.as_str() {
             "$vt" | "$thermal_vt" => {
+                validate_arg_range(&func.name, func.args.len(), 0, Some(1))?;
                 if func.args.is_empty() {
                     // $vt() = kT/q at nominal temperature
                     Ok(IrExpr::Vt)
@@ -288,29 +371,49 @@ impl<'a> ExprConverter<'a> {
                     ))
                 }
             }
-            "$temperature" => Ok(IrExpr::Temperature),
-            "$abstime" => Ok(IrExpr::Time),
-            "$realtime" => Ok(IrExpr::Time),
-            "$mfactor" => Ok(IrExpr::Mfactor),
+            "$temperature" => {
+                validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
+                Ok(IrExpr::Temperature)
+            }
+            "$abstime" => {
+                validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
+                Ok(IrExpr::Time)
+            }
+            "$realtime" => {
+                validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
+                Ok(IrExpr::Time)
+            }
+            "$mfactor" => {
+                validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
+                Ok(IrExpr::Mfactor)
+            }
             "$simparam" => {
+                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 // $simparam("name"[, default]) - simulator parameter query.
                 // The explicit default argument wins; otherwise return a
                 // sensible engine value for well-known names, else 0.
+                let name = match func.args.first() {
+                    Some(Expression::StringLit(s)) => s.value.as_str(),
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                            "$simparam requires a string parameter name".into(),
+                        ))
+                        .into());
+                    }
+                };
                 if let Some(default) = func.args.get(1) {
                     return self.convert(default);
                 }
-                let value = match func.args.first() {
-                    Some(Expression::StringLit(s)) => match s.value.as_str() {
-                        "gmin" => 1e-12,
-                        "tnom" => 300.15,
-                        "simulatorVersion" => 1.0,
-                        _ => 0.0,
-                    },
+                let value = match name {
+                    "gmin" => 1e-12,
+                    "tnom" => 300.15,
+                    "simulatorVersion" => 1.0,
                     _ => 0.0,
                 };
                 Ok(IrExpr::Const(value))
             }
             "$param_given" => {
+                validate_arg_range(&func.name, func.args.len(), 1, Some(1))?;
                 // $param_given(name) - whether the instance explicitly set
                 // the parameter
                 match func.args.first() {
@@ -326,18 +429,36 @@ impl<'a> ExprConverter<'a> {
                 }
             }
             "$port_connected" => {
-                // Check if port is connected (always true for now)
-                Ok(IrExpr::Const(1.0))
-            }
-            "$limit" => {
-                // $limit(expr) or $limit(expr, step)
-                // Bounds expression change per Newton iteration for convergence
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "$limit requires at least one argument".into(),
-                    ))
+                validate_arg_range(&func.name, func.args.len(), 1, Some(1))?;
+                let port_name = match func.args.first() {
+                    Some(Expression::Identifier(id)) => id.name.as_str(),
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                            "$port_connected requires a terminal name".into(),
+                        ))
+                        .into());
+                    }
+                };
+                let Some(index) = self.ctx.node_index(port_name) else {
+                    return Err(
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "$port_connected unknown terminal: {port_name}"
+                        )))
+                        .into(),
+                    );
+                };
+                if index >= self.ctx.num_terminals() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                        "$port_connected requires an external terminal, got internal node: {port_name}"
+                    )))
                     .into());
                 }
+                Ok(IrExpr::PortConnected(index))
+            }
+            "$limit" => {
+                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
+                // $limit(expr) or $limit(expr, step)
+                // Bounds expression change per Newton iteration for convergence
                 let inner = self.convert(&func.args[0])?;
                 let step = if func.args.len() > 1 {
                     Some(Box::new(self.convert(&func.args[1])?))
@@ -347,17 +468,12 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::Limit(Box::new(inner), step))
             }
             "$table_model" => {
+                validate_arg_range(&func.name, func.args.len(), 2, None)?;
                 // $table_model(input, table_spec, ...)
                 // Supports:
                 // 1) Inline numeric pairs: $table_model(x, 0,0, 1,2, 2,4)
                 // 2) Inline string table: $table_model(x, "0 0; 1 2; 2 4")
                 // 3) Table file path:    $table_model(x, "table.dat")
-                if func.args.len() < 2 {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "$table_model requires input expression and table data".into(),
-                    ))
-                    .into());
-                }
                 let input = self.convert(&func.args[0])?;
                 let (x_data, y_data) = self.parse_table_model_data(func)?;
                 Ok(IrExpr::TableLookup {
@@ -445,6 +561,7 @@ impl<'a> ExprConverter<'a> {
             }
             "cross" => {
                 // cross(expr, direction, time_tol)
+                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 if func.args.is_empty() {
                     return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                         "cross requires at least one argument".into(),
@@ -453,70 +570,33 @@ impl<'a> ExprConverter<'a> {
                 }
                 let expr = self.convert(&func.args[0])?;
                 // Direction: +1=rising, -1=falling, 0=both (default)
-                let direction = if func.args.len() > 1 {
-                    // Try to extract constant direction
-                    if let crate::ast::Expression::Number(n) = &func.args[1] {
-                        Some(n.value as i32)
-                    } else {
-                        Some(0)
-                    }
-                } else {
-                    None
-                };
-                let time_tol = if func.args.len() > 2 {
-                    Some(Box::new(self.convert(&func.args[2])?))
-                } else {
-                    None
-                };
+                let direction = func
+                    .args
+                    .get(1)
+                    .map(|arg| self.const_cross_direction(arg, "cross"))
+                    .transpose()?;
                 Ok(IrExpr::Cross {
                     expr: Box::new(expr),
                     direction,
-                    time_tol,
+                    time_tol: None,
                 })
             }
             "$white_noise" | "white_noise" => {
+                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 // $white_noise(power, name)
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "$white_noise requires power argument".into(),
-                    ))
-                    .into());
-                }
                 let power = self.convert(&func.args[0])?;
-                let name = if func.args.len() > 1 {
-                    // Extract name if it's a string literal
-                    if let crate::ast::Expression::StringLit(s) = &func.args[1] {
-                        Some(s.value.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+                let name = optional_string_arg(&func.name, func.args.get(1), "name")?;
                 Ok(IrExpr::WhiteNoise {
                     power: Box::new(power),
                     name,
                 })
             }
             "$flicker_noise" | "flicker_noise" => {
+                validate_arg_range(&func.name, func.args.len(), 2, Some(3))?;
                 // $flicker_noise(power, exponent, name)
-                if func.args.len() < 2 {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "$flicker_noise requires power and exponent arguments".into(),
-                    ))
-                    .into());
-                }
                 let power = self.convert(&func.args[0])?;
                 let exponent = self.convert(&func.args[1])?;
-                let name = if func.args.len() > 2 {
-                    if let crate::ast::Expression::StringLit(s) = &func.args[2] {
-                        Some(s.value.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+                let name = optional_string_arg(&func.name, func.args.get(2), "name")?;
                 Ok(IrExpr::FlickerNoise {
                     power: Box::new(power),
                     exponent: Box::new(exponent),
@@ -524,17 +604,9 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "$noise_table" | "noise_table" | "$noise_table_log" | "noise_table_log" => {
+                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 let log_interp = func.name.contains("log");
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "noise_table requires a {f, p, ...} pair list".into(),
-                    ))
-                    .into());
-                }
-                let name = match func.args.get(1) {
-                    Some(crate::ast::Expression::StringLit(s)) => Some(s.value.to_string()),
-                    _ => None,
-                };
+                let name = optional_string_arg(&func.name, func.args.get(1), "name")?;
                 let points = self.noise_table_points(&func.args[0], log_interp)?;
                 Ok(IrExpr::NoiseTable {
                     points,
@@ -544,39 +616,32 @@ impl<'a> ExprConverter<'a> {
             }
             "analysis" => {
                 // analysis("dc"), analysis("ac"), analysis("tran")
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "analysis() requires analysis type argument".into(),
-                    ))
-                    .into());
-                }
-                // Extract analysis type string
-                let analysis_type = if let crate::ast::Expression::StringLit(s) = &func.args[0] {
-                    s.value.as_str()
-                } else {
-                    "dc" // Default to DC if not a string
+                validate_arg_range(&func.name, func.args.len(), 1, Some(1))?;
+                let analysis_type = match func.args.first() {
+                    Some(crate::ast::Expression::StringLit(s)) => {
+                        validate_analysis_name(s.value.as_str())?
+                    }
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                            "analysis() requires a string argument".into(),
+                        ))
+                        .into());
+                    }
                 };
-                Ok(IrExpr::Analysis(analysis_type.to_string()))
+                Ok(IrExpr::Analysis(analysis_type))
             }
             "above" => {
-                // above(expr, threshold)
-                if func.args.len() < 2 {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "above() requires expr and threshold arguments".into(),
-                    ))
-                    .into());
-                }
+                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 let expr = self.convert(&func.args[0])?;
-                let threshold = self.convert(&func.args[1])?;
-                let time_tol = if func.args.len() > 2 {
-                    Some(Box::new(self.convert(&func.args[2])?))
+                let threshold = if let Some(threshold) = func.args.get(1) {
+                    self.convert(threshold)?
                 } else {
-                    None
+                    IrExpr::Const(0.0)
                 };
                 Ok(IrExpr::Above {
                     expr: Box::new(expr),
                     threshold: Box::new(threshold),
-                    time_tol,
+                    time_tol: None,
                 })
             }
             "timer" => {
@@ -806,10 +871,12 @@ impl<'a> ExprConverter<'a> {
 
         match call.name.as_str() {
             "ddt" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(1))?;
                 let inner = self.convert(require_arg(0)?)?;
                 Ok(IrExpr::Ddt(Box::new(inner)))
             }
             "idt" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let inner = self.convert(require_arg(0)?)?;
                 let ic = call
                     .args
@@ -820,6 +887,7 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::Idt(Box::new(inner), ic))
             }
             "idtmod" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
                 // idtmod(expr [, ic [, modulus [, offset]]]) - without a
                 // modulus it degenerates to idt
                 let inner = self.convert(require_arg(0)?)?;
@@ -849,36 +917,59 @@ impl<'a> ExprConverter<'a> {
                 }
             }
             "ddx" => {
+                validate_arg_range(&call.name, call.args.len(), 2, Some(2))?;
                 let inner = self.convert(require_arg(0)?)?;
                 let probe = require_arg(1)?;
-                let Expression::BranchAccess(BranchAccess::Nodes {
-                    access, pos, neg, ..
-                }) = probe
-                else {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "ddx probe must be a branch access like V(node) or V(a,b)".into(),
-                    ))
-                    .into());
-                };
-                // Potential probes of any discipline differentiate w.r.t.
-                // the node unknowns (V, Temp, ...); flow probes (I, Pwr)
-                // would need a branch-flow axis
-                if access == "I" || access == "Pwr" {
-                    return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                        "ddx with a flow probe (differentiate w.r.t. a potential instead)".into(),
-                    ))
-                    .into());
-                }
                 let unknown_node = |name: &str| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                         "Unknown node: {name}"
                     )))
                 };
-                let pos_node = self.ctx.node_index(pos).ok_or_else(|| unknown_node(pos))?;
-                let neg_node = neg
-                    .as_ref()
-                    .map(|n| self.ctx.node_index(n).ok_or_else(|| unknown_node(n)))
-                    .transpose()?;
+                let unknown_branch_or_node = |name: &str| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                        "Unknown branch or node: {name}"
+                    )))
+                };
+                let (pos_node, neg_node) = match probe {
+                    Expression::BranchAccess(BranchAccess::Nodes {
+                        access, pos, neg, ..
+                    }) => {
+                        reject_flow_ddx_probe(access)?;
+                        if neg.is_none()
+                            && let Some((pos_node, neg_node)) = self.ctx.branch_nodes(pos)
+                        {
+                            (pos_node, Some(neg_node))
+                        } else {
+                            let pos_node =
+                                self.ctx.node_index(pos).ok_or_else(|| unknown_node(pos))?;
+                            let neg_node = neg
+                                .as_ref()
+                                .map(|n| self.ctx.node_index(n).ok_or_else(|| unknown_node(n)))
+                                .transpose()?;
+                            (pos_node, neg_node)
+                        }
+                    }
+                    Expression::BranchAccess(BranchAccess::Branch { access, name, .. }) => {
+                        reject_flow_ddx_probe(access)?;
+                        if let Some((pos_node, neg_node)) = self.ctx.branch_nodes(name) {
+                            (pos_node, Some(neg_node))
+                        } else {
+                            (
+                                self.ctx
+                                    .node_index(name)
+                                    .ok_or_else(|| unknown_branch_or_node(name))?,
+                                None,
+                            )
+                        }
+                    }
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                            "ddx probe must be a branch access like V(node), V(a,b), or V(<branch>)"
+                                .into(),
+                        ))
+                        .into());
+                    }
+                };
                 Ok(IrExpr::Ddx {
                     expr: Box::new(inner),
                     pos: pos_node,
@@ -886,6 +977,7 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "absdelay" => {
+                validate_arg_range(&call.name, call.args.len(), 2, Some(2))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let delay = self.convert(require_arg(1)?)?;
                 Ok(IrExpr::AbsDelay {
@@ -894,6 +986,7 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "transition" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let opt = |n: usize| -> CompileResult<Option<Box<IrExpr>>> {
                     Ok(call
@@ -911,6 +1004,7 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "slew" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let opt = |n: usize| -> CompileResult<Option<Box<IrExpr>>> {
                     Ok(call
@@ -927,45 +1021,34 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "cross" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let expr = self.convert(require_arg(0)?)?;
-                let direction = match call.args.get(1) {
-                    Some(arg) => match self.convert(arg).map(autodiff_fold) {
-                        Ok(IrExpr::Const(v)) => Some(v as i32),
-                        _ => Some(0),
-                    },
-                    None => None,
-                };
-                let time_tol = call
+                let direction = call
                     .args
-                    .get(2)
-                    .map(|e| self.convert(e))
-                    .transpose()?
-                    .map(Box::new);
+                    .get(1)
+                    .map(|arg| self.const_cross_direction(arg, "cross"))
+                    .transpose()?;
                 Ok(IrExpr::Cross {
                     expr: Box::new(expr),
                     direction,
-                    time_tol,
+                    time_tol: None,
                 })
             }
             "above" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let threshold = match call.args.get(1) {
                     Some(t) => self.convert(t)?,
                     None => IrExpr::Const(0.0),
                 };
-                let time_tol = call
-                    .args
-                    .get(2)
-                    .map(|e| self.convert(e))
-                    .transpose()?
-                    .map(Box::new);
                 Ok(IrExpr::Above {
                     expr: Box::new(expr),
                     threshold: Box::new(threshold),
-                    time_tol,
+                    time_tol: None,
                 })
             }
             "timer" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let start_time = self.convert(require_arg(0)?)?;
                 let period = call
                     .args
@@ -978,14 +1061,14 @@ impl<'a> ExprConverter<'a> {
                     period,
                 })
             }
-            "last_crossing" => {
-                // Returns -1 until the first crossing is observed (LRM);
-                // crossing-time bookkeeping is not implemented yet.
-                Ok(IrExpr::Const(-1.0))
-            }
+            "last_crossing" => Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                "last_crossing() requires crossing-time history; it is not implemented yet".into(),
+            ))
+            .into()),
             "analysis" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(1))?;
                 let analysis_type = match call.args.first() {
-                    Some(Expression::StringLit(s)) => s.value.to_string(),
+                    Some(Expression::StringLit(s)) => validate_analysis_name(s.value.as_str())?,
                     _ => {
                         return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                             "analysis() requires a string argument".into(),
@@ -996,23 +1079,19 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::Analysis(analysis_type))
             }
             "white_noise" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let power = self.convert(require_arg(0)?)?;
-                let name = match call.args.get(1) {
-                    Some(Expression::StringLit(s)) => Some(s.value.to_string()),
-                    _ => None,
-                };
+                let name = optional_string_arg(&call.name, call.args.get(1), "name")?;
                 Ok(IrExpr::WhiteNoise {
                     power: Box::new(power),
                     name,
                 })
             }
             "flicker_noise" => {
+                validate_arg_range(&call.name, call.args.len(), 2, Some(3))?;
                 let power = self.convert(require_arg(0)?)?;
                 let exponent = self.convert(require_arg(1)?)?;
-                let name = match call.args.get(2) {
-                    Some(Expression::StringLit(s)) => Some(s.value.to_string()),
-                    _ => None,
-                };
+                let name = optional_string_arg(&call.name, call.args.get(2), "name")?;
                 Ok(IrExpr::FlickerNoise {
                     power: Box::new(power),
                     exponent: Box::new(exponent),
@@ -1020,11 +1099,9 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "noise_table" | "noise_table_log" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let log_interp = call.name.ends_with("log");
-                let name = match call.args.get(1) {
-                    Some(Expression::StringLit(s)) => Some(s.value.to_string()),
-                    _ => None,
-                };
+                let name = optional_string_arg(&call.name, call.args.get(1), "name")?;
                 let points = self.noise_table_points(require_arg(0)?, log_interp)?;
                 Ok(IrExpr::NoiseTable {
                     points,
@@ -1033,6 +1110,7 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "laplace_nd" => {
+                validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let numerator = self.const_real_array(require_arg(1)?)?;
                 let denominator = self.const_real_array(require_arg(2)?)?;
@@ -1049,6 +1127,7 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "laplace_zp" => {
+                validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let zeros = self.const_complex_pairs(require_arg(1)?)?;
                 let poles = self.const_complex_pairs(require_arg(2)?)?;
@@ -1060,6 +1139,7 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "laplace_zd" => {
+                validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 // zeros (pairs) + denominator coefficients: expand the
                 // zeros into a numerator polynomial
                 let expr = self.convert(require_arg(0)?)?;
@@ -1078,6 +1158,7 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "laplace_np" => {
+                validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 // numerator coefficients + poles (pairs)
                 let expr = self.convert(require_arg(0)?)?;
                 let numerator = self.const_real_array(require_arg(1)?)?;
@@ -1099,6 +1180,7 @@ impl<'a> ExprConverter<'a> {
             // polynomials. The sample period must fold to a constant
             // (per-instance periods would reshape the filter state).
             "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => {
+                validate_arg_range(&call.name, call.args.len(), 4, Some(4))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let (numerator, denominator) = match call.name.as_str() {
                     "zi_nd" => (
@@ -1272,14 +1354,16 @@ impl<'a> ExprConverter<'a> {
                 Self::access_to_ir(access, pos_idx, neg_idx)
             }
             BranchAccess::Branch { access, name, .. } => {
-                let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(name) else {
-                    return Err(
+                let (pos_idx, neg_idx) = if let Some(nodes) = self.ctx.branch_nodes(name) {
+                    nodes
+                } else {
+                    let pos_idx = self.ctx.node_index(name).ok_or_else(|| {
                         CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "Unknown branch: {}",
+                            "Unknown branch or node: {}",
                             name
                         )))
-                        .into(),
-                    );
+                    })?;
+                    (pos_idx, self.ctx.ground())
                 };
                 Self::access_to_ir(access, pos_idx, neg_idx)
             }
@@ -1416,14 +1500,16 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             BranchAccess::Branch { name, .. } => {
-                let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(name) else {
-                    return Err(
+                let (pos_idx, neg_idx) = if let Some(nodes) = self.ctx.branch_nodes(name) {
+                    nodes
+                } else {
+                    let pos_idx = self.ctx.node_index(name).ok_or_else(|| {
                         CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "Unknown branch: {}",
+                            "Unknown branch or node: {}",
                             name
                         )))
-                        .into(),
-                    );
+                    })?;
+                    (pos_idx, self.ctx.ground())
                 };
                 Ok(BranchRef {
                     pos_terminal: pos_idx,

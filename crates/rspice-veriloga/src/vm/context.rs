@@ -1,3 +1,4 @@
+use super::error::VmError;
 use super::filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
 use crate::codegen::LookupTable;
 use crate::laplace::StateSpaceFilter;
@@ -16,6 +17,8 @@ pub struct VmContext {
     pub branch_current_values: Vec<f64>,
     /// Terminal-pair branch current lookup table (flattened NxN matrix).
     terminal_pair_currents: Vec<f64>,
+    /// Per-terminal instance connection mask used by `$port_connected`.
+    pub port_connected: Vec<u8>,
     /// Parameter values (indexed by parameter)
     pub parameters: Vec<f64>,
     /// Whether each parameter was explicitly set on the instance
@@ -65,6 +68,7 @@ impl Default for VmContext {
             currents: Vec::new(),
             branch_current_values: Vec::new(),
             terminal_pair_currents: Vec::new(),
+            port_connected: Vec::new(),
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
@@ -96,6 +100,7 @@ impl VmContext {
             currents: Vec::new(),
             branch_current_values: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
+            port_connected: vec![1; num_terminals],
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
@@ -125,6 +130,7 @@ impl VmContext {
             currents: Vec::new(),
             branch_current_values: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
+            port_connected: vec![1; num_terminals],
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
@@ -154,6 +160,7 @@ impl VmContext {
             currents: Vec::new(),
             branch_current_values: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
+            port_connected: vec![1; num_terminals],
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
@@ -253,23 +260,35 @@ impl VmContext {
     /// global reference node).
     #[inline]
     pub fn voltage(&self, pos: usize, neg: usize) -> f64 {
-        self.node_potential(pos) - self.node_potential(neg)
+        self.try_voltage(pos, neg).unwrap_or(0.0)
+    }
+
+    /// Checked voltage difference between two unified node indexes.
+    #[inline]
+    pub fn try_voltage(&self, pos: usize, neg: usize) -> Result<f64, VmError> {
+        Ok(self.try_node_potential(pos)? - self.try_node_potential(neg)?)
     }
 
     /// Potential of a unified node index against the global reference.
     #[inline]
     pub fn node_potential(&self, node: usize) -> f64 {
+        self.try_node_potential(node).unwrap_or(0.0)
+    }
+
+    /// Checked potential of a unified node index against the global reference.
+    #[inline]
+    pub fn try_node_potential(&self, node: usize) -> Result<f64, VmError> {
         if node == usize::MAX {
-            return 0.0;
+            return Ok(0.0);
         }
         let num_terminals = self.voltages.len();
         if node < num_terminals {
-            self.voltages[node]
+            Ok(self.voltages[node])
         } else {
             self.internal_voltages
                 .get(node - num_terminals)
                 .copied()
-                .unwrap_or(0.0)
+                .ok_or(VmError::InvalidInstruction("missing node voltage slot"))
         }
     }
 
@@ -282,17 +301,30 @@ impl VmContext {
     /// Get current between terminals.
     #[inline]
     pub fn current(&self, pos: usize, neg: usize) -> f64 {
+        self.try_current(pos, neg).unwrap_or(0.0)
+    }
+
+    /// Get a previously stamped terminal-pair current.
+    ///
+    /// `I(pos, neg)` can only read an exact terminal-pair current that was
+    /// already produced by a contribution in the same evaluation context.
+    /// Falling back to another branch current aliases unrelated equations and
+    /// corrupts the model numerics, so missing probes are reported explicitly.
+    #[inline]
+    pub fn try_current(&self, pos: usize, neg: usize) -> Result<f64, VmError> {
         let n = self.voltages.len();
         if pos < n && neg < n {
             let idx = pos * n + neg;
             if idx < self.terminal_pair_currents.len() {
                 let value = self.terminal_pair_currents[idx];
                 if value.is_finite() {
-                    return value;
+                    return Ok(value);
                 }
             }
         }
-        self.currents.first().copied().unwrap_or(0.0)
+        Err(VmError::InvalidInstruction(
+            "missing terminal-pair current slot",
+        ))
     }
 
     /// Get pointer to the terminal-pair current lookup buffer.
@@ -311,6 +343,12 @@ impl VmContext {
     #[inline]
     pub fn terminal_count(&self) -> usize {
         self.voltages.len()
+    }
+
+    /// Whether a terminal was explicitly connected on this instance.
+    #[inline]
+    pub fn port_connected(&self, terminal: usize) -> bool {
+        self.port_connected.get(terminal).copied().unwrap_or(0) != 0
     }
 
     /// Get thermal voltage kT/q.

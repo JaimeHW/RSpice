@@ -129,12 +129,13 @@ coupled multi-conductor lines (`coupled_transmission_line.rs`,
 
 **Other** — switches (`switch.rs`), ideal op-amp (`opamp.rs`), GaN HEMT
 (`gan_hemt.rs`, in-tree physics-style model; ASM-HEMT/MVSG CMC
-qualification is roadmap work), thermal network elements (`thermal.rs`), tristate
+qualification is roadmap work through generated Rust from Verilog-A), thermal network elements (`thermal.rs`), tristate
 (`tristate.rs`), device bypass for latent devices (`model_bypass.rs`).
 
 **Extension points** — Verilog-A devices via the `rspice-veriloga` compiler
 (`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed on-disk
-caching of compiled models), dynamically loaded FFI models (`ffi.rs`,
+caching of compiled models), planned CMC Verilog-A to Rust generated devices
+using the same native storage/stamping contracts, dynamically loaded FFI models (`ffi.rs`,
 behind `ffi`), and SIMD batch evaluation for diodes, BJTs, JFETs, and
 MOSFET batches (`batch/`, behind `simd`).
 
@@ -209,9 +210,9 @@ only.
 | `parallel` | yes | rayon + portable-atomic for parallel solver paths (`solver/parallel.rs`) |
 | `simd` | yes | `wide`-based SIMD kernels (`simd/` module, `device/batch/`) |
 | `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus serde/bincode/blake3/dirs for the compiled-model cache |
-| `veriloga-native` | no | Cranelift JIT for Verilog-A devices (implies `veriloga`; native targets only) |
+| `veriloga-native` | no | Native-only Cranelift JIT performance backend for supported Verilog-A fragments (implies `veriloga`); unsupported fragments fall back to the interpreter, and any expansion of the raw-pointer boundary requires a targeted safety review |
 | `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
-| `ffi` | no | `libloading` for dynamically loaded external device models |
+| `ffi` | no | Experimental `libloading` integration for dynamically loaded external device models; not a production-stable device ABI until the callback ownership, library lifetime, and stamping contracts are audited |
 
 The defaults mean the CLI, Python bindings, and the standard test run all
 exercise the parallel + SIMD paths.

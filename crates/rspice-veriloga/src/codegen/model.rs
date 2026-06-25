@@ -277,6 +277,8 @@ pub enum Instruction {
     PushTime,
     /// Push the instance multiplicity ($mfactor)
     PushMfactor,
+    /// Push whether an external terminal is connected on this instance.
+    PushPortConnected(usize),
     /// Z-domain filter: pop the input, push the sampled-data output
     ZiState(usize),
     /// Binary operations

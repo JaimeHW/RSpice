@@ -163,6 +163,50 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+#[test]
+fn veriloga_ac_runtime_stamp_errors_are_simulation_errors_not_panics() {
+    let model = write_model(
+        "ac_oob",
+        r#"
+`include "disciplines.vams"
+module va_ac_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = analysis("ac") ? 5 : 1;
+        w[i] = 1.0e-6;
+        I(p, n) <+ w[i] * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* veriloga AC runtime diagnostic\n\
+         V1 in 0 DC 0 AC 1\n\
+         R1 in 0 1k\n\
+         XBAD in 0 va_ac_oob\n\
+         .va \"{}\" va_ac_oob\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = std::panic::catch_unwind(|| Engine::default().run_ac(&netlist, &[1.0e3]));
+
+    let _ = std::fs::remove_file(model);
+
+    let result = result.expect("Verilog-A AC runtime stamp errors must not panic");
+    let err = result.expect_err("AC runtime stamp error must be reported to the caller");
+    let text = err.to_string();
+    assert!(
+        text.contains("Verilog-A") && (text.contains("Array index 5") || text.contains("[1:4]")),
+        "diagnostic should identify the Verilog-A AC array bounds error, got: {text}"
+    );
+}
+
 /// Bias-dependent charge: Q = 0.5*k*V^2 gives C(V) = kV, so the corner
 /// frequency moves with the DC operating point.
 #[test]

@@ -113,7 +113,7 @@ locals and `output`/`inout` arguments in analog functions.
 
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
-| `native` | off | Cranelift JIT (`cranelift*` 0.115 crates); without it models run on the bytecode interpreter only |
+| `native` | off | Native-only Cranelift JIT performance backend for supported model fragments; without it models run on the bytecode interpreter only, and unsupported JIT fragments fall back to the interpreter |
 | `ams` | off | Declared for Verilog-AMS mixed-signal support; currently gates no code in the crate |
 
 `rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
@@ -127,7 +127,7 @@ cargo test  -p rspice-veriloga                      # interpreter paths
 cargo test  -p rspice-veriloga --features native    # + bytecode/JIT equivalence
 ```
 
-The 14 integration test files under `tests/` cover end-to-end compilation
+The integration test files under `tests/` cover end-to-end compilation
 (`compile_models.rs`), runtime evaluation and Jacobians
 (`device_eval.rs`), array variables, `aliasparam`, indirect contributions,
 `zi_*` filters, timestep control, `$mfactor` scaling, multi-module
