@@ -106,9 +106,7 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
                     ));
                 }
             },
-            HirExprKind::Laplace { .. }
-            | HirExprKind::Zi { .. }
-            | HirExprKind::NoiseSource { .. } => {
+            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. } => {
                 return Err(unsupported(
                     artifact,
                     format!(
@@ -117,6 +115,7 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
                     ),
                 ));
             }
+            HirExprKind::NoiseSource { .. } => {}
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 if args.len() != 1 {
                     return Err(unsupported(
@@ -125,6 +124,7 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
                     ));
                 }
             }
+            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {}
             HirExprKind::Call { name, .. } if is_stateful_or_effectful_call(name.as_str()) => {
                 return Err(unsupported(
                     artifact,
@@ -437,8 +437,6 @@ fn is_stateful_or_effectful_call(name: &str) -> bool {
             | "zi_zd"
             | "zi_np"
             | "zi_nd"
-            | "white_noise"
-            | "flicker_noise"
             | "noise_table"
             | "noise_table_log"
     )
@@ -446,6 +444,13 @@ fn is_stateful_or_effectful_call(name: &str) -> bool {
 
 fn is_ddt_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("ddt")
+}
+
+fn is_noise_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "white_noise" | "$white_noise" | "flicker_noise" | "$flicker_noise"
+    )
 }
 
 fn generate_mod_file() -> String {

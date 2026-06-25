@@ -178,6 +178,8 @@ impl ExprEmitter<'_> {
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 self.lower_ddt_value(id, args.as_slice(), &base)?
             }
+            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => "0.0".to_string(),
+            HirExprKind::NoiseSource { .. } => "0.0".to_string(),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddt { expr, abstol },
             } => {
@@ -257,6 +259,10 @@ impl ExprEmitter<'_> {
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 self.ddt_derivatives(id, args.as_slice())?
             }
+            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
+                zero_derivatives(node_count)
+            }
+            HirExprKind::NoiseSource { .. } => zero_derivatives(node_count),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddt { expr, abstol },
             } => {
@@ -308,6 +314,10 @@ impl ExprEmitter<'_> {
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 self.ddt_reactive_value(args.as_slice())?
             }
+            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
+                ReactiveValue::none(zero_derivatives(node_count))
+            }
+            HirExprKind::NoiseSource { .. } => ReactiveValue::none(zero_derivatives(node_count)),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddt { expr, abstol },
             } => {
@@ -850,6 +860,13 @@ fn reactive_div(left: &ExprValue, right: &ExprValue) -> Result<ReactiveValue, Ru
 
 fn is_ddt_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("ddt")
+}
+
+fn is_noise_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "white_noise" | "$white_noise" | "flicker_noise" | "$flicker_noise"
+    )
 }
 
 fn format_f64(value: f64) -> String {

@@ -327,6 +327,44 @@ fn generated_ddt_current_rust_compiles_with_runtime_stub() {
     assert_generated_rust_compiles(&generated);
 }
 
+#[test]
+fn rust_backend_lowers_noise_terms_to_zero_for_large_signal_stamps() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(noisy_current_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile noisy current source");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("eq0_value"), "{stamp}");
+    assert!(stamp.contains("0.0"), "{stamp}");
+    assert!(!stamp.contains("white_noise"), "{stamp}");
+    assert!(!stamp.contains("flicker_noise"), "{stamp}");
+    assert!(!stamp.contains("Interpreter"), "{stamp}");
+}
+
+#[test]
+fn generated_noise_term_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(noisy_current_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile noisy current source");
+
+    assert_generated_rust_compiles(&generated);
+}
+
 fn assert_generated_rust_compiles(generated: &GeneratedRustDevice) {
     let temp = temp_dir("rspice-rust-backend-compile");
 
@@ -507,6 +545,19 @@ module cap(p, n);
     electrical p, n;
     parameter real c = 1e-12 from (0:inf);
     analog I(p, n) <+ ddt(c * V(p, n));
+endmodule
+"#
+}
+
+fn noisy_current_source() -> &'static str {
+    r#"
+module noisy_source(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real thermal = 1e-18 from [0:inf);
+    parameter real flicker = 1e-20 from [0:inf);
+    parameter real af = 1.0 from [0:inf);
+    analog I(p, n) <+ white_noise(thermal, "thermal") + flicker_noise(flicker, af, "flicker");
 endmodule
 "#
 }
