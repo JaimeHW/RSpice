@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
-use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, MirEquationKind};
+use crate::canonical_ir::{
+    CanonicalIrArtifact, CanonicalValueType, HirExprKind, HirStatement, MirEquationKind,
+};
 
-use super::expr::{lower_equation_expr, parameter_field_names};
+use super::expr::{
+    LoweredVariable, lower_equation_expr, lower_equation_expr_with_variables,
+    parameter_field_names, unique_identifiers,
+};
 use super::{
     GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames, RustTranspileOptions,
 };
@@ -20,6 +25,7 @@ pub fn generate_device(
         artifact.metadata.source_digest.as_str(),
     );
     let parameter_fields = parameter_field_names(artifact);
+    let variable_fields = variable_local_names(artifact);
 
     Ok(GeneratedRustDevice {
         module_name: artifact.mir.module_name.to_string(),
@@ -37,28 +43,42 @@ pub fn generate_device(
             },
             GeneratedRustFile {
                 relative_path: "stamp.rs".to_string(),
-                contents: generate_stamp_file(artifact, options, &parameter_fields)?,
+                contents: generate_stamp_file(
+                    artifact,
+                    options,
+                    &parameter_fields,
+                    &variable_fields,
+                )?,
             },
         ],
     })
 }
 
 fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), RustBackendError> {
-    if !artifact.hir.statements.is_empty() {
-        return Err(unsupported(
-            artifact,
-            "analog assignment/control statements",
-        ));
-    }
     if !artifact.hir.arrays.is_empty() {
         return Err(unsupported(artifact, "arrays"));
     }
-    if !artifact.hir.variables.is_empty() {
-        return Err(unsupported(artifact, "analog variables"));
+    for variable in &artifact.hir.variables {
+        if variable.is_state {
+            return Err(unsupported(
+                artifact,
+                format!("state variable '{}'", variable.name),
+            ));
+        }
+        if !is_supported_scalar_value_type(variable.value_type) {
+            return Err(unsupported(
+                artifact,
+                format!(
+                    "non-numeric scalar variable '{}' with type {:?}",
+                    variable.name, variable.value_type
+                ),
+            ));
+        }
     }
     if !artifact.mir.state_slots.is_empty() {
         return Err(unsupported(artifact, "state slots"));
     }
+    reject_unsupported_statements(artifact, &artifact.hir.statements)?;
 
     for equation in &artifact.mir.equations {
         if equation.kind != MirEquationKind::Current {
@@ -99,6 +119,48 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
         }
     }
 
+    Ok(())
+}
+
+fn is_supported_scalar_value_type(value_type: CanonicalValueType) -> bool {
+    matches!(
+        value_type,
+        CanonicalValueType::Real | CanonicalValueType::Integer | CanonicalValueType::Boolean
+    )
+}
+
+fn reject_unsupported_statements(
+    artifact: &CanonicalIrArtifact,
+    statements: &[HirStatement],
+) -> Result<(), RustBackendError> {
+    for statement in statements {
+        match statement {
+            HirStatement::Assignment(assignment) => {
+                if assignment.index.is_some() {
+                    return Err(unsupported(
+                        artifact,
+                        format!("indexed assignment to '{}'", assignment.target_name),
+                    ));
+                }
+                if usize::from(assignment.target) >= artifact.hir.variables.len() {
+                    return Err(RustBackendError::internal(
+                        artifact.metadata.source_package.as_str(),
+                        artifact.mir.module_name.as_str(),
+                        format!(
+                            "assignment target {} is outside HIR variable arena",
+                            assignment.target
+                        ),
+                    ));
+                }
+            }
+            HirStatement::Loop(_) => {
+                return Err(unsupported(
+                    artifact,
+                    "runtime analog loops in Rust backend assignment lowering",
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -362,9 +424,10 @@ fn generate_stamp_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
     parameter_fields: &HashMap<String, String>,
+    variable_fields: &HashMap<String, String>,
 ) -> Result<String, RustBackendError> {
     let mut out = String::new();
-    out.push_str("#![allow(unused_parens)]\n\n");
+    out.push_str("#![allow(unused_assignments, unused_parens)]\n\n");
     out.push_str("use super::state::Instance;\n");
     out.push_str(&format!(
         "use {}::{{GeneratedEvalContext, GeneratedStamper}};\n\n",
@@ -375,10 +438,28 @@ fn generate_stamp_file(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
 
+    let mut variables = emit_variable_initializers(artifact, variable_fields, &mut out);
+    emit_assignment_statements(
+        artifact,
+        parameter_fields,
+        variable_fields,
+        &mut variables,
+        &mut out,
+    )?;
+
     for (index, equation) in artifact.mir.equations.iter().enumerate() {
         let prefix = format!("eq{index}");
-        let lowered =
-            lower_equation_expr(artifact, equation.expression.id, &prefix, parameter_fields)?;
+        let lowered = if variables.is_empty() {
+            lower_equation_expr(artifact, equation.expression.id, &prefix, parameter_fields)?
+        } else {
+            lower_equation_expr_with_variables(
+                artifact,
+                equation.expression.id,
+                &prefix,
+                parameter_fields,
+                &variables,
+            )?
+        };
         for line in lowered.lines {
             out.push_str("        ");
             out.push_str(&line);
@@ -415,6 +496,113 @@ fn generate_stamp_file(
     out.push_str("    }\n");
     out.push_str("}\n");
     Ok(out)
+}
+
+fn variable_local_names(artifact: &CanonicalIrArtifact) -> HashMap<String, String> {
+    let names = artifact
+        .hir
+        .variables
+        .iter()
+        .map(|variable| variable.name.to_string())
+        .collect::<Vec<_>>();
+    unique_identifiers(&names)
+}
+
+fn emit_variable_initializers(
+    artifact: &CanonicalIrArtifact,
+    variable_fields: &HashMap<String, String>,
+    out: &mut String,
+) -> HashMap<String, LoweredVariable> {
+    let mut variables = HashMap::new();
+    for variable in &artifact.hir.variables {
+        let local = variable_fields[variable.name.as_str()].clone();
+        out.push_str(&format!("        let mut {local}: f64 = 0.0;\n"));
+        let mut derivatives = Vec::with_capacity(artifact.mir.nodes.len());
+        for node_index in 0..artifact.mir.nodes.len() {
+            let derivative = format!("{local}_d_n{node_index}");
+            out.push_str(&format!("        let mut {derivative}: f64 = 0.0;\n"));
+            derivatives.push(derivative);
+        }
+        variables.insert(
+            variable.name.to_string(),
+            LoweredVariable {
+                value: local,
+                derivatives,
+            },
+        );
+    }
+    if !artifact.hir.variables.is_empty() {
+        out.push('\n');
+    }
+    variables
+}
+
+fn emit_assignment_statements(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    variable_fields: &HashMap<String, String>,
+    variables: &mut HashMap<String, LoweredVariable>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    for (index, statement) in artifact.hir.statements.iter().enumerate() {
+        let HirStatement::Assignment(assignment) = statement else {
+            return Err(unsupported(
+                artifact,
+                "runtime analog loops in Rust backend assignment lowering",
+            ));
+        };
+
+        let prefix = format!("assign{index}");
+        let lowered = lower_equation_expr_with_variables(
+            artifact,
+            assignment.expr.id,
+            &prefix,
+            parameter_fields,
+            variables,
+        )?;
+        for line in lowered.lines {
+            out.push_str("        ");
+            out.push_str(&line);
+            out.push('\n');
+        }
+
+        let target = artifact
+            .hir
+            .variables
+            .get(usize::from(assignment.target))
+            .ok_or_else(|| {
+                RustBackendError::internal(
+                    artifact.metadata.source_package.as_str(),
+                    artifact.mir.module_name.as_str(),
+                    format!(
+                        "assignment target {} is outside HIR variable arena",
+                        assignment.target
+                    ),
+                )
+            })?;
+        let target_local = variable_fields[target.name.as_str()].clone();
+        out.push_str(&format!("        {target_local} = {};\n", lowered.value));
+        for (node_index, derivative) in lowered.derivatives.iter().enumerate() {
+            out.push_str(&format!(
+                "        {target_local}_d_n{node_index} = {derivative};\n"
+            ));
+        }
+
+        let derivative_locals = (0..artifact.mir.nodes.len())
+            .map(|node_index| format!("{target_local}_d_n{node_index}"))
+            .collect();
+        variables.insert(
+            target.name.to_string(),
+            LoweredVariable {
+                value: target_local,
+                derivatives: derivative_locals,
+            },
+        );
+    }
+    if !artifact.hir.statements.is_empty() {
+        out.push('\n');
+    }
+    Ok(())
 }
 
 fn optional_node_expr(node: Option<crate::canonical_ir::NodeId>) -> String {

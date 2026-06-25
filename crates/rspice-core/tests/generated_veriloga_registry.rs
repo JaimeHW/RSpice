@@ -11,4 +11,11 @@ fn build_script_generates_registry_from_veriloga_directory() {
         "expected simple_res in generated built-in registry, got {:?}",
         builtins::builtin_names()
     );
+    assert!(
+        builtins::builtin_names()
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("assigned_res")),
+        "expected assigned_res in generated built-in registry, got {:?}",
+        builtins::builtin_names()
+    );
 }

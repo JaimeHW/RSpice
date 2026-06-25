@@ -1,0 +1,10 @@
+module assigned_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    real g;
+    analog begin
+        g = 1.0 / r;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule

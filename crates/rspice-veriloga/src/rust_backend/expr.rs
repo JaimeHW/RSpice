@@ -13,16 +13,33 @@ pub struct LoweredExpr {
     pub derivatives: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LoweredVariable {
+    pub value: String,
+    pub derivatives: Vec<String>,
+}
+
 pub fn lower_equation_expr(
     artifact: &CanonicalIrArtifact,
     expr: ExprId,
     prefix: &str,
     parameter_fields: &HashMap<String, String>,
 ) -> Result<LoweredExpr, RustBackendError> {
+    lower_equation_expr_with_variables(artifact, expr, prefix, parameter_fields, &HashMap::new())
+}
+
+pub fn lower_equation_expr_with_variables(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    prefix: &str,
+    parameter_fields: &HashMap<String, String>,
+    variables: &HashMap<String, LoweredVariable>,
+) -> Result<LoweredExpr, RustBackendError> {
     let mut emitter = ExprEmitter {
         artifact,
         prefix,
         parameter_fields,
+        variables,
         emitted: HashMap::new(),
         lines: Vec::new(),
     };
@@ -44,6 +61,7 @@ struct ExprEmitter<'a> {
     artifact: &'a CanonicalIrArtifact,
     prefix: &'a str,
     parameter_fields: &'a HashMap<String, String>,
+    variables: &'a HashMap<String, LoweredVariable>,
     emitted: HashMap<ExprId, ExprValue>,
     lines: Vec<String>,
 }
@@ -97,8 +115,13 @@ impl ExprEmitter<'_> {
         };
 
         let derivatives = match &expression.kind {
-            HirExprKind::Number { .. } | HirExprKind::Identifier { .. } => {
-                zero_derivatives(node_count)
+            HirExprKind::Number { .. } => zero_derivatives(node_count),
+            HirExprKind::Identifier { name } => {
+                if let Some(variable) = self.variables.get(name.as_str()) {
+                    variable.derivatives.clone()
+                } else {
+                    zero_derivatives(node_count)
+                }
             }
             HirExprKind::BranchAccess { access, pos, neg } => {
                 self.branch_access_derivatives(access.as_str(), pos.as_str(), neg.as_deref())?
@@ -170,8 +193,12 @@ impl ExprEmitter<'_> {
     fn lower_identifier(&self, name: &str) -> Result<String, RustBackendError> {
         if let Some(field) = self.parameter_fields.get(name) {
             Ok(format!("self.params.{field}"))
+        } else if let Some(variable) = self.variables.get(name) {
+            Ok(variable.value.clone())
         } else {
-            Err(self.unsupported(format!("identifier '{name}' is not a parameter")))
+            Err(self.unsupported(format!(
+                "identifier '{name}' is not a parameter or scalar variable"
+            )))
         }
     }
 

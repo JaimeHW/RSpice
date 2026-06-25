@@ -199,6 +199,44 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
 }
 
 #[test]
+fn rust_backend_lowers_scalar_assignments_before_current_equations() {
+    let src = r#"
+module assigned_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    real g;
+    analog begin
+        g = 1.0 / r;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(src)
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile assignment-fed resistor");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("let mut g: f64 = 0.0;"), "{stamp}");
+    assert!(stamp.contains("g = "), "{stamp}");
+    assert!(stamp.contains("g_d_n0"), "{stamp}");
+    assert!(stamp.contains("g_d_n1"), "{stamp}");
+    assert!(stamp.contains("eq0_value"), "{stamp}");
+    assert!(!stamp.contains("HashMap"), "{stamp}");
+    assert!(!stamp.contains("Bytecode"), "{stamp}");
+}
+
+#[test]
 fn generated_algebraic_current_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(tiny_resistor_source())
@@ -208,9 +246,41 @@ fn generated_algebraic_current_rust_compiles_with_runtime_stub() {
     })
     .transpile(&artifact)
     .expect("transpile simple resistor");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn generated_assignment_fed_current_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module assigned_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    real g;
+    analog begin
+        g = 1.0 / r;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile assignment-fed resistor");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+fn assert_generated_rust_compiles(generated: &GeneratedRustDevice) {
     let temp = temp_dir("rspice-rust-backend-compile");
 
-    write_generated_device(&temp, &generated).expect("write generated device");
+    write_generated_device(&temp, generated).expect("write generated device");
     let lib = temp.join("compile_smoke.rs");
     std::fs::write(
         &lib,
