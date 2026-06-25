@@ -49,6 +49,7 @@ impl TestRunner {
     }
 
     fn run_suite(&self, subdir: &str) -> Vec<TestResult> {
+        assert_ngspice_regression_deck_run_allowed(&format!("suite '{subdir}'"));
         self.discover_tests(subdir)
             .iter()
             .map(|path| self.run_test(path))
@@ -56,6 +57,7 @@ impl TestRunner {
     }
 
     fn run_suite_until(&self, subdir: &str, deadline: Option<Instant>) -> Vec<TestResult> {
+        assert_ngspice_regression_deck_run_allowed(&format!("suite '{subdir}'"));
         let mut results = Vec::new();
         for path in self.discover_tests(subdir) {
             let hard_timeout_ms = if let Some(deadline) = deadline {
@@ -85,6 +87,7 @@ impl TestRunner {
     }
 
     fn run_test(&self, cir_path: &Path) -> TestResult {
+        assert_ngspice_regression_deck_run_allowed(&format!("deck '{}'", cir_path.display()));
         run_case_with_watchdog(&self.test_dir, self.config(), cir_path)
     }
 
@@ -386,42 +389,6 @@ fn get_tests_dir() -> PathBuf {
     tests_dir.canonicalize().unwrap_or(tests_dir)
 }
 
-fn suite_is_cmc_qaspec(subdir: &str) -> bool {
-    let suite_dir = get_tests_dir().join(subdir);
-    if !suite_dir.exists() {
-        return false;
-    }
-
-    // CMC model QA suites typically expose `qaSpec`/`run` in nested
-    // model-family subdirectories (e.g. bsim3/nmos/qaSpec).
-    let mut stack = vec![suite_dir];
-    let mut visited_dirs = 0usize;
-    while let Some(dir) = stack.pop() {
-        visited_dirs += 1;
-        if visited_dirs > 256 {
-            break;
-        }
-
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if name.eq_ignore_ascii_case("qaSpec") || name.eq_ignore_ascii_case("run") {
-                return true;
-            }
-            if path.is_dir() {
-                stack.push(path);
-            }
-        }
-    }
-
-    false
-}
-
 fn normalize_suite_path(path: &Path) -> String {
     path.iter()
         .map(|segment| segment.to_string_lossy().into_owned())
@@ -479,23 +446,11 @@ fn all_discoverable_suite_dirs() -> Vec<String> {
 }
 
 fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
-    if let Some(message) = broad_ngspice_suite_debug_block_message(subdir) {
-        panic!("{message}");
-    }
-
     let results = runner.run_suite(subdir);
     if !results.is_empty() {
         TestRunner::print_summary(&results);
     }
     let stats = TestRunner::statistics(&results);
-
-    if stats.total == 0 && suite_is_cmc_qaspec(subdir) {
-        println!(
-            "Suite '{}' uses CMC qaSpec workflow (no direct .cir decks); skipping under .cir harness.",
-            subdir
-        );
-        return stats;
-    }
 
     assert!(
         stats.total > 0,
@@ -530,6 +485,23 @@ fn broad_ngspice_suite_debug_block_message(subdir: &str) -> Option<String> {
     Some(format!(
         "Refusing broad ngspice suite '{subdir}' in debug mode; run `cargo test --release -p rspice-core --test ngspice_regression test_full_ngspice_suite_summary -- --nocapture` for the full suite, or add `--release` to this exact suite command."
     ))
+}
+
+fn ngspice_regression_debug_block_message(scope: &str) -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+
+    Some(format!(
+        "Refusing ngspice regression {scope} in debug mode; run `cargo test --release -p rspice-core --test ngspice_regression test_full_ngspice_suite_summary -- --nocapture` for the full suite, or add `--release` to the focused command."
+    ))
+}
+
+fn assert_ngspice_regression_deck_run_allowed(scope: &str) {
+    if let Some(message) = ngspice_regression_debug_block_message(scope) {
+        panic!("{message}");
+    }
+    assert_ngspice_exe_is_console_binary();
 }
 
 /// Skips other than the debug-build watchdog class, which is the only skip
@@ -895,9 +867,64 @@ fn test_broad_ngspice_suite_runner_is_profile_gated() {
     }
 }
 
+#[test]
+fn test_ngspice_deck_runs_are_profile_gated() {
+    let skip_message = ngspice_regression_debug_block_message("deck 'general/rc.cir'");
+
+    if cfg!(debug_assertions) {
+        let skip_message = skip_message.expect("debug deck runs must be blocked");
+        assert!(skip_message.contains("general/rc.cir"));
+        assert!(skip_message.contains("Refusing ngspice regression"));
+        assert!(skip_message.contains("cargo test --release"));
+    } else {
+        assert!(
+            skip_message.is_none(),
+            "release deck runs must execute normally"
+        );
+    }
+}
+
+#[test]
+fn test_ngspice_deck_preflight_blocks_debug_profile_before_spawn() {
+    let result = std::panic::catch_unwind(|| {
+        assert_ngspice_regression_deck_run_allowed("deck 'general/rc.cir'");
+    });
+
+    if cfg!(debug_assertions) {
+        let panic_payload = result.expect_err("debug deck preflight must panic before spawn");
+        let message = panic_payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic_payload.downcast_ref::<&str>().copied())
+            .unwrap_or("<non-string panic>");
+        assert!(message.contains("general/rc.cir"));
+        assert!(message.contains("cargo test --release"));
+    } else {
+        result.expect("release deck preflight must allow execution");
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // General Circuit Tests
 // ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_ngspice_regression_rejects_windows_ngspice_gui_binary() {
+    let gui_exe = Path::new(r"C:\ngspice\Spice64\bin\ngspice.exe");
+    let console_exe = Path::new(r"C:\ngspice\Spice64\bin\ngspice_con.exe");
+
+    if cfg!(windows) {
+        let error =
+            ngspice_exe_console_binary_error(gui_exe).expect("Windows GUI binary is rejected");
+        assert!(error.contains("ngspice_con.exe"));
+    } else {
+        assert!(
+            ngspice_exe_console_binary_error(gui_exe).is_none(),
+            "non-Windows platforms are not forced to use ngspice_con.exe"
+        );
+    }
+    assert!(ngspice_exe_console_binary_error(console_exe).is_none());
+}
 
 #[test]
 fn test_ngspice_general_suite() {
@@ -1024,30 +1051,6 @@ fn test_ngspice_jfet_suite() {
 }
 
 #[test]
-fn test_ngspice_bsim3_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
-    let stats = run_and_report(&runner, "bsim3");
-
-    println!(
-        "BSIM3: {} tests, {:.1}% pass rate",
-        stats.total,
-        stats.pass_rate()
-    );
-}
-
-#[test]
-fn test_ngspice_bsim4_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
-    let stats = run_and_report(&runner, "bsim4");
-
-    println!(
-        "BSIM4: {} tests, {:.1}% pass rate",
-        stats.total,
-        stats.pass_rate()
-    );
-}
-
-#[test]
 fn test_ngspice_mos6_suite() {
     let runner = TestRunner::new(get_tests_dir(), suite_config("mos6"));
     let stats = run_and_report(&runner, "mos6");
@@ -1094,18 +1097,6 @@ fn test_ngspice_vbic_ceamp_focus() {
         result.passed,
         "Focused VBIC CEamp deck failed: {:?} | mismatches: {:?}",
         result.error, result.mismatches
-    );
-}
-
-#[test]
-fn test_ngspice_hicum2_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
-    let stats = run_and_report(&runner, "hicum2");
-
-    println!(
-        "HiCUM2: {} tests, {:.1}% pass rate",
-        stats.total,
-        stats.pass_rate()
     );
 }
 
@@ -1343,11 +1334,7 @@ fn test_ngspice_mesa_suite() {
 
 #[test]
 fn test_full_ngspice_suite_summary() {
-    if cfg!(debug_assertions) {
-        panic!(
-            "Refusing full ngspice suite in debug mode; run `cargo test --release -p rspice-core --test ngspice_regression test_full_ngspice_suite_summary -- --nocapture`."
-        );
-    }
+    assert_ngspice_regression_deck_run_allowed("full suite");
 
     let suites = all_discoverable_suite_dirs();
     let full_suite_start = Instant::now();
@@ -1439,6 +1426,30 @@ fn test_full_ngspice_suite_summary() {
 // Utility Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
+fn assert_ngspice_exe_is_console_binary() {
+    let Some(exe) = std::env::var_os("NGSPICE_EXE").map(PathBuf::from) else {
+        return;
+    };
+    if let Some(error) = ngspice_exe_console_binary_error(&exe) {
+        panic!("{error}");
+    }
+}
+
+fn ngspice_exe_console_binary_error(exe: &Path) -> Option<String> {
+    let file_name = exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+
+    if cfg!(windows) && file_name.eq_ignore_ascii_case("ngspice.exe") {
+        return Some(format!(
+            "Refusing ngspice regression run with Windows GUI binary '{}'; set NGSPICE_EXE to ngspice_con.exe.",
+            exe.display()
+        ));
+    }
+    None
+}
+
 #[test]
 fn test_discover_tests() {
     let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
@@ -1525,14 +1536,6 @@ fn test_discovered_suites_cover_every_local_ngspice_circuit() {
         discovered, all_circuits,
         "Every checked-in ngspice .cir deck must be discoverable and run by the suite harness"
     );
-}
-
-#[test]
-fn test_cmc_suite_detection() {
-    assert!(suite_is_cmc_qaspec("bsim3"));
-    assert!(suite_is_cmc_qaspec("bsim4"));
-    assert!(suite_is_cmc_qaspec("hicum2"));
-    assert!(!suite_is_cmc_qaspec("general"));
 }
 
 #[test]

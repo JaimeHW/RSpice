@@ -98,12 +98,48 @@ pub struct Netlist {
     /// back-annotated onto the parsed deck by the path-aware parse entry
     /// points (`netlist::spef`).
     pub spef_includes: Vec<String>,
+    /// Non-fatal parser diagnostics for constructs that were accepted but not
+    /// fully acted on. Callers should surface these to users before simulation.
+    pub diagnostics: Vec<ParseDiagnostic>,
     /// Optional original netlist text used to build this AST.
     /// Stored to support parameter re-application workflows (e.g., sensitivity).
     pub source_text: Option<String>,
     /// Optional source path for the netlist used to resolve relative includes
     /// and model-file references during reparsing workflows.
     pub source_path: Option<PathBuf>,
+}
+
+/// Severity for parser diagnostics that do not abort parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    /// The deck parsed, but the simulator ignored or downgraded a construct.
+    Warning,
+}
+
+/// Structured parser diagnostic suitable for CLI, UI, Python, and WASM callers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseDiagnostic {
+    /// 1-based input line number. `0` is reserved for diagnostics that cannot be
+    /// tied to one source line.
+    pub line: usize,
+    /// Stable machine-readable diagnostic code.
+    pub code: String,
+    /// Human-readable diagnostic message.
+    pub message: String,
+    /// Diagnostic severity.
+    pub severity: DiagnosticSeverity,
+}
+
+impl ParseDiagnostic {
+    /// Create a warning diagnostic.
+    pub fn warning(line: usize, code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            line,
+            code: code.into(),
+            message: message.into(),
+            severity: DiagnosticSeverity::Warning,
+        }
+    }
 }
 
 /// Verilog-A model include directive
@@ -121,8 +157,10 @@ pub struct VerilogAInclude {
 impl Netlist {
     /// Parse a netlist from a string
     pub fn parse(input: &str) -> Result<Self, ParseError> {
-        let sanitized = Self::strip_control_blocks(input);
+        let (sanitized, mut diagnostics) = Self::strip_control_blocks_with_diagnostics(input);
         let mut netlist = parser::parse_netlist(&sanitized)?;
+        diagnostics.extend(netlist.diagnostics);
+        netlist.diagnostics = diagnostics;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = None;
         Ok(netlist)
@@ -247,14 +285,25 @@ impl Netlist {
     /// conditionals). These contain operators like '>' that break the netlist
     /// parser. We strip them since RSpice runs the circuit directly.
     pub fn strip_control_blocks(input: &str) -> String {
+        Self::strip_control_blocks_with_diagnostics(input).0
+    }
+
+    fn strip_control_blocks_with_diagnostics(input: &str) -> (String, Vec<ParseDiagnostic>) {
         let mut result = String::with_capacity(input.len());
         let mut in_control = false;
+        let mut diagnostics = Vec::new();
 
-        for line in input.lines() {
+        for (index, line) in input.lines().enumerate() {
+            let line_num = index + 1;
             let trimmed = line.trim().to_lowercase();
 
             if trimmed.starts_with(".control") {
                 in_control = true;
+                diagnostics.push(ParseDiagnostic::warning(
+                    line_num,
+                    "control-block-ignored",
+                    ".control block ignored; RSpice parses circuit decks and does not execute ngspice command scripts",
+                ));
                 result.push_str("* ");
                 result.push_str(line);
                 result.push('\n');
@@ -274,7 +323,7 @@ impl Netlist {
             }
         }
 
-        result
+        (result, diagnostics)
     }
 
     fn normalize_model_string_paths(&mut self, file_path: &std::path::Path) {
@@ -334,6 +383,7 @@ impl Default for Netlist {
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
             spef_includes: Vec::new(),
+            diagnostics: Vec::new(),
             source_text: None,
             source_path: None,
         }
@@ -435,6 +485,132 @@ mod tests {
 
         assert!(model.params.iter().any(|(name, value)| {
             name.eq_ignore_ascii_case("steplimit") && (*value - 1.0).abs() < f64::EPSILON
+        }));
+    }
+
+    #[test]
+    fn parses_parenthesized_scalar_model_parameter_values() {
+        let netlist = Netlist::parse(
+            "parenthesized model scalars\n\
+             q1 c b e h1\n\
+             .model h1 npn level=8 version=2.40\n\
+             + c10 = ( 9.074e-030 ) hf0 = ( 40 ) alces = ( -0.2286 )\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("h1"))
+            .expect("model exists");
+
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("c10") && (*value - 9.074e-30).abs() < 1.0e-40
+        }));
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("hf0") && (*value - 40.0).abs() < f64::EPSILON
+        }));
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("alces") && (*value + 0.2286).abs() < 1.0e-15
+        }));
+    }
+
+    #[test]
+    fn rejects_unclosed_parenthesized_scalar_model_parameter_values() {
+        let error = Netlist::parse(
+            "bad parenthesized model scalar\n\
+             q1 c b e h1\n\
+             .model h1 npn level=8 version=2.40 c10=(9.074e-030\n\
+             .op\n\
+             .end\n",
+        )
+        .expect_err("unclosed parenthesized scalar should fail");
+
+        assert!(
+            error.to_string().contains("Expected ')'"),
+            "error should explain the missing closing paren: {error}"
+        );
+    }
+
+    #[test]
+    fn reports_unsupported_dot_command_as_structured_diagnostic() {
+        let netlist = Netlist::parse(
+            "unknown command\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .foo compatibility_mode=vendor\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("unsupported dot command should not abort parsing");
+
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.line == 4
+                && diagnostic.code == "unsupported-dot-command"
+                && diagnostic.message.to_ascii_lowercase().contains(".foo")
+        }));
+    }
+
+    #[test]
+    fn reports_unknown_options_key_as_structured_diagnostic() {
+        let netlist = Netlist::parse(
+            "unknown option\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .options reltol=1e-4 vendorcompat=1\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("unknown option should not abort parsing");
+
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.line == 4
+                && diagnostic.code == "unknown-option"
+                && diagnostic
+                    .message
+                    .to_ascii_lowercase()
+                    .contains("vendorcompat")
+        }));
+    }
+
+    #[test]
+    fn reports_control_block_stripping_as_structured_diagnostic() {
+        let netlist = Netlist::parse(
+            "control block\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .control\n\
+             run\n\
+             .endc\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("control block should be stripped before circuit parsing");
+
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.line == 4
+                && diagnostic.code == "control-block-ignored"
+                && diagnostic.message.contains(".control")
+        }));
+    }
+
+    #[test]
+    fn reports_unsupported_mos_instance_token_as_structured_diagnostic() {
+        let netlist = Netlist::parse(
+            "mos tail token\n\
+             M1 d g s b nmod L=1u W=2u @probe\n\
+             .model nmod nmos level=1\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("unsupported MOS token should not abort parsing");
+
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.line == 2
+                && diagnostic.code == "unsupported-mos-instance-token"
+                && diagnostic.message.contains("@")
         }));
     }
 

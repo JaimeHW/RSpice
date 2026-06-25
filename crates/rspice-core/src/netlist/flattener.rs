@@ -466,6 +466,26 @@ impl<'a> Flattener<'a> {
                 tc1: *tc1,
                 tc2: *tc2,
             },
+            ElementKind::Vcvs {
+                gain,
+                control_nodes,
+            } => ElementKind::Vcvs {
+                gain: *gain,
+                control_nodes: (
+                    self.remap_node(&control_nodes.0, prefix, node_map),
+                    self.remap_node(&control_nodes.1, prefix, node_map),
+                ),
+            },
+            ElementKind::Vccs {
+                transconductance,
+                control_nodes,
+            } => ElementKind::Vccs {
+                transconductance: *transconductance,
+                control_nodes: (
+                    self.remap_node(&control_nodes.0, prefix, node_map),
+                    self.remap_node(&control_nodes.1, prefix, node_map),
+                ),
+            },
             ElementKind::Cccs {
                 gain,
                 control_element,

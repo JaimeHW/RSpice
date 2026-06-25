@@ -15,6 +15,8 @@ pub struct ValidationResult {
 pub struct ValidationIssue {
     pub message: String,
     pub element: Option<String>,
+    pub line: Option<usize>,
+    pub code: Option<String>,
 }
 
 impl ValidationResult {
@@ -26,6 +28,8 @@ impl ValidationResult {
         self.warnings.push(ValidationIssue {
             message: message.into(),
             element: Some(element.into()),
+            line: None,
+            code: None,
         });
     }
 }
@@ -55,6 +59,7 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
     };
 
     let mut result = ValidationResult::default();
+    add_parser_diagnostics(&netlist, &mut result);
 
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
@@ -143,6 +148,8 @@ fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
                     elem.name
                 ),
                 element: Some(elem.name.clone()),
+                line: None,
+                code: None,
             });
         } else {
             parent.insert(a, b);
@@ -179,7 +186,24 @@ fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
                 node
             ),
             element: None,
+            line: None,
+            code: None,
         });
+    }
+}
+
+fn add_parser_diagnostics(netlist: &Netlist, result: &mut ValidationResult) {
+    for diagnostic in &netlist.diagnostics {
+        match diagnostic.severity {
+            rspice_core::netlist::DiagnosticSeverity::Warning => {
+                result.warnings.push(ValidationIssue {
+                    message: diagnostic.message.clone(),
+                    element: None,
+                    line: (diagnostic.line != 0).then_some(diagnostic.line),
+                    code: Some(diagnostic.code.clone()),
+                });
+            }
+        }
     }
 }
 
@@ -246,8 +270,18 @@ fn is_builtin_model(name: &str) -> bool {
 fn output_json(result: &ValidationResult) {
     let json = serde_json::json!({
         "valid": result.is_ok() && result.warnings.is_empty(),
-        "errors": result.errors.iter().map(|e| serde_json::json!({"message": e.message})).collect::<Vec<_>>(),
-        "warnings": result.warnings.iter().map(|w| serde_json::json!({"message": w.message, "element": w.element})).collect::<Vec<_>>(),
+        "errors": result.errors.iter().map(|e| serde_json::json!({
+            "message": &e.message,
+            "element": &e.element,
+            "line": e.line,
+            "code": &e.code,
+        })).collect::<Vec<_>>(),
+        "warnings": result.warnings.iter().map(|w| serde_json::json!({
+            "message": &w.message,
+            "element": &w.element,
+            "line": w.line,
+            "code": &w.code,
+        })).collect::<Vec<_>>(),
     });
     match serde_json::to_string_pretty(&json) {
         Ok(text) => println!("{text}"),
@@ -260,6 +294,12 @@ fn output_text(result: &ValidationResult, quiet: bool) {
         println!("✗ Error: {}", error.message);
     }
     for warning in &result.warnings {
+        if warning.element.is_none()
+            && let Some(line) = warning.line
+        {
+            println!("Warning [line {line}]: {}", warning.message);
+            continue;
+        }
         if let Some(ref elem) = warning.element {
             println!("⚠ Warning [{}]: {}", elem, warning.message);
         } else {

@@ -331,6 +331,17 @@ pub enum ElementKind {
         initial_state: Option<SwitchState>,
     },
 
+    /// Xyce generic expression-controlled switch:
+    /// SW1 n+ n- MODEL [ON|OFF] CONTROL={expr}
+    GenericSwitch {
+        /// Switch model name
+        model: String,
+        /// Scalar control expression
+        control_expression: String,
+        /// Initial state
+        initial_state: Option<SwitchState>,
+    },
+
     //-------------------------------------------------------------------------
     // Transmission Lines
     //-------------------------------------------------------------------------
@@ -498,12 +509,17 @@ impl SaveSet {
                     }
                 }
                 SaveSignal::DeviceParam { device, param } => {
-                    let probe = format!(
+                    let bracket_probe = format!(
                         "@{}[{}]",
                         device.to_ascii_lowercase(),
                         param.to_ascii_lowercase()
                     );
-                    if var == probe {
+                    let xyce_probe = format!(
+                        "n({}:{})",
+                        device.to_ascii_lowercase(),
+                        param.to_ascii_lowercase()
+                    );
+                    if var == bracket_probe || var == xyce_probe {
                         return true;
                     }
                 }

@@ -6,7 +6,7 @@
 //! voltage-output forms where signs are unambiguous.
 
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::{ElementKind, Netlist};
+use rspice_core::netlist::{ElementKind, Netlist, flatten_netlist};
 
 fn op_voltage(deck: &str, node: &str) -> f64 {
     let netlist = Netlist::parse(deck).expect("deck parses");
@@ -212,6 +212,48 @@ rh h_out 0 1k
         (1, 1, 1, 1),
         "plain linear E/G/F/H must keep their dedicated element kinds"
     );
+}
+
+#[test]
+fn subckt_linear_controlled_sources_remap_control_nodes() {
+    let deck = "\
+* subckt controlled-source control nodes
+.subckt wrap p out
+eprobe eout 0 p 0 1
+gprobe out 0 p 0 1m
+.ends wrap
+vin in 0 dc 1
+x1 in out wrap
+rl out 0 1k
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let flat = flatten_netlist(&netlist).expect("flatten succeeds");
+
+    let mut saw_vcvs = false;
+    let mut saw_vccs = false;
+    for element in flat {
+        match element.kind {
+            ElementKind::Vcvs { control_nodes, .. }
+                if element.name.eq_ignore_ascii_case("x1.eprobe") =>
+            {
+                assert!(control_nodes.0.eq_ignore_ascii_case("in"));
+                assert_eq!(control_nodes.1, "0");
+                saw_vcvs = true;
+            }
+            ElementKind::Vccs { control_nodes, .. }
+                if element.name.eq_ignore_ascii_case("x1.gprobe") =>
+            {
+                assert!(control_nodes.0.eq_ignore_ascii_case("in"));
+                assert_eq!(control_nodes.1, "0");
+                saw_vccs = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(saw_vcvs, "flattened VCVS not found");
+    assert!(saw_vccs, "flattened VCCS not found");
 }
 
 #[test]

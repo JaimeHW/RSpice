@@ -10,6 +10,7 @@ pub fn execute(args: InfoArgs, _verbose: bool, quiet: bool) -> Result<(), CliErr
     if args.json {
         print_json(&netlist, &args)?;
     } else {
+        crate::commands::emit_netlist_diagnostics(&netlist, quiet);
         print_summary(&netlist, &args, quiet)?;
     }
 
@@ -152,6 +153,14 @@ fn print_json(netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
         } else { None },
         "subcircuits": if args.hierarchy { Some(netlist.subcircuits.iter().map(|s| &s.name).collect::<Vec<_>>()) } else { None },
         "measurements": netlist.measurements.len(),
+        "diagnostics": netlist.diagnostics.iter().map(|diagnostic| serde_json::json!({
+            "severity": match diagnostic.severity {
+                rspice_core::netlist::DiagnosticSeverity::Warning => "warning",
+            },
+            "line": diagnostic.line,
+            "code": &diagnostic.code,
+            "message": &diagnostic.message,
+        })).collect::<Vec<_>>(),
     });
 
     println!(

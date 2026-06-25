@@ -12,9 +12,9 @@ use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, Element, ElementKind, FreqVariation, InitialCondition, JfetType,
     MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet,
-    ParamContext, ParametricValue, ParseError, PoleZeroAnalysisType, PoleZeroTransferType, SaveSet,
-    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec, StepCommand, StepSweep,
-    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    ParamContext, ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType,
+    PoleZeroTransferType, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};

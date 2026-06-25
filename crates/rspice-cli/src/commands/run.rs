@@ -386,7 +386,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                 use rayon::prelude::*;
                 plan.par_iter()
                     .map(|deck| {
-                        let netlist = load_netlist_from_source(&deck.source, &args, config)?;
+                        let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
                         run_deck(&netlist, &args, config, false, true, deck.label.as_deref())
                     })
                     .collect()
@@ -411,7 +411,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             if multi_run && !quiet {
                 println!("\n=== run: {} ===", deck.label.as_deref().unwrap_or("base"));
             }
-            let netlist = load_netlist_from_source(&deck.source, &args, config)?;
+            let netlist = load_netlist_from_source(&deck.source, &args, config, !quiet)?;
             let (report, deck_outputs) = run_deck(
                 &netlist,
                 &args,
@@ -744,6 +744,7 @@ fn load_netlist_from_source(
     source: &str,
     args: &RunArgs,
     config: &Config,
+    emit_diagnostics: bool,
 ) -> Result<Netlist, CliError> {
     let mut search_paths: Vec<PathBuf> = args.includes.clone();
     search_paths.extend(config.paths.include_paths.iter().cloned());
@@ -813,6 +814,10 @@ fn load_netlist_from_source(
             saves.signals.push(parsed.expect("checked above"));
         }
         netlist.saves = saves;
+    }
+
+    if emit_diagnostics {
+        crate::commands::emit_netlist_diagnostics(&netlist, false);
     }
 
     Ok(netlist)

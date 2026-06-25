@@ -89,6 +89,40 @@ r1 in 0 1k
 }
 
 #[test]
+fn xyce_n_device_outvar_probe_parses() {
+    let netlist = parse(
+        "\
+* Xyce-style native device output variable probe
+v1 d 0 dc 1
+v2 g 0 dc 1
+v3 s 0 dc 0
+v4 b 0 dc 0
+.model nmos nmos level=77
+m1 d g s b nmos w=10u l=10u
+.print dc N(M1:ids) N(M1:gm) N(M1:Vth)
+.dc v1 0 1 1
+.end
+",
+    );
+
+    for expected in ["ids", "gm", "vth"] {
+        assert!(
+            netlist.saves.signals.iter().any(|signal| matches!(
+                signal,
+                SaveSignal::DeviceParam { device, param }
+                    if device.eq_ignore_ascii_case("m1")
+                        && param.eq_ignore_ascii_case(expected)
+            )),
+            "missing parsed N(M1:{expected}) device outvar"
+        );
+        assert!(
+            netlist.saves.selects(&format!("N(M1:{expected})")),
+            "N(M1:{expected}) should select its output vector"
+        );
+    }
+}
+
+#[test]
 fn selection_matches_raw_variable_conventions() {
     let netlist = parse(
         "\

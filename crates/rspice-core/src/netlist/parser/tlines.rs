@@ -74,6 +74,21 @@ pub(super) fn parse_vswitch(
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
+    if looks_like_xyce_generic_switch_control(stream) {
+        let model = expect_ident(stream, line_num)?;
+        let initial_state = parse_switch_state(stream);
+        let control_expression = parse_generic_switch_control_expression(stream, line_num)?;
+        elements.push(Element {
+            name,
+            kind: ElementKind::GenericSwitch {
+                model,
+                control_expression,
+                initial_state,
+            },
+            nodes: vec![node_pos, node_neg],
+        });
+        return Ok(());
+    }
     let control_pos = expect_node(stream, line_num)?;
     let control_neg = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
@@ -93,6 +108,63 @@ pub(super) fn parse_vswitch(
     });
 
     Ok(())
+}
+
+fn looks_like_xyce_generic_switch_control(stream: &TokenStream) -> bool {
+    let TokenKind::Ident(_) = &stream.peek().kind else {
+        return false;
+    };
+
+    let mut control_offset = 1;
+    if let TokenKind::Ident(state) = &stream.peek_n(control_offset).kind {
+        if state.eq_ignore_ascii_case("ON") || state.eq_ignore_ascii_case("OFF") {
+            control_offset += 1;
+        }
+    }
+
+    matches!(
+        (&stream.peek_n(control_offset).kind, &stream.peek_n(control_offset + 1).kind),
+        (TokenKind::Ident(keyword), TokenKind::Equals) if keyword.eq_ignore_ascii_case("CONTROL")
+    )
+}
+
+fn parse_generic_switch_control_expression(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    skip_commas(stream);
+    match &stream.peek().kind {
+        TokenKind::Ident(keyword) if keyword.eq_ignore_ascii_case("CONTROL") => {
+            stream.advance();
+        }
+        other => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Xyce generic SWITCH requires CONTROL={{expr}}, found {other:?}"),
+            });
+        }
+    }
+
+    if !stream.consume(&TokenKind::Equals) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Xyce generic SWITCH CONTROL requires '='".to_string(),
+        });
+    }
+
+    match &stream.peek().kind {
+        TokenKind::Expression(expr) => {
+            let expr = expr.clone();
+            stream.advance();
+            Ok(expr)
+        }
+        other => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Xyce generic SWITCH CONTROL requires a braced expression, found {other:?}"
+            ),
+        }),
+    }
 }
 
 /// Parse current-controlled switch: W1 n+ n- Vname MODEL [ON|OFF]
