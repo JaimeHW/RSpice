@@ -464,6 +464,10 @@ async function doSummary() {
     const s = response.result;
     log(`summary: "${s.title}" — ${s.element_count} elements, ${s.analysis_count} analyses, ` +
         `${s.model_count} models, ${s.subcircuit_count} subckts`, "ok");
+    for (const diagnostic of s.diagnostics ?? []) {
+      const where = diagnostic.line ? `line ${diagnostic.line}: ` : "";
+      log(`${diagnostic.severity}: ${where}${diagnostic.message}`, "warn");
+    }
   } catch (e) { log("parse error: " + e, "err"); }
 }
 async function doOp() {
