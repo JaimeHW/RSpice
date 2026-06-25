@@ -1,24 +1,26 @@
 # RSpice Verilog-A
 
 A Verilog-A compiler written in Rust: it takes Verilog-A source (the analog
-subset of the Verilog-AMS LRM 2.4), compiles it through a five-stage
-pipeline into a bytecode `CompiledModel`, and provides the runtime
-(`VerilogADevice` + bytecode VM, plus an optional Cranelift JIT) that lets
-the compiled model behave as a device inside the rspice-core simulator —
-evaluating currents and charges, producing an analytic Jacobian via
-automatic differentiation, and contributing noise sources. It is the
-backend of the engine's `veriloga`/`veriloga-native` features, the CLI's
-`rspice compile-va`, and the GUI's Verilog-A dialog.
+subset of the Verilog-AMS LRM 2.4), compiles it through parser, semantic,
+device-IR, canonical-IR, and backend stages, and provides the runtime
+(`VerilogADevice` + bytecode VM, plus an optional Cranelift JIT) that lets the
+compiled model behave as a device inside the rspice-core simulator —
+evaluating currents and charges, producing an analytic Jacobian via automatic
+differentiation, and contributing noise sources. It is the backend of the
+engine's `veriloga`/`veriloga-native` features, the CLI's `rspice compile-va`,
+the GUI's Verilog-A dialog, and the generated-Rust built-in path used by
+`rspice-core`'s `veriloga-builtins` feature.
 
 ## Compilation pipeline and module map
 
 ```
-source text ──▶ preprocessor ──▶ lexer ──▶ parser ──▶ semantic ──▶ IR (+ autodiff) ──▶ codegen
+source text ──▶ preprocessor ──▶ lexer ──▶ parser ──▶ semantic ──▶ IR (+ autodiff) ──▶ canonical IR ──▶ backend
                 `include/`define   tokens     AST      symbol/type    device equations    bytecode
-                                                       resolution     + derivatives       CompiledModel
+                                                       resolution     + derivatives       / generated Rust
                                                                                               │
                                             runtime:  vm (interpreter)  ◀─────────────────────┤
                                                       native/ (Cranelift JIT, feature "native")
+                                                      rust_backend (feature-gated built-ins)
                                                       device (VerilogADevice instance)
 ```
 
@@ -30,7 +32,9 @@ source text ──▶ preprocessor ──▶ lexer ──▶ parser ──▶ se
 | `ast` | AST types for expressions, statements, declarations, analog operators, event expressions |
 | `semantic` | Symbol table, type inference, discipline validation; rejects unsupported constructs with explicit errors |
 | `ir` / `expr_converter` | Lowering to device-equation IR; the `autodiff` submodule generates derivative ("shadow") assignments by symbolic forward-mode differentiation, so Jacobians are analytic rather than finite-difference |
+| `canonical_ir` | Stable HIR/MIR/OptIR artifact with validation, diagnostics, content digests, and backend input for generated Rust and future native/JIT paths |
 | `codegen` | Emits the bytecode `CompiledModel`: assignment programs, per-stamp value and Jacobian programs, reactive (charge) programs, noise metadata |
+| `rust_backend` | Deterministic Verilog-A-to-Rust backend for generated built-ins: lowers canonical IR to Rust source folders, registry/support modules, manifest data, and cleanup guards used by `rspice-core`'s `veriloga-builtins` feature |
 | `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
 | `laplace` / `zfilter` | State-space runtime for the `laplace_*` (s-domain) and `zi_*` (sampled-data) filter operators |
 | `device` | `VerilogADevice`: the per-instance object the simulator drives — see below |
@@ -125,17 +129,26 @@ locals and `output`/`inout` arguments in analog functions.
 cargo build -p rspice-veriloga
 cargo test  -p rspice-veriloga                      # interpreter paths
 cargo test  -p rspice-veriloga --features native    # + bytecode/JIT equivalence
+cargo test  -p rspice-veriloga --test rust_backend   # generated-Rust backend
 ```
 
 The integration test files under `tests/` cover end-to-end compilation
 (`compile_models.rs`), runtime evaluation and Jacobians
 (`device_eval.rs`), array variables, `aliasparam`, indirect contributions,
 `zi_*` filters, timestep control, `$mfactor` scaling, multi-module
-selection, bytecode-vs-native equivalence (`native_equivalence.rs`), and
-real production models: EKV 2.6 physics, PSP 103, and CMC model frontier
-tests, plus optional BSIM4 coverage when `RSPICE_BSIM4_VA` points at an
-externally supplied clean source file. Engine-level oracle tests
-that compare compiled models against reference results live in
+selection, bytecode-vs-native equivalence (`native_equivalence.rs`), canonical
+IR validation, the Rust backend (`rust_backend.rs`), and real production
+models: EKV 2.6 physics, PSP 103, and CMC model frontier tests, plus optional
+BSIM4 coverage when `RSPICE_BSIM4_VA` points at an externally supplied clean
+source file. The broad shipped-CMC compile-frontier tests are ignored by
+default because they are qualification evidence, not a normal fast check; run
+them explicitly when working on generated built-ins:
+
+```bash
+cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture
+```
+
+Engine-level oracle tests that compare compiled models against reference results live in
 [rspice-core's test suite](../rspice-core/README.md#building-and-testing)
 (`veriloga_*.rs`).
 

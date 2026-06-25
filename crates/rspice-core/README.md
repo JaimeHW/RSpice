@@ -129,15 +129,16 @@ coupled multi-conductor lines (`coupled_transmission_line.rs`,
 
 **Other** — switches (`switch.rs`), ideal op-amp (`opamp.rs`), GaN HEMT
 (`gan_hemt.rs`, in-tree physics-style model; ASM-HEMT/MVSG CMC
-qualification is roadmap work through generated Rust from Verilog-A), thermal network elements (`thermal.rs`), tristate
+qualification is feature-gated work through generated Rust from Verilog-A), thermal network elements (`thermal.rs`), tristate
 (`tristate.rs`), device bypass for latent devices (`model_bypass.rs`).
 
-**Extension points** — Verilog-A devices via the `rspice-veriloga` compiler
+**Extension points** — external Verilog-A devices via the `rspice-veriloga` compiler
 (`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed on-disk
-caching of compiled models), planned CMC Verilog-A to Rust generated devices
-using the same native storage/stamping contracts, dynamically loaded FFI models (`ffi.rs`,
-behind `ffi`), and SIMD batch evaluation for diodes, BJTs, JFETs, and
-MOSFET batches (`batch/`, behind `simd`).
+caching of compiled models), build-time generated Verilog-A built-ins
+(`veriloga-builtins`, materialized under `src/device/veriloga_generated/` and
+instantiated by model name when the feature is enabled), dynamically loaded FFI
+models (`ffi.rs`, behind `ffi`), and SIMD batch evaluation for diodes, BJTs,
+JFETs, and MOSFET batches (`batch/`, behind `simd`).
 
 ## Analyses
 
@@ -211,6 +212,7 @@ only.
 | `simd` | yes | `wide`-based SIMD kernels (`simd/` module, `device/batch/`) |
 | `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus serde/bincode/blake3/dirs for the compiled-model cache |
 | `veriloga-native` | no | Native-only Cranelift JIT performance backend for supported Verilog-A fragments (implies `veriloga`); unsupported fragments fall back to the interpreter, and any expansion of the raw-pointer boundary requires a targeted safety review |
+| `veriloga-builtins` | no | Build-time generated Rust devices from bundled Verilog-A sources; uses `build.rs` to materialize `src/device/veriloga_generated/` and compile a generated registry. Feature-gated until CMC model qualification and product gates are explicit |
 | `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
 | `ffi` | no | Experimental `libloading` integration for dynamically loaded external device models; not a production-stable device ABI until the callback ownership, library lifetime, and stamping contracts are audited |
 
@@ -223,11 +225,14 @@ exercise the parallel + SIMD paths.
 # Build (library only)
 cargo build -p rspice-core
 
-# Full test suite — 52 integration test files under tests/
+# Full test suite — 75 integration test files under tests/
 cargo test -p rspice-core
 
 # With Verilog-A device tests (veriloga_*.rs oracle tests need the JIT)
 cargo test -p rspice-core --features veriloga-native
+
+# Generated Verilog-A built-in runtime checks (feature-gated)
+cargo test -p rspice-core --features veriloga-builtins --test generated_veriloga_runtime
 
 # Solver kernel micro-benchmark (factor/refactor/solve in isolation)
 cargo run --release -p rspice-core --example klu_bench

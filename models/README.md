@@ -21,9 +21,11 @@ its upstream source layout and bundled license/notice files. The root
 license files remain authoritative.
 
 These CMC sources are not a staging area for hand-written native ports. They
-are the canonical inputs for the Verilog-A to Rust transpiler; generated Rust
-devices should preserve the upstream source package identity and license/notice
-attribution.
+are the canonical inputs for the Verilog-A to Rust generator path in
+`rspice-veriloga` / `rspice-core`. Generated Rust devices should preserve the
+upstream source package identity and license/notice attribution, and generated
+CMC entries remain feature-gated qualification artifacts until their oracle
+coverage and product gates are explicit.
 
 OMI packages are intentionally not shipped in `veriloga/cmc/` because they are
 not normal Verilog-A model packages and their terms require separate review.

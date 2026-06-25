@@ -83,13 +83,12 @@ uses one single-threaded engine instance rather than wasm threads.
 
 The crate has no standalone Rust test suite (`test = false`, `doctest = false`
 in `Cargo.toml`). Validation is exercised through the playground page and the
-deployed site demo for summary, DC operating-point, and transient flows; the
-`runAcAnalysis` export remains part of the JavaScript API contract but is not
-currently driven by the checked-in playground UI. The static browser contract is
-guarded by `tools/ci/test_wasm_playground.py`, which verifies that both
-playground pages route engine calls through `engine-worker.js` instead of
-importing synchronous solve functions on the main page. The engine logic itself
-is tested in `rspice-core`.
+deployed site demo for summary, DC operating-point, AC, and transient flows.
+The static browser contract is guarded by `tools/ci/test_wasm_playground.py`,
+which verifies that both playground pages route engine calls through
+`engine-worker.js`, that AC controls are present, and that the worker calls the
+`runAcAnalysis` export instead of importing synchronous solve functions on the
+main page. The engine logic itself is tested in `rspice-core`.
 
 ## License
 

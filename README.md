@@ -23,7 +23,7 @@ Around the engine sit a CLI built for batch runs and CI, a desktop application f
 
 ## Status
 
-RSpice is a young project under active development. The surface area below is broad, and all of it exists in code and is exercised by tests — but maturity varies between areas, and accuracy is measured against ngspice continuously rather than assumed. It is not yet a substitute for hardened EDA tooling.
+RSpice is a young project under active development. The surface area below is broad: major paths are implemented and covered by focused tests, but maturity and validation depth vary by subsystem. Accuracy is measured against ngspice continuously rather than assumed, and the current repository should not be presented as a substitute for hardened EDA tooling.
 
 Platform support is tracked by evidence in [docs/platform-support.md](docs/platform-support.md); mobile/tablet browser use and signed release artifacts are still experimental or launch-only until their gates exist.
 
@@ -103,10 +103,12 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 CMC compact-model families that ship redistributable Verilog-A sources under
 `models/veriloga/cmc/` are no longer planned as hand-maintained native ports.
 The strategic native path for those devices is generated Rust from the upstream
-Verilog-A source, produced by the planned Verilog-A to Rust transpiler. Any
-historical hand-native CMC experiments should be treated as compatibility or
-reference work only; active CMC device coverage should come from generated
-implementations.
+Verilog-A source. That generator/build path now exists behind `rspice-core`'s
+`veriloga-builtins` feature, with a materialized generated registry under
+`crates/rspice-core/src/device/veriloga_generated/`. Historical hand-native CMC
+experiments should be treated as compatibility or reference work only; generated
+CMC devices remain feature-gated qualification artifacts until their oracle
+coverage and product gates are explicit.
 
 BSIM-class models fail with typed errors when a model card requests unported
 physics such as BSIM4 gate/body resistance networks, NQS, material-mode
@@ -213,11 +215,11 @@ coverage; it is not a substitute for importing the extension in pytest.
 
 ### Verilog-A
 
-`rspice-veriloga` compiles behavioral modules through a parser → semantic analysis → VM pipeline, with optional native code generation via a Cranelift JIT (the `native` feature). The CMC-model roadmap extends this front end with a Verilog-A to Rust transpiler so packages under [models/veriloga/cmc/](models/veriloga/cmc/) can become generated native Rust devices instead of hand-written ports. Models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
+`rspice-veriloga` compiles behavioral modules through a parser, semantic analysis, canonical IR, and bytecode VM pipeline, with optional native code generation via a Cranelift JIT (the `native` feature). It also owns the Rust backend used by `rspice-core`'s feature-gated generated built-ins, so packages under [models/veriloga/cmc/](models/veriloga/cmc/) can be qualified as generated native Rust devices instead of hand-written ports. External models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
 
 ## Validation
 
-Correctness is measured rather than assumed, at four levels: unit tests in each crate, integration tests, oracle-replay fixtures for history-coupled device runtimes, and a regression harness that runs the vendored ngspice test suite deck-by-deck against the RSpice engine — comparing row-by-row against ngspice's reference outputs at 2% relative tolerance with probe-aware absolute floors. Every executed analysis must be backed by a validation oracle, so no deck can pass silently, and each deck runs in a watchdog-supervised process so a hung simulation cannot stall the suite.
+Correctness is measured rather than assumed, at four levels: unit tests in each crate, integration tests, oracle-replay fixtures for history-coupled device runtimes, and a regression harness that runs the vendored ngspice test suite deck-by-deck against the RSpice engine — comparing row-by-row against ngspice's reference outputs at 2% relative tolerance with probe-aware absolute floors. Every executed analysis must be backed by a validation oracle, so no deck can pass silently, and each deck runs in a watchdog-supervised process so a hung simulation cannot stall the suite. Current CI separates harness discipline from conformance status: nightly release runs ratchet against the recorded failure watermark in `.github/workflows/nightly.yml`; that watermark should only tighten as decks are fixed.
 
 ```bash
 cargo test --release -p rspice-core                            # unit + integration
@@ -233,7 +235,7 @@ The harness design — oracle-replay methodology, comparison gating, debug envir
 | `rspice-core` | Simulation engine: device models, analyses, netlist parser, validation harnesses |
 | `rspice-cli` | Command-line interface for simulation, validation, conversion, and reporting |
 | `rspice-ui` | Desktop application for schematic editing and waveform inspection |
-| `rspice-veriloga` | Verilog-A parser, semantic pipeline, VM runtime, optional native codegen |
+| `rspice-veriloga` | Verilog-A parser, semantic pipeline, VM/JIT runtime, generated-Rust backend |
 | `rspice-python` | Python bindings built with PyO3 |
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |
