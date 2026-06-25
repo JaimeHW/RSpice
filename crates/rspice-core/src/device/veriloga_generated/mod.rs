@@ -7,6 +7,10 @@
 use crate::Value;
 use crate::solver::StaticMatrix;
 
+pub mod builtins {
+    include!(concat!(env!("OUT_DIR"), "/veriloga_builtins/registry.rs"));
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct GeneratedEvalContext<'a> {
     voltages: &'a [Value],

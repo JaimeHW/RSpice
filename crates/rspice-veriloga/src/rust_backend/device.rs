@@ -207,6 +207,7 @@ fn generate_stamp_file(
     parameter_fields: &HashMap<String, String>,
 ) -> Result<String, RustBackendError> {
     let mut out = String::new();
+    out.push_str("#![allow(unused_parens)]\n\n");
     out.push_str("use super::state::Instance;\n");
     out.push_str(&format!(
         "use {}::{{GeneratedEvalContext, GeneratedStamper}};\n\n",
