@@ -1,6 +1,8 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::RustBackendError;
+use crate::Preprocessor;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerilogASourceCandidate {
@@ -18,14 +20,7 @@ pub fn discover_veriloga_sources(
 
     let mut candidates = Vec::new();
     for path in files {
-        let source = std::fs::read_to_string(&path).map_err(|error| {
-            RustBackendError::internal(
-                path.display().to_string(),
-                "<scan>",
-                format!("failed to read candidate: {error}"),
-            )
-        })?;
-        let modules = module_names_in_source(&path, &source)?;
+        let modules = module_names_in_file(root, &path)?;
         if !modules.is_empty() {
             candidates.push(VerilogASourceCandidate { path, modules });
         }
@@ -60,24 +55,48 @@ fn collect_va_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), RustBac
 
         if file_type.is_dir() {
             collect_va_files(&path, files)?;
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("va") {
+        } else if has_veriloga_extension(&path) {
             files.push(path.canonicalize().unwrap_or(path));
         }
     }
     Ok(())
 }
 
-fn module_names_in_source(_path: &Path, source: &str) -> Result<Vec<String>, RustBackendError> {
+fn has_veriloga_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("va"))
+}
+
+fn module_names_in_file(root: &Path, path: &Path) -> Result<Vec<String>, RustBackendError> {
+    let mut preprocessor = Preprocessor::new();
+    preprocessor.add_include_path(root);
+    let preprocessed = preprocessor.preprocess_file(path).map_err(|error| {
+        RustBackendError::internal(path.display().to_string(), "<scan>", error.to_string())
+    })?;
+    Ok(module_names_in_source(&preprocessed))
+}
+
+fn module_names_in_source(source: &str) -> Vec<String> {
     let mut scanner = ModuleNameScanner::new(source);
     let mut modules = scanner.collect_modules();
     modules.sort();
-    Ok(modules)
+    modules
 }
 
 struct ModuleNameScanner<'a> {
     source: &'a str,
     cursor: usize,
     at_line_start: bool,
+    defines: HashSet<String>,
+    conditionals: Vec<ConditionalFrame>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConditionalFrame {
+    parent_active: bool,
+    condition_active: bool,
+    branch_taken: bool,
 }
 
 impl<'a> ModuleNameScanner<'a> {
@@ -86,13 +105,15 @@ impl<'a> ModuleNameScanner<'a> {
             source,
             cursor: 0,
             at_line_start: true,
+            defines: HashSet::new(),
+            conditionals: Vec::new(),
         }
     }
 
     fn collect_modules(&mut self) -> Vec<String> {
         let mut modules = Vec::new();
         while let Some(token) = self.next_identifier() {
-            if token == "module" {
+            if token == "module" && self.is_active() {
                 if let Some(name) = self.next_identifier() {
                     modules.push(name);
                 }
@@ -148,7 +169,7 @@ impl<'a> ModuleNameScanner<'a> {
             }
 
             if self.at_line_start && ch == '`' {
-                self.skip_preprocessor_directive();
+                self.handle_preprocessor_directive();
                 continue;
             }
 
@@ -229,7 +250,65 @@ impl<'a> ModuleNameScanner<'a> {
         self.at_line_start = false;
     }
 
-    fn skip_preprocessor_directive(&mut self) {
+    fn handle_preprocessor_directive(&mut self) {
+        let directive = self.take_preprocessor_directive();
+        let mut parts = directive.split_whitespace();
+        let Some(keyword) = parts.next().map(|part| part.trim_start_matches('`')) else {
+            return;
+        };
+        match keyword {
+            "define" => {
+                if self.is_active()
+                    && let Some(name) = parts.next()
+                {
+                    self.defines.insert(name.to_string());
+                }
+            }
+            "undef" => {
+                if self.is_active()
+                    && let Some(name) = parts.next()
+                {
+                    self.defines.remove(name);
+                }
+            }
+            "ifdef" | "ifndef" => {
+                let parent_active = self.is_active();
+                let defined = parts.next().is_some_and(|name| self.defines.contains(name));
+                let condition_active = if keyword == "ifdef" {
+                    defined
+                } else {
+                    !defined
+                };
+                self.conditionals.push(ConditionalFrame {
+                    parent_active,
+                    condition_active,
+                    branch_taken: parent_active && condition_active,
+                });
+            }
+            "else" => {
+                if let Some(frame) = self.conditionals.last_mut() {
+                    let activate = frame.parent_active && !frame.branch_taken;
+                    frame.condition_active = activate;
+                    frame.branch_taken |= activate;
+                }
+            }
+            "elsif" => {
+                let defined = parts.next().is_some_and(|name| self.defines.contains(name));
+                if let Some(frame) = self.conditionals.last_mut() {
+                    let activate = frame.parent_active && !frame.branch_taken && defined;
+                    frame.condition_active = activate;
+                    frame.branch_taken |= activate;
+                }
+            }
+            "endif" => {
+                self.conditionals.pop();
+            }
+            _ => {}
+        }
+    }
+
+    fn take_preprocessor_directive(&mut self) -> String {
+        let start = self.cursor;
         let mut continued = false;
         loop {
             let mut previous_significant = '\0';
@@ -247,9 +326,15 @@ impl<'a> ModuleNameScanner<'a> {
             }
 
             if !continued || self.cursor >= self.source.len() {
-                return;
+                return self.source[start..self.cursor].to_string();
             }
         }
+    }
+
+    fn is_active(&self) -> bool {
+        self.conditionals
+            .last()
+            .is_none_or(|frame| frame.parent_active && frame.condition_active)
     }
 
     fn advance_whitespace(&mut self, ch: char) {
