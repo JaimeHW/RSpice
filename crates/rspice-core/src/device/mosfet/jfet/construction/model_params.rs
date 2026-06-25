@@ -8,6 +8,15 @@ impl Jfet {
         if let Some(level) = params.get("LEVEL").copied().filter(|v| v.is_finite()) {
             p.hfet_level = level.round() as i32;
         }
+        if matches!(p.channel_model, JfetChannelModel::Hfet1) && p.hfet_level == 6 {
+            p.n = 5.0;
+            p.hfet_js1s = 0.0;
+            p.hfet_js2s = 0.0;
+            p.hfet_js1d = 0.0;
+            p.hfet_js2d = 0.0;
+            p.hfet_ggr = 0.0;
+            p.hfet_cf = 0.0;
+        }
         if let Some(v) = params.get("GATEMOD").copied().filter(|v| v.is_finite()) {
             p.hfet_gatemod = v.round() != 0.0;
         }
@@ -62,7 +71,11 @@ impl Jfet {
             .copied()
             .filter(|v| v.is_finite() && *v >= 0.0)
         {
-            p.is = v;
+            if matches!(p.channel_model, JfetChannelModel::Hfet1) && p.hfet_level == 6 {
+                p.hfet_js = v;
+            } else {
+                p.is = v;
+            }
         }
         if let Some(v) = params
             .get("CGS")
@@ -540,6 +553,18 @@ impl Jfet {
         if let Some(v) = params.get("DEL").copied().filter(|v| v.is_finite()) {
             p.hfet_del = v;
         }
+        if let Some(v) = params.get("KLAMBDA").copied().filter(|v| v.is_finite()) {
+            p.hfet_klambda = v;
+        }
+        if let Some(v) = params.get("KMU").copied().filter(|v| v.is_finite()) {
+            p.hfet_kmu = v;
+        }
+        if let Some(v) = params.get("KNMAX").copied().filter(|v| v.is_finite()) {
+            p.hfet_knmax = v;
+        }
+        if let Some(v) = params.get("KVTO").copied().filter(|v| v.is_finite()) {
+            p.hfet_kvto = v;
+        }
         if let Some(v) = params
             .get("ETA1")
             .copied()
@@ -556,6 +581,23 @@ impl Jfet {
         }
         if let Some(v) = params.get("VT1").copied().filter(|v| v.is_finite()) {
             p.hfet_vt1 = v;
+        }
+        if let Some(v) = params
+            .get("ETA2")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.hfet_eta2 = v;
+        }
+        if let Some(v) = params
+            .get("D2")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.hfet_d2 = v;
+        }
+        if let Some(v) = params.get("VT2").copied().filter(|v| v.is_finite()) {
+            p.hfet_vt2 = v;
         }
         if let Some(v) = params
             .get("P")
@@ -587,6 +629,13 @@ impl Jfet {
             .filter(|v| v.is_finite() && *v >= 0.0)
         {
             p.hfet_cds = v;
+        }
+        if let Some(v) = params
+            .get("CF")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.hfet_cf = v;
         }
         if let Some(v) = params
             .get("ASTAR")

@@ -30,7 +30,7 @@ impl Mosfet {
     /// Cached operating-point values from the last accepted Newton solution.
     pub fn op_values(&self) -> MosfetOpValues {
         let (vth, vdsat, gm, gds, gmb) = self.model_space_op_values();
-        let id = if self.level == 3 {
+        let id = if self.uses_mos3_core() {
             self.polarity() * self.id
         } else {
             self.id
@@ -54,7 +54,7 @@ impl Mosfet {
     }
 
     fn model_space_op_values(&self) -> (Value, Value, Value, Value, Value) {
-        if self.level == 3 {
+        if self.uses_mos3_core() {
             let state = self.mos3_state(self.eval_vgs, self.eval_vds, self.eval_vbs);
             return (state.von, state.vdsat, state.gm, state.gds, state.gmb);
         }
@@ -176,7 +176,7 @@ impl Mosfet {
         let qgd_ov = cgd_ov * vgd;
         let qgb_ov = cgb_ov * vgb;
 
-        if self.level == 3 {
+        if self.uses_mos3_core() {
             let oxide_cap = self.oxide_capacitance_total();
             let state = self.mos3_state(self.vgs, self.vds, self.vbs);
             let von = p * state.von;

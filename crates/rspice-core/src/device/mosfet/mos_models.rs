@@ -1,9 +1,9 @@
-//! MOSFET model calculations for Level 1 and simplified fallback models.
+//! MOSFET model calculations for native Berkeley-style MOS paths.
 //!
 //! This module contains drain current calculations and transconductance
 //! functions for different MOSFET model levels:
 //! - Level 1: Shichman-Hodges model (simple, widely used)
-//! - Simplified fallback: short-channel effects for opt-in non-native levels
+//! - Higher native Berkeley levels: smoothed short-channel helper equations
 //!
 //! All calculations use C1-continuous smooth transition functions from
 //! the `smooth` module to ensure Newton-Raphson convergence.
@@ -169,7 +169,7 @@ pub fn calculate_id_level1(
 }
 
 //=============================================================================
-// Simplified fallback model
+// Smoothed short-channel helper model
 //=============================================================================
 
 /// Simplified short-channel drain current with C1 continuous transitions.
@@ -355,10 +355,10 @@ pub fn calculate_gmb(params: &MosParams, vgs: Value, vds: Value, vbs: Value, vth
 // Threshold Voltage Calculation
 //=============================================================================
 
-/// Calculate effective threshold voltage with body effect and fallback short-channel effects.
+/// Calculate effective threshold voltage with body effect and short-channel effects.
 ///
 /// For Level 1: standard body effect formula.
-/// For simplified fallback levels: approximate short-channel Vth roll-off.
+/// For higher native Berkeley-style levels: approximate short-channel Vth roll-off.
 #[inline]
 pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
     let p = params.polarity;
@@ -377,7 +377,7 @@ pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
         return vth_base;
     }
 
-    // Simplified fallback short-channel Vth roll-off
+    // Smoothed short-channel Vth roll-off
     // Delta_Vth = -DVT0 * L_eff / Ldrawn * (1 + DVT2 * Vbs)
     // where L_eff adjustment factor uses DVT1
     let l_ratio = 1e-6 / params.l.max(1e-9); // Normalize to 1um

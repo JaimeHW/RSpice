@@ -42,6 +42,7 @@ pub struct Bsim3v3Model {
     pub mob_mod: i32,
     pub cap_mod: i32,
     pub acm_mod: i32,
+    pub acm_mod_value: Value,
     pub calcacm: i32,
     pub noi_mod: i32,
     pub nqs_mod: i32,
@@ -156,8 +157,7 @@ pub struct Bsim3v3Model {
     pub tpbsw: Value,
     pub tpbswg: Value,
 
-    // ACM model scalars (acmMod 0 only is supported by the load; the rest of
-    // the card is stored so a future ACM port keeps the same model struct).
+    // ACM model scalars (ACM=1 is native; higher ACM families stay fail-closed).
     pub xl: Value,
     pub xw: Value,
     pub hdif: Value,
@@ -253,6 +253,72 @@ fn binned(map: &HashMap<String, Value>, name: &str, v_def: Value) -> Binned {
     }
 }
 
+fn selector_values(allowed: &[i32]) -> String {
+    allowed
+        .iter()
+        .map(i32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Fetch a native model-card selector. Omitted selectors default like b3set.c;
+/// explicit values fail closed rather than being truncated or reset, except
+/// for the handful of selectors with an oracle-backed ngspice reset rule.
+fn selector(
+    map: &HashMap<String, Value>,
+    key: &str,
+    default: i32,
+    allowed: &[i32],
+) -> Result<i32, String> {
+    let Some(raw) = map.get(key).copied() else {
+        return Ok(default);
+    };
+    let values = selector_values(allowed);
+    if !raw.is_finite() || raw.trunc() != raw || raw < i32::MIN as Value || raw > i32::MAX as Value
+    {
+        return Err(format!(
+            "BSIM3 selector {key} must be a finite integer (supported values: {values}); got {key}={raw}"
+        ));
+    }
+    let value = raw as i32;
+    if allowed.contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!(
+            "BSIM3 selector {key} must be a finite integer in the supported set ({values}); got {key}={value}"
+        ))
+    }
+}
+
+fn selector_reset_to_default(
+    map: &HashMap<String, Value>,
+    key: &str,
+    default: i32,
+    allowed: &[i32],
+) -> Result<i32, String> {
+    let Some(raw) = map.get(key).copied() else {
+        return Ok(default);
+    };
+    let values = selector_values(allowed);
+    if !raw.is_finite() {
+        return Err(format!(
+            "BSIM3 selector {key} must be finite (supported values: {values}); got {key}={raw}"
+        ));
+    }
+    let rounded = (raw + 0.5).floor();
+    if rounded < i32::MIN as Value || rounded > i32::MAX as Value {
+        return Err(format!(
+            "BSIM3 selector {key} must be convertible to an integer (supported values: {values}); got {key}={raw}"
+        ));
+    }
+    let value = rounded as i32;
+    if allowed.contains(&value) {
+        Ok(value)
+    } else {
+        Ok(default)
+    }
+}
+
 impl Bsim3v3Model {
     /// Build a model card from an uppercase-keyed parameter map.
     ///
@@ -264,10 +330,28 @@ impl Bsim3v3Model {
         is_pmos: bool,
         nominal_temp_k: Value,
     ) -> Self {
+        Self::try_from_params(params, is_pmos, nominal_temp_k)
+            .expect("valid BSIM3 v3.3 model parameters")
+    }
+
+    /// Fallible model-card constructor used at user-facing build boundaries.
+    pub fn try_from_params(
+        params: &HashMap<String, Value>,
+        is_pmos: bool,
+        nominal_temp_k: Value,
+    ) -> Result<Self, String> {
         let p = params;
         let mtype: Value = if is_pmos { -1.0 } else { 1.0 };
 
-        let mob_mod = val(p, "MOBMOD", 1.0) as i32;
+        let mob_mod = selector(p, "MOBMOD", 1, &[1, 2, 3])?;
+        let cap_mod = selector(p, "CAPMOD", 3, &[0, 1, 2, 3])?;
+        let acm_mod = selector(p, "ACM", 0, &[0, 1])?;
+        let calcacm = selector(p, "CALCACM", 0, &[0, 1])?;
+        let noi_mod = selector(p, "NOIMOD", 1, &[1, 2, 3, 4, 5, 6])?;
+        let nqs_mod = selector_reset_to_default(p, "NQSMOD", 0, &[0, 1])?;
+        let acnqs_mod = selector_reset_to_default(p, "ACNQSMOD", 0, &[0, 1])?;
+        let bin_unit = selector(p, "BINUNIT", 1, &[1, 2])?;
+        let param_chk = selector(p, "PARAMCHK", 0, &[0, 1])?;
         let tox = val(p, "TOX", 150.0e-10);
         let cox = 3.453133e-11 / tox;
 
@@ -320,17 +404,18 @@ impl Bsim3v3Model {
         // TNOM on the card is Celsius; CKTnomTemp is Kelvin (b3mpar.c:1517).
         let tnom = get(p, "TNOM").map(|t| t + 273.15).unwrap_or(nominal_temp_k);
 
-        Self {
+        Ok(Self {
             mtype,
             mob_mod,
-            cap_mod: val(p, "CAPMOD", 3.0) as i32,
-            acm_mod: val(p, "ACM", 0.0) as i32,
-            calcacm: val(p, "CALCACM", 0.0) as i32,
-            noi_mod: val(p, "NOIMOD", 1.0) as i32,
-            nqs_mod: val(p, "NQSMOD", 0.0) as i32,
-            acnqs_mod: val(p, "ACNQSMOD", 0.0) as i32,
-            bin_unit: val(p, "BINUNIT", 1.0) as i32,
-            param_chk: val(p, "PARAMCHK", 0.0) as i32,
+            cap_mod,
+            acm_mod,
+            acm_mod_value: val(p, "ACM", 0.0),
+            calcacm,
+            noi_mod,
+            nqs_mod,
+            acnqs_mod,
+            bin_unit,
+            param_chk,
             // The C stores version as a string; the numeric-card map can only
             // carry numbers, so a numeric VERSION is rendered back (the model
             // itself never branches on it — b3check.c only warns on != 3.3*).
@@ -541,6 +626,6 @@ impl Bsim3v3Model {
             lintnoi: val(p, "LINTNOI", 0.0),
 
             cox,
-        }
+        })
     }
 }

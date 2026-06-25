@@ -155,7 +155,7 @@ fn device_with_card(card: HashMap<String, Value>, l: Value, w: Value) -> Bsim3v3
 }
 
 fn construct_device_with_card(card: HashMap<String, Value>) -> Result<Bsim3v3, String> {
-    let model = Arc::new(Bsim3v3Model::from_params(&card, false, T300));
+    let model = Arc::new(Bsim3v3Model::try_from_params(&card, false, T300)?);
     let geom = Bsim3v3Geometry {
         l: 0.18e-6,
         w: 10e-6,
@@ -871,9 +871,9 @@ fn ngspice_pinned_nmos_charges_xpart_negative_suppresses_intrinsic_charge() {
 #[test]
 fn eval_rejects_invalid_capmod_even_when_xpart_suppresses_intrinsic_charge() {
     let mut card = nmos018();
-    card.insert("CAPMOD".to_string(), 99.0);
     card.insert("XPART".to_string(), -1.0);
-    let model = Bsim3v3Model::from_params(&card, false, T300);
+    let mut model = Bsim3v3Model::from_params(&card, false, T300);
+    model.cap_mod = 99;
     let mt = Bsim3v3ModelTemp::new(&model, T300);
     let size = Bsim3v3SizeDep::new(&model, &mt, 0.18e-6, 10e-6).expect("size");
     let geom = Bsim3v3Geometry {
@@ -907,7 +907,7 @@ fn eval_rejects_invalid_capmod_even_when_xpart_suppresses_intrinsic_charge() {
 }
 
 #[test]
-fn acnqsmod_and_transient_nqs_construct_but_invalid_selectors_reject() {
+fn acnqsmod_and_transient_nqs_construct_and_out_of_range_nqs_resets() {
     let mut ac_card = nmos018();
     ac_card.insert("ACNQSMOD".to_string(), 1.0);
     let ac_dev = construct_device_with_card(ac_card)
@@ -921,14 +921,50 @@ fn acnqsmod_and_transient_nqs_construct_but_invalid_selectors_reject() {
         .unwrap_or_else(|err| panic!("NQSMOD=1 should construct natively: {err}"));
     assert_eq!(transient_dev.model.nqs_mod, 1);
 
-    let mut invalid_card = nmos018();
-    invalid_card.insert("NQSMOD".to_string(), 2.0);
-    let err =
-        construct_device_with_card(invalid_card).expect_err("invalid NQSMOD selector must reject");
-    assert!(
-        err.contains("NQSMOD=2") && err.contains("invalid"),
-        "typed rejection should name invalid NQSMOD selector: {err}"
-    );
+    let mut reset_nqs_card = nmos018();
+    reset_nqs_card.insert("NQSMOD".to_string(), 2.0);
+    let reset_nqs_dev = construct_device_with_card(reset_nqs_card)
+        .unwrap_or_else(|err| panic!("NQSMOD=2 should reset to ngspice default: {err}"));
+    assert_eq!(reset_nqs_dev.model.nqs_mod, 0);
+
+    let mut reset_acnqs_card = nmos018();
+    reset_acnqs_card.insert("ACNQSMOD".to_string(), -1.0);
+    let reset_acnqs_dev = construct_device_with_card(reset_acnqs_card)
+        .unwrap_or_else(|err| panic!("ACNQSMOD=-1 should reset to ngspice default: {err}"));
+    assert_eq!(reset_acnqs_dev.model.acnqs_mod, 0);
+}
+
+#[test]
+fn fractional_nqs_selectors_round_then_reset_like_ngspice46() {
+    for (param, value, expected) in [
+        ("NQSMOD", 0.4, 0),
+        ("NQSMOD", 0.5, 1),
+        ("NQSMOD", 1.4, 1),
+        ("NQSMOD", 1.5, 0),
+        ("NQSMOD", -0.5, 0),
+        ("NQSMOD", -0.6, 0),
+        ("ACNQSMOD", 0.4, 0),
+        ("ACNQSMOD", 0.5, 1),
+        ("ACNQSMOD", 1.4, 1),
+        ("ACNQSMOD", 1.5, 0),
+        ("ACNQSMOD", -0.5, 0),
+        ("ACNQSMOD", -0.6, 0),
+    ] {
+        let mut card = nmos018();
+        card.insert(param.to_string(), value);
+        let dev = construct_device_with_card(card).unwrap_or_else(|err| {
+            panic!("BSIM3 {param}={value} should round/reset like ngspice-46: {err}")
+        });
+        let got = if param == "NQSMOD" {
+            dev.model.nqs_mod
+        } else {
+            dev.model.acnqs_mod
+        };
+        assert_eq!(
+            got, expected,
+            "BSIM3 {param}={value} should round/reset like ngspice-46"
+        );
+    }
 }
 
 #[test]

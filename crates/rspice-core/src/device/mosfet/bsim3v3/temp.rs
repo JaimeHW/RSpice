@@ -797,9 +797,8 @@ impl Bsim3v3InstTemp {
         let nqs_tail_t0 = (1.0 + size.nlx / size.leff).sqrt();
         let tconst = u0temp * size.elm / (m.cox * size.weff_cv * size.leff_cv * nqs_tail_t0);
 
-        // Series resistance, acmMod = 0 (b3temp.c:811-851).
-        let drain_resistance = m.sheet_resistance * geom.drain_squares;
-        let source_resistance = m.sheet_resistance * geom.source_squares;
+        // Series resistance (b3temp.c:811-851 plus ACM=1 devsup.c helper).
+        let (drain_resistance, source_resistance) = source_drain_resistances_acm0_or_1(m, geom);
         let drain_conductance = if drain_resistance > 0.0 {
             1.0 / drain_resistance
         } else {
@@ -813,12 +812,7 @@ impl Bsim3v3InstTemp {
 
         // Junction saturation currents + ijth anchors (b3temp.c:856-889).
         let nvtm = mt.vtm * m.jct_emission_coeff;
-        let source_sat_current = if geom.source_area <= 0.0 && geom.source_perimeter <= 0.0 {
-            1.0e-14
-        } else {
-            geom.source_area * mt.jct_temp_sat_cur_density
-                + geom.source_perimeter * mt.jct_sidewall_temp_sat_cur_density
-        };
+        let (drain_sat_current, source_sat_current) = saturation_currents_acm0_or_1(m, mt, geom);
         let vjsm = if source_sat_current > 0.0 && m.ijth > 0.0 {
             let v = nvtm * (m.ijth / source_sat_current + 1.0).ln();
             Some((v, source_sat_current * (v / nvtm).exp()))
@@ -826,12 +820,6 @@ impl Bsim3v3InstTemp {
             None
         };
 
-        let drain_sat_current = if geom.drain_area <= 0.0 && geom.drain_perimeter <= 0.0 {
-            1.0e-14
-        } else {
-            geom.drain_area * mt.jct_temp_sat_cur_density
-                + geom.drain_perimeter * mt.jct_sidewall_temp_sat_cur_density
-        };
         let vjdm = if drain_sat_current > 0.0 && m.ijth > 0.0 {
             let v = nvtm * (m.ijth / drain_sat_current + 1.0).ln();
             Some((v, drain_sat_current * (v / nvtm).exp()))
@@ -856,6 +844,61 @@ impl Bsim3v3InstTemp {
             drain_perimeter: geom.drain_perimeter,
             source_perimeter: geom.source_perimeter,
         }
+    }
+}
+
+fn acm_effective_width(model: &Bsim3v3Model, geom: &Bsim3v3Geometry) -> Value {
+    geom.w * model.wmlt + model.xw
+}
+
+fn source_drain_resistances_acm0_or_1(
+    model: &Bsim3v3Model,
+    geom: &Bsim3v3Geometry,
+) -> (Value, Value) {
+    if model.acm_mod == 1 {
+        let w_eff = acm_effective_width(model, geom);
+        let l_diff = model.ld + model.ldif;
+        (
+            l_diff / w_eff * model.rd + model.sheet_resistance * geom.drain_squares + model.rdc,
+            l_diff / w_eff * model.rs + model.sheet_resistance * geom.source_squares + model.rsc,
+        )
+    } else {
+        (
+            model.sheet_resistance * geom.drain_squares,
+            model.sheet_resistance * geom.source_squares,
+        )
+    }
+}
+
+fn saturation_currents_acm0_or_1(
+    model: &Bsim3v3Model,
+    mt: &Bsim3v3ModelTemp,
+    geom: &Bsim3v3Geometry,
+) -> (Value, Value) {
+    if model.acm_mod == 1 {
+        let w_eff = acm_effective_width(model, geom);
+        let area = w_eff * model.wmlt;
+        let perimeter = w_eff;
+        let mut sat =
+            area * mt.jct_temp_sat_cur_density + perimeter * mt.jct_sidewall_temp_sat_cur_density;
+        if sat <= 0.0 {
+            sat = 1.0e-14;
+        }
+        (sat, sat)
+    } else {
+        let source = if geom.source_area <= 0.0 && geom.source_perimeter <= 0.0 {
+            1.0e-14
+        } else {
+            geom.source_area * mt.jct_temp_sat_cur_density
+                + geom.source_perimeter * mt.jct_sidewall_temp_sat_cur_density
+        };
+        let drain = if geom.drain_area <= 0.0 && geom.drain_perimeter <= 0.0 {
+            1.0e-14
+        } else {
+            geom.drain_area * mt.jct_temp_sat_cur_density
+                + geom.drain_perimeter * mt.jct_sidewall_temp_sat_cur_density
+        };
+        (drain, source)
     }
 }
 

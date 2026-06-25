@@ -45,24 +45,21 @@ pub mod batch;
 pub use mosfet::{
     B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode, Bsim3v3,
     Bsim3v3Device, Bsim3v3Model, Bsim4, Bsim4Params, Bsim4Type, Bsim4v8, Bsim4v8Device,
-    Bsim4v8Model, EkvMosfet, Jfet, JfetChannelModel, JfetParams, JfetType, MosParams, MosRegion,
-    MosType, Mosfet, MosfetIndices, Vdmos, VdmosRegion, VdmosType,
+    Bsim4v8Model, Ekv3Device, Ekv3Op, EkvMosfet, Jfet, JfetChannelModel, JfetParams, JfetType,
+    MosParams, MosRegion, MosType, Mosfet, MosfetIndices, Vdmos, VdmosRegion, VdmosType,
 };
 pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
     SaturableInductor,
 };
-pub use semiconductor::{
-    Bjt, BjtType, Diode, Mextram504, Mextram504Model, Mextram504Nodes, Mextram504Op,
-    Mextram504Polarity,
-};
+pub use semiconductor::{Bjt, BjtType, Diode};
 
 // Re-export from root-level modules
 pub use behavioral::{BehavioralCurrentSource, BehavioralSources, BehavioralVoltageSource};
 pub use controlled::{Cccs, Ccvs, Vccs, Vcvs};
 pub use coupled_transmission_line::CoupledTransmissionLine;
 pub use sources::{CurrentSource, VoltageSource};
-pub use switch::{CurrentSwitch, SwitchState, VoltageSwitch};
+pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
 pub use transmission_line::{LossyTransmissionLine, TransmissionLine};
 pub(crate) use transmission_line::{TlineTransientResponse, TxlTransientStamp};

@@ -35,6 +35,9 @@
 //! where f(x) is a smooth step function.
 
 use super::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
+use crate::expr::{
+    BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
+};
 use crate::{Value, circuit::NodeId};
 
 //=============================================================================
@@ -83,6 +86,7 @@ pub struct VoltageSwitch {
     // State
     state: SwitchState,
     prev_state: SwitchState,
+    in_hysteresis_band: bool,
     current_resistance: Value,
     prev_resistance: Value,
 }
@@ -109,6 +113,7 @@ impl VoltageSwitch {
             smooth: 0.1,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
+            in_hysteresis_band: false,
             current_resistance: 1e6,
             prev_resistance: 1e6,
         }
@@ -120,7 +125,7 @@ impl VoltageSwitch {
             self.vt = v;
         }
         if let Some(&v) = params.get("VH") {
-            self.vh = v.abs();
+            self.vh = v;
         }
         if let Some(&v) = params.get("RON") {
             self.ron = v.max(1e-6);
@@ -144,7 +149,7 @@ impl VoltageSwitch {
     /// Set thresholds
     pub fn with_thresholds(mut self, vt: Value, vh: Value) -> Self {
         self.vt = vt;
-        self.vh = vh.abs();
+        self.vh = vh;
         self
     }
 
@@ -165,6 +170,7 @@ impl VoltageSwitch {
     /// Set initial hysteresis state.
     pub fn with_initial_state(mut self, state: SwitchState) -> Self {
         self.state = state;
+        self.in_hysteresis_band = false;
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
             SwitchState::Off => self.roff,
@@ -193,10 +199,18 @@ impl VoltageSwitch {
 
     #[inline]
     fn effective_threshold(&self) -> Value {
-        match self.state {
-            SwitchState::Off => self.vt + self.vh,
-            SwitchState::On => self.vt - self.vh,
-            SwitchState::Transitioning => self.vt,
+        if self.vh < 0.0 {
+            match self.state {
+                SwitchState::Off => self.vt - self.vh,
+                SwitchState::On => self.vt + self.vh,
+                SwitchState::Transitioning => self.vt,
+            }
+        } else {
+            match self.state {
+                SwitchState::Off => self.vt + self.vh,
+                SwitchState::On => self.vt - self.vh,
+                SwitchState::Transitioning => self.vt,
+            }
         }
     }
 
@@ -228,6 +242,27 @@ impl VoltageSwitch {
 
     /// Update state based on control voltage (with hysteresis)
     fn update_state(&mut self, vctrl: Value) {
+        if self.vh < 0.0 {
+            let lower = self.vt + self.vh;
+            let upper = self.vt - self.vh;
+            if vctrl > upper {
+                self.state = SwitchState::On;
+                self.in_hysteresis_band = false;
+            } else if vctrl < lower {
+                self.state = SwitchState::Off;
+                self.in_hysteresis_band = false;
+            } else if !self.in_hysteresis_band {
+                self.state = match self.state {
+                    SwitchState::Off => SwitchState::On,
+                    SwitchState::On => SwitchState::Off,
+                    SwitchState::Transitioning => SwitchState::Transitioning,
+                };
+                self.in_hysteresis_band = true;
+            }
+            return;
+        }
+
+        self.in_hysteresis_band = false;
         match self.state {
             SwitchState::Off => {
                 if vctrl > self.vt + self.vh {
@@ -372,6 +407,7 @@ pub struct CurrentSwitch {
     // State
     state: SwitchState,
     prev_state: SwitchState,
+    in_hysteresis_band: bool,
     current_resistance: Value,
     prev_resistance: Value,
 }
@@ -392,6 +428,7 @@ impl CurrentSwitch {
             smooth: 0.001, // 1mA smooth region
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
+            in_hysteresis_band: false,
             current_resistance: 1e6,
             prev_resistance: 1e6,
         }
@@ -408,7 +445,7 @@ impl CurrentSwitch {
             self.it = v;
         }
         if let Some(&v) = params.get("IH") {
-            self.ih = v.abs();
+            self.ih = v;
         }
         if let Some(&v) = params.get("RON") {
             self.ron = v.max(1e-6);
@@ -432,7 +469,7 @@ impl CurrentSwitch {
     /// Set thresholds
     pub fn with_thresholds(mut self, it: Value, ih: Value) -> Self {
         self.it = it;
-        self.ih = ih.abs();
+        self.ih = ih;
         self
     }
 
@@ -453,6 +490,7 @@ impl CurrentSwitch {
     /// Set initial hysteresis state.
     pub fn with_initial_state(mut self, state: SwitchState) -> Self {
         self.state = state;
+        self.in_hysteresis_band = false;
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
             SwitchState::Off => self.roff,
@@ -481,10 +519,18 @@ impl CurrentSwitch {
 
     #[inline]
     fn effective_threshold(&self) -> Value {
-        match self.state {
-            SwitchState::Off => self.it + self.ih,
-            SwitchState::On => self.it - self.ih,
-            SwitchState::Transitioning => self.it,
+        if self.ih < 0.0 {
+            match self.state {
+                SwitchState::Off => self.it - self.ih,
+                SwitchState::On => self.it + self.ih,
+                SwitchState::Transitioning => self.it,
+            }
+        } else {
+            match self.state {
+                SwitchState::Off => self.it + self.ih,
+                SwitchState::On => self.it - self.ih,
+                SwitchState::Transitioning => self.it,
+            }
         }
     }
 
@@ -514,6 +560,27 @@ impl CurrentSwitch {
 
     /// Update state with hysteresis
     fn update_state(&mut self, ictrl: Value) {
+        if self.ih < 0.0 {
+            let lower = self.it + self.ih;
+            let upper = self.it - self.ih;
+            if ictrl > upper {
+                self.state = SwitchState::On;
+                self.in_hysteresis_band = false;
+            } else if ictrl < lower {
+                self.state = SwitchState::Off;
+                self.in_hysteresis_band = false;
+            } else if !self.in_hysteresis_band {
+                self.state = match self.state {
+                    SwitchState::Off => SwitchState::On,
+                    SwitchState::On => SwitchState::Off,
+                    SwitchState::Transitioning => SwitchState::Transitioning,
+                };
+                self.in_hysteresis_band = true;
+            }
+            return;
+        }
+
+        self.in_hysteresis_band = false;
         match self.state {
             SwitchState::Off => {
                 if ictrl > self.it + self.ih {
@@ -617,5 +684,453 @@ impl NonlinearDevice for CurrentSwitch {
 }
 
 //=============================================================================
+// Xyce Generic Expression-Controlled Switch
+//=============================================================================
+
+/// Xyce generic two-terminal switch:
+/// `SW1 p n MODEL [ON|OFF] CONTROL={expr}`.
+///
+/// This first native slice supports time/constant control expressions. Control
+/// expressions that reference circuit unknowns require Jacobian coupling and are
+/// rejected by the builder until that path is implemented.
+#[derive(Debug, Clone)]
+pub struct GenericSwitch {
+    /// Instance name
+    pub name: String,
+    /// Positive terminal
+    pub node_pos: NodeId,
+    /// Negative terminal
+    pub node_neg: NodeId,
+
+    /// Compiled scalar control expression
+    pub program: CompiledExpr,
+    vm: Vm,
+    time_breakpoints: Vec<Value>,
+
+    /// On resistance
+    pub ron: Value,
+    /// Off resistance
+    pub roff: Value,
+    /// Control value for fully on
+    pub on: Value,
+    /// Control value for fully off
+    pub off: Value,
+    /// Rising hysteresis on threshold
+    pub onh: Value,
+    /// Falling hysteresis off threshold
+    pub offh: Value,
+    /// Whether ONH/OFFH semantics are active
+    pub hysteresis_enabled: bool,
+
+    last_state: Value,
+    hysteresis_rising: bool,
+    current_conductance: Value,
+}
+
+impl GenericSwitch {
+    /// Create a generic switch with Xyce defaults.
+    pub fn new(
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        control_expression: &str,
+    ) -> Result<Self, String> {
+        let ast = parse_expression_strict(control_expression).map_err(|err| {
+            format!(
+                "Generic switch '{}' has invalid CONTROL expression '{}': {}",
+                name, control_expression, err
+            )
+        })?;
+        let time_breakpoints = Self::collect_time_breakpoints(&ast);
+        let program = compile(&ast);
+        Ok(Self {
+            name,
+            node_pos,
+            node_neg,
+            program,
+            vm: Vm::new(),
+            time_breakpoints,
+            ron: 1.0,
+            roff: 1.0e6,
+            on: 1.0,
+            off: 0.0,
+            onh: 1.0,
+            offh: 0.0,
+            hysteresis_enabled: false,
+            last_state: 0.0,
+            hysteresis_rising: true,
+            current_conductance: 1.0e-6,
+        })
+    }
+
+    /// Return true when the expression needs solution-vector Jacobian support.
+    pub fn has_solution_references(&self) -> bool {
+        !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
+    }
+
+    /// Time instants where the control expression can change discontinuously.
+    pub fn time_breakpoints(&self) -> &[Value] {
+        &self.time_breakpoints
+    }
+
+    fn collect_time_breakpoints(expr: &Expr) -> Vec<Value> {
+        let mut breakpoints = Vec::new();
+        Self::collect_time_breakpoints_from_expr(expr, &mut breakpoints);
+        breakpoints.retain(|time| time.is_finite() && *time >= 0.0);
+        breakpoints.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        breakpoints.dedup_by(|a, b| {
+            let scale = a.abs().max(b.abs()).max(1.0);
+            (*a - *b).abs() <= scale * 1.0e-12
+        });
+        breakpoints
+    }
+
+    fn collect_time_breakpoints_from_expr(expr: &Expr, breakpoints: &mut Vec<Value>) {
+        match expr {
+            Expr::Binary { op, left, right } => {
+                if matches!(
+                    op,
+                    BinaryOp::Lt
+                        | BinaryOp::Le
+                        | BinaryOp::Gt
+                        | BinaryOp::Ge
+                        | BinaryOp::Eq
+                        | BinaryOp::Ne
+                ) {
+                    Self::push_affine_crossing(left, right, breakpoints);
+                }
+                Self::collect_time_breakpoints_from_expr(left, breakpoints);
+                Self::collect_time_breakpoints_from_expr(right, breakpoints);
+            }
+            Expr::Unary { operand, .. } => {
+                Self::collect_time_breakpoints_from_expr(operand, breakpoints);
+            }
+            Expr::Function { func, args } => {
+                if matches!(
+                    func,
+                    Function::Stp
+                        | Function::Gt0
+                        | Function::Lt0
+                        | Function::Ge0
+                        | Function::Le0
+                        | Function::Eq0
+                        | Function::Ne0
+                ) {
+                    if let Some(arg) = args.first() {
+                        Self::push_affine_zero_crossing(arg, breakpoints);
+                    }
+                }
+                if matches!(func, Function::Table | Function::Pwl) {
+                    Self::collect_table_time_breakpoints(args, breakpoints);
+                }
+                for arg in args {
+                    Self::collect_time_breakpoints_from_expr(arg, breakpoints);
+                }
+            }
+            Expr::Const(_)
+            | Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
+            | Expr::Time
+            | Expr::Frequency
+            | Expr::Temperature => {}
+        }
+    }
+
+    fn collect_table_time_breakpoints(args: &[Expr], breakpoints: &mut Vec<Value>) {
+        let Some((time_scale, time_offset)) = args.first().and_then(Self::affine_time) else {
+            return;
+        };
+        if time_scale.abs() < 1.0e-30 {
+            return;
+        }
+        for pair in args[1..].chunks(2) {
+            let Some(Expr::Const(knot)) = pair.first() else {
+                continue;
+            };
+            breakpoints.push((*knot - time_offset) / time_scale);
+        }
+    }
+
+    fn push_affine_crossing(left: &Expr, right: &Expr, breakpoints: &mut Vec<Value>) {
+        let (Some((left_a, left_b)), Some((right_a, right_b))) =
+            (Self::affine_time(left), Self::affine_time(right))
+        else {
+            return;
+        };
+        let a = left_a - right_a;
+        let b = left_b - right_b;
+        if a.abs() >= 1.0e-30 {
+            breakpoints.push(-b / a);
+        }
+    }
+
+    fn push_affine_zero_crossing(expr: &Expr, breakpoints: &mut Vec<Value>) {
+        let Some((a, b)) = Self::affine_time(expr) else {
+            return;
+        };
+        if a.abs() >= 1.0e-30 {
+            breakpoints.push(-b / a);
+        }
+    }
+
+    fn affine_time(expr: &Expr) -> Option<(Value, Value)> {
+        match expr {
+            Expr::Const(value) => Some((0.0, *value)),
+            Expr::Time => Some((1.0, 0.0)),
+            Expr::Unary {
+                op: UnaryOp::Neg,
+                operand,
+            } => {
+                let (a, b) = Self::affine_time(operand)?;
+                Some((-a, -b))
+            }
+            Expr::Binary { op, left, right } => {
+                let (left_a, left_b) = Self::affine_time(left)?;
+                let (right_a, right_b) = Self::affine_time(right)?;
+                match op {
+                    BinaryOp::Add => Some((left_a + right_a, left_b + right_b)),
+                    BinaryOp::Sub => Some((left_a - right_a, left_b - right_b)),
+                    BinaryOp::Mul if left_a == 0.0 => Some((right_a * left_b, right_b * left_b)),
+                    BinaryOp::Mul if right_a == 0.0 => Some((left_a * right_b, left_b * right_b)),
+                    BinaryOp::Div if right_a == 0.0 && right_b.abs() >= 1.0e-30 => {
+                        Some((left_a / right_b, left_b / right_b))
+                    }
+                    _ => None,
+                }
+            }
+            Expr::Unary { .. }
+            | Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
+            | Expr::Frequency
+            | Expr::Temperature
+            | Expr::Function { .. } => None,
+        }
+    }
+
+    /// Set model parameters.
+    pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+        self.hysteresis_enabled = params.contains_key("ONH") || params.contains_key("OFFH");
+        if let Some(&v) = params.get("RON") {
+            self.ron = v.max(1.0e-12);
+        }
+        if let Some(&v) = params.get("ROFF") {
+            self.roff = v.max(1.0e-12);
+        }
+        if let Some(&v) = params.get("ON") {
+            self.on = v;
+        }
+        if let Some(&v) = params.get("OFF") {
+            self.off = v;
+        }
+        self.onh = params.get("ONH").copied().unwrap_or(self.on);
+        self.offh = params.get("OFFH").copied().unwrap_or(self.off);
+        self.current_conductance = 1.0 / self.roff;
+        self
+    }
+
+    /// Set initial ON/OFF state.
+    pub fn with_initial_state(mut self, state: SwitchState) -> Self {
+        match state {
+            SwitchState::On => {
+                self.last_state = 1.0;
+                self.hysteresis_rising = false;
+                self.current_conductance = 1.0 / self.ron;
+            }
+            SwitchState::Off | SwitchState::Transitioning => {
+                self.last_state = 0.0;
+                self.hysteresis_rising = true;
+                self.current_conductance = 1.0 / self.roff;
+            }
+        }
+        self
+    }
+
+    /// Current small-signal conductance.
+    pub fn conductance(&self) -> Value {
+        self.current_conductance
+    }
+
+    fn evaluate_control(&mut self, time: Value) -> Value {
+        let ctx = Context::transient(&[], &[], time);
+        let value = self.vm.execute(&self.program, &ctx);
+        if value.is_finite() { value } else { self.off }
+    }
+
+    #[inline]
+    fn safe_delta(delta: Value) -> Value {
+        if delta.abs() >= 1.0e-12 {
+            delta
+        } else if delta.is_sign_negative() {
+            -1.0e-12
+        } else {
+            1.0e-12
+        }
+    }
+
+    fn interpolated_conductance(&self, normalized_state: Value) -> Value {
+        let state = normalized_state.clamp(0.0, 1.0);
+        if state >= 1.0 {
+            return 1.0 / self.ron;
+        }
+        if state <= 0.0 {
+            return 1.0 / self.roff;
+        }
+
+        let lm = (self.ron * self.roff).sqrt().ln();
+        let lr = (self.ron / self.roff).ln();
+        let x = 2.0 * state - 1.0;
+        (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp()
+    }
+
+    fn conductance_for_control(&mut self, control: Value) -> Value {
+        let d_inv = 1.0 / Self::safe_delta(self.on - self.off);
+        let base_state = (control - self.off) * d_inv;
+
+        if !self.hysteresis_enabled {
+            self.last_state = base_state;
+            return self.interpolated_conductance(base_state);
+        }
+
+        if self.hysteresis_rising {
+            let state = (control - self.offh) / Self::safe_delta(self.on - self.offh);
+            if state <= 0.0 {
+                self.last_state = 0.0;
+                return 1.0 / self.roff;
+            }
+            if state >= 1.0 || base_state >= 1.0 {
+                self.last_state = 1.0;
+                self.hysteresis_rising = false;
+                return 1.0 / self.ron;
+            }
+            self.last_state = state;
+            return self.interpolated_conductance(state);
+        }
+
+        let latch_state = (control - self.off) / Self::safe_delta(self.onh - self.off);
+        if latch_state >= 1.0 {
+            self.last_state = 1.0;
+            return 1.0 / self.ron;
+        }
+        if latch_state <= 0.0 || base_state <= 0.0 {
+            self.last_state = 0.0;
+            self.hysteresis_rising = true;
+            return 1.0 / self.roff;
+        }
+        self.last_state = base_state;
+        self.interpolated_conductance(base_state)
+    }
+
+    /// Stamp the switch conductance for a given analysis time.
+    pub fn stamp_time_dependent(&mut self, time: Value, matrix: &mut impl MatrixStamper) {
+        let control = self.evaluate_control(time);
+        let g = self.conductance_for_control(control);
+        self.current_conductance = g;
+        self.stamp_conductance(g, matrix);
+    }
+
+    /// Stamp the current frozen conductance, used by small-signal analyses
+    /// after the operating point has evaluated the switch at t=0.
+    pub fn stamp_current_conductance(&self, matrix: &mut impl MatrixStamper) {
+        self.stamp_conductance(self.current_conductance, matrix);
+    }
+
+    fn stamp_conductance(&self, g: Value, matrix: &mut impl MatrixStamper) {
+        matrix.stamp(self.node_pos, self.node_pos, g);
+        matrix.stamp(self.node_pos, self.node_neg, -g);
+        matrix.stamp(self.node_neg, self.node_pos, -g);
+        matrix.stamp(self.node_neg, self.node_neg, g);
+    }
+}
+
+//=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use crate::device::traits::NonlinearDevice;
+
+    use super::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
+
+    #[test]
+    fn generic_switch_extracts_time_control_breakpoints() {
+        let switch = GenericSwitch::new("sw1".to_string(), 1, 0, "if(time>2u,1,stp(time-3u))")
+            .expect("valid generic switch expression");
+
+        assert_eq!(switch.time_breakpoints().len(), 2);
+        assert!((switch.time_breakpoints()[0] - 2.0e-6).abs() < 1.0e-18);
+        assert!((switch.time_breakpoints()[1] - 3.0e-6).abs() < 1.0e-18);
+    }
+
+    #[test]
+    fn generic_switch_hysteresis_keeps_xyce_branch_during_partial_transition() {
+        let params = std::collections::HashMap::from([
+            ("ON".to_string(), 1.0),
+            ("ONH".to_string(), 0.55),
+            ("OFF".to_string(), 0.0),
+            ("OFFH".to_string(), 0.25),
+            ("RON".to_string(), 1.0),
+            ("ROFF".to_string(), 100.0),
+        ]);
+        let mut switch = GenericSwitch::new("sw1".to_string(), 1, 0, "1")
+            .expect("valid generic switch expression")
+            .with_params(&params)
+            .with_initial_state(SwitchState::Off);
+
+        let rising_g = switch.conductance_for_control(0.269_311_698);
+        assert!((rising_g - 0.010_090_431_945).abs() < 1.0e-12);
+
+        assert!((switch.conductance_for_control(1.0) - 1.0).abs() < 1.0e-15);
+        assert!((switch.conductance_for_control(0.562_116_094) - 1.0).abs() < 1.0e-15);
+
+        let falling_g = switch.conductance_for_control(0.381_041_069);
+        assert!((falling_g - 0.044_653_639_971).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn voltage_switch_negative_vh_uses_ngspice_inverted_hysteresis_band() {
+        let mut switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0)
+            .with_thresholds(0.0, -0.5)
+            .with_resistances(1.0, 1.0e6)
+            .with_initial_state(SwitchState::Off);
+
+        switch.update(&[0.0, -1.0]);
+        assert_eq!(switch.state(), SwitchState::Off);
+
+        switch.update(&[0.0, 0.0]);
+
+        assert_eq!(switch.state(), SwitchState::On);
+        assert!(
+            switch.resistance() < 10.0,
+            "negative VH should enter the on side of the inverted hysteresis band; resistance={}",
+            switch.resistance()
+        );
+
+        switch.update(&[0.0, 0.0]);
+        assert_eq!(switch.state(), SwitchState::On);
+    }
+
+    #[test]
+    fn current_switch_negative_ih_uses_ngspice_inverted_hysteresis_band() {
+        let mut switch = CurrentSwitch::new("w1".to_string(), 1, 0, "vctrl".to_string())
+            .with_thresholds(0.0, -0.5)
+            .with_resistances(1.0, 1.0e6)
+            .with_initial_state(SwitchState::Off);
+        switch.set_ctrl_branch(2);
+
+        switch.update(&[0.0, -1.0]);
+        assert_eq!(switch.state(), SwitchState::Off);
+
+        switch.update(&[0.0, 0.0]);
+
+        assert_eq!(switch.state(), SwitchState::On);
+        assert!(
+            switch.resistance() < 10.0,
+            "negative IH should enter the on side of the inverted hysteresis band; resistance={}",
+            switch.resistance()
+        );
+
+        switch.update(&[0.0, 0.0]);
+        assert_eq!(switch.state(), SwitchState::On);
+    }
+}

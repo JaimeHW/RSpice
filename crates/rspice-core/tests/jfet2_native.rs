@@ -326,6 +326,54 @@ z1 d g s badmod
     );
 }
 
+#[test]
+fn unsupported_mesfet_level7_fails_closed_instead_of_hfet_fallback() {
+    let deck = "\
+* unsupported MESFET/HFET level policy
+vd d 0 dc 2
+vg g 0 dc -0.25
+vs s 0 dc 0
+z1 d g s badmod
+.model badmod NMF(level=7 beta=1e-3 vt0=-1)
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let message = engine()
+        .run_dc_op(&netlist)
+        .expect_err("unsupported MESFET LEVEL=7 must not fall back to HFET1")
+        .to_string();
+
+    assert!(
+        message.contains("LEVEL=7") && message.contains("unsupported"),
+        "error should explain unsupported MESFET LEVEL=7, got: {message}"
+    );
+}
+
+#[test]
+fn unsupported_jfet_level6_fails_closed_instead_of_classic_fallback() {
+    let deck = "\
+* unsupported JFET level policy
+vd d 0 dc 5
+vg g 0 dc -0.25
+vs s 0 dc 0
+j1 d g s badmod
+.model badmod NJF(level=6 beta=1e-3 vt0=-2)
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let message = engine()
+        .run_dc_op(&netlist)
+        .expect_err("unsupported JFET LEVEL=6 must not fall back to classic JFET")
+        .to_string();
+
+    assert!(
+        message.contains("LEVEL=6") && message.contains("unsupported"),
+        "error should explain unsupported JFET LEVEL=6, got: {message}"
+    );
+}
+
 fn node_series<'a>(names: &[String], voltages: &'a [Vec<f64>], want: &str) -> &'a [f64] {
     let idx = names
         .iter()

@@ -6,6 +6,13 @@
 //! This enables integration of Verilog-A models compiled with external tools,
 //! or custom device models written in C/C++.
 //!
+//! # Stability
+//!
+//! This module is an experimental integration boundary behind the optional
+//! `ffi` feature. It is not part of the production-stable device ABI until the
+//! callback ownership model, dynamic-library lifetime, and matrix/RHS stamping
+//! path have a documented safety review and conformance suite.
+//!
 //! # SPICE Syntax
 //! ```text
 //! .MODEL mydev FFI_MODEL LIB="path/to/model.dll" ENTRY="create_device"

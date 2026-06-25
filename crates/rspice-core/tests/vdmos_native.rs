@@ -986,6 +986,32 @@ fn xyce_level18_nmos_routes_to_native_vdmos_without_simplified_opt_in() {
 }
 
 #[test]
+fn xyce_level18_vdmos_rejects_unresolved_native_model_params() {
+    let deck = "* xyce level 18 vdmos unresolved model param\n\
+                vd d 0 dc 12\n\
+                vg g 0 dc 8\n\
+                vs s 0 dc 0\n\
+                m1 d g s 0 irf130 w=0.386 l=2.5u\n\
+                .model irf130 nmos level=18 vto={missing_vto} kp=2 rd=0 rs=0.005 lambda=0\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("VDMOS unresolved VTO deck parses");
+
+    let message = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect_err("unresolved VDMOS model param must fail closed before native defaults")
+        .to_string();
+
+    assert!(
+        message.contains("VDMOS")
+            && message.contains("VTO")
+            && message.contains("unresolved")
+            && message.contains("finite numeric literal"),
+        "unexpected unresolved VDMOS VTO error: {message}"
+    );
+}
+
+#[test]
 fn xyce_level18_irf130_dc_matches_xyce_gold_current() {
     let netlist = Netlist::parse(xyce_irf130_dc_deck()).expect("deck parses");
     let sweep2 = netlist
@@ -1875,6 +1901,68 @@ fn ngspice_vdmos_model_routes_to_same_native_device() {
         .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
         .expect("m1 op entry");
     assert_eq!(m1.device_kind, "VDMOS");
+}
+
+#[test]
+fn ngspice_vdmosn_and_vdmosp_aliases_route_to_native_device() {
+    for (model_type, drain_bias, gate_bias, expected_id_sign) in
+        [("vdmosn", 12.0, 8.0, 1.0), ("vdmosp", -12.0, -8.0, -1.0)]
+    {
+        let deck = format!(
+            "* ngspice {model_type} native alias\n\
+             vd d 0 dc {drain_bias}\n\
+             vg g 0 dc {gate_bias}\n\
+             vs s 0 dc 0\n\
+             m1 d g s dmod\n\
+             .model dmod {model_type} vto=3.5 kp=2 rd=0 rs=0.005 lambda=0\n\
+             .op\n\
+             .end\n"
+        );
+
+        let report = run_report(&deck);
+        let m1 = report
+            .entries
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+            .unwrap_or_else(|| panic!("{model_type} m1 op entry"));
+        assert_eq!(m1.device_kind, "VDMOS");
+
+        let id = m1
+            .params
+            .iter()
+            .find_map(|(name, value)| (*name == "id").then_some(*value))
+            .unwrap_or_else(|| panic!("{model_type} id op value"));
+        assert!(
+            id.is_finite() && id * expected_id_sign > 0.0,
+            "{model_type} should preserve native channel polarity, got id={id}"
+        );
+    }
+}
+
+#[test]
+fn ngspice_vdmos_rejects_non_numeric_native_model_params() {
+    let deck = "* ngspice vdmos non-numeric model param\n\
+                vd d 0 dc 12\n\
+                vg g 0 dc 8\n\
+                vs s 0 dc 0\n\
+                m1 d g s irf130\n\
+                .model irf130 vdmos nchan vto=3.5 kp=\"2\" rd=0 rs=0.005 lambda=0\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("VDMOS non-numeric KP deck parses");
+
+    let message = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect_err("non-numeric VDMOS model param must fail closed before native defaults")
+        .to_string();
+
+    assert!(
+        message.contains("VDMOS")
+            && message.contains("KP")
+            && message.contains("non-numeric")
+            && message.contains("finite numeric literal"),
+        "unexpected non-numeric VDMOS KP error: {message}"
+    );
 }
 
 #[test]

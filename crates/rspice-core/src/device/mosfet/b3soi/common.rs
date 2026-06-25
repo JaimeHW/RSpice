@@ -4,6 +4,78 @@
 //! `b3soiddtemp.c` (the FD and PD sources use the same numeric constants).
 
 use crate::Value;
+use std::collections::HashMap;
+
+pub(crate) const B3SOI_MOBMOD_VALUES: &[i32] = &[0, 1, 2, 3];
+pub(crate) const B3SOI_CAPMOD_VALUES: &[i32] = &[0, 1, 2, 3];
+pub(crate) const B3SOI_SHMOD_VALUES: &[i32] = &[0, 1];
+pub(crate) const B3SOI_BINUNIT_VALUES: &[i32] = &[0, 1, 2];
+pub(crate) const B3SOI_PARAMCHK_VALUES: &[i32] = &[0, 1];
+
+pub(crate) fn model_selector(
+    params: &HashMap<String, Value>,
+    name: &str,
+    default: i32,
+    allowed: &[i32],
+) -> Result<i32, String> {
+    let Some(value) = params.get(name).copied() else {
+        return Ok(default);
+    };
+
+    let rounded = value.round();
+    if !value.is_finite() || (value - rounded).abs() > 1.0e-12 {
+        return Err(format!(
+            "{name} selector must be a finite integer, got {name}={value}"
+        ));
+    }
+
+    for candidate in allowed {
+        if (rounded - *candidate as Value).abs() <= 1.0e-12 {
+            return Ok(*candidate);
+        }
+    }
+
+    Err(format!(
+        "{name}={value} is unsupported; supported finite integer values are {}",
+        selector_values(allowed)
+    ))
+}
+
+pub(crate) fn mobmod_selector(
+    params: &HashMap<String, Value>,
+    default: i32,
+    allowed: &[i32],
+) -> Result<i32, String> {
+    let Some(value) = params.get("MOBMOD").copied() else {
+        return Ok(default);
+    };
+
+    if !value.is_finite() {
+        return Err(format!(
+            "MOBMOD selector must be finite for ngspice integer coercion, got MOBMOD={value}"
+        ));
+    }
+
+    let selected = (value + 0.5).floor();
+    for candidate in allowed {
+        if (selected - *candidate as Value).abs() <= 1.0e-12 {
+            return Ok(*candidate);
+        }
+    }
+
+    Err(format!(
+        "MOBMOD={value} coerces to unsupported integer {selected:.0}; supported values are {}",
+        selector_values(allowed)
+    ))
+}
+
+fn selector_values(allowed: &[i32]) -> String {
+    allowed
+        .iter()
+        .map(i32::to_string)
+        .collect::<Vec<_>>()
+        .join("/")
+}
 
 /// `exp(34.0)` guard value (ngspice `MAX_EXP`).
 pub const MAX_EXP: Value = 5.834617425e14;
