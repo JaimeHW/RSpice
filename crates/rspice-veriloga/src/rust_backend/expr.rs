@@ -179,6 +179,9 @@ impl ExprEmitter<'_> {
                 self.lower_ddt_value(id, args.as_slice(), &base)?
             }
             HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => "0.0".to_string(),
+            HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
+                self.lower_intrinsic_value(name.as_str(), args.as_slice(), &base)?
+            }
             HirExprKind::NoiseSource { .. } => "0.0".to_string(),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddt { expr, abstol },
@@ -262,6 +265,9 @@ impl ExprEmitter<'_> {
             HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
                 zero_derivatives(node_count)
             }
+            HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
+                self.intrinsic_derivatives(name.as_str(), args.as_slice(), &value_expr)?
+            }
             HirExprKind::NoiseSource { .. } => zero_derivatives(node_count),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddt { expr, abstol },
@@ -316,6 +322,9 @@ impl ExprEmitter<'_> {
             }
             HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
                 ReactiveValue::none(zero_derivatives(node_count))
+            }
+            HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
+                self.intrinsic_reactive_value(args.as_slice())?
             }
             HirExprKind::NoiseSource { .. } => ReactiveValue::none(zero_derivatives(node_count)),
             HirExprKind::AnalogOperator {
@@ -504,6 +513,239 @@ impl ExprEmitter<'_> {
     fn emit_value(&mut self, base: &str, expression: String) -> String {
         self.lines.push(format!("let {base}: f64 = {expression};"));
         base.to_string()
+    }
+
+    fn lower_intrinsic_value(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        base: &str,
+    ) -> Result<String, RustBackendError> {
+        let normalized = name.to_ascii_lowercase();
+        let args = self.lower_intrinsic_args(&normalized, args)?;
+        let value = match normalized.as_str() {
+            "abs" | "fabs" => format!("({}).abs()", args[0].value),
+            "sqrt" => format!("({}).sqrt()", args[0].value),
+            "exp" => format!("({}).exp()", args[0].value),
+            "ln" | "log" => format!("({}).ln()", args[0].value),
+            "log10" => format!("({}).log10()", args[0].value),
+            "sin" => format!("({}).sin()", args[0].value),
+            "cos" => format!("({}).cos()", args[0].value),
+            "tan" => format!("({}).tan()", args[0].value),
+            "sinh" => format!("({}).sinh()", args[0].value),
+            "cosh" => format!("({}).cosh()", args[0].value),
+            "tanh" => format!("({}).tanh()", args[0].value),
+            "floor" => format!("({}).floor()", args[0].value),
+            "ceil" => format!("({}).ceil()", args[0].value),
+            "pow" => format!("({}).powf({})", args[0].value, args[1].value),
+            "min" => format!("({}).min({})", args[0].value, args[1].value),
+            "max" => format!("({}).max({})", args[0].value, args[1].value),
+            "hypot" => format!("({}).hypot({})", args[0].value, args[1].value),
+            "atan2" => format!("({}).atan2({})", args[0].value, args[1].value),
+            _ => return Err(self.unsupported(format!("intrinsic function '{name}'"))),
+        };
+        Ok(self.emit_value(base, value))
+    }
+
+    fn intrinsic_derivatives(
+        &self,
+        name: &str,
+        args: &[ExprId],
+        value: &str,
+    ) -> Result<Vec<String>, RustBackendError> {
+        let normalized = name.to_ascii_lowercase();
+        let args = self.emitted_intrinsic_args(&normalized, args)?;
+        let derivatives = match normalized.as_str() {
+            "abs" | "fabs" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("if {} >= 0.0 {{ {d} }} else {{ -({d}) }}", args[0].value))
+                .collect(),
+            "sqrt" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("({d} / (2.0 * {value}))"))
+                .collect(),
+            "exp" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("({value} * {d})"))
+                .collect(),
+            "ln" | "log" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("({d} / {})", args[0].value))
+                .collect(),
+            "log10" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("({d} / ({} * std::f64::consts::LN_10))", args[0].value))
+                .collect(),
+            "sin" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("(({}).cos() * {d})", args[0].value))
+                .collect(),
+            "cos" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("(-({}).sin() * {d})", args[0].value))
+                .collect(),
+            "tan" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| {
+                    format!(
+                        "({d} / (({}).cos() * ({}).cos()))",
+                        args[0].value, args[0].value
+                    )
+                })
+                .collect(),
+            "sinh" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("(({}).cosh() * {d})", args[0].value))
+                .collect(),
+            "cosh" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| format!("(({}).sinh() * {d})", args[0].value))
+                .collect(),
+            "tanh" => args[0]
+                .derivatives
+                .iter()
+                .map(|d| {
+                    format!(
+                        "({d} / (({}).cosh() * ({}).cosh()))",
+                        args[0].value, args[0].value
+                    )
+                })
+                .collect(),
+            "floor" | "ceil" => zero_derivatives(args[0].derivatives.len()),
+            "pow" => args[0]
+                .derivatives
+                .iter()
+                .zip(&args[1].derivatives)
+                .map(|(dx, dy)| {
+                    format!(
+                        "({value} * (({dy} * ({}).ln()) + ({} * ({dx} / {}))))",
+                        args[0].value, args[1].value, args[0].value
+                    )
+                })
+                .collect(),
+            "min" => args[0]
+                .derivatives
+                .iter()
+                .zip(&args[1].derivatives)
+                .map(|(left, right)| {
+                    format!(
+                        "if {} <= {} {{ {left} }} else {{ {right} }}",
+                        args[0].value, args[1].value
+                    )
+                })
+                .collect(),
+            "max" => args[0]
+                .derivatives
+                .iter()
+                .zip(&args[1].derivatives)
+                .map(|(left, right)| {
+                    format!(
+                        "if {} >= {} {{ {left} }} else {{ {right} }}",
+                        args[0].value, args[1].value
+                    )
+                })
+                .collect(),
+            "hypot" => args[0]
+                .derivatives
+                .iter()
+                .zip(&args[1].derivatives)
+                .map(|(dx, dy)| {
+                    format!(
+                        "(({} * {dx}) + ({} * {dy})) / {value}",
+                        args[0].value, args[1].value
+                    )
+                })
+                .collect(),
+            "atan2" => args[0]
+                .derivatives
+                .iter()
+                .zip(&args[1].derivatives)
+                .map(|(dy, dx)| {
+                    format!(
+                        "(({} * {dy}) - ({} * {dx})) / (({} * {}) + ({} * {}))",
+                        args[1].value,
+                        args[0].value,
+                        args[1].value,
+                        args[1].value,
+                        args[0].value,
+                        args[0].value
+                    )
+                })
+                .collect(),
+            _ => return Err(self.unsupported(format!("intrinsic function '{name}'"))),
+        };
+        Ok(derivatives)
+    }
+
+    fn intrinsic_reactive_value(&self, args: &[ExprId]) -> Result<ReactiveValue, RustBackendError> {
+        for arg in args {
+            let value = self
+                .emitted
+                .get(arg)
+                .expect("intrinsic argument must be emitted before reactive derivative");
+            if value.has_reactive {
+                return Err(self.unsupported("ddt() inside intrinsic math call"));
+            }
+        }
+        Ok(ReactiveValue::none(zero_derivatives(
+            self.artifact.mir.nodes.len(),
+        )))
+    }
+
+    fn lower_intrinsic_args(
+        &mut self,
+        normalized: &str,
+        args: &[ExprId],
+    ) -> Result<Vec<ExprValue>, RustBackendError> {
+        self.validate_intrinsic_arity(normalized, args)?;
+        args.iter().map(|arg| self.lower(*arg)).collect()
+    }
+
+    fn emitted_intrinsic_args(
+        &self,
+        normalized: &str,
+        args: &[ExprId],
+    ) -> Result<Vec<ExprValue>, RustBackendError> {
+        self.validate_intrinsic_arity(normalized, args)?;
+        Ok(args
+            .iter()
+            .map(|arg| {
+                self.emitted
+                    .get(arg)
+                    .expect("intrinsic argument must be emitted before derivative")
+                    .clone()
+            })
+            .collect())
+    }
+
+    fn validate_intrinsic_arity(
+        &self,
+        normalized: &str,
+        args: &[ExprId],
+    ) -> Result<(), RustBackendError> {
+        let expected = if is_binary_intrinsic_name(normalized) {
+            2
+        } else {
+            1
+        };
+        if args.len() == expected {
+            Ok(())
+        } else {
+            Err(self.unsupported(format!(
+                "intrinsic function '{normalized}' expects {expected} argument(s), found {}",
+                args.len()
+            )))
+        }
     }
 
     fn lower_ddt_value(
@@ -867,6 +1109,36 @@ fn is_noise_name(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "white_noise" | "$white_noise" | "flicker_noise" | "$flicker_noise"
     )
+}
+
+fn is_intrinsic_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "abs"
+            | "fabs"
+            | "sqrt"
+            | "exp"
+            | "ln"
+            | "log"
+            | "log10"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "floor"
+            | "ceil"
+            | "pow"
+            | "min"
+            | "max"
+            | "hypot"
+            | "atan2"
+    )
+}
+
+fn is_binary_intrinsic_name(name: &str) -> bool {
+    matches!(name, "pow" | "min" | "max" | "hypot" | "atan2")
 }
 
 fn format_f64(value: f64) -> String {
