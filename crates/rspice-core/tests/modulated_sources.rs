@@ -1,10 +1,10 @@
-//! End-to-end tests for the SFFM and AM transient sources.
+//! End-to-end tests for EXP, SFFM, and AM transient sources.
 //!
 //! The waveform formulas are transcribed from ngspice-46 vsrcload.c; these
 //! tests pin them analytically (a voltage source's node equals the source
-//! value exactly at every accepted timepoint) plus the parity quirks:
-//! exact 0 before TD, degree phases, the MDI clamp, and the DC operating
-//! point seeing 0.
+//! value exactly at every accepted timepoint) plus the parity quirks: EXP
+//! tstep defaults, exact 0 before TD for the modulated sources, degree phases,
+//! the MDI clamp, and the DC operating point seeing 0.
 
 use std::f64::consts::PI;
 
@@ -31,6 +31,17 @@ fn am_reference(t: f64, vo: f64, vmo: f64, vma: f64, fm: f64, fc: f64, td: f64) 
     }
 }
 
+fn exp_reference(t: f64, v1: f64, v2: f64, td1: f64, tau1: f64, td2: f64, tau2: f64) -> f64 {
+    if t <= td1 {
+        v1
+    } else if t <= td2 {
+        v1 + (v2 - v1) * (1.0 - (-(t - td1) / tau1).exp())
+    } else {
+        v1 + (v2 - v1) * (1.0 - (-(t - td1) / tau1).exp())
+            - (v2 - v1) * (1.0 - (-(t - td2) / tau2).exp())
+    }
+}
+
 fn transient_node_values(
     deck: &str,
     node: &str,
@@ -48,6 +59,113 @@ fn transient_node_values(
         .position(|name| name.eq_ignore_ascii_case(node))
         .unwrap_or_else(|| panic!("node {node} missing from {:?}", result.node_names));
     (result.time.clone(), result.voltages[idx].clone())
+}
+
+#[test]
+fn exp_parses_full_and_short_forms() {
+    let deck = "\
+* exp parse
+v1 1 0 exp(0.1 1.2 2n 0.5n 5n 1n)
+r1 1 0 1k
+.end
+";
+    let netlist = Netlist::parse(deck).expect("parse");
+    let Some(rspice_core::netlist::ElementKind::VoltageSource(SourceSpec::Exp {
+        v1,
+        v2,
+        td1,
+        tau1,
+        td2,
+        tau2,
+    })) = netlist
+        .elements
+        .iter()
+        .find(|e| e.name.eq_ignore_ascii_case("v1"))
+        .map(|e| &e.kind)
+    else {
+        panic!("expected EXP source");
+    };
+    assert_eq!(*v1, 0.1);
+    assert_eq!(*v2, 1.2);
+    assert_eq!(*td1, 2.0e-9);
+    assert_eq!(*tau1, 0.5e-9);
+    assert_eq!(*td2, 5.0e-9);
+    assert_eq!(*tau2, 1.0e-9);
+
+    let short = "\
+* exp short
+v1 1 0 exp(0 1)
+r1 1 0 1k
+.end
+";
+    let netlist = Netlist::parse(short).expect("parse");
+    let Some(rspice_core::netlist::ElementKind::VoltageSource(SourceSpec::Exp {
+        td1,
+        tau1,
+        td2,
+        tau2,
+        ..
+    })) = netlist
+        .elements
+        .iter()
+        .find(|e| e.name.eq_ignore_ascii_case("v1"))
+        .map(|e| &e.kind)
+    else {
+        panic!("expected EXP source");
+    };
+    assert!(
+        td1.is_nan() && tau1.is_nan() && td2.is_nan() && tau2.is_nan(),
+        "omitted EXP timing values must stay NaN for tstep-based defaults"
+    );
+}
+
+#[test]
+fn exp_transient_matches_ngspice_formula_and_breakpoints() {
+    let deck = "\
+* exp waveform
+v1 1 0 exp(0.1 1.2 2n 0.5n 5n 1n)
+r1 1 0 1k
+.tran 0.1n 8n
+.end
+";
+    let (times, values) = transient_node_values(deck, "1", 8.0e-9, 0.1e-9);
+    assert!(times.len() > 20, "expected a dense transient");
+    for (t, v) in times.iter().zip(values.iter()) {
+        let expected = exp_reference(*t, 0.1, 1.2, 2.0e-9, 0.5e-9, 5.0e-9, 1.0e-9);
+        assert!(
+            (v - expected).abs() < TOL,
+            "exp at t={t}: got {v}, formula {expected}"
+        );
+    }
+    assert!(
+        times.iter().any(|t| (t - 2.0e-9).abs() < 1e-15)
+            && times.iter().any(|t| (t - 5.0e-9).abs() < 1e-15),
+        "TD1 and TD2 must be breakpoint timepoints"
+    );
+}
+
+#[test]
+fn exp_omitted_timing_uses_ngspice_tstep_defaults_end_to_end() {
+    let deck = "\
+* exp default timing
+v1 1 0 exp(0 1)
+r1 1 0 1k
+.tran 1n 4n
+.end
+";
+    let (times, values) = transient_node_values(deck, "1", 4.0e-9, 1.0e-9);
+    for (t, v) in times.iter().zip(values.iter()) {
+        let expected = exp_reference(*t, 0.0, 1.0, 1.0e-9, 1.0e-9, 2.0e-9, 1.0e-9);
+        assert!(
+            (v - expected).abs() < TOL,
+            "defaulted exp at t={t}: got {v}, formula {expected}"
+        );
+    }
+    assert!(
+        times.iter().any(|t| (t - 1.0e-9).abs() < 1e-15)
+            && times.iter().any(|t| (t - 2.0e-9).abs() < 1e-15),
+        "defaulted TD1 and TD2 must be breakpoint timepoints"
+    );
 }
 
 #[test]

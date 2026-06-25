@@ -185,7 +185,19 @@ pub(super) fn parse_model_params(
                         }
                     }
                     _ => {
-                        if let Some(value) = try_signed_model_value(stream, params) {
+                        if stream.consume(&TokenKind::LParen) {
+                            if let Some(value) = try_signed_model_value(stream, params) {
+                                numeric_params.push((name, value));
+                            }
+                            if !stream.consume(&TokenKind::RParen) {
+                                return Err(ParseError::Syntax {
+                                    line: stream.line(),
+                                    message:
+                                        "Expected ')' after parenthesized model parameter value"
+                                            .to_string(),
+                                });
+                            }
+                        } else if let Some(value) = try_signed_model_value(stream, params) {
                             numeric_params.push((name, value));
                         } else {
                             return Err(ParseError::Syntax {

@@ -98,12 +98,48 @@ pub struct Netlist {
     /// back-annotated onto the parsed deck by the path-aware parse entry
     /// points (`netlist::spef`).
     pub spef_includes: Vec<String>,
+    /// Non-fatal parser diagnostics for constructs that were accepted but not
+    /// fully acted on. Callers should surface these to users before simulation.
+    pub diagnostics: Vec<ParseDiagnostic>,
     /// Optional original netlist text used to build this AST.
     /// Stored to support parameter re-application workflows (e.g., sensitivity).
     pub source_text: Option<String>,
     /// Optional source path for the netlist used to resolve relative includes
     /// and model-file references during reparsing workflows.
     pub source_path: Option<PathBuf>,
+}
+
+/// Severity for parser diagnostics that do not abort parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    /// The deck parsed, but the simulator ignored or downgraded a construct.
+    Warning,
+}
+
+/// Structured parser diagnostic suitable for CLI, UI, Python, and WASM callers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseDiagnostic {
+    /// 1-based input line number. `0` is reserved for diagnostics that cannot be
+    /// tied to one source line.
+    pub line: usize,
+    /// Stable machine-readable diagnostic code.
+    pub code: String,
+    /// Human-readable diagnostic message.
+    pub message: String,
+    /// Diagnostic severity.
+    pub severity: DiagnosticSeverity,
+}
+
+impl ParseDiagnostic {
+    /// Create a warning diagnostic.
+    pub fn warning(line: usize, code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            line,
+            code: code.into(),
+            message: message.into(),
+            severity: DiagnosticSeverity::Warning,
+        }
+    }
 }
 
 /// Verilog-A model include directive
@@ -121,8 +157,10 @@ pub struct VerilogAInclude {
 impl Netlist {
     /// Parse a netlist from a string
     pub fn parse(input: &str) -> Result<Self, ParseError> {
-        let sanitized = Self::strip_control_blocks(input)?;
+        let (sanitized, mut diagnostics) = Self::strip_control_blocks_with_diagnostics(input)?;
         let mut netlist = parser::parse_netlist(&sanitized)?;
+        diagnostics.extend(netlist.diagnostics);
+        netlist.diagnostics = diagnostics;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = None;
         Ok(netlist)
@@ -247,9 +285,16 @@ impl Netlist {
     /// conditionals). These contain operators like '>' that break the netlist
     /// parser. We strip them since RSpice runs the circuit directly.
     pub fn strip_control_blocks(input: &str) -> Result<String, ParseError> {
+        Ok(Self::strip_control_blocks_with_diagnostics(input)?.0)
+    }
+
+    fn strip_control_blocks_with_diagnostics(
+        input: &str,
+    ) -> Result<(String, Vec<ParseDiagnostic>), ParseError> {
         let mut result = String::with_capacity(input.len());
         let mut in_control = false;
         let mut opened_at_line = None;
+        let mut diagnostics = Vec::new();
 
         for (line_index, line) in input.lines().enumerate() {
             let line_num = line_index + 1;
@@ -259,6 +304,11 @@ impl Netlist {
             if head.eq_ignore_ascii_case(".control") {
                 in_control = true;
                 opened_at_line = Some(line_num);
+                diagnostics.push(ParseDiagnostic::warning(
+                    line_num,
+                    "control-block-ignored",
+                    ".control block ignored; RSpice parses circuit decks and does not execute ngspice command scripts",
+                ));
                 result.push_str("* ");
                 result.push_str(line);
                 result.push('\n');
@@ -292,7 +342,7 @@ impl Netlist {
             });
         }
 
-        Ok(result)
+        Ok((result, diagnostics))
     }
 
     fn normalize_model_string_paths(&mut self, file_path: &std::path::Path) {
@@ -352,6 +402,7 @@ impl Default for Netlist {
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
             spef_includes: Vec::new(),
+            diagnostics: Vec::new(),
             source_text: None,
             source_path: None,
         }

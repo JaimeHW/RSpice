@@ -69,3 +69,28 @@ pub(crate) fn parse_netlist_input(
     }
     Netlist::parse_file(input).map_err(map_err)
 }
+
+pub(crate) fn format_netlist_diagnostic(
+    diagnostic: &rspice_core::netlist::ParseDiagnostic,
+) -> String {
+    let location = if diagnostic.line == 0 {
+        String::new()
+    } else {
+        format!("line {}: ", diagnostic.line)
+    };
+    format!("{location}{}", diagnostic.message)
+}
+
+pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bool) {
+    if quiet {
+        return;
+    }
+
+    for diagnostic in &netlist.diagnostics {
+        match diagnostic.severity {
+            rspice_core::netlist::DiagnosticSeverity::Warning => {
+                eprintln!("warning: {}", format_netlist_diagnostic(diagnostic));
+            }
+        }
+    }
+}

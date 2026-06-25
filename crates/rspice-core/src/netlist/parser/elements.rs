@@ -786,10 +786,22 @@ pub(super) fn parse_bjt(
 
     // BJT can have optional substrate node: Q1 C B E [S] model
     // We need to peek ahead to determine if next is substrate or model
-    let (substrate, model) = match &stream.peek().kind {
+    let (substrate, mut model) = match &stream.peek().kind {
         TokenKind::Number(_) => {
             // It's a numeric node (substrate like "0")
             let substrate = expect_node(stream, line_num)?;
+            let model = expect_ident(stream, line_num)?;
+            (Some(substrate), model)
+        }
+        TokenKind::LBracket => {
+            stream.advance();
+            let substrate = expect_node(stream, line_num)?;
+            if !stream.consume(&TokenKind::RBracket) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected closing ']' after BJT substrate node".to_string(),
+                });
+            }
             let model = expect_ident(stream, line_num)?;
             (Some(substrate), model)
         }
@@ -852,9 +864,24 @@ pub(super) fn parse_bjt(
         }
     };
 
+    let mut thermal = None;
+    if substrate.is_some() {
+        if let TokenKind::Ident(next_model) = &stream.peek().kind {
+            let next_upper = next_model.to_ascii_uppercase();
+            if !matches!(stream.peek_n(1).kind, TokenKind::Equals) && next_upper != "OFF" {
+                thermal = Some(model);
+                model = next_model.clone();
+                stream.advance();
+            }
+        }
+    }
+
     let mut nodes = vec![collector, base, emitter];
     if let Some(sub) = substrate {
         nodes.push(sub);
+    }
+    if let Some(thermal) = thermal {
+        nodes.push(thermal);
     }
 
     let mut instance_params = Vec::new();
@@ -969,6 +996,7 @@ pub(super) fn parse_mosfet(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    _diagnostics: &mut Vec<ParseDiagnostic>,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
@@ -1419,6 +1447,14 @@ pub(super) fn parse_lossy_tline(
     params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
+    if let Some(keyword) = xyce_ydevice_keyword(&name) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{keyword} is an unsupported Xyce Y-device keyword with no native implementation yet; refusing to parse it as a Y-line transmission line"
+            ),
+        });
+    }
     let port1_pos = expect_node(stream, line_num)?;
     let port1_neg = expect_node(stream, line_num)?;
     let port2_pos = expect_node(stream, line_num)?;
@@ -1445,6 +1481,30 @@ pub(super) fn parse_lossy_tline(
     });
 
     Ok(())
+}
+
+fn xyce_ydevice_keyword(name: &str) -> Option<&'static str> {
+    let upper = name.to_ascii_uppercase();
+    match upper.as_str() {
+        "YACC" => Some("YACC"),
+        "YADC" => Some("YADC"),
+        "YAND" => Some("YAND"),
+        "YDAC" => Some("YDAC"),
+        "YDELAY" => Some("YDELAY"),
+        "YDFF" => Some("YDFF"),
+        "YLIN" => Some("YLIN"),
+        "YMEMRISTOR" => Some("YMEMRISTOR"),
+        "YNAND" => Some("YNAND"),
+        "YNEURON" => Some("YNEURON"),
+        "YNOT" => Some("YNOT"),
+        "YOR" => Some("YOR"),
+        "YPDE" => Some("YPDE"),
+        "YRXN" => Some("YRXN"),
+        "YSYNAPSE" => Some("YSYNAPSE"),
+        "YTRANSLINE" => Some("YTRANSLINE"),
+        "YXOR" => Some("YXOR"),
+        _ => None,
+    }
 }
 
 /// Parse coupled transmission lines (P element)

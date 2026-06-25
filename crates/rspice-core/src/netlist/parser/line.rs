@@ -240,6 +240,7 @@ pub(super) fn process_line(
             let global_nodes = &mut state.global_nodes;
             let saves = &mut state.saves;
             let options = &mut state.options;
+            let diagnostics = &mut state.diagnostics;
             let spef_includes = &mut state.spef_includes;
             let frame = state
                 .subckt_stack
@@ -264,6 +265,7 @@ pub(super) fn process_line(
                     global_nodes,
                     saves,
                     options,
+                    diagnostics,
                     spef_includes,
                 },
             )?;
@@ -289,6 +291,7 @@ pub(super) fn process_line(
             global_nodes: &mut state.global_nodes,
             saves: &mut state.saves,
             options: &mut state.options,
+            diagnostics: &mut state.diagnostics,
             spef_includes: &mut state.spef_includes,
         },
     )
@@ -312,6 +315,7 @@ pub(super) fn parse_line(
         global_nodes,
         saves,
         options,
+        diagnostics,
         spef_includes,
     } = context;
 
@@ -353,6 +357,7 @@ pub(super) fn parse_line(
                 measurements,
                 saves,
                 options,
+                diagnostics,
                 spef_includes,
             },
         ),
@@ -398,6 +403,7 @@ pub(super) fn parse_line(
             line_num,
             elements,
             params,
+            diagnostics,
             defer_simple_param_refs,
         ),
         'J' => parse_jfet(

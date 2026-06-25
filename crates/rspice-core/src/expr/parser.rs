@@ -566,7 +566,11 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Check for TIME or FREQ
+        // Check for constants and analysis variables.
+        if upper == "PI" {
+            return Expr::Const(std::f64::consts::PI);
+        }
+
         if upper == "TIME" || upper == "T" {
             return Expr::Time;
         }
@@ -709,6 +713,11 @@ mod tests {
         assert_eq!(eval_const("2**-2"), 0.25);
         assert_eq!(eval_const("-2**2"), -4.0);
         assert_eq!(eval_const("2**3**2"), 64.0);
+    }
+
+    #[test]
+    fn pi_constant_matches_xyce_expression_semantics() {
+        assert!((eval_const("sin(pi/2)") - 1.0).abs() < 1.0e-15);
     }
 
     #[test]

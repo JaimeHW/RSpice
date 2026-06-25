@@ -18,6 +18,7 @@ pub(super) fn parse_command(
         measurements,
         saves,
         options,
+        diagnostics,
         spef_includes,
     } = context;
 
@@ -220,9 +221,14 @@ pub(super) fn parse_command(
         ".TF" => {
             analyses.push(parse_tf_command(stream, line_num)?);
         }
-        ".OPTIONS" | ".OPTION" | ".OPT" => {
-            parse_options_command(stream, line_num, params, options, unknown_warned)?;
-        }
+        ".OPTIONS" | ".OPTION" | ".OPT" => parse_options_command(
+            stream,
+            line_num,
+            params,
+            options,
+            unknown_warned,
+            diagnostics,
+        )?,
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
             measurements.push(parse_meas_command(stream, line_num, params)?);
@@ -240,10 +246,16 @@ pub(super) fn parse_command(
             // happen; that must be visible, not a debug-level whisper.
             let key = cmd.to_ascii_uppercase();
             if unknown_warned.insert(key) {
-                log::warn!(
-                    "line {line_num}: unsupported dot-command '{cmd}' ignored - \
-                     whatever it requests (analysis, option, output) will not run"
+                let message = format!(
+                    "unsupported dot-command '{cmd}' ignored; whatever it requests \
+                     (analysis, option, output) will not run"
                 );
+                log::warn!("line {line_num}: {message}");
+                diagnostics.push(ParseDiagnostic::warning(
+                    line_num,
+                    "unsupported-dot-command",
+                    message,
+                ));
             }
             require_line_consumed = false;
         }
@@ -283,6 +295,7 @@ fn reject_unconsumed_command_tokens(
 /// - `v(node)` / `v(a,b)` — also when the lexer splits them into
 ///   `v ( node )` token runs
 /// - `i(elem)`
+/// - `n(dev:param)` - Xyce-style native device output variable
 /// - `@dev[param]`
 /// - bare vector names (`out` is shorthand for `v(out)`)
 ///
@@ -331,7 +344,7 @@ pub(super) fn parse_save_command(
 
                 // `v(...)` / `i(...)` may arrive either as one identifier or
                 // as an identifier followed by a parenthesized token run.
-                let is_probe_prefix = upper == "V" || upper == "I";
+                let is_probe_prefix = upper == "V" || upper == "I" || upper == "N";
                 if is_probe_prefix && matches!(stream.peek().kind, TokenKind::LParen) {
                     let mut probe = raw.clone();
                     probe.push('(');
@@ -446,8 +459,8 @@ pub(super) fn parse_save_command(
     Ok(())
 }
 
-/// Parse a single textual probe (`v(out)`, `v(a,b)`, `i(v1)`, `@m1[id]`, or a
-/// bare vector name) into a [`super::SaveSignal`].
+/// Parse a single textual probe (`v(out)`, `v(a,b)`, `i(v1)`, `n(m1:id)`,
+/// `@m1[id]`, or a bare vector name) into a [`super::SaveSignal`].
 ///
 /// Public (via the netlist module) so frontends can build a
 /// [`super::SaveSet`] from user-supplied probe specs — e.g. the CLI
@@ -480,6 +493,20 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
         return Some(SaveSignal::Current(inner.to_string()));
     }
 
+    if let Some(inner) = lower.strip_prefix("n(").and_then(|s| s.strip_suffix(')')) {
+        if let Some((device, param)) = inner.split_once(':') {
+            let device = device.trim();
+            let param = param.trim();
+            if !device.is_empty() && !param.is_empty() {
+                return Some(SaveSignal::DeviceParam {
+                    device: device.to_string(),
+                    param: param.to_string(),
+                });
+            }
+        }
+        return None;
+    }
+
     if let Some(rest) = lower.strip_prefix('@') {
         if let Some((device, param)) = rest
             .split_once('[')
@@ -502,6 +529,7 @@ pub(super) fn parse_options_command(
     params: &ParamContext,
     options: &mut super::SimulationOptions,
     unknown_warned: &mut std::collections::HashSet<String>,
+    diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Result<(), ParseError> {
     while !stream.is_eof() {
         skip_commas(stream);
@@ -615,7 +643,13 @@ pub(super) fn parse_options_command(
                 // compatibility knobs misleads users into thinking they took
                 // effect, so say so once per key.
                 if unknown_warned.insert(format!(".options {key_upper}")) {
-                    log::warn!("line {line_num}: unknown .options key '{key}' ignored");
+                    let message = format!("unknown .options key '{key}' ignored");
+                    log::warn!("line {line_num}: {message}");
+                    diagnostics.push(ParseDiagnostic::warning(
+                        line_num,
+                        "unknown-option",
+                        message,
+                    ));
                 }
                 if has_equals
                     && try_value(stream, params).is_none()

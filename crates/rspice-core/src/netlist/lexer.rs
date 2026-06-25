@@ -235,15 +235,18 @@ impl<'a> Lexer<'a> {
         Ok((TokenKind::Ident(ident.to_uppercase()), end))
     }
 
-    /// Try to parse number, but if it looks like a model name (e.g. "1N4148"), parse as identifier
+    /// Try to parse a number, but keep digit-leading alphanumeric tokens as
+    /// identifiers in ambiguous cases. Parser value contexts call
+    /// `parse_spice_value` for numeric-looking identifiers, while node/model
+    /// contexts need to preserve names like `1A` and `1N4148`.
     fn parse_number_or_ident(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
-        // First, scan ahead to see if this looks like a model name (digit followed by letter then more chars)
-        // Examples: 1N4148, 2N2222, 2SA1015
         let chars: Vec<char> = input.chars().collect();
         let mut i = 0;
 
         // Skip optional leading sign
+        let mut had_sign = false;
         if i < chars.len() && (chars[i] == '-' || chars[i] == '+') {
+            had_sign = true;
             i += 1;
         }
 
@@ -251,6 +254,20 @@ impl<'a> Lexer<'a> {
         let digit_start = i;
         while i < chars.len() && chars[i].is_ascii_digit() {
             i += 1;
+        }
+
+        // Unsigned digit-leading names are legal SPICE node/model names
+        // (`1A`, `2N2222`). Preserve them as identifiers; value parsers still
+        // resolve `1A`, `4U`, `10V`, etc. through parse_spice_value. Keep
+        // scientific notation on the numeric path.
+        if !had_sign && i < chars.len() && i > digit_start {
+            let next_char = chars[i].to_ascii_uppercase();
+            let sci_exp = next_char == 'E'
+                && i + 1 < chars.len()
+                && (chars[i + 1].is_ascii_digit() || chars[i + 1] == '+' || chars[i + 1] == '-');
+            if next_char.is_ascii_alphabetic() && !sci_exp {
+                return self.parse_ident(input);
+            }
         }
 
         // If followed by a letter that's NOT a valid SPICE suffix start or E (exponent),
@@ -818,6 +835,16 @@ mod tests {
     #[test]
     fn braced_expressions_keep_multibyte_content() {
         assert_eq!(expression_tokens("R1 a b {µ0*2}"), ["µ0*2"]);
+    }
+
+    #[test]
+    fn digit_leading_node_names_remain_identifiers() {
+        let tokens = tokenize("VMON 1 1a 0v\n").expect("tokenize");
+
+        assert_eq!(tokens[1].kind, TokenKind::Number(1.0));
+        assert_eq!(tokens[2].kind, TokenKind::Ident("1A".to_string()));
+        assert_eq!(tokens[3].kind, TokenKind::Ident("0V".to_string()));
+        assert_eq!(parse_spice_value("0V").expect("0V parses"), 0.0);
     }
 
     #[test]
