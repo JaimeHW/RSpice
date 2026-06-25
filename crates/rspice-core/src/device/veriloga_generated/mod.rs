@@ -7,11 +7,13 @@
 use crate::Value;
 use crate::solver::{ComplexMatrix, StaticMatrix};
 
+pub(crate) mod support;
+
 pub mod builtins {
     include!("registry.rs");
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BuiltinVerilogAInstance {
     pub model_name: &'static str,
     pub instance_name: String,
@@ -19,6 +21,18 @@ pub struct BuiltinVerilogAInstance {
     pub branches: Vec<usize>,
     temperature: Value,
     kind: builtins::GeneratedBuiltinKind,
+}
+
+impl std::fmt::Debug for BuiltinVerilogAInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BuiltinVerilogAInstance")
+            .field("model_name", &self.model_name)
+            .field("instance_name", &self.instance_name)
+            .field("nodes", &self.nodes)
+            .field("branches", &self.branches)
+            .field("temperature", &self.temperature)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -403,6 +417,119 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
+    pub fn stamp_current_dense(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        value: Value,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+        derivative_scale: Value,
+    ) {
+        let mut equivalent = value;
+        for (index, derivative) in node_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            let node = nodes.get(index).copied().unwrap_or(0);
+            equivalent -= derivative * self.axis_value(GeneratedDerivativeAxis::Node(node));
+        }
+        for (index, derivative) in branch_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            let branch = branches.get(index).copied().unwrap_or(0);
+            equivalent -= derivative * self.axis_value(GeneratedDerivativeAxis::Branch(branch));
+        }
+
+        if let Some(row) = pos {
+            self.stamp_current_dense_row(
+                row,
+                1.0,
+                equivalent,
+                nodes,
+                node_derivatives,
+                branches,
+                branch_derivatives,
+                derivative_scale,
+            );
+        }
+        if let Some(row) = neg {
+            self.stamp_current_dense_row(
+                row,
+                -1.0,
+                equivalent,
+                nodes,
+                node_derivatives,
+                branches,
+                branch_derivatives,
+                derivative_scale,
+            );
+        }
+    }
+
+    #[inline]
+    fn stamp_current_dense_row(
+        &mut self,
+        row_node: usize,
+        row_sign: Value,
+        equivalent: Value,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+        derivative_scale: Value,
+    ) {
+        if row_node == 0 {
+            return;
+        }
+        let row = row_node - 1;
+        for (index, derivative) in node_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            let node = nodes.get(index).copied().unwrap_or(0);
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Node(node)) {
+                match &mut self.matrix {
+                    GeneratedMatrixTarget::Static(matrix) => {
+                        matrix.add(row, col, row_sign * derivative);
+                    }
+                    GeneratedMatrixTarget::AcReal(matrix) => {
+                        matrix.add_real(row, col, row_sign * derivative);
+                    }
+                }
+            }
+        }
+        for (index, derivative) in branch_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            let branch = branches.get(index).copied().unwrap_or(0);
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Branch(branch)) {
+                match &mut self.matrix {
+                    GeneratedMatrixTarget::Static(matrix) => {
+                        matrix.add(row, col, row_sign * derivative);
+                    }
+                    GeneratedMatrixTarget::AcReal(matrix) => {
+                        matrix.add_real(row, col, row_sign * derivative);
+                    }
+                }
+            }
+        }
+        if let Some(rhs) = &mut self.rhs
+            && let Some(slot) = rhs.get_mut(row)
+        {
+            *slot += -row_sign * equivalent;
+        }
+    }
+
+    #[inline]
     fn stamp_current_row(
         &mut self,
         row_node: usize,
@@ -472,6 +599,47 @@ impl<'a> GeneratedStamper<'a> {
         for derivative in derivatives {
             if let Some(col) = self.axis_matrix_index(derivative.axis) {
                 self.add_real(row, col, -derivative.value);
+            }
+        }
+        if let Some(rhs) = &mut self.rhs
+            && let Some(slot) = rhs.get_mut(row)
+        {
+            *slot += equivalent;
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_dense(
+        &mut self,
+        branch_ordinal: usize,
+        value: Value,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        let mut equivalent = value;
+        for (index, derivative) in node_derivatives.iter().copied().enumerate() {
+            if derivative == 0.0 {
+                continue;
+            }
+            let node = nodes.get(index).copied().unwrap_or(0);
+            equivalent -= derivative * self.axis_value(GeneratedDerivativeAxis::Node(node));
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Node(node)) {
+                self.add_real(row, col, -derivative);
+            }
+        }
+        for (index, derivative) in branch_derivatives.iter().copied().enumerate() {
+            if derivative == 0.0 {
+                continue;
+            }
+            let branch = branches.get(index).copied().unwrap_or(0);
+            equivalent -= derivative * self.axis_value(GeneratedDerivativeAxis::Branch(branch));
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Branch(branch)) {
+                self.add_real(row, col, -derivative);
             }
         }
         if let Some(rhs) = &mut self.rhs
@@ -552,6 +720,80 @@ impl<'a> GeneratedReactiveStamper<'a> {
     }
 
     #[inline]
+    pub fn stamp_current_reactive_dense(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+        derivative_scale: Value,
+    ) {
+        if let Some(row) = pos {
+            self.stamp_current_reactive_dense_row(
+                row,
+                1.0,
+                nodes,
+                node_derivatives,
+                branches,
+                branch_derivatives,
+                derivative_scale,
+            );
+        }
+        if let Some(row) = neg {
+            self.stamp_current_reactive_dense_row(
+                row,
+                -1.0,
+                nodes,
+                node_derivatives,
+                branches,
+                branch_derivatives,
+                derivative_scale,
+            );
+        }
+    }
+
+    #[inline]
+    fn stamp_current_reactive_dense_row(
+        &mut self,
+        row_node: usize,
+        row_sign: Value,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+        derivative_scale: Value,
+    ) {
+        if row_node == 0 {
+            return;
+        }
+        let row = row_node - 1;
+        for (index, derivative) in node_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            let node = nodes.get(index).copied().unwrap_or(0);
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Node(node)) {
+                self.matrix
+                    .add_imag(row, col, row_sign * self.omega * derivative);
+            }
+        }
+        for (index, derivative) in branch_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            let branch = branches.get(index).copied().unwrap_or(0);
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Branch(branch)) {
+                self.matrix
+                    .add_imag(row, col, row_sign * self.omega * derivative);
+            }
+        }
+    }
+
+    #[inline]
     fn stamp_current_reactive_row(
         &mut self,
         row_node: usize,
@@ -583,6 +825,38 @@ impl<'a> GeneratedReactiveStamper<'a> {
             if let Some(col) = self.axis_matrix_index(derivative.axis) {
                 self.matrix
                     .add_imag(row, col, -self.omega * derivative.value);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_dense(
+        &mut self,
+        branch_ordinal: usize,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        for (index, derivative) in node_derivatives.iter().copied().enumerate() {
+            if derivative == 0.0 {
+                continue;
+            }
+            let node = nodes.get(index).copied().unwrap_or(0);
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Node(node)) {
+                self.matrix.add_imag(row, col, -self.omega * derivative);
+            }
+        }
+        for (index, derivative) in branch_derivatives.iter().copied().enumerate() {
+            if derivative == 0.0 {
+                continue;
+            }
+            let branch = branches.get(index).copied().unwrap_or(0);
+            if let Some(col) = self.axis_matrix_index(GeneratedDerivativeAxis::Branch(branch)) {
+                self.matrix.add_imag(row, col, -self.omega * derivative);
             }
         }
     }
