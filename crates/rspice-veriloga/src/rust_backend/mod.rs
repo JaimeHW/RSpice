@@ -7,7 +7,9 @@ mod names;
 
 pub use discover::{VerilogASourceCandidate, discover_veriloga_sources};
 pub use error::RustBackendError;
-pub use files::write_generated_device;
+pub use files::{
+    cleanup_stale_generated_device_folders, write_generated_device, write_text_file_if_changed,
+};
 pub use names::{RustDeviceNames, sanitize_identifier};
 
 use crate::canonical_ir::CanonicalIrArtifact;
