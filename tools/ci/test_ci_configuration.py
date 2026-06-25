@@ -55,6 +55,23 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
             r"- name: Clear check artifacts before tests\s+run: cargo clean",
         )
+        self.assertNotIn(
+            "cargo test --workspace --exclude rspice-python --exclude rspice-wasm\n"
+            "          -- --skip test_ngspice_ --skip test_full_ngspice",
+            workflow,
+            "Linux fast CI should not link every workspace test target in one cargo invocation",
+        )
+        self.assertIn("Test core integration tests (fast tier)", workflow)
+        self.assertIn("cargo test -p rspice-core --tests", workflow)
+        self.assertIn("Test non-UI crates (fast tier)", workflow)
+        self.assertIn("cargo test -p rspice-cli -p rspice-veriloga -p rspice-bench", workflow)
+        self.assertIn("Test UI library (Linux)", workflow)
+        self.assertIn("cargo test -p rspice-ui --lib", workflow)
+        self.assertGreaterEqual(
+            workflow.count("run: cargo clean"),
+            3,
+            "Linux fast CI should clean between heavy test groups to stay within runner disk",
+        )
         self.assertRegex(
             workflow,
             r"- name: Format\s+run: cargo fmt --all -- --check",

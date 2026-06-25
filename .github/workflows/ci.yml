@@ -53,16 +53,24 @@ jobs:
         run: cargo clippy --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
       - name: Clear check artifacts before tests
         run: cargo clean
-      - name: Test (fast tier)
+      - name: Test core integration tests (fast tier)
         # Skip only the vendored conformance suites (their test names start
         # with test_ngspice_ / test_full_ngspice). A bare "ngspice" filter
         # used to swallow seven oracle-pinned tests in unrelated files whose
         # names merely mention ngspice.
         run: >-
-          cargo test --workspace --exclude rspice-python --exclude rspice-wasm
+          cargo test -p rspice-core --tests
           -- --skip test_ngspice_ --skip test_full_ngspice
       - name: Core library unit tests
         run: cargo test -p rspice-core --lib
+      - name: Clear core test artifacts
+        run: cargo clean
+      - name: Test non-UI crates (fast tier)
+        run: cargo test -p rspice-cli -p rspice-veriloga -p rspice-bench
+      - name: Clear non-UI test artifacts
+        run: cargo clean
+      - name: Test UI library (Linux)
+        run: cargo test -p rspice-ui --lib
 
   test-windows:
     name: Build & unit test (Windows)
