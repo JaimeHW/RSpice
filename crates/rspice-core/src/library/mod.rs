@@ -16,8 +16,10 @@
 pub mod lib_parser;
 mod manager;
 mod parser;
+mod veriloga_discovery;
 
 pub use lib_parser::{
     LibParseResult, LibParser, LibSection, ParseError, ParsedModel, ParsedSubcircuit,
 };
 pub use manager::{LibraryManager, ModelDefinition, ModelType, SubcircuitDefinition};
+pub use veriloga_discovery::{VerilogAModelEntry, discover_veriloga_models};

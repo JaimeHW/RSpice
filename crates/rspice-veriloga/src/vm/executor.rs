@@ -54,22 +54,31 @@ impl<'a> Vm<'a> {
                 self.stack.push(*v);
             }
             Instruction::PushParam(idx) => {
-                let v = self.context.parameters.get(*idx).copied().unwrap_or(0.0);
+                let v = self
+                    .context
+                    .parameters
+                    .get(*idx)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing parameter slot"))?;
                 self.stack.push(v);
             }
             Instruction::PushParamGiven(idx) => {
-                let v = if self.context.is_param_given(*idx) {
-                    1.0
-                } else {
-                    0.0
-                };
+                let given = self
+                    .context
+                    .param_given
+                    .get(*idx)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing parameter-given slot"))?;
+                let v = if given { 1.0 } else { 0.0 };
                 self.stack.push(v);
             }
             Instruction::PushVoltage(pos, neg) => {
-                self.stack.push(self.context.voltage(*pos, *neg));
+                let v = self.context.try_voltage(*pos, *neg)?;
+                self.stack.push(v);
             }
             Instruction::PushCurrent(pos, neg) => {
-                self.stack.push(self.context.current(*pos, *neg));
+                let v = self.context.try_current(*pos, *neg)?;
+                self.stack.push(v);
             }
             Instruction::PushBranchCurrent(k) => {
                 let v = self
@@ -77,14 +86,25 @@ impl<'a> Vm<'a> {
                     .branch_current_values
                     .get(*k)
                     .copied()
-                    .unwrap_or(0.0);
+                    .ok_or(VmError::InvalidInstruction("missing branch-current slot"))?;
                 self.stack.push(v);
             }
             Instruction::PushInternalVoltage(idx) => {
-                self.stack.push(self.context.internal_voltage(*idx));
+                let v = self
+                    .context
+                    .internal_voltages
+                    .get(*idx)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing internal-voltage slot"))?;
+                self.stack.push(v);
             }
             Instruction::PushVariable(idx) => {
-                let v = self.context.variables.get(*idx).copied().unwrap_or(0.0);
+                let v = self
+                    .context
+                    .variables
+                    .get(*idx)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing variable slot"))?;
                 self.stack.push(v);
             }
             Instruction::PushVariableDyn { base, len, lower } => {
@@ -93,7 +113,12 @@ impl<'a> Vm<'a> {
                     .pop()
                     .ok_or(VmError::StackUnderflow("PushVariableDyn"))?;
                 let slot = Self::array_slot(raw, *base, *len, *lower)?;
-                let v = self.context.variables.get(slot).copied().unwrap_or(0.0);
+                let v = self
+                    .context
+                    .variables
+                    .get(slot)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing dynamic variable slot"))?;
                 self.stack.push(v);
             }
             Instruction::PushTime => {
@@ -102,13 +127,20 @@ impl<'a> Vm<'a> {
             Instruction::PushMfactor => {
                 self.stack.push(self.context.multiplicity);
             }
+            Instruction::PushPortConnected(terminal) => {
+                self.stack.push(if self.context.port_connected(*terminal) {
+                    1.0
+                } else {
+                    0.0
+                });
+            }
             Instruction::ZiState(filter_id) => {
                 let input = self.pop()?;
                 let time = self.context.time;
                 let transient = self.context.analysis_type == 2;
                 let output = match self.context.zi_filters.get_mut(*filter_id) {
                     Some(filter) => filter.eval(input, time, transient),
-                    None => 0.0,
+                    None => return Err(VmError::InvalidInstruction("missing zi filter")),
                 };
                 self.stack.push(output);
             }
@@ -334,12 +366,12 @@ impl<'a> Vm<'a> {
             // Slope of a lookup table at the input point
             Instruction::TableDerivative(table_id) => {
                 let input = self.pop()?;
-                let result = self
+                let table = self
                     .context
                     .lookup_tables
                     .get(*table_id)
-                    .map(|table| table.derivative(input))
-                    .unwrap_or(0.0);
+                    .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
+                let result = table.derivative(input);
                 self.stack.push(result);
             }
 
@@ -378,17 +410,12 @@ impl<'a> Vm<'a> {
             // Uses context.lookup_tables for table storage
             Instruction::TableLookup(table_id) => {
                 let input = self.pop()?;
-
-                // Get the lookup table from context
-                let result = if let Some(table) = self.context.lookup_tables.get(*table_id) {
-                    // Use the commercial-grade LookupTable interpolation
-                    table.interpolate(input)
-                } else {
-                    // Table not found - return 0 with warning
-                    // In production, this should be caught at compile time
-                    0.0
-                };
-
+                let table = self
+                    .context
+                    .lookup_tables
+                    .get(*table_id)
+                    .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
+                let result = table.interpolate(input);
                 self.stack.push(result);
             }
 
@@ -617,14 +644,14 @@ impl<'a> Vm<'a> {
                     if let Some(filter) = self.context.laplace_filters.get_mut(*filter_id) {
                         filter.step(input, self.context.timestep)
                     } else {
-                        input
+                        return Err(VmError::InvalidInstruction("missing laplace filter"));
                     }
                 } else {
                     // DC and others (s=0)
                     if let Some(filter) = self.context.laplace_filters.get(*filter_id) {
                         filter.dc_output(input)
                     } else {
-                        input
+                        return Err(VmError::InvalidInstruction("missing laplace filter"));
                     }
                 };
                 self.stack.push(result);
@@ -662,5 +689,204 @@ impl<'a> Vm<'a> {
         let a = self.pop()?;
         self.stack.push(f(a, b));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn execute(instructions: Vec<Instruction>) -> Result<f64, VmError> {
+        let mut context = VmContext::default();
+        let mut vm = Vm::new(&mut context);
+        vm.execute(&BytecodeProgram { instructions })
+    }
+
+    fn execute_with_context(
+        context: &mut VmContext,
+        instructions: Vec<Instruction>,
+    ) -> Result<f64, VmError> {
+        let mut vm = Vm::new(context);
+        vm.execute(&BytecodeProgram { instructions })
+    }
+
+    #[test]
+    fn missing_parameter_slot_is_a_vm_error() {
+        let err = execute(vec![Instruction::PushParam(0)])
+            .expect_err("missing parameter slot must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_param_given_slot_is_a_vm_error() {
+        let err = execute(vec![Instruction::PushParamGiven(0)])
+            .expect_err("missing $param_given slot must not evaluate as false");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_variable_slot_is_a_vm_error() {
+        let err = execute(vec![Instruction::PushVariable(0)])
+            .expect_err("missing variable slot must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_internal_voltage_slot_is_a_vm_error() {
+        let err = execute(vec![Instruction::PushInternalVoltage(0)])
+            .expect_err("missing internal voltage slot must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_voltage_to_ground_evaluates_from_context() {
+        let mut context = VmContext::new(1);
+        context.voltages[0] = 3.25;
+
+        let value =
+            execute_with_context(&mut context, vec![Instruction::PushVoltage(0, usize::MAX)])
+                .expect("terminal-to-ground voltage should evaluate");
+
+        assert_eq!(value, 3.25);
+    }
+
+    #[test]
+    fn missing_internal_node_voltage_in_push_voltage_is_a_vm_error() {
+        let mut context = VmContext::new(1);
+
+        let err = execute_with_context(&mut context, vec![Instruction::PushVoltage(1, usize::MAX)])
+            .expect_err("missing internal-node voltage must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_branch_current_slot_is_a_vm_error() {
+        let err = execute(vec![Instruction::PushBranchCurrent(0)])
+            .expect_err("missing branch current slot must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_pair_current_uses_exact_pair_and_orientation() {
+        let mut context = VmContext::new(2);
+        context.currents.push(123.0);
+        context.set_branch_current(0, 1, 4.25);
+
+        let forward = execute_with_context(&mut context, vec![Instruction::PushCurrent(0, 1)])
+            .expect("exact terminal-pair current should evaluate");
+        assert_eq!(forward, 4.25);
+
+        let reverse = execute_with_context(&mut context, vec![Instruction::PushCurrent(1, 0)])
+            .expect("reverse terminal-pair current should evaluate");
+        assert_eq!(reverse, -4.25);
+    }
+
+    #[test]
+    fn missing_terminal_pair_current_is_a_vm_error() {
+        let mut context = VmContext::new(2);
+        context.currents.push(123.0);
+
+        let err = execute_with_context(&mut context, vec![Instruction::PushCurrent(0, 1)])
+            .expect_err("missing terminal-pair current must not alias first current");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_dynamic_variable_slot_is_a_vm_error() {
+        let err = execute(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushVariableDyn {
+                base: 0,
+                len: 1,
+                lower: 1,
+            },
+        ])
+        .expect_err("missing dynamic variable slot must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_lookup_table_is_a_vm_error() {
+        let err = execute(vec![
+            Instruction::PushConst(0.5),
+            Instruction::TableLookup(0),
+        ])
+        .expect_err("missing lookup table must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_table_derivative_is_a_vm_error() {
+        let err = execute(vec![
+            Instruction::PushConst(0.5),
+            Instruction::TableDerivative(0),
+        ])
+        .expect_err("missing table derivative must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_zi_filter_is_a_vm_error() {
+        let err = execute(vec![Instruction::PushConst(1.0), Instruction::ZiState(0)])
+            .expect_err("missing zi filter must not evaluate as zero");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_laplace_filter_is_a_vm_error() {
+        let err = execute(vec![
+            Instruction::PushConst(1.0),
+            Instruction::LaplaceState(0),
+        ])
+        .expect_err("missing laplace filter must not pass the input through");
+
+        assert!(
+            matches!(err, VmError::InvalidInstruction(_)),
+            "expected invalid instruction error, got {err:?}"
+        );
     }
 }

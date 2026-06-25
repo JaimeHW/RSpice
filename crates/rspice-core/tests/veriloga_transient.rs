@@ -6,7 +6,9 @@
 //! and the backward-Euler ddt() state pipeline.
 #![cfg(feature = "veriloga")]
 
-use rspice_core::{Engine, Netlist};
+use rspice_core::{Engine, Netlist, register_precompiled_veriloga_model};
+use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
+use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -72,6 +74,137 @@ endmodule
     );
 
     let _ = std::fs::remove_file(model);
+}
+
+/// Optional trailing terminals must remain observable to Verilog-A through
+/// `$port_connected`; omitting `opt` below selects the weak conductance path.
+#[test]
+fn veriloga_optional_trailing_terminal_is_marked_unconnected() {
+    let model = write_model(
+        "optg",
+        r#"
+`include "disciplines.vams"
+module va_optional_g(p, n, opt);
+    inout p, n, opt;
+    electrical p, n, opt;
+    analog I(p, n) <+ ($port_connected(opt) ? 1e-3 : 1e-6) * V(p, n);
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* veriloga optional terminal\n\
+         V1 in 0 1.0\n\
+         R1 in out 1k\n\
+         XG1 out 0 va_optional_g\n\
+         .va \"{}\" va_optional_g\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 1e-4, 1e-5)
+        .expect("transient run");
+
+    let out = node_series(&result.node_names, &result.voltages, "out");
+    let v_final = *out.last().expect("samples");
+    let expected = 1.0e6 / (1.0e3 + 1.0e6);
+    assert!(
+        (v_final - expected).abs() < 1e-6,
+        "omitted optional terminal should select weak path: got {v_final}, want {expected}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn veriloga_runtime_stamp_errors_are_simulation_errors_not_panics() {
+    let model = write_model(
+        "runtime_oob",
+        r#"
+`include "disciplines.vams"
+
+module va_runtime_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = (V(p, n) > 0.5) ? 5 : 1;
+        w[i] = 1.0e-3;
+        I(p, n) <+ w[i] * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* veriloga runtime diagnostic\n\
+         V1 in 0 1.0\n\
+         XBAD in 0 va_runtime_oob\n\
+         .va \"{}\" va_runtime_oob\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = std::panic::catch_unwind(|| Engine::default().run_dc_op(&netlist));
+
+    let _ = std::fs::remove_file(model);
+
+    let result = result.expect("Verilog-A runtime stamp errors must not panic");
+    let err = result.expect_err("runtime stamp error must be reported to the caller");
+    let text = err.to_string();
+    assert!(
+        text.contains("Verilog-A") && (text.contains("Array index 5") || text.contains("[1:4]")),
+        "diagnostic should identify the Verilog-A array bounds error, got: {text}"
+    );
+}
+
+#[test]
+fn veriloga_dependent_parameter_default_errors_are_simulation_errors_not_zeroed() {
+    let source = r#"
+`include "disciplines.vams"
+module va_bad_default(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real w = 1.0 from (0:inf);
+    parameter real r = 10.0 / w from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#;
+    let model_path = write_model("bad_default", source);
+    let mut compiled = VerilogACompiler::new(CompilerOptions::default())
+        .compile(source)
+        .expect("model compiles before cache corruption");
+    compiled.parameters[1].default_program = Some(BytecodeProgram {
+        instructions: vec![Instruction::PushParam(99)],
+    });
+    register_precompiled_veriloga_model(&model_path, compiled)
+        .expect("register corrupted precompiled model");
+
+    let deck = format!(
+        "* veriloga dependent default diagnostic\n\
+         V1 in 0 DC 1\n\
+         XBAD in 0 va_bad_default\n\
+         .va \"{}\" va_bad_default\n\
+         .end\n",
+        deck_path(&model_path)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = std::panic::catch_unwind(|| Engine::default().run_dc_op(&netlist));
+
+    let _ = std::fs::remove_file(model_path);
+
+    let result = result.expect("dependent default runtime errors must not panic");
+    let err = result.expect_err("dependent default runtime error must be reported");
+    let text = err.to_string();
+    assert!(
+        text.contains("Verilog-A") && text.contains("parameter"),
+        "diagnostic should identify the Verilog-A parameter default failure, got: {text}"
+    );
 }
 
 /// RC charging: native 1k resistor, Verilog-A 1uF capacitor (ddt-based).

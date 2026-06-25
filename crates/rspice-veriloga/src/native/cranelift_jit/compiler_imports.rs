@@ -94,29 +94,6 @@ impl JitCompiler {
             .map_err(|e| JitError::Module(e.to_string()))?;
         funcs.insert("rspice_laplace_step", id);
 
-        // Import rspice helper functions for PushCurrent lookup
-        // Signature: fn(branch_ptr, branch_len, currents_ptr, currents_len, num_terminals, pos, neg) -> f64
-        let current_lookup_sig = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(ptr_type)); // branch_ptr
-            sig.params.push(AbiParam::new(ptr_type)); // branch_len
-            sig.params.push(AbiParam::new(ptr_type)); // currents_ptr
-            sig.params.push(AbiParam::new(ptr_type)); // currents_len
-            sig.params.push(AbiParam::new(ptr_type)); // num_terminals
-            sig.params.push(AbiParam::new(ptr_type)); // pos
-            sig.params.push(AbiParam::new(ptr_type)); // neg
-            sig.returns.push(AbiParam::new(types::F64));
-            sig
-        };
-        let id = module
-            .declare_function(
-                "rspice_current_lookup",
-                Linkage::Import,
-                &current_lookup_sig,
-            )
-            .map_err(|e| JitError::Module(e.to_string()))?;
-        funcs.insert("rspice_current_lookup", id);
-
         // Import rspice_limexp for limited exponential (prevents overflow)
         // Signature: fn(value: f64) -> f64
         let id = module

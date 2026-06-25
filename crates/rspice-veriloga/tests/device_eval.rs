@@ -4,6 +4,7 @@
 //! the engine solves A*V = z, so a device must stamp G into all rows of its
 //! KCL pair and -/+ Ieq = -/+(I - G*V) into the RHS.
 
+use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
@@ -278,6 +279,33 @@ endmodule
 }
 
 #[test]
+fn ddx_accepts_named_branch_probe() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module ddxbr(p, n);
+    inout p, n;
+    electrical p, n;
+    branch (p, n) sense;
+    real g, h;
+    analog begin
+        g = ddx(V(<sense>) * V(<sense>), V(<sense>));
+        h = ddx(V(sense) * V(sense), V(sense));
+        I(p, n) <+ 0.5 * (g + h) * V(p, n);
+    end
+endmodule
+"#,
+    );
+    let mut device = VerilogADevice::new("DXB1", model, &[1, 0]);
+    device.update_voltages(&[3.0]);
+    let currents = device.evaluate();
+
+    assert!((device.variable("g").unwrap() - 6.0).abs() < 1e-12);
+    assert!((device.variable("h").unwrap() - 6.0).abs() < 1e-12);
+    assert!((currents[0] - 18.0).abs() < 1e-9, "got {}", currents[0]);
+}
+
+#[test]
 fn voltage_contribution_stamps_branch_unknown() {
     let model = compile(
         r#"
@@ -337,6 +365,34 @@ endmodule
         (matrix[&(2, 2)] + 2000.0).abs() < 1e-9,
         "got {:?}",
         matrix.get(&(2, 2))
+    );
+}
+
+#[test]
+fn try_stamp_reports_missing_branch_current_solution_slot() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module zres(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2000.0 from (0:inf);
+    analog V(p, n) <+ I(p, n) * r;
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("Z1", model, &[1, 2]);
+    device.set_branch_current_indices(&[3]);
+
+    let err = device
+        .try_stamp(&[1.0, 0.5], |_, _, _| {}, |_, _| {})
+        .expect_err("missing branch-current solution slot must be reported");
+
+    assert!(
+        err.to_string()
+            .contains("missing branch-current solution slot"),
+        "unexpected error: {err}"
     );
 }
 
@@ -442,6 +498,33 @@ endmodule
 }
 
 #[test]
+fn try_new_reports_dependent_parameter_default_runtime_errors() {
+    let mut model = compile(
+        r#"
+`include "disciplines.vams"
+module bad_default(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real w = 1.0 from (0:inf);
+    parameter real r = 10.0 / w from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#,
+    );
+    model.parameters[1].default_program = Some(BytecodeProgram {
+        instructions: vec![Instruction::PushParam(99)],
+    });
+
+    let err = VerilogADevice::try_new("BD1", model, &[1, 0])
+        .expect_err("checked construction must report invalid dependent parameter defaults");
+    let text = err.to_string();
+    assert!(
+        text.contains("parameter") || text.contains("Invalid instruction"),
+        "diagnostic should identify the dependent default failure, got: {text}"
+    );
+}
+
+#[test]
 fn param_given_reflects_instance_overrides() {
     let model = compile(
         r#"
@@ -472,6 +555,240 @@ endmodule
     device.set_parameter("rknob", 1.0);
     device.update_voltages(&[2.0]);
     assert!((device.evaluate()[0] - 2.0).abs() < 1e-12);
+}
+
+#[test]
+fn port_connected_reflects_omitted_trailing_terminal() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module optional_port_probe(p, n, opt);
+    inout p, n, opt;
+    electrical p, n, opt;
+    analog I(p, n) <+ ($port_connected(opt) ? 10.0 : 1.0) * V(p, n);
+endmodule
+"#,
+    );
+
+    let mut omitted = VerilogADevice::new("X1", model.clone(), &[1, 0]);
+    omitted.update_voltages(&[2.0]);
+    assert!((omitted.evaluate()[0] - 2.0).abs() < 1e-12);
+
+    let mut grounded = VerilogADevice::new("X2", model, &[1, 0, 0]);
+    grounded.update_voltages(&[2.0]);
+    assert!((grounded.evaluate()[0] - 20.0).abs() < 1e-12);
+}
+
+#[test]
+fn runtime_array_index_errors_do_not_evaluate_as_zero() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module runtime_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nseg = 5;
+    real w[1:4];
+    integer i;
+    real total;
+    analog begin
+        total = 0.0;
+        for (i = 1; i <= nseg; i = i + 1) begin
+            w[i] = 0.001 * i;
+            total = total + w[i];
+        end
+        I(p, n) <+ total * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+        device.update_voltages(&[1.0]);
+        let _ = device.evaluate();
+    }));
+
+    assert!(
+        result.is_err(),
+        "runtime array bounds errors must not be converted into a numeric current"
+    );
+}
+
+#[test]
+fn try_stamp_reports_runtime_array_index_errors() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module stamp_runtime_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = (V(p, n) > 0.5) ? 5 : 1;
+        w[i] = 1.0e-3;
+        I(p, n) <+ w[i] * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    let err = device
+        .try_stamp(&[1.0], |_, _, _| {}, |_, _| {})
+        .expect_err("checked stamping must report runtime array bounds errors");
+    let text = err.to_string();
+    assert!(
+        text.contains("Array index 5") || text.contains("[1:4]"),
+        "diagnostic should identify the runtime array bounds error, got: {text}"
+    );
+}
+
+#[test]
+fn try_compute_jacobian_reports_runtime_array_index_errors() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module jac_runtime_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = (V(p, n) > 0.5) ? 5 : 1;
+        w[i] = 1.0e-3;
+        I(p, n) <+ w[i] * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    device.update_voltages(&[1.0]);
+    let err = device
+        .try_compute_jacobian()
+        .expect_err("checked Jacobian evaluation must report runtime array bounds errors");
+    let text = err.to_string();
+    assert!(
+        text.contains("Array index 5") || text.contains("[1:4]"),
+        "diagnostic should identify the runtime array bounds error, got: {text}"
+    );
+}
+
+#[test]
+fn try_stamp_reactive_reports_runtime_array_index_errors() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module reactive_runtime_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = (V(p, n) > 0.5) ? 5 : 1;
+        w[i] = 1.0e-6;
+        I(p, n) <+ ddt(w[i] * V(p, n));
+    end
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    device.set_analysis_type(1);
+    let err = device
+        .try_stamp_reactive(&[1.0], |_, _, _| {})
+        .expect_err("checked reactive stamping must report runtime array bounds errors");
+    let text = err.to_string();
+    assert!(
+        text.contains("Array index 5") || text.contains("[1:4]"),
+        "diagnostic should identify the runtime array bounds error, got: {text}"
+    );
+}
+
+#[test]
+fn try_noise_sources_reports_runtime_array_index_errors() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module noise_runtime_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = analysis("noise") ? 5 : 1;
+        w[i] = 1.0e-18;
+        I(p, n) <+ V(p, n) * 1.0e-3 + white_noise(w[i], "bad");
+    end
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    device.set_analysis_type(3);
+    let err = device
+        .try_noise_sources(&[1.0])
+        .expect_err("checked noise evaluation must report runtime array bounds errors");
+    let text = err.to_string();
+    assert!(
+        text.contains("Array index 5") || text.contains("[1:4]"),
+        "diagnostic should identify the runtime array bounds error, got: {text}"
+    );
+}
+
+#[test]
+fn try_noise_sources_preserves_flicker_and_table_metadata() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+
+module noise_metadata(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real s = 1.0e-18;
+    parameter real ex = 2.0;
+    analog begin
+        I(p, n) <+ flicker_noise(s, ex, "fl");
+        I(p, n) <+ noise_table('{1.0, 2.0e-18, 10.0, 4.0e-18}, "tbl");
+    end
+endmodule
+"#,
+    );
+
+    let mut device = VerilogADevice::new("X1", model, &[1, 0]);
+    device.set_analysis_type(3);
+    let sources = device
+        .try_noise_sources(&[0.0])
+        .expect("checked noise metadata");
+
+    let flicker = sources
+        .iter()
+        .find(|source| source.name == "fl")
+        .expect("flicker source");
+    assert!((flicker.psd - 1.0e-18).abs() < 1.0e-30);
+    assert_eq!(flicker.exponent, Some(2.0));
+    assert!(flicker.table.is_none());
+
+    let table = sources
+        .iter()
+        .find(|source| source.name == "tbl")
+        .expect("table source");
+    assert_eq!(table.psd, 1.0);
+    assert_eq!(
+        table
+            .table
+            .as_ref()
+            .map(|(points, log)| (points.len(), *log)),
+        Some((2, false))
+    );
 }
 
 #[test]

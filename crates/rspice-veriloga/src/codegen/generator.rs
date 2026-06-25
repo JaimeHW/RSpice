@@ -1,4 +1,29 @@
 use super::*;
+use std::collections::HashMap;
+
+struct EmitContext {
+    parameter_indices: HashMap<SmolStr, usize>,
+    variable_indices: HashMap<SmolStr, usize>,
+}
+
+impl EmitContext {
+    fn from_ir(ir: &DeviceIR) -> Self {
+        Self {
+            parameter_indices: ir
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(idx, param)| (param.name.clone(), idx))
+                .collect(),
+            variable_indices: ir
+                .variables
+                .iter()
+                .enumerate()
+                .map(|(idx, var)| (var.name.clone(), idx))
+                .collect(),
+        }
+    }
+}
 
 impl Default for CodeGenerator {
     fn default() -> Self {
@@ -43,12 +68,37 @@ impl CodeGenerator {
         module_name: Option<&str>,
     ) -> CompileResult<CompiledModel> {
         let module = Self::select_module(analyzed, module_name)?;
+        let timings = compile_timings_enabled();
 
         // Build IR
+        let phase_start = std::time::Instant::now();
         let ir = DeviceIR::from_analyzed(module)?;
+        if timings {
+            eprintln!(
+                "timing codegen.ir module={} elapsed={:.3}s variables={} assignments={} equations={} branch_unknowns={}",
+                ir.name,
+                phase_start.elapsed().as_secs_f64(),
+                ir.variables.len(),
+                count_ir_assignment_items(&ir.assignments),
+                ir.equations.len(),
+                ir.branch_unknowns.len()
+            );
+        }
 
         // Generate code from IR
-        self.generate_from_ir(&ir)
+        let phase_start = std::time::Instant::now();
+        let model = self.generate_from_ir(&ir)?;
+        if timings {
+            eprintln!(
+                "timing codegen.bytecode module={} elapsed={:.3}s assignment_steps={} stamp_programs={} variables={}",
+                model.name,
+                phase_start.elapsed().as_secs_f64(),
+                count_assignment_steps_for_timing(&model.assignment_steps),
+                model.stamp_programs.len(),
+                model.num_variables
+            );
+        }
+        Ok(model)
     }
 
     /// Resolve which analyzed module to compile
@@ -101,6 +151,8 @@ impl CodeGenerator {
 
     /// Generate from IR
     fn generate_from_ir(&self, ir: &DeviceIR) -> CompileResult<CompiledModel> {
+        let timings = compile_timings_enabled();
+        let emit_ctx = EmitContext::from_ir(ir);
         self.lookup_tables.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
         self.zi_filters.borrow_mut().clear();
@@ -112,6 +164,7 @@ impl CodeGenerator {
         self.above_detector_count.set(0);
         self.timer_state_count.set(0);
 
+        let phase_start = std::time::Instant::now();
         let parameters = ir
             .parameters
             .iter()
@@ -119,7 +172,7 @@ impl CodeGenerator {
                 let default_program = p
                     .default_expr
                     .as_ref()
-                    .map(|expr| self.compile_expr(expr, ir))
+                    .map(|expr| self.compile_expr(expr, &emit_ctx))
                     .transpose()?;
                 Ok(CompiledParameter {
                     name: p.name.clone(),
@@ -131,6 +184,14 @@ impl CodeGenerator {
                 })
             })
             .collect::<CompileResult<Vec<_>>>()?;
+        if timings {
+            eprintln!(
+                "timing codegen.parameters module={} elapsed={:.3}s count={}",
+                ir.name,
+                phase_start.elapsed().as_secs_f64(),
+                parameters.len()
+            );
+        }
 
         let mut model = CompiledModel {
             name: ir.name.clone(),
@@ -158,22 +219,42 @@ impl CodeGenerator {
         };
 
         // Generate evaluation steps (executed in order before contributions)
-        model.assignment_steps = self.compile_assignment_items(&ir.assignments, ir)?;
+        let phase_start = std::time::Instant::now();
+        model.assignment_steps = self.compile_assignment_items(&ir.assignments, &emit_ctx)?;
+        if timings {
+            eprintln!(
+                "timing codegen.assignments module={} elapsed={:.3}s steps={}",
+                ir.name,
+                phase_start.elapsed().as_secs_f64(),
+                count_assignment_steps_for_timing(&model.assignment_steps)
+            );
+        }
 
         // Generate stamp programs for each equation
+        let phase_start = std::time::Instant::now();
         for eq in &ir.equations {
-            let program = self.compile_equation(eq, ir)?;
+            let program = self.compile_equation(eq, ir, &emit_ctx)?;
             model.stamp_programs.push(program);
+        }
+        if timings {
+            eprintln!(
+                "timing codegen.equations module={} elapsed={:.3}s equations={} programs={}",
+                ir.name,
+                phase_start.elapsed().as_secs_f64(),
+                ir.equations.len(),
+                model.stamp_programs.len()
+            );
         }
 
         // Compile noise-source PSD programs (evaluated at the operating
         // point during noise analysis)
+        let phase_start = std::time::Instant::now();
         for source in &ir.noise_sources {
-            let psd_program = self.compile_expr(&source.psd, ir)?;
+            let psd_program = self.compile_expr(&source.psd, &emit_ctx)?;
             let exponent_program = source
                 .exponent
                 .as_ref()
-                .map(|e| self.compile_expr(e, ir))
+                .map(|e| self.compile_expr(e, &emit_ctx))
                 .transpose()?;
             model.noise_sources.push(CompiledNoiseSource {
                 pos: Self::node_stamp_index(ir, source.branch.pos_terminal),
@@ -190,6 +271,14 @@ impl CodeGenerator {
                 name: source.name.clone(),
             });
         }
+        if timings {
+            eprintln!(
+                "timing codegen.noise module={} elapsed={:.3}s sources={}",
+                ir.name,
+                phase_start.elapsed().as_secs_f64(),
+                model.noise_sources.len()
+            );
+        }
 
         model.laplace_filters = self.laplace_filters.take();
         model.lookup_tables = self.lookup_tables.take();
@@ -202,19 +291,19 @@ impl CodeGenerator {
     fn compile_assignment_items(
         &self,
         items: &[crate::ir::IrAssignmentItem],
-        ir: &DeviceIR,
+        emit_ctx: &EmitContext,
     ) -> CompileResult<Vec<AssignmentStep>> {
         items
             .iter()
             .map(|item| match item {
                 crate::ir::IrAssignmentItem::Assign(assign) => {
-                    let program = self.compile_expr(&assign.expr, ir)?;
+                    let program = self.compile_expr(&assign.expr, emit_ctx)?;
                     match &assign.index {
                         Some(target) => Ok(AssignmentStep::AssignIndexed {
                             base: assign.var_index,
                             len: target.len,
                             lower: target.lower,
-                            index: self.compile_expr(&target.index, ir)?,
+                            index: self.compile_expr(&target.index, emit_ctx)?,
                             value: program,
                         }),
                         None => Ok(AssignmentStep::Assign(AssignmentProgram {
@@ -224,8 +313,8 @@ impl CodeGenerator {
                     }
                 }
                 crate::ir::IrAssignmentItem::Loop { condition, body } => {
-                    let condition = self.compile_expr(condition, ir)?;
-                    let body = self.compile_assignment_items(body, ir)?;
+                    let condition = self.compile_expr(condition, emit_ctx)?;
+                    let body = self.compile_assignment_items(body, emit_ctx)?;
                     Ok(AssignmentStep::Loop { condition, body })
                 }
             })
@@ -266,12 +355,17 @@ impl CodeGenerator {
     /// branch column; the branch row gains the node columns), each
     /// -dE/dx into the branch row, and Eeq = E - sum(dE/dx * x) into the
     /// branch RHS.
-    fn compile_equation(&self, eq: &BranchEquation, ir: &DeviceIR) -> CompileResult<StampProgram> {
-        let value_program = self.compile_expr(&eq.expr, ir)?;
+    fn compile_equation(
+        &self,
+        eq: &BranchEquation,
+        ir: &DeviceIR,
+        emit_ctx: &EmitContext,
+    ) -> CompileResult<StampProgram> {
+        let value_program = self.compile_expr(&eq.expr, emit_ctx)?;
         let static_condition = eq
             .static_condition
             .as_ref()
-            .map(|cond| self.compile_expr(cond, ir))
+            .map(|cond| self.compile_expr(cond, emit_ctx))
             .transpose()?;
 
         let pos = Self::node_stamp_index(ir, eq.branch.pos_terminal);
@@ -292,7 +386,7 @@ impl CodeGenerator {
             let branch_row = StampIndex::Branch(ordinal);
             for deriv in &eq.derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, ir)?;
+                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -305,7 +399,7 @@ impl CodeGenerator {
             let mut reactive_jacobians = Vec::new();
             for deriv in &eq.reactive_derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, ir)?;
+                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -338,7 +432,7 @@ impl CodeGenerator {
             let branch_row = StampIndex::Branch(ordinal);
             for deriv in &eq.derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, ir)?;
+                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -353,7 +447,7 @@ impl CodeGenerator {
             let mut reactive_jacobians = Vec::new();
             for deriv in &eq.reactive_derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, ir)?;
+                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -384,7 +478,7 @@ impl CodeGenerator {
         // Current contribution
         for deriv in &eq.derivatives {
             let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
-            let program = self.compile_expr(&deriv.expr, ir)?;
+            let program = self.compile_expr(&deriv.expr, emit_ctx)?;
 
             // KCL row of the positive node gains +dI/dx, the negative node
             // row gains -dI/dx
@@ -409,7 +503,7 @@ impl CodeGenerator {
         let mut reactive_jacobians = Vec::new();
         for deriv in &eq.reactive_derivatives {
             let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
-            let program = self.compile_expr(&deriv.expr, ir)?;
+            let program = self.compile_expr(&deriv.expr, emit_ctx)?;
             reactive_jacobians.push(JacobianEntry {
                 row: pos.clone(),
                 col: col.clone(),
@@ -454,13 +548,13 @@ impl CodeGenerator {
     }
 
     /// Compile an IR expression to bytecode
-    pub(super) fn compile_expr(
+    fn compile_expr(
         &self,
         expr: &IrExpr,
-        ir: &DeviceIR,
+        emit_ctx: &EmitContext,
     ) -> CompileResult<BytecodeProgram> {
         let mut program = BytecodeProgram::default();
-        self.emit_expr(expr, ir, &mut program)?;
+        self.emit_expr(expr, emit_ctx, &mut program)?;
         Ok(program)
     }
 
@@ -475,7 +569,7 @@ impl CodeGenerator {
     fn emit_expr(
         &self,
         expr: &IrExpr,
-        ir: &DeviceIR,
+        emit_ctx: &EmitContext,
         program: &mut BytecodeProgram,
     ) -> CompileResult<()> {
         match expr {
@@ -483,10 +577,10 @@ impl CodeGenerator {
                 program.instructions.push(Instruction::PushConst(*v));
             }
             IrExpr::Param(name) => {
-                let idx = ir
-                    .parameters
-                    .iter()
-                    .position(|p| &p.name == name)
+                let idx = emit_ctx
+                    .parameter_indices
+                    .get(name)
+                    .copied()
                     .ok_or_else(|| {
                         CodeGenError::new(CodeGenErrorKind::Internal(format!(
                             "Unknown parameter: {}",
@@ -496,10 +590,10 @@ impl CodeGenerator {
                 program.instructions.push(Instruction::PushParam(idx));
             }
             IrExpr::ParamGiven(name) => {
-                let idx = ir
-                    .parameters
-                    .iter()
-                    .position(|p| &p.name == name)
+                let idx = emit_ctx
+                    .parameter_indices
+                    .get(name)
+                    .copied()
                     .ok_or_else(|| {
                         CodeGenError::new(CodeGenErrorKind::Internal(format!(
                             "Unknown parameter: {}",
@@ -509,10 +603,10 @@ impl CodeGenerator {
                 program.instructions.push(Instruction::PushParamGiven(idx));
             }
             IrExpr::Var(name) => {
-                let idx = ir
-                    .variables
-                    .iter()
-                    .position(|v| &v.name == name)
+                let idx = emit_ctx
+                    .variable_indices
+                    .get(name)
+                    .copied()
                     .ok_or_else(|| {
                         CodeGenError::new(CodeGenErrorKind::Internal(format!(
                             "Unknown variable: {}",
@@ -528,7 +622,7 @@ impl CodeGenerator {
                 index,
                 ..
             } => {
-                self.emit_expr(index, ir, program)?;
+                self.emit_expr(index, emit_ctx, program)?;
                 program.instructions.push(Instruction::PushVariableDyn {
                     base: *base,
                     len: *len,
@@ -558,9 +652,14 @@ impl CodeGenerator {
             IrExpr::Mfactor => {
                 program.instructions.push(Instruction::PushMfactor);
             }
+            IrExpr::PortConnected(index) => {
+                program
+                    .instructions
+                    .push(Instruction::PushPortConnected(*index));
+            }
             IrExpr::Binary(op, left, right) => {
-                self.emit_expr(left, ir, program)?;
-                self.emit_expr(right, ir, program)?;
+                self.emit_expr(left, emit_ctx, program)?;
+                self.emit_expr(right, emit_ctx, program)?;
                 program.instructions.push(match op {
                     // Arithmetic
                     BinaryOp::Add => Instruction::Add,
@@ -588,22 +687,22 @@ impl CodeGenerator {
                 });
             }
             IrExpr::Unary(crate::ast::UnaryOp::Neg, inner) => {
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::Neg);
             }
             // Unary plus is the identity
             IrExpr::Unary(crate::ast::UnaryOp::Pos, inner) => {
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
             }
             // Bitwise complement truncates to integer: ~x = -x - 1
             IrExpr::Unary(crate::ast::UnaryOp::BitNot, inner) => {
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::PushConst(-1.0));
                 program.instructions.push(Instruction::BitXor);
             }
             IrExpr::Call(func, args) => {
                 for arg in args {
-                    self.emit_expr(arg, ir, program)?;
+                    self.emit_expr(arg, emit_ctx, program)?;
                 }
                 program.instructions.push(match func {
                     IrFunction::Abs => Instruction::Abs,
@@ -632,33 +731,33 @@ impl CodeGenerator {
                 });
             }
             IrExpr::Limexp(inner) => {
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::Limexp);
             }
             IrExpr::Conditional(cond, then_expr, else_expr) => {
-                self.emit_expr(cond, ir, program)?;
-                self.emit_expr(then_expr, ir, program)?;
-                self.emit_expr(else_expr, ir, program)?;
+                self.emit_expr(cond, emit_ctx, program)?;
+                self.emit_expr(then_expr, emit_ctx, program)?;
+                self.emit_expr(else_expr, emit_ctx, program)?;
                 program.instructions.push(Instruction::IfElse);
             }
             IrExpr::Unary(crate::ast::UnaryOp::Not, inner) => {
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::Not);
             }
             IrExpr::Ddt(inner) => {
                 // Backward-Euler time derivative with a dedicated state slot:
                 // (value - prev_value) / dt in transient, 0 at DC. The state
                 // slot records the operand so the next step has its history.
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 let state_id = Self::allocate_slot(&self.limit_state_count);
                 program.instructions.push(Instruction::DdtState(state_id));
             }
             IrExpr::Idt(inner, ic) => {
                 // Time integral: state + value*dt in transient; the initial
                 // condition (default 0) seeds the integral at DC/IC.
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 if let Some(ic_expr) = ic {
-                    self.emit_expr(ic_expr, ir, program)?;
+                    self.emit_expr(ic_expr, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
@@ -671,14 +770,14 @@ impl CodeGenerator {
                 modulus,
                 offset,
             } => {
-                self.emit_expr(expr, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
                 match ic {
-                    Some(ic) => self.emit_expr(ic, ir, program)?,
+                    Some(ic) => self.emit_expr(ic, emit_ctx, program)?,
                     None => program.instructions.push(Instruction::PushConst(0.0)),
                 }
-                self.emit_expr(modulus, ir, program)?;
+                self.emit_expr(modulus, emit_ctx, program)?;
                 match offset {
-                    Some(offset) => self.emit_expr(offset, ir, program)?,
+                    Some(offset) => self.emit_expr(offset, emit_ctx, program)?,
                     None => program.instructions.push(Instruction::PushConst(0.0)),
                 }
                 let state_id = Self::allocate_slot(&self.limit_state_count);
@@ -688,12 +787,12 @@ impl CodeGenerator {
             }
             IrExpr::DdtCompanion(inner) => {
                 // Jacobian companion factor: operand / dt (0 at DC)
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::DdtJacobian);
             }
             IrExpr::IdtCompanion(inner) => {
                 // Jacobian companion factor: operand * dt (0 at DC)
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::IdtJacobian);
             }
             IrExpr::TableDerivative {
@@ -701,7 +800,7 @@ impl CodeGenerator {
                 x_data,
                 y_data,
             } => {
-                self.emit_expr(input, ir, program)?;
+                self.emit_expr(input, emit_ctx, program)?;
                 let table_id = self.register_lookup_table(x_data, y_data)?;
                 program
                     .instructions
@@ -715,9 +814,9 @@ impl CodeGenerator {
             IrExpr::Limit(inner, step) => {
                 // $limit(expr, step) - bounds value change per Newton iteration
                 // For DC, we track previous value and limit the step
-                self.emit_expr(inner, ir, program)?;
+                self.emit_expr(inner, emit_ctx, program)?;
                 if let Some(step_expr) = step {
-                    self.emit_expr(step_expr, ir, program)?;
+                    self.emit_expr(step_expr, emit_ctx, program)?;
                 } else {
                     // Default step limit for pn-junction type limiting
                     program.instructions.push(Instruction::PushConst(0.7)); // ~2*Vt
@@ -732,7 +831,7 @@ impl CodeGenerator {
             } => {
                 // $table_model lookup with linear interpolation
                 // Emit input expression, then TableLookup instruction referencing the table
-                self.emit_expr(input, ir, program)?;
+                self.emit_expr(input, emit_ctx, program)?;
                 let table_id = self.register_lookup_table(x_data, y_data)?;
                 program
                     .instructions
@@ -741,8 +840,8 @@ impl CodeGenerator {
             IrExpr::AbsDelay { expr, delay_time } => {
                 // absdelay(expr, delay_time) - transport delay
                 // Emit expression value, then delay time, then AbsDelayState instruction
-                self.emit_expr(expr, ir, program)?;
-                self.emit_expr(delay_time, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(delay_time, emit_ctx, program)?;
                 let buffer_id = Self::allocate_slot(&self.delay_buffer_count);
                 program
                     .instructions
@@ -755,22 +854,22 @@ impl CodeGenerator {
                 fall_time,
             } => {
                 // transition(expr, delay, rise_time, fall_time)
-                self.emit_expr(expr, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
                 // Emit delay (default 0)
                 if let Some(d) = delay {
-                    self.emit_expr(d, ir, program)?;
+                    self.emit_expr(d, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
                 // Emit rise_time (default 0 = instantaneous)
                 if let Some(r) = rise_time {
-                    self.emit_expr(r, ir, program)?;
+                    self.emit_expr(r, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
                 // Emit fall_time (default to rise_time)
                 if let Some(f) = fall_time {
-                    self.emit_expr(f, ir, program)?;
+                    self.emit_expr(f, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
@@ -785,10 +884,10 @@ impl CodeGenerator {
                 max_neg_slew,
             } => {
                 // slew(expr, max_pos_slew, max_neg_slew)
-                self.emit_expr(expr, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
                 // Emit max_pos_slew (default infinity = no limit)
                 if let Some(p) = max_pos_slew {
-                    self.emit_expr(p, ir, program)?;
+                    self.emit_expr(p, emit_ctx, program)?;
                 } else {
                     program
                         .instructions
@@ -796,7 +895,7 @@ impl CodeGenerator {
                 }
                 // Emit max_neg_slew (default to max_pos_slew)
                 if let Some(n) = max_neg_slew {
-                    self.emit_expr(n, ir, program)?;
+                    self.emit_expr(n, emit_ctx, program)?;
                 } else {
                     program
                         .instructions
@@ -811,7 +910,7 @@ impl CodeGenerator {
                 time_tol: _,
             } => {
                 // cross(expr, direction, time_tol)
-                self.emit_expr(expr, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
                 // Push direction constant (-1, 0, or +1)
                 let dir = direction.unwrap_or(0);
                 program
@@ -826,7 +925,7 @@ impl CodeGenerator {
                 // $white_noise(power, name)
                 // In time domain, noise returns 0
                 // Contributes to AC noise analysis
-                self.emit_expr(power, ir, program)?;
+                self.emit_expr(power, emit_ctx, program)?;
                 program.instructions.push(Instruction::WhiteNoise);
             }
             IrExpr::NoiseTable { .. } => {
@@ -840,7 +939,7 @@ impl CodeGenerator {
                 denominator,
                 period,
             } => {
-                self.emit_expr(expr, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
                 let filter_id = {
                     let mut filters = self.zi_filters.borrow_mut();
                     filters.push(crate::zfilter::ZiFilter::new(
@@ -858,8 +957,8 @@ impl CodeGenerator {
                 name: _,
             } => {
                 // $flicker_noise(power, exponent, name)
-                self.emit_expr(power, ir, program)?;
-                self.emit_expr(exponent, ir, program)?;
+                self.emit_expr(power, emit_ctx, program)?;
+                self.emit_expr(exponent, emit_ctx, program)?;
                 program.instructions.push(Instruction::FlickerNoise);
             }
             IrExpr::Analysis(name) => {
@@ -872,7 +971,12 @@ impl CodeGenerator {
                     "ic" => 4,
                     // "static" matches any equilibrium (DC or IC) analysis
                     "static" => 5,
-                    _ => 255, // Unknown = always false
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                            format!("analysis() unknown analysis name '{name}'"),
+                        ))
+                        .into());
+                    }
                 };
                 program
                     .instructions
@@ -884,8 +988,8 @@ impl CodeGenerator {
                 time_tol: _,
             } => {
                 // above(expr, threshold) - level crossing
-                self.emit_expr(expr, ir, program)?;
-                self.emit_expr(threshold, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(threshold, emit_ctx, program)?;
                 let detector_id = Self::allocate_slot(&self.above_detector_count);
                 program
                     .instructions
@@ -893,9 +997,9 @@ impl CodeGenerator {
             }
             IrExpr::Timer { start_time, period } => {
                 // timer(start, period) - periodic trigger
-                self.emit_expr(start_time, ir, program)?;
+                self.emit_expr(start_time, emit_ctx, program)?;
                 if let Some(p) = period {
-                    self.emit_expr(p, ir, program)?;
+                    self.emit_expr(p, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
@@ -908,7 +1012,7 @@ impl CodeGenerator {
                 poles,
                 gain,
             } => {
-                self.emit_expr(expr, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
 
                 let p_complex: Vec<Complex> = poles
                     .iter()
@@ -932,7 +1036,7 @@ impl CodeGenerator {
                 numerator,
                 denominator,
             } => {
-                self.emit_expr(expr, ir, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
 
                 // IR has ascending powers: n0 + n1*s + ...
                 // StateSpaceFilter expects descending: n_k*s^k + ... + n0
@@ -980,4 +1084,28 @@ impl CodeGenerator {
         tables.push(table);
         Ok(tables.len() - 1)
     }
+}
+
+fn compile_timings_enabled() -> bool {
+    std::env::var_os("RSPICE_VERILOGA_COMPILE_TIMINGS").is_some()
+}
+
+fn count_ir_assignment_items(items: &[crate::ir::IrAssignmentItem]) -> usize {
+    items
+        .iter()
+        .map(|item| match item {
+            crate::ir::IrAssignmentItem::Assign(_) => 1,
+            crate::ir::IrAssignmentItem::Loop { body, .. } => 1 + count_ir_assignment_items(body),
+        })
+        .sum()
+}
+
+fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {
+    items
+        .iter()
+        .map(|item| match item {
+            AssignmentStep::Assign(_) | AssignmentStep::AssignIndexed { .. } => 1,
+            AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps_for_timing(body),
+        })
+        .sum()
 }

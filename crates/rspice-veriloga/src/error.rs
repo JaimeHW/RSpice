@@ -147,8 +147,14 @@ pub enum ParseErrorKind {
     #[error("Invalid analog statement")]
     InvalidAnalogStatement,
 
+    #[error("Invalid event expression: {0}")]
+    InvalidEventExpression(String),
+
     #[error("Invalid expression")]
     InvalidExpression,
+
+    #[error("Invalid number literal: {0}")]
+    InvalidNumber(String),
 
     #[error("Invalid branch access")]
     InvalidBranchAccess,

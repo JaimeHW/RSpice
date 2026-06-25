@@ -347,3 +347,105 @@ fn series_voltage_noise_reaches_the_output() {
         );
     }
 }
+
+#[test]
+fn va_noise_runtime_errors_are_simulation_errors_not_panics() {
+    let model = write_model(
+        "noise_runtime_oob.va",
+        r#"
+`include "disciplines.vams"
+
+module va_noise_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = analysis("noise") ? 5 : 1;
+        w[i] = 1.0e-18;
+        I(p, n) <+ V(p, n) * 1.0e-3 + white_noise(w[i], "bad");
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* veriloga noise runtime diagnostic\n\
+         V1 in 0 DC 1 AC 1\n\
+         XBAD in 0 va_noise_oob\n\
+         .va \"{model}\" va_noise_oob\n\
+         .end\n"
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let dc = engine.run_dc_op(&netlist).expect("dc op");
+    let input = dc
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("in"))
+        .expect("input node");
+    let result =
+        std::panic::catch_unwind(|| engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM));
+
+    let _ = std::fs::remove_file(model);
+
+    let result = result.expect("Verilog-A noise runtime errors must not panic");
+    let err = result.expect_err("noise runtime error must be reported to the caller");
+    let text = err.to_string();
+    assert!(
+        text.contains("Verilog-A") && (text.contains("Array index 5") || text.contains("[1:4]")),
+        "diagnostic should identify the Verilog-A noise array bounds error, got: {text}"
+    );
+}
+
+#[test]
+fn va_noise_ac_linearization_errors_are_simulation_errors_not_panics() {
+    let model = write_model(
+        "noise_ac_oob.va",
+        r#"
+`include "disciplines.vams"
+
+module va_noise_ac_oob(p, n);
+    inout p, n;
+    electrical p, n;
+    real w[1:4];
+    integer i;
+    analog begin
+        i = analysis("ac") ? 5 : 1;
+        w[i] = 1.0e-3;
+        I(p, n) <+ w[i] * V(p, n) + white_noise(1.0e-18, "wn");
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* veriloga noise AC-linearization diagnostic\n\
+         V1 in 0 DC 1 AC 1\n\
+         XBAD in 0 va_noise_ac_oob\n\
+         .va \"{model}\" va_noise_ac_oob\n\
+         .end\n"
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let dc = engine.run_dc_op(&netlist).expect("dc op");
+    let input = dc
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("in"))
+        .expect("input node");
+    let result =
+        std::panic::catch_unwind(|| engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM));
+
+    let _ = std::fs::remove_file(model);
+
+    let result = result.expect("Verilog-A noise AC-linearization errors must not panic");
+    let err = result.expect_err("AC-linearization runtime error must be reported to the caller");
+    let text = err.to_string();
+    assert!(
+        text.contains("Verilog-A") && (text.contains("Array index 5") || text.contains("[1:4]")),
+        "diagnostic should identify the Verilog-A AC-linearization array bounds error, got: {text}"
+    );
+}

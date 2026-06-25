@@ -16,10 +16,7 @@ mod compiler_imports;
 mod abi;
 
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
-pub use abi::{
-    EvalContext, rspice_current_lookup, rspice_laplace_step, rspice_limexp, rspice_limit,
-    rspice_table_lookup,
-};
+pub use abi::{EvalContext, rspice_laplace_step, rspice_limexp, rspice_limit, rspice_table_lookup};
 pub(crate) use compiler_expr::program_is_jitable;
 
 type AssignmentFn = extern "C" fn(*const EvalContext, *mut f64);
@@ -103,7 +100,12 @@ pub struct NativeModel {
     _module: JITModule,
 }
 
-// Safety: The raw function pointers are only called with proper arguments
+// Safety: NativeModel owns the JITModule for at least as long as any function
+// pointer stored in the model, so compiled code is not unloaded while calls can
+// occur. The function vectors are immutable after construction; evaluation
+// state is supplied by each caller through EvalContext and scratch buffers. The
+// JIT backend remains a native-only performance path and must not expose raw
+// pointers outside this module without a matching safety review.
 unsafe impl Send for NativeModel {}
 unsafe impl Sync for NativeModel {}
 
@@ -124,13 +126,8 @@ const EVAL_CTX_OFFSET_VOLTAGES: i32 = std::mem::offset_of!(EvalContext, voltages
 const EVAL_CTX_OFFSET_INTERNAL_VOLTAGES: i32 =
     std::mem::offset_of!(EvalContext, internal_voltages) as i32;
 const EVAL_CTX_OFFSET_PARAMS: i32 = std::mem::offset_of!(EvalContext, params) as i32;
-const EVAL_CTX_OFFSET_BRANCH_CURRENTS: i32 =
-    std::mem::offset_of!(EvalContext, branch_currents) as i32;
-const EVAL_CTX_OFFSET_BRANCH_CURRENTS_LEN: i32 =
-    std::mem::offset_of!(EvalContext, branch_currents_len) as i32;
-const EVAL_CTX_OFFSET_CURRENTS: i32 = std::mem::offset_of!(EvalContext, currents) as i32;
-const EVAL_CTX_OFFSET_CURRENTS_LEN: i32 = std::mem::offset_of!(EvalContext, currents_len) as i32;
-const EVAL_CTX_OFFSET_NUM_TERMINALS: i32 = std::mem::offset_of!(EvalContext, num_terminals) as i32;
+const EVAL_CTX_OFFSET_PORT_CONNECTED: i32 =
+    std::mem::offset_of!(EvalContext, port_connected) as i32;
 const EVAL_CTX_OFFSET_TEMPERATURE: i32 = std::mem::offset_of!(EvalContext, temperature) as i32;
 const EVAL_CTX_OFFSET_TIME: i32 = std::mem::offset_of!(EvalContext, time) as i32;
 const EVAL_CTX_OFFSET_LOOKUP_TABLES: i32 = std::mem::offset_of!(EvalContext, lookup_tables) as i32;
@@ -268,7 +265,6 @@ impl JitCompiler {
         builder.symbol("rspice_limit", rspice_limit as *const u8);
         builder.symbol("rspice_limexp", rspice_limexp as *const u8);
         builder.symbol("rspice_laplace_step", rspice_laplace_step as *const u8);
-        builder.symbol("rspice_current_lookup", rspice_current_lookup as *const u8);
 
         let mut module = JITModule::new(builder);
         let mut ctx = module.make_context();

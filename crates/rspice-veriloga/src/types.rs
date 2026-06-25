@@ -377,8 +377,8 @@ impl FunctionRegistry {
 
         // Math functions
         for name in &[
-            "abs", "sqrt", "exp", "ln", "log", "sin", "cos", "tan", "asin", "acos", "atan", "sinh",
-            "cosh", "tanh", "asinh", "acosh", "atanh", "floor", "ceil", "limexp",
+            "abs", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos",
+            "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "floor", "ceil", "limexp",
         ] {
             functions.insert((*name).into(), FunctionSignature::math_unary(name));
         }
@@ -389,28 +389,28 @@ impl FunctionRegistry {
         }
 
         // Analog operators
-        functions.insert("ddt".into(), FunctionSignature::analog_operator("ddt", 2));
-        functions.insert("idt".into(), FunctionSignature::analog_operator("idt", 4));
+        functions.insert("ddt".into(), FunctionSignature::analog_operator("ddt", 1));
+        functions.insert("idt".into(), FunctionSignature::analog_operator("idt", 2));
         functions.insert(
             "idtmod".into(),
-            FunctionSignature::analog_operator("idtmod", 5),
+            FunctionSignature::analog_operator("idtmod", 4),
         );
         functions.insert("ddx".into(), FunctionSignature::analog_operator("ddx", 2));
         functions.insert(
             "laplace_zp".into(),
-            FunctionSignature::analog_operator("laplace_zp", 4),
+            FunctionSignature::analog_operator("laplace_zp", 3),
         );
         functions.insert(
             "laplace_zd".into(),
-            FunctionSignature::analog_operator("laplace_zd", 4),
+            FunctionSignature::analog_operator("laplace_zd", 3),
         );
         functions.insert(
             "laplace_np".into(),
-            FunctionSignature::analog_operator("laplace_np", 4),
+            FunctionSignature::analog_operator("laplace_np", 3),
         );
         functions.insert(
             "laplace_nd".into(),
-            FunctionSignature::analog_operator("laplace_nd", 4),
+            FunctionSignature::analog_operator("laplace_nd", 3),
         );
 
         // Noise functions

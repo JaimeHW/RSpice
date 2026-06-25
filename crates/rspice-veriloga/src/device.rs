@@ -15,12 +15,16 @@
 //!
 //! # Native Compilation
 //!
-//! When the `native` feature is enabled and a C compiler is available,
-//! the device will automatically compile to native code for maximum performance.
-//! Falls back gracefully to the bytecode VM interpreter otherwise.
+//! When the `native` feature is enabled, supported model fragments can compile
+//! through the Cranelift JIT for higher throughput. Unsupported fragments fall
+//! back to the bytecode VM interpreter.
+//!
+//! The native path is a performance backend, not a separate public ABI. Keep all
+//! raw-pointer and Send/Sync safety reasoning in the native module and require a
+//! targeted audit before expanding that boundary.
 
 use crate::codegen::{CompiledModel, Instruction, StampIndex};
-use crate::vm::{Vm, VmContext};
+use crate::vm::{Vm, VmContext, VmError};
 use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
@@ -65,8 +69,11 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-// NativeModel contains raw pointers but is safe to send across threads
-// because the pointers are only used via the evaluate functions
+// Safety: VerilogADevice owns per-instance VmContext and solver mapping state.
+// The optional NativeModel is shared through Arc and is immutable after JIT
+// construction; it owns its JITModule for the lifetime of its function
+// pointers. Calls supply mutable evaluation state through the device instance,
+// so cloned devices used by line-search probes do not share VmContext mutation.
 #[cfg(feature = "native")]
 unsafe impl Send for VerilogADevice {}
 #[cfg(feature = "native")]
@@ -123,8 +130,22 @@ impl VerilogADevice {
         model: impl Into<std::sync::Arc<CompiledModel>>,
         nodes: &[usize],
     ) -> Self {
+        Self::try_new(name, model, nodes).unwrap_or_else(|err| {
+            panic!("Verilog-A device construction failed: {}", err);
+        })
+    }
+
+    /// Checked constructor for callers that can surface dependent-parameter
+    /// default failures as diagnostics instead of panicking or accepting a
+    /// zero fallback.
+    pub fn try_new(
+        name: impl Into<SmolStr>,
+        model: impl Into<std::sync::Arc<CompiledModel>>,
+        nodes: &[usize],
+    ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
         let num_terminals = model.num_terminals;
+        let supplied_terminals = nodes.len().min(num_terminals);
 
         // Build node mapping
         let mut node_mapping = vec![0; num_terminals];
@@ -137,6 +158,9 @@ impl VerilogADevice {
         // Create context with terminal count and internal nodes
         let num_internal_nodes = model.internal_nodes;
         let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
+        context.port_connected = (0..num_terminals)
+            .map(|terminal| u8::from(terminal < supplied_terminals))
+            .collect();
 
         // Initialize parameters to their constant defaults; dependent
         // defaults are resolved after instance parameters are applied
@@ -175,8 +199,8 @@ impl VerilogADevice {
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
-        device.resolve_parameter_defaults();
-        device
+        device.try_resolve_parameter_defaults()?;
+        Ok(device)
     }
 
     /// Preallocate interpreter runtime state vectors from bytecode instruction IDs.
@@ -451,6 +475,17 @@ impl VerilogADevice {
     /// calling it again is harmless (it is idempotent for a fixed set of
     /// given parameters).
     pub fn resolve_parameter_defaults(&mut self) {
+        self.try_resolve_parameter_defaults().unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' parameter default resolution failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    /// Checked dependent-parameter default evaluation. A malformed or stale
+    /// compiled default program must not become a numeric zero.
+    pub fn try_resolve_parameter_defaults(&mut self) -> Result<(), VmError> {
         for i in 0..self.model.parameters.len() {
             if self.context.is_param_given(i) {
                 continue;
@@ -460,7 +495,7 @@ impl VerilogADevice {
             };
             let value = {
                 let mut vm = Vm::new(&mut self.context);
-                vm.execute(&program).unwrap_or(0.0)
+                vm.execute(&program)?
             };
             let (min, max) = (self.model.parameters[i].min, self.model.parameters[i].max);
             let clamped = match (min, max) {
@@ -474,6 +509,7 @@ impl VerilogADevice {
 
         // Topology guards depend on final parameter values
         self.refresh_static_conditions();
+        Ok(())
     }
 
     /// Set simulation temperature in Kelvin
@@ -556,12 +592,25 @@ impl VerilogADevice {
             // BSIM4rdsMod derived from the rdsmod parameter); run the
             // evaluation stream once so those variables hold their values.
             // Node voltages are irrelevant to instance-static expressions.
-            Self::execute_assignment_programs(&mut vm, model);
+            Self::execute_assignment_programs(&mut vm, model).unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' static-condition evaluation failed: {}",
+                    self.name, model.name, err
+                )
+            });
             for (idx, program) in model.stamp_programs.iter().enumerate() {
-                let active = match &program.static_condition {
-                    Some(condition) => vm.execute(condition).map(|v| v != 0.0).unwrap_or(true),
-                    None => true,
-                };
+                let active =
+                    match &program.static_condition {
+                        Some(condition) => vm.execute(condition).map(|v| v != 0.0).unwrap_or_else(
+                            |err| {
+                                panic!(
+                                    "Verilog-A device '{}' model '{}' static condition failed: {}",
+                                    self.name, model.name, err
+                                )
+                            },
+                        ),
+                        None => true,
+                    };
                 program_active[idx] = active;
                 if active
                     && let Some(ordinal) = program.branch_ordinal
@@ -713,7 +762,25 @@ impl VerilogADevice {
     where
         M: FnMut(usize, usize, f64),
     {
-        self.update_all_voltages(circuit_voltages);
+        if let Err(err) = self.try_stamp_reactive(circuit_voltages, &mut matrix_add) {
+            panic!(
+                "Verilog-A device '{}' model '{}' reactive stamping failed: {}",
+                self.name, self.model.name, err
+            );
+        }
+    }
+
+    /// Checked reactive stamping path for callers that can report Verilog-A
+    /// runtime diagnostics instead of unwinding.
+    pub fn try_stamp_reactive<M>(
+        &mut self,
+        circuit_voltages: &[f64],
+        mut matrix_add: M,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+    {
+        self.try_update_all_voltages(circuit_voltages)?;
 
         let context = &mut self.context;
         let model = &self.model;
@@ -730,7 +797,7 @@ impl VerilogADevice {
             model,
             #[cfg(feature = "native")]
             native,
-        );
+        )?;
 
         let m = vm.context.multiplicity;
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
@@ -746,8 +813,14 @@ impl VerilogADevice {
 
             for entry in &matrix_indices.reactive[program_idx] {
                 let model_entry = &program.reactive_jacobians[entry.jacobian_idx];
-                let deriv = match vm.execute(&model_entry.program) {
-                    Ok(v) if v.is_finite() => v * scale,
+                let deriv = Self::run_value_program(
+                    &mut vm,
+                    &model_entry.program,
+                    #[cfg(feature = "native")]
+                    None,
+                )?;
+                let deriv = match deriv {
+                    v if v.is_finite() => v * scale,
                     _ => continue,
                 };
                 if let (Some(row), Some(col)) = (entry.row, entry.col) {
@@ -755,43 +828,61 @@ impl VerilogADevice {
                 }
             }
         }
+        Ok(())
     }
 
     /// Update terminal voltages from circuit solution
     ///
     /// Called before evaluating device equations.
     pub fn update_voltages(&mut self, circuit_voltages: &[f64]) {
+        self.try_update_voltages(circuit_voltages)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' terminal voltage update failed: {}",
+                    self.name, self.model.name, err
+                )
+            });
+    }
+
+    /// Checked terminal voltage update from circuit solution.
+    pub fn try_update_voltages(&mut self, circuit_voltages: &[f64]) -> Result<(), VmError> {
         for (terminal, &node) in self.node_mapping.iter().enumerate() {
             if terminal < self.context.voltages.len() {
-                let v = if node == 0 {
-                    0.0
-                } else if node <= circuit_voltages.len() {
-                    circuit_voltages[node - 1]
-                } else {
-                    0.0
-                };
+                let v =
+                    Self::solution_value(circuit_voltages, node, "missing terminal solution slot")?;
                 self.context.voltages[terminal] = v;
             }
         }
+        Ok(())
     }
 
     /// Update both terminal and internal node voltages from circuit solution
     ///
     /// This is the full-featured method for solver integration.
     pub fn update_all_voltages(&mut self, circuit_voltages: &[f64]) {
+        self.try_update_all_voltages(circuit_voltages)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' solution update failed: {}",
+                    self.name, self.model.name, err
+                )
+            });
+    }
+
+    /// Checked update of terminals, internal nodes, and branch-current
+    /// unknowns from a circuit solution.
+    pub fn try_update_all_voltages(&mut self, circuit_voltages: &[f64]) -> Result<(), VmError> {
         // Update terminal voltages
-        self.update_voltages(circuit_voltages);
+        self.try_update_voltages(circuit_voltages)?;
 
         // Update internal node voltages
         for (internal_idx, &circuit_node) in self.internal_node_indices.iter().enumerate() {
             if internal_idx < self.context.internal_voltages.len() {
-                let v = if circuit_node == 0 {
-                    0.0
-                } else if circuit_node <= circuit_voltages.len() {
-                    circuit_voltages[circuit_node - 1]
-                } else {
-                    0.0
-                };
+                let v = Self::solution_value(
+                    circuit_voltages,
+                    circuit_node,
+                    "missing internal-node solution slot",
+                )?;
                 self.context.internal_voltages[internal_idx] = v;
             }
         }
@@ -799,15 +890,29 @@ impl VerilogADevice {
         // Update branch-current unknown values
         for (ordinal, &circuit_node) in self.branch_current_indices.iter().enumerate() {
             if ordinal < self.context.branch_current_values.len() {
-                let v = if circuit_node == 0 {
-                    0.0
-                } else if circuit_node <= circuit_voltages.len() {
-                    circuit_voltages[circuit_node - 1]
-                } else {
-                    0.0
-                };
+                let v = Self::solution_value(
+                    circuit_voltages,
+                    circuit_node,
+                    "missing branch-current solution slot",
+                )?;
                 self.context.branch_current_values[ordinal] = v;
             }
+        }
+        Ok(())
+    }
+
+    fn solution_value(
+        circuit_voltages: &[f64],
+        circuit_node: usize,
+        missing_message: &'static str,
+    ) -> Result<f64, VmError> {
+        if circuit_node == 0 {
+            Ok(0.0)
+        } else {
+            circuit_voltages
+                .get(circuit_node - 1)
+                .copied()
+                .ok_or(VmError::InvalidInstruction(missing_message))
         }
     }
 
@@ -818,6 +923,17 @@ impl VerilogADevice {
     /// everywhere else — both paths share the same variable storage and
     /// activation guards.
     pub fn evaluate(&mut self) -> Vec<f64> {
+        self.try_evaluate().unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' evaluation failed: {}",
+                self.name, self.model.name, err
+            )
+        })
+    }
+
+    /// Checked evaluation path for callers that can surface runtime model
+    /// errors as diagnostics instead of panicking.
+    pub fn try_evaluate(&mut self) -> Result<Vec<f64>, VmError> {
         self.context.clear_currents();
         // Pre-reserve so the currents pointer stays stable while native
         // snapshots reference it across pushes
@@ -834,7 +950,7 @@ impl VerilogADevice {
             &self.model,
             #[cfg(feature = "native")]
             native,
-        );
+        )?;
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
         for (program_idx, program) in self.model.stamp_programs.iter().enumerate() {
@@ -848,25 +964,17 @@ impl VerilogADevice {
                 &program.value_program,
                 #[cfg(feature = "native")]
                 native.and_then(|n| n.stamp_value_fn(program_idx)),
-            );
-            match value {
-                Some(value) => {
-                    currents.push(value);
-                    vm.context.currents.push(value);
-                    if program.branch_ordinal.is_none()
-                        && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
-                    {
-                        vm.context.set_branch_current(pos, neg, value);
-                    }
-                }
-                None => {
-                    currents.push(0.0);
-                    vm.context.currents.push(0.0);
-                }
+            )?;
+            currents.push(value);
+            vm.context.currents.push(value);
+            if program.branch_ordinal.is_none()
+                && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+            {
+                vm.context.set_branch_current(pos, neg, value);
             }
         }
 
-        currents
+        Ok(currents)
     }
 
     /// Build a native evaluation-context snapshot over the VM context.
@@ -883,6 +991,8 @@ impl VerilogADevice {
             currents: context.currents.as_ptr(),
             currents_len: context.currents.len(),
             num_terminals: context.terminal_count(),
+            port_connected: context.port_connected.as_ptr(),
+            port_connected_len: context.port_connected.len(),
             temperature: context.temperature,
             time: context.time,
             timestep: context.timestep,
@@ -921,19 +1031,19 @@ impl VerilogADevice {
     }
 
     /// Run one value-returning program: native function when one compiled,
-    /// otherwise the interpreter. Returns None when evaluation failed.
+    /// otherwise the interpreter.
     fn run_value_program(
         vm: &mut Vm<'_>,
         program: &crate::codegen::BytecodeProgram,
         #[cfg(feature = "native")] native_fn: Option<crate::native::StampFn>,
-    ) -> Option<f64> {
+    ) -> Result<f64, VmError> {
         #[cfg(feature = "native")]
         if let Some(f) = native_fn {
             let ctx = Self::eval_context_from(vm.context);
             let vars_ptr = vm.context.variables.as_ptr();
-            return Some(f(&ctx, vars_ptr));
+            return Ok(f(&ctx, vars_ptr));
         }
-        vm.execute(program).ok()
+        vm.execute(program)
     }
 
     /// Execute the assignment pass: the native hybrid plan when one
@@ -942,22 +1052,20 @@ impl VerilogADevice {
         vm: &mut Vm<'_>,
         model: &CompiledModel,
         #[cfg(feature = "native")] native: Option<&NativeModel>,
-    ) {
+    ) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
         #[cfg(feature = "native")]
         if let Some(native) = native {
-            Self::execute_assignment_plan(
+            return Self::execute_assignment_plan(
                 vm,
                 native,
                 &native.plan,
                 &model.assignment_steps,
-                &model.name,
             );
-            return;
         }
-        Self::execute_assignment_steps(vm, &model.assignment_steps, &model.name);
+        Self::execute_assignment_steps(vm, &model.assignment_steps)
     }
 
     /// Walk the hybrid plan: native chunks write straight into the shared
@@ -968,8 +1076,7 @@ impl VerilogADevice {
         native: &NativeModel,
         plan: &[crate::native::PlanStep],
         steps: &[crate::codegen::AssignmentStep],
-        model_name: &str,
-    ) {
+    ) -> Result<(), VmError> {
         use crate::native::PlanStep;
         for step in plan {
             match step {
@@ -979,7 +1086,7 @@ impl VerilogADevice {
                     native.run_chunk(*id, &ctx, vars_ptr);
                 }
                 PlanStep::Interpret { from, to } => {
-                    Self::execute_assignment_steps(vm, &steps[*from..*to], model_name);
+                    Self::execute_assignment_steps(vm, &steps[*from..*to])?;
                 }
                 PlanStep::Loop { index, body } => {
                     let Some(crate::codegen::AssignmentStep::Loop {
@@ -991,25 +1098,22 @@ impl VerilogADevice {
                     };
                     let mut iterations = 0usize;
                     loop {
-                        let active = vm.execute(condition).unwrap_or(0.0);
+                        let active = vm.execute(condition)?;
                         if active == 0.0 {
                             break;
                         }
-                        Self::execute_assignment_plan(vm, native, body, body_steps, model_name);
+                        Self::execute_assignment_plan(vm, native, body, body_steps)?;
                         iterations += 1;
                         if iterations >= Self::MAX_RUNTIME_LOOP_ITERATIONS {
-                            log::warn!(
-                                "Verilog-A model '{}': runtime loop exceeded {} iterations; \
-                                 aborting the loop (check the loop bounds)",
-                                model_name,
-                                Self::MAX_RUNTIME_LOOP_ITERATIONS
-                            );
-                            break;
+                            return Err(VmError::InvalidInstruction(
+                                "runtime loop iteration limit exceeded",
+                            ));
                         }
                     }
                 }
             }
         }
+        Ok(())
     }
 
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
@@ -1017,12 +1121,12 @@ impl VerilogADevice {
     const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
 
     /// Execute assignment programs and update VM variable storage.
-    fn execute_assignment_programs(vm: &mut Vm<'_>, model: &CompiledModel) {
+    fn execute_assignment_programs(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
 
-        Self::execute_assignment_steps(vm, &model.assignment_steps, &model.name);
+        Self::execute_assignment_steps(vm, &model.assignment_steps)
     }
 
     /// Execute a sequence of evaluation steps (assignments and runtime
@@ -1030,12 +1134,11 @@ impl VerilogADevice {
     fn execute_assignment_steps(
         vm: &mut Vm<'_>,
         steps: &[crate::codegen::AssignmentStep],
-        model_name: &str,
-    ) {
+    ) -> Result<(), VmError> {
         for step in steps {
             match step {
                 crate::codegen::AssignmentStep::Assign(assignment) => {
-                    let value = vm.execute(&assignment.program).unwrap_or(0.0);
+                    let value = vm.execute(&assignment.program)?;
                     if assignment.var_index < vm.context.variables.len() {
                         vm.context.variables[assignment.var_index] = value;
                     }
@@ -1050,55 +1153,55 @@ impl VerilogADevice {
                     let slot = vm
                         .execute(index)
                         .and_then(|raw| Vm::array_slot(raw, *base, *len, *lower));
-                    match slot {
-                        Ok(slot) => {
-                            let value = vm.execute(value).unwrap_or(0.0);
-                            if slot < vm.context.variables.len() {
-                                vm.context.variables[slot] = value;
-                            }
-                        }
-                        Err(err) => {
-                            log::warn!(
-                                "Verilog-A model '{model_name}': skipping array element \
-                                 assignment: {err}"
-                            );
-                        }
+                    let slot = slot?;
+                    let value = vm.execute(value)?;
+                    if slot < vm.context.variables.len() {
+                        vm.context.variables[slot] = value;
                     }
                 }
                 crate::codegen::AssignmentStep::Loop { condition, body } => {
                     let mut iterations = 0usize;
                     loop {
-                        let active = vm.execute(condition).unwrap_or(0.0);
+                        let active = vm.execute(condition)?;
                         if active == 0.0 {
                             break;
                         }
-                        Self::execute_assignment_steps(vm, body, model_name);
+                        Self::execute_assignment_steps(vm, body)?;
                         iterations += 1;
                         if iterations >= Self::MAX_RUNTIME_LOOP_ITERATIONS {
-                            log::warn!(
-                                "Verilog-A model '{}': runtime loop exceeded {} iterations; \
-                                 aborting the loop (check the loop bounds)",
-                                model_name,
-                                Self::MAX_RUNTIME_LOOP_ITERATIONS
-                            );
-                            break;
+                            return Err(VmError::InvalidInstruction(
+                                "runtime loop iteration limit exceeded",
+                            ));
                         }
                     }
                 }
             }
         }
+        Ok(())
     }
 
     /// Compute Jacobian entries
     ///
     /// Returns (value, row_terminal, col_terminal, is_current) for each derivative.
     pub fn compute_jacobian(&mut self) -> Vec<JacobianEntry> {
+        self.try_compute_jacobian().unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' Jacobian evaluation failed: {}",
+                self.name, self.model.name, err
+            )
+        })
+    }
+
+    /// Checked Jacobian evaluation path for callers that can surface
+    /// runtime model errors as diagnostics instead of panicking.
+    pub fn try_compute_jacobian(&mut self) -> Result<Vec<JacobianEntry>, VmError> {
         let context = &mut self.context;
         let model = &self.model;
         #[cfg(feature = "native")]
         let native = self.native_model.as_deref();
 
         context.clear_currents();
+        context.currents.reserve(model.stamp_programs.len());
 
         let program_active = &self.program_active;
         let mut vm = Vm::new(context);
@@ -1107,7 +1210,7 @@ impl VerilogADevice {
             model,
             #[cfg(feature = "native")]
             native,
-        );
+        )?;
         let mut entries = Vec::new();
 
         for (prog_idx, program) in model.stamp_programs.iter().enumerate() {
@@ -1115,7 +1218,19 @@ impl VerilogADevice {
                 vm.context.currents.push(0.0);
                 continue;
             }
-            let value = vm.execute(&program.value_program).unwrap_or(0.0);
+            let value = Self::run_value_program(
+                &mut vm,
+                &program.value_program,
+                #[cfg(feature = "native")]
+                native.and_then(|n| n.stamp_value_fn(prog_idx)),
+            )?;
+            let value = match value {
+                v if v.is_finite() => v,
+                _ => {
+                    vm.context.currents.push(0.0);
+                    continue;
+                }
+            };
             vm.context.currents.push(value);
             if program.branch_ordinal.is_none()
                 && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
@@ -1124,19 +1239,27 @@ impl VerilogADevice {
             }
 
             for (jac_idx, jac_entry) in program.jacobian_programs.iter().enumerate() {
-                if let Ok(value) = vm.execute(&jac_entry.program) {
-                    entries.push(JacobianEntry {
-                        value: jac_entry.sign * value,
-                        row: jac_entry.row.clone(),
-                        col: jac_entry.col.clone(),
-                        program_idx: prog_idx,
-                        jacobian_idx: jac_idx,
-                    });
-                }
+                let value = Self::run_value_program(
+                    &mut vm,
+                    &jac_entry.program,
+                    #[cfg(feature = "native")]
+                    native.and_then(|n| n.jacobian_fn(prog_idx, jac_idx)),
+                )?;
+                let value = match value {
+                    v if v.is_finite() => v,
+                    _ => continue,
+                };
+                entries.push(JacobianEntry {
+                    value: jac_entry.sign * value,
+                    row: jac_entry.row.clone(),
+                    col: jac_entry.col.clone(),
+                    program_idx: prog_idx,
+                    jacobian_idx: jac_idx,
+                });
             }
         }
 
-        entries
+        Ok(entries)
     }
 
     /// Stamp device into matrix and RHS
@@ -1152,9 +1275,29 @@ impl VerilogADevice {
         M: FnMut(usize, usize, f64),
         R: FnMut(usize, f64),
     {
+        if let Err(err) = self.try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add) {
+            panic!(
+                "Verilog-A device '{}' model '{}' stamping failed: {}",
+                self.name, self.model.name, err
+            );
+        }
+    }
+
+    /// Checked stamping path for callers that can turn Verilog-A runtime
+    /// faults into simulator diagnostics.
+    pub fn try_stamp<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        mut matrix_add: M,
+        mut rhs_add: R,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
         // Update context with the full solution (terminals, internal
         // nodes, and branch-current unknowns)
-        self.update_all_voltages(circuit_voltages);
+        self.try_update_all_voltages(circuit_voltages)?;
 
         // Extract disjoint fields to satisfy borrow checker
         let context = &mut self.context;
@@ -1178,7 +1321,7 @@ impl VerilogADevice {
             model,
             #[cfg(feature = "native")]
             native,
-        );
+        )?;
 
         // Structural stamps of the branch-current unknowns: the KCL rows of
         // the source nodes couple to the branch column, and the branch row
@@ -1250,9 +1393,9 @@ impl VerilogADevice {
                 &program.value_program,
                 #[cfg(feature = "native")]
                 native.and_then(|n| n.stamp_value_fn(program_idx)),
-            );
+            )?;
             let value = match value {
-                Some(v) if v.is_finite() => v,
+                v if v.is_finite() => v,
                 _ => continue,
             };
 
@@ -1295,9 +1438,9 @@ impl VerilogADevice {
                     &model_entry.program,
                     #[cfg(feature = "native")]
                     native.and_then(|n| n.jacobian_fn(program_idx, jacobian_entry.jacobian_idx)),
-                );
+                )?;
                 let deriv = match deriv {
-                    Some(v) if v.is_finite() => v * scale,
+                    v if v.is_finite() => v * scale,
                     _ => continue,
                 };
 
@@ -1334,6 +1477,7 @@ impl VerilogADevice {
                 }
             }
         }
+        Ok(())
     }
 
     /// Evaluate the model's noise sources at an operating point.
@@ -1346,7 +1490,22 @@ impl VerilogADevice {
     /// engine convention (0 = ground). Mode-disabled contributions
     /// contribute nothing.
     pub fn noise_sources(&mut self, circuit_voltages: &[f64]) -> Vec<EvaluatedNoiseSource> {
-        self.update_all_voltages(circuit_voltages);
+        self.try_noise_sources(circuit_voltages)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' noise evaluation failed: {}",
+                    self.name, self.model.name, err
+                )
+            })
+    }
+
+    /// Checked noise-source evaluation path for callers that can surface
+    /// runtime model diagnostics instead of panicking or dropping sources.
+    pub fn try_noise_sources(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<Vec<EvaluatedNoiseSource>, VmError> {
+        self.try_update_all_voltages(circuit_voltages)?;
 
         let context = &mut self.context;
         let model = &self.model;
@@ -1361,7 +1520,7 @@ impl VerilogADevice {
             model,
             #[cfg(feature = "native")]
             native,
-        );
+        )?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -1381,10 +1540,11 @@ impl VerilogADevice {
             {
                 continue;
             }
-            let psd = match vm.execute(&source.psd_program) {
-                Ok(v) if v.is_finite() => v.max(0.0),
-                _ => continue,
-            };
+            let psd = vm.execute(&source.psd_program)?;
+            if !psd.is_finite() {
+                continue;
+            }
+            let psd = psd.max(0.0);
             if psd == 0.0 {
                 continue;
             }
@@ -1395,7 +1555,8 @@ impl VerilogADevice {
             let exponent = source
                 .exponent_program
                 .as_ref()
-                .map(|p| vm.execute(p).unwrap_or(1.0));
+                .map(|p| vm.execute(p))
+                .transpose()?;
 
             // Potential-contribution noise is a series EMF on the branch
             // equation row; current noise injects across the node pair
@@ -1423,7 +1584,7 @@ impl VerilogADevice {
                     .unwrap_or_else(|| format!("noise{idx}")),
             });
         }
-        sources
+        Ok(sources)
     }
 
     /// Value of a differentiation axis: a unified node voltage or a

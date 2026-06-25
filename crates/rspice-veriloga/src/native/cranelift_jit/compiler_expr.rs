@@ -10,6 +10,8 @@ pub(crate) fn program_is_jitable(program: &BytecodeProgram) -> bool {
         !matches!(
             instr,
             Instruction::PushVariableDyn { .. }
+                | Instruction::PushCurrent(..)
+                | Instruction::PushInternalVoltage(_)
                 | Instruction::IdtModState(_)
                 | Instruction::TableDerivative(_)
                 | Instruction::LimitState(_)
@@ -93,25 +95,17 @@ impl JitCompiler {
                     stack.push(val);
                 }
                 Instruction::PushVoltage(pos, neg) => {
+                    let native_safe_node = |node: usize| node == usize::MAX || node < num_terminals;
+                    if !native_safe_node(*pos) || !native_safe_node(*neg) {
+                        return Err(JitError::UnsupportedInstruction("PushVoltage"));
+                    }
                     let v_pos = load_node_potential(builder, *pos);
                     let v_neg = load_node_potential(builder, *neg);
                     let diff = builder.ins().fsub(v_pos, v_neg);
                     stack.push(diff);
                 }
-                Instruction::PushInternalVoltage(idx) => {
-                    let internal_ptr = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::new(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_INTERNAL_VOLTAGES,
-                    );
-                    let val = builder.ins().load(
-                        types::F64,
-                        MemFlags::new(),
-                        internal_ptr,
-                        (*idx * 8) as i32,
-                    );
-                    stack.push(val);
+                Instruction::PushInternalVoltage(_) => {
+                    return Err(JitError::UnsupportedInstruction("PushInternalVoltage"));
                 }
                 Instruction::PushVariable(idx) => {
                     let val = builder.ins().load(
@@ -135,6 +129,22 @@ impl JitCompiler {
                         EVAL_CTX_OFFSET_MULTIPLICITY,
                     );
                     stack.push(val);
+                }
+                Instruction::PushPortConnected(terminal) => {
+                    let flags_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_PORT_CONNECTED,
+                    );
+                    let flag =
+                        builder
+                            .ins()
+                            .load(types::I8, MemFlags::new(), flags_ptr, *terminal as i32);
+                    let cmp = builder.ins().icmp_imm(IntCC::NotEqual, flag, 0);
+                    let one = builder.ins().f64const(1.0);
+                    let zero = builder.ins().f64const(0.0);
+                    stack.push(builder.ins().select(cmp, one, zero));
                 }
                 Instruction::PushTemperature => {
                     let val = builder.ins().load(
@@ -168,58 +178,8 @@ impl JitCompiler {
                     );
                     stack.push(val);
                 }
-                Instruction::PushCurrent(pos, neg) => {
-                    let branch_currents_ptr = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::trusted(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_BRANCH_CURRENTS,
-                    );
-                    let branch_currents_len = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::trusted(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_BRANCH_CURRENTS_LEN,
-                    );
-                    let currents_ptr = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::trusted(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_CURRENTS,
-                    );
-                    let currents_len = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::trusted(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_CURRENTS_LEN,
-                    );
-                    let num_terminals = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::trusted(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_NUM_TERMINALS,
-                    );
-                    let pos_idx = builder.ins().iconst(self.isa.pointer_type(), *pos as i64);
-                    let neg_idx = builder.ins().iconst(self.isa.pointer_type(), *neg as i64);
-
-                    let func_id = math_funcs.get("rspice_current_lookup").ok_or_else(|| {
-                        JitError::FunctionNotFound("rspice_current_lookup".to_string())
-                    })?;
-                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
-                    let call = builder.ins().call(
-                        func_ref,
-                        &[
-                            branch_currents_ptr,
-                            branch_currents_len,
-                            currents_ptr,
-                            currents_len,
-                            num_terminals,
-                            pos_idx,
-                            neg_idx,
-                        ],
-                    );
-                    let result = builder.inst_results(call)[0];
-                    stack.push(result);
+                Instruction::PushCurrent(..) => {
+                    return Err(JitError::UnsupportedInstruction("PushCurrent"));
                 }
 
                 // Binary operations
@@ -830,5 +790,34 @@ impl JitCompiler {
         let func_ref = module.declare_func_in_func(*func_id, builder.func);
         let call = builder.ins().call(func_ref, &[arg1, arg2]);
         Ok(builder.inst_results(call)[0])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn push_current_programs_are_not_jitable_until_errors_can_propagate() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(0, 1)],
+        };
+
+        assert!(
+            !program_is_jitable(&program),
+            "native current probes must not bypass checked VM lookup errors"
+        );
+    }
+
+    #[test]
+    fn push_internal_voltage_programs_are_not_jitable_until_errors_can_propagate() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushInternalVoltage(0)],
+        };
+
+        assert!(
+            !program_is_jitable(&program),
+            "native internal-node voltage reads must not bypass checked VM lookup errors"
+        );
     }
 }

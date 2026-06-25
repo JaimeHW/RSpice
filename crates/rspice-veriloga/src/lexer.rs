@@ -467,6 +467,9 @@ impl<'a> Lexer<'a> {
             '}' => TokenKind::RBrace,
             ',' => TokenKind::Comma,
             ';' => TokenKind::Semicolon,
+            '.' if self.peek_char().is_some_and(|next| next.is_ascii_digit()) => {
+                return self.scan_number(start, ch);
+            }
             '.' => TokenKind::Dot,
             '@' => TokenKind::At,
             '?' => TokenKind::Question,
@@ -714,8 +717,8 @@ impl<'a> Lexer<'a> {
         Ok(Token::with_text(TokenKind::EscapedIdentifier, span, text))
     }
 
-    fn scan_number(&mut self, start: usize, _first: char) -> Result<Token, LexerError> {
-        let mut has_dot = false;
+    fn scan_number(&mut self, start: usize, first: char) -> Result<Token, LexerError> {
+        let mut has_dot = first == '.';
         let mut has_exp = false;
 
         // Continue scanning digits
@@ -741,6 +744,13 @@ impl<'a> Lexer<'a> {
                     && (sign == '+' || sign == '-')
                 {
                     self.advance();
+                }
+                if !self.peek_char().is_some_and(|next| next.is_ascii_digit()) {
+                    let text = self.source[start..self.pos].to_string();
+                    return Err(LexerError::new(
+                        LexerErrorKind::InvalidNumber(text),
+                        Span::new(self.source_id, start as u32, self.pos as u32),
+                    ));
                 }
             } else {
                 break;
@@ -824,10 +834,7 @@ impl<'a> Lexer<'a> {
                             // Skip both and continue on next line
                         }
                         Some((_, ch)) => {
-                            return Err(LexerError::new(
-                                LexerErrorKind::InvalidEscape(ch),
-                                Span::new(self.source_id, start as u32, self.pos as u32),
-                            ));
+                            value.push(ch);
                         }
                         None => {
                             return Err(LexerError::new(
@@ -970,9 +977,35 @@ mod tests {
     }
 
     #[test]
+    fn leading_dot_numbers_are_real_literals() {
+        for src in [".5", ".5e-3", ".5k"] {
+            let toks = lex(src);
+            assert_eq!(toks[0].kind, TokenKind::RealLiteral, "for {src}");
+            assert_eq!(toks[0].text.as_deref(), Some(src), "for {src}");
+        }
+    }
+
+    #[test]
+    fn exponent_requires_digits() {
+        for src in ["1e", "1e+", "1E-"] {
+            let err = Lexer::new(src, SourceId::new(0))
+                .collect_tokens()
+                .expect_err("malformed exponent must be rejected");
+            assert!(matches!(err.kind, LexerErrorKind::InvalidNumber(_)));
+        }
+    }
+
+    #[test]
     fn octal_escapes_in_strings() {
         let toks = lex(r#""a\101b\0c""#);
         assert_eq!(toks[0].text.as_deref(), Some("aAb\0c"));
+    }
+
+    #[test]
+    fn non_special_string_escapes_preserve_character() {
+        let toks = lex(r#""hisimsoi\_fb""#);
+        assert_eq!(toks[0].kind, TokenKind::StringLiteral);
+        assert_eq!(toks[0].text.as_deref(), Some("hisimsoi_fb"));
     }
 
     #[test]

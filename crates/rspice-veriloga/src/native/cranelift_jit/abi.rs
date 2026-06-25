@@ -17,6 +17,10 @@ pub struct EvalContext {
     pub currents_len: usize,
     /// Number of terminals in the device
     pub num_terminals: usize,
+    /// Whether each external terminal was explicitly connected.
+    pub port_connected: *const u8,
+    /// Length of `port_connected`.
+    pub port_connected_len: usize,
     /// Temperature in Kelvin
     pub temperature: f64,
     /// Simulation time
@@ -161,8 +165,8 @@ pub unsafe extern "C" fn rspice_laplace_step(
 pub unsafe extern "C" fn rspice_current_lookup(
     branch_currents_ptr: *const f64,
     branch_currents_len: usize,
-    currents_ptr: *const f64,
-    currents_len: usize,
+    _currents_ptr: *const f64,
+    _currents_len: usize,
     num_terminals: usize,
     pos: usize,
     neg: usize,
@@ -178,10 +182,5 @@ pub unsafe extern "C" fn rspice_current_lookup(
         }
     }
 
-    if !currents_ptr.is_null() && currents_len > 0 {
-        // Safety: caller guarantees valid pointer and bounds.
-        return unsafe { *currents_ptr };
-    }
-
-    0.0
+    f64::NAN
 }

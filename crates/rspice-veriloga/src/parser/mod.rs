@@ -422,8 +422,12 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error(ParseErrorKind::InvalidPort)),
         };
 
-        // Optional discipline
-        let discipline = if self.is_discipline_keyword() {
+        // Optional discipline. User-defined disciplines are identifiers, so
+        // distinguish `inout foo bar;` from `inout foo, bar;` by requiring
+        // two adjacent identifiers, matching ANSI port-list parsing.
+        let discipline = if self.is_discipline_keyword()
+            || (self.check(TokenKind::Identifier) && self.peek_is(TokenKind::Identifier))
+        {
             Some(self.expect_identifier("discipline")?)
         } else {
             None
@@ -1173,12 +1177,12 @@ impl<'a> Parser<'a> {
             // `initial` keyword appears for bare @(initial) robustness.
             TokenKind::Initial => {
                 self.advance();
-                self.skip_optional_event_args()?;
+                self.reject_step_event_analysis_args("initial_step")?;
                 Ok(EventExpr::InitialStep { span: start })
             }
             TokenKind::Final => {
                 self.advance();
-                self.skip_optional_event_args()?;
+                self.reject_step_event_analysis_args("final_step")?;
                 Ok(EventExpr::FinalStep { span: start })
             }
             TokenKind::Cross => {
@@ -1189,12 +1193,25 @@ impl<'a> Parser<'a> {
                 }
                 let mut args = args.into_iter();
                 let signal = args.next().unwrap();
-                let direction = args.next().as_ref().and_then(Self::const_cross_direction);
-                let tolerance = args.next();
+                let direction = match args.next() {
+                    Some(direction) => {
+                        Some(Self::const_cross_direction(&direction).ok_or_else(|| {
+                            self.error(ParseErrorKind::InvalidEventExpression(
+                                "cross direction must be a constant -1, 0, or 1".into(),
+                            ))
+                        })?)
+                    }
+                    None => None,
+                };
+                if args.next().is_some() {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "cross event time tolerance is not supported".into(),
+                    )));
+                }
                 Ok(EventExpr::Cross {
                     signal,
                     direction,
-                    tolerance,
+                    tolerance: None,
                     span: start.extend(self.previous_span()),
                 })
             }
@@ -1204,7 +1221,13 @@ impl<'a> Parser<'a> {
                 if args.is_empty() {
                     return Err(self.error(ParseErrorKind::InvalidAnalogStatement));
                 }
-                let signal = args.into_iter().next().unwrap();
+                let mut args = args.into_iter();
+                let signal = args.next().unwrap();
+                if args.next().is_some() {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "above event accepts exactly 1 argument".into(),
+                    )));
+                }
                 Ok(EventExpr::Above {
                     signal,
                     span: start.extend(self.previous_span()),
@@ -1219,6 +1242,11 @@ impl<'a> Parser<'a> {
                 let mut args = args.into_iter();
                 let start_time = args.next().unwrap();
                 let period = args.next();
+                if args.next().is_some() {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "timer event accepts at most 2 arguments".into(),
+                    )));
+                }
                 Ok(EventExpr::Timer {
                     start: start_time,
                     period,
@@ -1246,12 +1274,12 @@ impl<'a> Parser<'a> {
                 match name.as_str() {
                     "initial_step" => {
                         self.advance();
-                        self.skip_optional_event_args()?;
+                        self.reject_step_event_analysis_args("initial_step")?;
                         Ok(EventExpr::InitialStep { span: start })
                     }
                     "final_step" => {
                         self.advance();
-                        self.skip_optional_event_args()?;
+                        self.reject_step_event_analysis_args("final_step")?;
                         Ok(EventExpr::FinalStep { span: start })
                     }
                     _ => {
@@ -1277,10 +1305,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Skip the optional analysis-list arguments of initial_step/final_step
-    fn skip_optional_event_args(&mut self) -> Result<(), ParseError> {
+    /// Analysis-list filters need a true first/last-step event state per
+    /// analysis. Until that exists, reject them rather than silently widening
+    /// the event to the current coarse initial/final-step behavior.
+    fn reject_step_event_analysis_args(&mut self, event_name: &str) -> Result<(), ParseError> {
         if self.check(TokenKind::LParen) {
-            self.parse_arg_list()?;
+            let args = self.parse_arg_list()?;
+            if !args.is_empty() {
+                return Err(self.error(ParseErrorKind::InvalidEventExpression(format!(
+                    "{event_name} analysis-list arguments are not supported"
+                ))));
+            }
         }
         Ok(())
     }
@@ -1288,15 +1323,10 @@ impl<'a> Parser<'a> {
     /// Extract a constant cross direction (+1, -1, 0) from an expression
     fn const_cross_direction(expr: &Expression) -> Option<CrossDirection> {
         match expr {
-            Expression::Number(n) => {
-                if n.value > 0.5 {
-                    Some(CrossDirection::Rising)
-                } else if n.value < -0.5 {
-                    Some(CrossDirection::Falling)
-                } else {
-                    Some(CrossDirection::Both)
-                }
-            }
+            Expression::Number(n) if n.value == 1.0 => Some(CrossDirection::Rising),
+            Expression::Number(n) if n.value == 0.0 => Some(CrossDirection::Both),
+            Expression::Number(n) if n.value == -1.0 => Some(CrossDirection::Falling),
+            Expression::Unary(u) if u.op == UnaryOp::Pos => Self::const_cross_direction(&u.operand),
             Expression::Unary(u) if u.op == UnaryOp::Neg => {
                 match Self::const_cross_direction(&u.operand) {
                     Some(CrossDirection::Rising) => Some(CrossDirection::Falling),
@@ -1426,6 +1456,17 @@ impl<'a> Parser<'a> {
         let access = self.expect_identifier("access function")?;
 
         self.expect(TokenKind::LParen)?;
+        if self.match_token(TokenKind::Lt) {
+            let name = self.expect_identifier("branch")?;
+            self.expect(TokenKind::Gt)?;
+            self.expect(TokenKind::RParen)?;
+            return Ok(BranchAccess::Branch {
+                access: access.into(),
+                name: name.into(),
+                span: start.extend(self.previous_span()),
+            });
+        }
+
         let pos = self.expect_identifier("node")?;
         let neg = if self.match_token(TokenKind::Comma) {
             Some(self.expect_identifier("node")?.into())
@@ -1676,8 +1717,11 @@ impl<'a> Parser<'a> {
         match self.current().kind {
             TokenKind::IntegerLiteral | TokenKind::RealLiteral => {
                 let text = self.current().text.clone().unwrap_or_default();
+                let span = start.extend(self.current_span());
+                let value = parse_number(&text).map_err(|message| {
+                    ParseError::new(ParseErrorKind::InvalidNumber(message), span)
+                })?;
                 self.advance();
-                let value = parse_number(&text);
                 Ok(Expression::Number(NumberLit {
                     value,
                     raw: text.into(),
@@ -1716,6 +1760,17 @@ impl<'a> Parser<'a> {
                     if name == "V" || name == "I" {
                         // Branch access
                         self.expect(TokenKind::LParen)?;
+                        if self.match_token(TokenKind::Lt) {
+                            let branch = self.expect_identifier("branch")?;
+                            self.expect(TokenKind::Gt)?;
+                            self.expect(TokenKind::RParen)?;
+                            return Ok(Expression::BranchAccess(BranchAccess::Branch {
+                                access: name.into(),
+                                name: branch.into(),
+                                span: start.extend(self.previous_span()),
+                            }));
+                        }
+
                         let pos = self.expect_identifier("node")?;
                         let neg = if self.match_token(TokenKind::Comma) {
                             Some(self.expect_identifier("node")?.into())
@@ -2046,7 +2101,7 @@ impl<'a> Parser<'a> {
 }
 
 /// Parse a number literal with scale factors
-fn parse_number(s: &str) -> f64 {
+fn parse_number(s: &str) -> Result<f64, String> {
     let s = s.trim();
 
     // Check for scale factors at the end
@@ -2079,7 +2134,14 @@ fn parse_number(s: &str) -> f64 {
         (s, 1.0)
     };
 
-    num_str.parse::<f64>().unwrap_or(0.0) * scale
+    let value = num_str
+        .parse::<f64>()
+        .map_err(|_| format!("'{s}' is not a valid number"))?
+        * scale;
+    if !value.is_finite() {
+        return Err(format!("'{s}' is outside the finite real range"));
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -2220,6 +2282,37 @@ mod tests {
         assert_eq!(m.branches[0].pos.as_str(), "p");
         assert_eq!(m.branches[0].neg.as_str(), "n");
         assert_eq!(m.branches[1].name.as_str(), "cap");
+    }
+
+    #[test]
+    fn angle_bracket_named_branch_access_parses() {
+        let m = parse_module(
+            r#"module a(c, e);
+                inout c, e;
+                electrical c, e;
+                branch (c, e) coll;
+                real ic;
+                analog begin
+                    ic = I(<coll>);
+                    I(<coll>) <+ ic;
+                end
+            endmodule"#,
+        );
+        let stmts = &m.analog_block.as_ref().unwrap().statements;
+        let AnalogStatement::Assignment(assign) = &stmts[0] else {
+            panic!("expected branch-current assignment");
+        };
+        assert!(matches!(
+            assign.value,
+            Expression::BranchAccess(BranchAccess::Branch { .. })
+        ));
+        let AnalogStatement::Contribution(contrib) = &stmts[1] else {
+            panic!("expected named branch contribution");
+        };
+        assert!(matches!(
+            contrib.target,
+            BranchAccess::Branch { ref name, .. } if name.as_str() == "coll"
+        ));
     }
 
     #[test]
@@ -2371,19 +2464,19 @@ mod tests {
 
     #[test]
     fn scale_factor_values() {
-        assert_eq!(parse_number("1k"), 1e3);
-        assert_eq!(parse_number("1K"), 1e3);
-        assert_eq!(parse_number("2.5M"), 2.5e6);
-        assert_eq!(parse_number("1meg"), 1e6);
-        assert_eq!(parse_number("1Meg"), 1e6);
-        assert_eq!(parse_number("1MEG"), 1e6);
-        assert_eq!(parse_number("3m"), 3e-3);
-        assert_eq!(parse_number("4u"), 4e-6);
-        assert_eq!(parse_number("5n"), 5e-9);
-        assert_eq!(parse_number("6p"), 6e-12);
-        assert_eq!(parse_number("7f"), 7e-15);
-        assert_eq!(parse_number("8a"), 8e-18);
-        assert_eq!(parse_number("9T"), 9e12);
-        assert_eq!(parse_number("10G"), 10e9);
+        assert_eq!(parse_number("1k").unwrap(), 1e3);
+        assert_eq!(parse_number("1K").unwrap(), 1e3);
+        assert_eq!(parse_number("2.5M").unwrap(), 2.5e6);
+        assert_eq!(parse_number("1meg").unwrap(), 1e6);
+        assert_eq!(parse_number("1Meg").unwrap(), 1e6);
+        assert_eq!(parse_number("1MEG").unwrap(), 1e6);
+        assert_eq!(parse_number("3m").unwrap(), 3e-3);
+        assert_eq!(parse_number("4u").unwrap(), 4e-6);
+        assert_eq!(parse_number("5n").unwrap(), 5e-9);
+        assert_eq!(parse_number("6p").unwrap(), 6e-12);
+        assert_eq!(parse_number("7f").unwrap(), 7e-15);
+        assert_eq!(parse_number("8a").unwrap(), 8e-18);
+        assert_eq!(parse_number("9T").unwrap(), 9e12);
+        assert_eq!(parse_number("10G").unwrap(), 10e9);
     }
 }
