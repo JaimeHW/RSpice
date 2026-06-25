@@ -87,11 +87,43 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
                     ),
                 ));
             }
+            HirExprKind::Call { name, .. } if is_stateful_or_effectful_call(name.as_str()) => {
+                return Err(unsupported(
+                    artifact,
+                    format!("stateful or effectful analog operator call {name}"),
+                ));
+            }
             _ => {}
         }
     }
 
     Ok(())
+}
+
+fn is_stateful_or_effectful_call(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "ddt"
+            | "idt"
+            | "idtmod"
+            | "ddx"
+            | "absdelay"
+            | "transition"
+            | "slew"
+            | "last_crossing"
+            | "laplace_zp"
+            | "laplace_zd"
+            | "laplace_np"
+            | "laplace_nd"
+            | "zi_zp"
+            | "zi_zd"
+            | "zi_np"
+            | "zi_nd"
+            | "white_noise"
+            | "flicker_noise"
+            | "noise_table"
+            | "noise_table_log"
+    )
 }
 
 fn generate_mod_file() -> String {

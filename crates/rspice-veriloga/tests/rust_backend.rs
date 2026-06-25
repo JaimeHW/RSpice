@@ -1,7 +1,7 @@
 use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::rust_backend::{
-    GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames, RustTranspiler,
-    RustTranspileOptions, discover_veriloga_sources, write_generated_device,
+    GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames,
+    RustTranspileOptions, RustTranspiler, discover_veriloga_sources, write_generated_device,
 };
 
 #[test]
@@ -175,8 +175,8 @@ fn generated_algebraic_current_rust_compiles_with_runtime_stub() {
     let generated = RustTranspiler::new(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
-        .transpile(&artifact)
-        .expect("transpile simple resistor");
+    .transpile(&artifact)
+    .expect("transpile simple resistor");
     let temp = temp_dir("rspice-rust-backend-compile");
 
     write_generated_device(&temp, &generated).expect("write generated device");
@@ -246,6 +246,70 @@ pub mod generated_device;
     );
 
     let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn rust_backend_rejects_stateful_operator_until_supported() {
+    let src = r#"
+module cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12;
+    analog I(p, n) <+ ddt(c * V(p, n));
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(src)
+        .expect("canonical IR");
+    let err = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect_err("ddt unsupported in first slice");
+
+    let rendered = err.to_string();
+    assert!(rendered.contains("cap"), "{rendered}");
+    assert!(rendered.contains("stateful"), "{rendered}");
+}
+
+#[test]
+fn rust_backend_rejects_non_current_contribution_until_supported() {
+    let src = r#"
+module vsrc(p, n);
+    inout p, n;
+    electrical p, n;
+    analog V(p, n) <+ 1.0;
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(src)
+        .expect("canonical IR");
+    let err = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect_err("potential unsupported in first slice");
+
+    assert!(err.to_string().contains("vsrc"));
+    assert!(err.to_string().contains("potential"));
+}
+
+#[test]
+fn rust_backend_reports_real_module_for_expression_lowering_failures() {
+    let src = r#"
+module pow_res(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) ** 2.0;
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(src)
+        .expect("canonical IR");
+    let err = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect_err("pow unsupported in first slice");
+    let rendered = err.to_string();
+
+    assert!(rendered.contains("<input>"));
+    assert!(rendered.contains("pow_res"));
+    assert!(rendered.contains("binary operator Pow"));
 }
 
 fn temp_dir(prefix: &str) -> std::path::PathBuf {

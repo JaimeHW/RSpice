@@ -74,12 +74,16 @@ impl ExprEmitter<'_> {
             }
             HirExprKind::Unary { op, operand } => {
                 let operand = self.lower(*operand)?;
-                self.emit_value(&base, unary_value(op.as_str(), &operand.value)?)
+                let value = unary_value(op.as_str(), &operand.value)
+                    .map_err(|_| self.unsupported(format!("unary operator {op}")))?;
+                self.emit_value(&base, value)
             }
             HirExprKind::Binary { op, left, right } => {
                 let left = self.lower(*left)?;
                 let right = self.lower(*right)?;
-                self.emit_value(&base, binary_value(op.as_str(), &left.value, &right.value)?)
+                let value = binary_value(op.as_str(), &left.value, &right.value)
+                    .map_err(|_| self.unsupported(format!("binary operator {op}")))?;
+                self.emit_value(&base, value)
             }
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Limexp { expr },
@@ -126,7 +130,10 @@ impl ExprEmitter<'_> {
                 operand
                     .derivatives
                     .iter()
-                    .map(|derivative| unary_value(op.as_str(), derivative))
+                    .map(|derivative| {
+                        unary_value(op.as_str(), derivative)
+                            .map_err(|_| self.unsupported(format!("unary operator {op}")))
+                    })
                     .collect::<Result<Vec<_>, _>>()?
             }
             HirExprKind::Binary { op, left, right } => {
@@ -138,7 +145,8 @@ impl ExprEmitter<'_> {
                     .emitted
                     .get(right)
                     .expect("right operand must be emitted before binary derivative");
-                binary_derivatives(op.as_str(), left, right)?
+                binary_derivatives(op.as_str(), left, right)
+                    .map_err(|_| self.unsupported(format!("binary operator {op}")))?
             }
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Limexp { expr },
