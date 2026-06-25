@@ -137,9 +137,9 @@ The shipped CMC Verilog-A package set currently includes:
   - L_UTSOI_102.9.0_code_package
   - MOSVAR140
   - mvsg_cmc_v4.0.0_official
-  - PSP104.1.0_vacode
+  - PSP104.1.0_vacode (PSP 104.1.0, including JUNCAP200 support files)
   - r2_cmc_v1.0.2
-  - r3_cmc_release1.1.2_2023Jun16
+  - r3_cmc_release1.1.2_2023Jun16 (R3_CMC 1.1.2)
 
 Most of these packages identify their license as Educational Community
 License, Version 2.0. MEXTRAM 505.5.0 ships under its package-local custom

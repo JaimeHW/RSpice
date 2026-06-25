@@ -180,15 +180,19 @@ class CiConfigurationTests(unittest.TestCase):
         notice = read_text("NOTICE")
 
         for required in [
-            "EKV v2.6",
-            "PSP 103",
+            "PSP104.1.0_vacode",
             "JUNCAP200",
+            "r3_cmc_release1.1.2_2023Jun16",
             "R3_CMC",
-            "Educational Community License, Version 2.0",
+            "diode_cmc_3.0_20250714",
+            "BSIM-CMG_112.1.0_04282026",
             "Si2 Compact Model Coalition",
         ]:
             with self.subTest(required=required):
                 self.assertIn(required, notice)
+
+        normalized_notice = re.sub(r"\s+", " ", notice)
+        self.assertIn("Educational Community License, Version 2.0", normalized_notice)
 
     def test_klu_solver_provenance_audit_is_current(self) -> None:
         audit = read_text("docs/legal/ngspice-provenance-audit.md")
