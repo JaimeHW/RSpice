@@ -34,8 +34,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.94.0
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
 

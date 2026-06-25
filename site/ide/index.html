@@ -50,10 +50,10 @@
 </div>
 <canvas id="rspice_canvas"></canvas>
 <script>
-  // wgpu 23 (pinned by egui 0.29) still requests the WebGPU limit
+  // The egui 0.29 WebGPU stack still requests the WebGPU limit
   // `maxInterStageShaderComponents`, which the spec dropped and Chrome 129+
   // rejects. Strip it before the module's requestDevice call.
-  // TODO: remove once rspice-ui moves to egui >= 0.31 (wgpu >= 24).
+  // TODO: remove once the egui/WebGPU stack no longer requests that limit.
   if (navigator.gpu && window.GPUAdapter) {
     const origRequestDevice = GPUAdapter.prototype.requestDevice;
     GPUAdapter.prototype.requestDevice = function (desc) {
