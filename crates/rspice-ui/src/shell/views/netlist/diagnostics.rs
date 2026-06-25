@@ -117,6 +117,23 @@ pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
+pub(super) fn parser_diagnostics(netlist: &rspice_core::Netlist) -> Vec<Diagnostic> {
+    netlist
+        .diagnostics
+        .iter()
+        .map(|diagnostic| Diagnostic {
+            severity: match diagnostic.severity {
+                rspice_core::netlist::DiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
+            },
+            span: None,
+            line: diagnostic.line.checked_sub(1),
+            column: None,
+            message: diagnostic.message.clone(),
+            fix: None,
+        })
+        .collect()
+}
+
 fn visible_definitions<'a>(
     reference: &NetlistReference,
     definitions: &'a [NetlistDefinition],
