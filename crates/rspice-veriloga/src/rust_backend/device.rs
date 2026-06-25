@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, EquationId, ExprId, HirAnalogOperator, HirExprKind,
@@ -17,7 +17,9 @@ use super::{
 };
 
 const MAX_STAMP_HELPER_LINES: usize = 512;
-const MAX_STAMP_HELPERS_PER_MODULE: usize = 4;
+const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
+const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
+const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
 
 pub fn generate_device(
     artifact: &CanonicalIrArtifact,
@@ -42,7 +44,7 @@ pub fn generate_device(
     let transient_liveness = collect_transient_liveness(artifact)?;
     let potential_branch_slots = collect_potential_branch_slots(artifact)?;
 
-    let stamp_files = generate_stamp_file(
+    let stamp_files = compact_stamp_files(generate_stamp_file(
         artifact,
         options,
         &parameter_fields,
@@ -51,7 +53,7 @@ pub fn generate_device(
         &transient_liveness,
         &reactive_liveness,
         &potential_branch_slots,
-    )?;
+    )?);
     let mut files = vec![
         GeneratedRustFile {
             relative_path: "mod.rs".to_string(),
@@ -63,6 +65,7 @@ pub fn generate_device(
                 artifact,
                 &parameter_fields,
                 ddt_slots.len(),
+                ddt_slots.idt_len(),
                 potential_branch_slots.len(),
             )?,
         },
@@ -80,6 +83,121 @@ pub fn generate_device(
         source_digest: artifact.metadata.source_digest.to_string(),
         files,
     })
+}
+
+fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
+    files.stamp = compact_generated_stamp_surface(files.stamp);
+    for helper in &mut files.helpers {
+        helper.contents = compact_generated_stamp_surface(std::mem::take(&mut helper.contents));
+    }
+    files
+}
+
+fn compact_generated_stamp_surface(mut source: String) -> String {
+    for (from, to) in [
+        ("scratch.reactive_node_derivatives", "scratch.rdn"),
+        ("scratch.reactive_branch_derivatives", "scratch.rdb"),
+        ("scratch.reactive_values", "scratch.rv"),
+        ("scratch.node_derivatives", "scratch.dn"),
+        ("scratch.branch_derivatives", "scratch.db"),
+        ("scratch.values", "scratch.v"),
+        (".node_derivatives", ".dn"),
+        (".branch_derivatives", ".db"),
+        ("let mut scratch = ", "let mut s = "),
+        ("&mut scratch", "&mut s"),
+        ("scratch: &mut ReactiveScratch", "s: &mut ReactiveScratch"),
+        ("scratch: &mut Scratch", "s: &mut Scratch"),
+        ("scratch.", "s."),
+        ("type AdValue = GenericAdValue", "type A = GenericAdValue"),
+        ("AdValue::", "A::"),
+        (": AdValue", ": A"),
+        ("params.", "p."),
+        ("&self.nodes", "&nodes"),
+        ("self.nodes[", "nodes["),
+        ("&self.branches", "&branches"),
+        ("self.branches[", "branches["),
+    ] {
+        source = source.replace(from, to);
+    }
+    cache_context_reads(source)
+}
+
+fn cache_context_reads(source: String) -> String {
+    const ANCHOR: &str = "        let branches = self.branches;\n";
+
+    let mut out = String::with_capacity(source.len());
+    let mut remaining = source.as_str();
+    while let Some(anchor_start) = remaining.find(ANCHOR) {
+        let anchor_end = anchor_start + ANCHOR.len();
+        out.push_str(&remaining[..anchor_end]);
+        remaining = &remaining[anchor_end..];
+
+        let segment_end = remaining.find(ANCHOR).unwrap_or(remaining.len());
+        out.push_str(&cache_context_reads_in_segment(&remaining[..segment_end]));
+        remaining = &remaining[segment_end..];
+    }
+    out.push_str(remaining);
+    out
+}
+
+fn cache_context_reads_in_segment(segment: &str) -> String {
+    let node_indices = collect_indexed_calls(segment, "ctx.node_voltage(nodes[", "])");
+    let branch_indices = collect_indexed_calls(segment, "ctx.branch_current(branches[", "])");
+    if node_indices.is_empty() && branch_indices.is_empty() {
+        return segment.to_string();
+    }
+
+    let mut body = segment.to_string();
+    for index in &node_indices {
+        body = body.replace(
+            &format!("ctx.node_voltage(nodes[{index}])"),
+            &format!("nv{index}"),
+        );
+    }
+    for index in &branch_indices {
+        body = body.replace(
+            &format!("ctx.branch_current(branches[{index}])"),
+            &format!("bi{index}"),
+        );
+    }
+
+    let mut cached = String::new();
+    for index in node_indices {
+        cached.push_str(&format!(
+            "        let nv{index} = ctx.node_voltage(nodes[{index}]);\n"
+        ));
+    }
+    for index in branch_indices {
+        cached.push_str(&format!(
+            "        let bi{index} = ctx.branch_current(branches[{index}]);\n"
+        ));
+    }
+    cached.push_str(&body);
+    cached
+}
+
+fn collect_indexed_calls(segment: &str, prefix: &str, suffix: &str) -> BTreeSet<usize> {
+    let mut indices = BTreeSet::new();
+    let mut remaining = segment;
+    while let Some(start) = remaining.find(prefix) {
+        let after_prefix = &remaining[start + prefix.len()..];
+        let digit_len = after_prefix
+            .as_bytes()
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        if digit_len > 0 && after_prefix[digit_len..].starts_with(suffix) {
+            if let Ok(index) = after_prefix[..digit_len].parse() {
+                indices.insert(index);
+            }
+        }
+        let advance = digit_len.max(1);
+        if advance >= after_prefix.len() {
+            break;
+        }
+        remaining = &after_prefix[advance..];
+    }
+    indices
 }
 
 #[derive(Debug, Clone, Default)]
@@ -146,10 +264,13 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
                         return Err(unsupported(artifact, "ddt abstol argument"));
                     }
                 }
-                HirAnalogOperator::Ddx { .. } => {}
-                HirAnalogOperator::Limexp { .. } => {
-                    return Err(unsupported(artifact, "convergence-limited limexp operator"));
+                HirAnalogOperator::Idt { assert, abstol, .. } => {
+                    if assert.is_some() || abstol.is_some() {
+                        return Err(unsupported(artifact, "idt assert/abstol argument"));
+                    }
                 }
+                HirAnalogOperator::Ddx { .. } => {}
+                HirAnalogOperator::Limexp { .. } => {}
                 _ => {
                     return Err(unsupported(
                         artifact,
@@ -175,6 +296,14 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
                     ));
                 }
             }
+            HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
+                if !(1..=2).contains(&args.len()) {
+                    return Err(unsupported(
+                        artifact,
+                        format!("idt expects one or two operands, found {}", args.len()),
+                    ));
+                }
+            }
             HirExprKind::Call { name, args } if is_ddx_name(name.as_str()) => {
                 if args.len() != 2 {
                     return Err(unsupported(
@@ -193,8 +322,6 @@ fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), 
             _ => {}
         }
     }
-    reject_ddx_feeding_current_contributions(artifact)?;
-
     Ok(())
 }
 
@@ -237,314 +364,11 @@ fn reject_unsupported_statements(
     Ok(())
 }
 
-fn reject_ddx_feeding_current_contributions(
-    artifact: &CanonicalIrArtifact,
-) -> Result<(), RustBackendError> {
-    let mut ddx_tainted_variables = HashSet::new();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for statement in &artifact.hir.statements {
-            let HirStatement::Assignment(assignment) = statement else {
-                continue;
-            };
-            let mut visited = HashSet::new();
-            if expr_contains_ddx_or_tainted_variable(
-                artifact,
-                assignment.expr.id,
-                &ddx_tainted_variables,
-                &mut visited,
-            )? && ddx_tainted_variables.insert(assignment.target_name.to_string())
-            {
-                changed = true;
-            }
-        }
-    }
-
-    for equation in &artifact.mir.equations {
-        let mut visited = HashSet::new();
-        if expr_contains_ddx_or_tainted_variable(
-            artifact,
-            equation.expression.id,
-            &ddx_tainted_variables,
-            &mut visited,
-        )? {
-            return Err(unsupported(
-                artifact,
-                "ddx feeding a current contribution requires second derivatives",
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn expr_contains_ddx_or_tainted_variable(
-    artifact: &CanonicalIrArtifact,
-    id: ExprId,
-    ddx_tainted_variables: &HashSet<String>,
-    visited: &mut HashSet<ExprId>,
-) -> Result<bool, RustBackendError> {
-    if !visited.insert(id) {
-        return Ok(false);
-    }
-    let expression = artifact
-        .mir
-        .expressions
-        .get(usize::from(id))
-        .ok_or_else(|| {
-            RustBackendError::internal(
-                artifact.metadata.source_package.as_str(),
-                artifact.mir.module_name.as_str(),
-                format!("expression {id} is outside MIR arena"),
-            )
-        })?;
-
-    match &expression.kind {
-        HirExprKind::Identifier { name } => Ok(ddx_tainted_variables.contains(name.as_str())),
-        HirExprKind::AnalogOperator {
-            op: HirAnalogOperator::Ddx { .. },
-        } => Ok(true),
-        HirExprKind::Call { name, .. } if is_ddx_name(name.as_str()) => Ok(true),
-        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => Ok(false),
-        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => Ok(false),
-        HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
-            exprs_contain_ddx_or_tainted_variable(artifact, args, ddx_tainted_variables, visited)
-        }
-        HirExprKind::Binary { left, right, .. } => exprs_contain_ddx_or_tainted_variable(
-            artifact,
-            &[*left, *right],
-            ddx_tainted_variables,
-            visited,
-        ),
-        HirExprKind::Unary { operand, .. } => expr_contains_ddx_or_tainted_variable(
-            artifact,
-            *operand,
-            ddx_tainted_variables,
-            visited,
-        ),
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => exprs_contain_ddx_or_tainted_variable(
-            artifact,
-            &[*condition, *then_expr, *else_expr],
-            ddx_tainted_variables,
-            visited,
-        ),
-        HirExprKind::ArrayAccess { index, .. } => {
-            expr_contains_ddx_or_tainted_variable(artifact, *index, ddx_tainted_variables, visited)
-        }
-        HirExprKind::ArrayLiteral { elements } => exprs_contain_ddx_or_tainted_variable(
-            artifact,
-            elements,
-            ddx_tainted_variables,
-            visited,
-        ),
-        HirExprKind::AnalogOperator { op } => match op {
-            HirAnalogOperator::Ddt { expr, abstol } => {
-                let children = [Some(*expr), *abstol];
-                optional_exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &children,
-                    ddx_tainted_variables,
-                    visited,
-                )
-            }
-            HirAnalogOperator::Limexp { expr } => expr_contains_ddx_or_tainted_variable(
-                artifact,
-                *expr,
-                ddx_tainted_variables,
-                visited,
-            ),
-            HirAnalogOperator::Idt {
-                expr,
-                ic,
-                assert,
-                abstol,
-            } => {
-                let children = [Some(*expr), *ic, *assert, *abstol];
-                optional_exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &children,
-                    ddx_tainted_variables,
-                    visited,
-                )
-            }
-            HirAnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-            } => {
-                let children = [Some(*expr), *ic, *modulus, *offset, *abstol];
-                optional_exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &children,
-                    ddx_tainted_variables,
-                    visited,
-                )
-            }
-            HirAnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-            } => {
-                let children = [Some(*expr), Some(*delay), *max_delay];
-                optional_exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &children,
-                    ddx_tainted_variables,
-                    visited,
-                )
-            }
-            HirAnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-            } => {
-                let children = [Some(*expr), *delay, *rise, *fall, *tolerance];
-                optional_exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &children,
-                    ddx_tainted_variables,
-                    visited,
-                )
-            }
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => {
-                let children = [Some(*expr), *max_rise, *max_fall];
-                optional_exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &children,
-                    ddx_tainted_variables,
-                    visited,
-                )
-            }
-            HirAnalogOperator::Ddx { .. } => Ok(true),
-            HirAnalogOperator::LastCrossing { expr, .. } => expr_contains_ddx_or_tainted_variable(
-                artifact,
-                *expr,
-                ddx_tainted_variables,
-                visited,
-            ),
-        },
-        HirExprKind::Laplace { expr, kind } => {
-            if expr_contains_ddx_or_tainted_variable(
-                artifact,
-                *expr,
-                ddx_tainted_variables,
-                visited,
-            )? {
-                return Ok(true);
-            }
-            match kind {
-                crate::canonical_ir::HirLaplaceKind::ZeroPole { zeros, poles }
-                | crate::canonical_ir::HirLaplaceKind::ZeroDenominator {
-                    zeros,
-                    denominator: poles,
-                }
-                | crate::canonical_ir::HirLaplaceKind::NumeratorPole {
-                    numerator: zeros,
-                    poles,
-                }
-                | crate::canonical_ir::HirLaplaceKind::NumeratorDenominator {
-                    numerator: zeros,
-                    denominator: poles,
-                } => exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &zeros
-                        .iter()
-                        .chain(poles.iter())
-                        .copied()
-                        .collect::<Vec<_>>(),
-                    ddx_tainted_variables,
-                    visited,
-                ),
-            }
-        }
-        HirExprKind::Zi { expr, kind } => {
-            if expr_contains_ddx_or_tainted_variable(
-                artifact,
-                *expr,
-                ddx_tainted_variables,
-                visited,
-            )? {
-                return Ok(true);
-            }
-            match kind {
-                crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles }
-                | crate::canonical_ir::HirZiKind::ZeroDenominator {
-                    zeros,
-                    denominator: poles,
-                }
-                | crate::canonical_ir::HirZiKind::NumeratorPole {
-                    numerator: zeros,
-                    poles,
-                }
-                | crate::canonical_ir::HirZiKind::NumeratorDenominator {
-                    numerator: zeros,
-                    denominator: poles,
-                } => exprs_contain_ddx_or_tainted_variable(
-                    artifact,
-                    &zeros
-                        .iter()
-                        .chain(poles.iter())
-                        .copied()
-                        .collect::<Vec<_>>(),
-                    ddx_tainted_variables,
-                    visited,
-                ),
-            }
-        }
-        HirExprKind::NoiseSource { operands, .. } => exprs_contain_ddx_or_tainted_variable(
-            artifact,
-            operands,
-            ddx_tainted_variables,
-            visited,
-        ),
-    }
-}
-
-fn exprs_contain_ddx_or_tainted_variable(
-    artifact: &CanonicalIrArtifact,
-    ids: &[ExprId],
-    ddx_tainted_variables: &HashSet<String>,
-    visited: &mut HashSet<ExprId>,
-) -> Result<bool, RustBackendError> {
-    for id in ids {
-        if expr_contains_ddx_or_tainted_variable(artifact, *id, ddx_tainted_variables, visited)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn optional_exprs_contain_ddx_or_tainted_variable(
-    artifact: &CanonicalIrArtifact,
-    ids: &[Option<ExprId>],
-    ddx_tainted_variables: &HashSet<String>,
-    visited: &mut HashSet<ExprId>,
-) -> Result<bool, RustBackendError> {
-    for id in ids.iter().flatten() {
-        if expr_contains_ddx_or_tainted_variable(artifact, *id, ddx_tainted_variables, visited)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 fn collect_ddt_slots(artifact: &CanonicalIrArtifact) -> Result<DdtSlots, RustBackendError> {
     let mut collector = DdtSlotCollector {
         artifact,
         slots: HashMap::new(),
+        idt_slots: HashMap::new(),
         visited: HashSet::new(),
     };
 
@@ -566,7 +390,10 @@ fn collect_ddt_slots(artifact: &CanonicalIrArtifact) -> Result<DdtSlots, RustBac
         collector.collect(equation.expression.id)?;
     }
 
-    Ok(DdtSlots::new(collector.slots))
+    Ok(DdtSlots::with_idt_slots(
+        collector.slots,
+        collector.idt_slots,
+    ))
 }
 
 fn collect_potential_branch_slots(
@@ -901,9 +728,16 @@ fn expr_depends_on_ddt_or_dynamic(
 
     match &expression.kind {
         HirExprKind::Identifier { name } => Ok(dynamic_variables.contains(name.as_str())),
-        HirExprKind::Call { name, .. } if is_ddt_name(name.as_str()) => Ok(true),
+        HirExprKind::Call { name, .. }
+            if is_ddt_name(name.as_str()) || is_idt_name(name.as_str()) =>
+        {
+            Ok(true)
+        }
         HirExprKind::AnalogOperator {
             op: HirAnalogOperator::Ddt { .. },
+        } => Ok(true),
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Idt { .. },
         } => Ok(true),
         other => {
             for child in expression_children(other) {
@@ -944,6 +778,96 @@ fn collect_expression_identifiers(
         collect_expression_identifiers(artifact, child, identifiers, visited)?;
     }
     Ok(())
+}
+
+fn collect_named_current_accesses(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    currents: &mut HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<(), RustBackendError> {
+    if !visited.insert(id) {
+        return Ok(());
+    }
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    if let HirExprKind::NamedBranchAccess { access, name } = &expression.kind
+        && access == "I"
+    {
+        currents.insert(name.to_string());
+    }
+    for child in expression_children(&expression.kind) {
+        collect_named_current_accesses(artifact, child, currents, visited)?;
+    }
+    Ok(())
+}
+
+fn equation_inline_plan(artifact: &CanonicalIrArtifact) -> Result<Vec<bool>, RustBackendError> {
+    let mut reads_by_index = Vec::with_capacity(artifact.mir.equations.len());
+    for equation in &artifact.mir.equations {
+        let mut reads = HashSet::new();
+        collect_named_current_accesses(
+            artifact,
+            equation.expression.id,
+            &mut reads,
+            &mut HashSet::new(),
+        )?;
+        reads_by_index.push(reads);
+    }
+
+    let mut future_reads = vec![HashSet::<String>::new(); artifact.mir.equations.len() + 1];
+    for index in (0..artifact.mir.equations.len()).rev() {
+        future_reads[index] = future_reads[index + 1].clone();
+        future_reads[index].extend(reads_by_index[index].iter().cloned());
+    }
+
+    let mut inline = vec![false; artifact.mir.equations.len()];
+    for (index, equation) in artifact.mir.equations.iter().enumerate() {
+        if !reads_by_index[index].is_empty() {
+            inline[index] = true;
+            continue;
+        }
+        if equation.kind == MirEquationKind::Current
+            && let Some(branch_name) = declared_contribution_branch_name(artifact, equation)
+            && future_reads[index + 1].contains(branch_name.as_str())
+        {
+            inline[index] = true;
+        }
+    }
+    Ok(inline)
+}
+
+fn expression_node_count(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+) -> Result<usize, RustBackendError> {
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    let mut count = 1;
+    for child in expression_children(&expression.kind) {
+        count += expression_node_count(artifact, child)?;
+    }
+    Ok(count)
 }
 
 fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
@@ -1105,6 +1029,7 @@ fn push_zi_children(kind: &crate::canonical_ir::HirZiKind, children: &mut Vec<Ex
 struct DdtSlotCollector<'a> {
     artifact: &'a CanonicalIrArtifact,
     slots: HashMap<ExprId, usize>,
+    idt_slots: HashMap<ExprId, usize>,
     visited: HashSet<ExprId>,
 }
 
@@ -1163,6 +1088,18 @@ impl DdtSlotCollector<'_> {
                     }
                     let next_slot = self.slots.len();
                     self.slots.entry(id).or_insert(next_slot);
+                }
+                if let HirExprKind::Call { name, args } = &expression.kind
+                    && is_idt_name(name.as_str())
+                {
+                    if !(1..=2).contains(&args.len()) {
+                        return Err(unsupported(
+                            self.artifact,
+                            format!("idt expects one or two operands, found {}", args.len()),
+                        ));
+                    }
+                    let next_slot = self.idt_slots.len();
+                    self.idt_slots.entry(id).or_insert(next_slot);
                 }
                 for arg in args {
                     self.collect(*arg)?;
@@ -1269,8 +1206,13 @@ impl DdtSlotCollector<'_> {
                 assert,
                 abstol,
             } => {
+                if assert.is_some() || abstol.is_some() {
+                    return Err(unsupported(self.artifact, "idt assert/abstol argument"));
+                }
+                let next_slot = self.idt_slots.len();
+                self.idt_slots.entry(id).or_insert(next_slot);
                 self.collect(*expr)?;
-                for child in [*ic, *assert, *abstol].into_iter().flatten() {
+                for child in [*ic].into_iter().flatten() {
                     self.collect(child)?;
                 }
             }
@@ -1360,6 +1302,10 @@ fn is_ddt_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("ddt")
 }
 
+fn is_idt_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("idt")
+}
+
 fn is_ddx_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("ddx")
 }
@@ -1386,16 +1332,21 @@ fn generate_state_file(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     ddt_state_count: usize,
+    idt_state_count: usize,
     branch_count: usize,
 ) -> Result<String, RustBackendError> {
     let mut out = String::new();
-    out.push_str("#![allow(dead_code, unused_variables)]\n\n");
-    out.push_str("#[derive(Debug, Clone)]\n");
+    out.push_str("#![allow(dead_code, unused_parens, unused_variables)]\n\n");
     out.push_str("pub struct Parameters {\n");
     for parameter in &artifact.mir.parameters {
         let field = &parameter_fields[parameter.name.as_str()];
         out.push_str(&format!("    pub {field}: f64,\n"));
     }
+    out.push_str("}\n\n");
+    out.push_str("impl Copy for Parameters {}\n\n");
+    out.push_str("impl Clone for Parameters {\n");
+    out.push_str("    #[inline]\n");
+    out.push_str("    fn clone(&self) -> Self { *self }\n");
     out.push_str("}\n\n");
 
     out.push_str("impl Default for Parameters {\n");
@@ -1404,32 +1355,30 @@ fn generate_state_file(
         out.push_str("        Self {\n");
         out.push_str("        }\n");
     } else {
-        out.push_str("        let mut params = Self {\n");
-        for parameter in &artifact.mir.parameters {
-            let field = &parameter_fields[parameter.name.as_str()];
-            out.push_str(&format!("            {field}: 0.0,\n"));
-        }
-        out.push_str("        };\n");
+        out.push_str("        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.\n");
+        out.push_str("        let mut params: Self = unsafe { std::mem::zeroed::<Self>() };\n");
         for parameter in &artifact.mir.parameters {
             let field = &parameter_fields[parameter.name.as_str()];
             let default = parameter_default_rust_expr(artifact, parameter, parameter_fields)?;
             out.push_str(&format!("        params.{field} = {default};\n"));
-            out.push_str(&format!(
-                "        validate_parameter_{field}(params.{field}).expect(\"generated Verilog-A parameter default must satisfy declared range\");\n"
-            ));
+            if parameter_default_requires_runtime_validation(parameter) {
+                let validation = parameter_validation_call(
+                    parameter.name.as_str(),
+                    &format!("params.{field}"),
+                    parameter.range.as_ref(),
+                )?;
+                out.push_str(&format!(
+                    "        {validation}.expect(\"generated Verilog-A parameter default must satisfy declared range\");\n"
+                ));
+            }
         }
         out.push_str("        params\n");
     }
     out.push_str("    }\n");
     out.push_str("}\n\n");
 
-    for parameter in &artifact.mir.parameters {
-        let field = &parameter_fields[parameter.name.as_str()];
-        out.push_str(&generate_parameter_validator(
-            parameter.name.as_str(),
-            field,
-            parameter.range.as_ref(),
-        )?);
+    if !artifact.mir.parameters.is_empty() {
+        out.push_str(&generate_shared_parameter_validator());
         out.push('\n');
     }
 
@@ -1449,7 +1398,6 @@ fn generate_state_file(
         .collect();
     let internal_node_count = internal_node_names.len();
     let parameter_count = artifact.mir.parameters.len();
-    out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str("pub struct Instance {\n");
     out.push_str(&format!("    pub nodes: [usize; {node_count}],\n"));
     out.push_str(&format!("    pub branches: [usize; {branch_count}],\n"));
@@ -1467,8 +1415,22 @@ fn generate_state_file(
     out.push_str(&format!(
         "    pub(crate) ddt_state_initialized: [bool; {ddt_state_count}],\n"
     ));
+    out.push_str(&format!(
+        "    pub(crate) idt_state_current: [f64; {idt_state_count}],\n"
+    ));
+    out.push_str(&format!(
+        "    pub(crate) idt_state_previous: [f64; {idt_state_count}],\n"
+    ));
+    out.push_str(&format!(
+        "    pub(crate) idt_state_initialized: [bool; {idt_state_count}],\n"
+    ));
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
+    out.push_str("}\n\n");
+    out.push_str("impl Copy for Instance {}\n\n");
+    out.push_str("impl Clone for Instance {\n");
+    out.push_str("    #[inline]\n");
+    out.push_str("    fn clone(&self) -> Self { *self }\n");
     out.push_str("}\n\n");
 
     out.push_str("impl Instance {\n");
@@ -1502,6 +1464,9 @@ fn generate_state_file(
     out.push_str(&format!(
         "    pub const DDT_STATE_COUNT: usize = {ddt_state_count};\n"
     ));
+    out.push_str(&format!(
+        "    pub const IDT_STATE_COUNT: usize = {idt_state_count};\n"
+    ));
     out.push_str("    pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;\n");
     out.push_str("    pub const DDT_EPSILON: f64 = 1.0e-20;\n\n");
     out.push_str("    pub fn new(nodes: &[usize]) -> Self {\n");
@@ -1517,6 +1482,9 @@ fn generate_state_file(
     out.push_str("            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],\n");
     out.push_str("            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],\n");
     out.push_str("            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],\n");
+    out.push_str("            idt_state_current: [0.0; Self::IDT_STATE_COUNT],\n");
+    out.push_str("            idt_state_previous: [0.0; Self::IDT_STATE_COUNT],\n");
+    out.push_str("            idt_state_initialized: [false; Self::IDT_STATE_COUNT],\n");
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
     out.push_str("        }\n");
@@ -1533,13 +1501,15 @@ fn generate_state_file(
     for parameter in &artifact.mir.parameters {
         let parameter_index = usize::from(parameter.id);
         let field = &parameter_fields[parameter.name.as_str()];
+        let validation =
+            parameter_validation_call(parameter.name.as_str(), "value", parameter.range.as_ref())?;
         out.push_str(&format!(
-            "            \"{}\" => {{ validate_parameter_{field}(value)?; self.params.{field} = value; self.mark_param_given({parameter_index}); Ok(()) }}\n",
+            "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); Ok(()) }}\n",
             parameter.name.to_ascii_lowercase()
         ));
         for alias in &parameter.aliases {
             out.push_str(&format!(
-                "            \"{}\" => {{ validate_parameter_{field}(value)?; self.params.{field} = value; self.mark_param_given({parameter_index}); Ok(()) }}\n",
+                "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); Ok(()) }}\n",
                 alias.to_ascii_lowercase()
             ));
         }
@@ -1575,6 +1545,12 @@ fn generate_state_file(
     out.push_str("            self.ddt_state_initialized[index] = true;\n");
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
+    out.push_str("        let mut index = 0usize;\n");
+    out.push_str("        while index < Self::IDT_STATE_COUNT {\n");
+    out.push_str("            self.idt_state_previous[index] = self.idt_state_current[index];\n");
+    out.push_str("            self.idt_state_initialized[index] = true;\n");
+    out.push_str("            index += 1;\n");
+    out.push_str("        }\n");
     out.push_str("    }\n\n");
     if ddt_state_count > 0 {
         out.push_str("    #[inline]\n");
@@ -1603,8 +1579,44 @@ fn generate_state_file(
         out.push_str("        }\n");
         out.push_str("    }\n");
     }
+    if idt_state_count > 0 {
+        out.push_str("    #[inline]\n");
+        out.push_str(
+            "    pub(crate) fn eval_idt(&mut self, slot: usize, value: f64, ic: f64) -> f64 {\n",
+        );
+        out.push_str("        debug_assert!(slot < Self::IDT_STATE_COUNT, \"generated idt state slot out of range\");\n");
+        out.push_str("        let previous = if self.idt_state_initialized[slot] {\n");
+        out.push_str("            self.idt_state_previous[slot]\n");
+        out.push_str("        } else {\n");
+        out.push_str("            ic\n");
+        out.push_str("        };\n");
+        out.push_str("        let current = if self.timestep.abs() > Self::DDT_EPSILON {\n");
+        out.push_str("            previous + value * self.timestep\n");
+        out.push_str("        } else {\n");
+        out.push_str("            ic\n");
+        out.push_str("        };\n");
+        out.push_str("        self.idt_state_current[slot] = current;\n");
+        out.push_str("        if self.timestep.abs() <= Self::DDT_EPSILON {\n");
+        out.push_str("            self.idt_state_previous[slot] = current;\n");
+        out.push_str("            self.idt_state_initialized[slot] = true;\n");
+        out.push_str("        }\n");
+        out.push_str("        current\n");
+        out.push_str("    }\n\n");
+        out.push_str("    #[inline]\n");
+        out.push_str("    pub(crate) fn idt_jacobian(&self, derivative: f64) -> f64 {\n");
+        out.push_str("        if self.timestep.abs() > Self::DDT_EPSILON {\n");
+        out.push_str("            derivative * self.timestep\n");
+        out.push_str("        } else {\n");
+        out.push_str("            0.0\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+    }
     out.push_str("}\n");
     Ok(out)
+}
+
+fn parameter_default_requires_runtime_validation(parameter: &MirParameterSlot) -> bool {
+    parameter.default.is_none()
 }
 
 fn parameter_default_rust_expr(
@@ -1668,6 +1680,7 @@ fn lower_parameter_default_expr(
             match op.as_str() {
                 "Neg" => Ok(format!("(-{operand})")),
                 "Pos" => Ok(format!("({operand})")),
+                "Not" => Ok(format!("if !({operand} != 0.0) {{ 1.0 }} else {{ 0.0 }}")),
                 _ => Err(unsupported(
                     artifact,
                     format!("parameter default unary operator {op}"),
@@ -1675,6 +1688,23 @@ fn lower_parameter_default_expr(
             }
         }
         HirExprKind::Binary { op, left, right } => {
+            if let Some(operator) = comparison_operator(op.as_str()) {
+                let left = lower_parameter_default_expr(artifact, *left, parameter_fields)?;
+                let right = lower_parameter_default_expr(artifact, *right, parameter_fields)?;
+                return Ok(format!(
+                    "if ({left} {operator} {right}) {{ 1.0 }} else {{ 0.0 }}"
+                ));
+            }
+            if op.as_str() == "And" || op.as_str() == "Or" {
+                let left_condition =
+                    lower_parameter_default_condition(artifact, *left, parameter_fields)?;
+                let right_condition =
+                    lower_parameter_default_condition(artifact, *right, parameter_fields)?;
+                let operator = if op.as_str() == "And" { "&&" } else { "||" };
+                return Ok(format!(
+                    "if ({left_condition} {operator} {right_condition}) {{ 1.0 }} else {{ 0.0 }}"
+                ));
+            }
             let left = lower_parameter_default_expr(artifact, *left, parameter_fields)?;
             let right = lower_parameter_default_expr(artifact, *right, parameter_fields)?;
             let operator = match op.as_str() {
@@ -1682,6 +1712,7 @@ fn lower_parameter_default_expr(
                 "Sub" => "-",
                 "Mul" => "*",
                 "Div" => "/",
+                "Mod" => "%",
                 _ => {
                     return Err(unsupported(
                         artifact,
@@ -1690,6 +1721,19 @@ fn lower_parameter_default_expr(
                 }
             };
             Ok(format!("({left} {operator} {right})"))
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            let condition =
+                lower_parameter_default_condition(artifact, *condition, parameter_fields)?;
+            let then_expr = lower_parameter_default_expr(artifact, *then_expr, parameter_fields)?;
+            let else_expr = lower_parameter_default_expr(artifact, *else_expr, parameter_fields)?;
+            Ok(format!(
+                "if {condition} {{ {then_expr} }} else {{ {else_expr} }}"
+            ))
         }
         HirExprKind::SystemFunction { name, args }
             if name.as_str().eq_ignore_ascii_case("$simparam")
@@ -1707,6 +1751,47 @@ fn lower_parameter_default_expr(
             artifact,
             format!("parameter default expression kind {other:?}"),
         )),
+    }
+}
+
+fn lower_parameter_default_condition(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    parameter_fields: &HashMap<String, String>,
+) -> Result<String, RustBackendError> {
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(expr))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("parameter default condition {expr} is outside MIR arena"),
+            )
+        })?;
+
+    match &expression.kind {
+        HirExprKind::Binary { op, left, right } if comparison_operator(op.as_str()).is_some() => {
+            let operator = comparison_operator(op.as_str()).expect("checked above");
+            let left = lower_parameter_default_expr(artifact, *left, parameter_fields)?;
+            let right = lower_parameter_default_expr(artifact, *right, parameter_fields)?;
+            Ok(format!("({left} {operator} {right})"))
+        }
+        HirExprKind::Binary { op, left, right } if op.as_str() == "And" || op.as_str() == "Or" => {
+            let left = lower_parameter_default_condition(artifact, *left, parameter_fields)?;
+            let right = lower_parameter_default_condition(artifact, *right, parameter_fields)?;
+            let operator = if op.as_str() == "And" { "&&" } else { "||" };
+            Ok(format!("({left} {operator} {right})"))
+        }
+        HirExprKind::Unary { op, operand } if op.as_str() == "Not" => {
+            let operand = lower_parameter_default_condition(artifact, *operand, parameter_fields)?;
+            Ok(format!("(!{operand})"))
+        }
+        _ => {
+            let value = lower_parameter_default_expr(artifact, expr, parameter_fields)?;
+            Ok(format!("({value} != 0.0)"))
+        }
     }
 }
 
@@ -1761,72 +1846,124 @@ fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> boo
     !range.exclude.contains(&value)
 }
 
-fn generate_parameter_validator(
+fn parameter_validation_call(
     parameter_name: &str,
-    field_name: &str,
+    value_expr: &str,
     range: Option<&crate::canonical_ir::HirParamRange>,
 ) -> Result<String, RustBackendError> {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "fn validate_parameter_{field_name}(value: f64) -> Result<(), String> {{\n"
-    ));
-    out.push_str("    if !value.is_finite() {\n");
-    out.push_str(&format!(
-        "        return Err(format!(\"parameter '{}' must be finite, got {{}}\", value));\n",
-        parameter_name
-    ));
-    out.push_str("    }\n");
+    if !parameter_range_has_runtime_constraints(parameter_name, range)? {
+        return Ok(format!(
+            "validate_finite_parameter({parameter_name:?}, {value_expr})"
+        ));
+    }
 
-    if let Some(range) = range {
-        if let Some(min) = range.min.filter(|value| value.is_finite()) {
-            let op = if range.min_exclusive { ">" } else { ">=" };
-            let condition = if range.min_exclusive { "<=" } else { "<" };
-            out.push_str(&format!(
-                "    if value {condition} {} {{\n",
-                format_f64(min)
-            ));
-            out.push_str(&format!(
-                "        return Err(format!(\"parameter '{}' must be {op} {}, got {{}}\", value));\n",
-                parameter_name,
-                format_f64(min)
-            ));
-            out.push_str("    }\n");
-        }
-        if let Some(max) = range.max.filter(|value| value.is_finite()) {
-            let op = if range.max_exclusive { "<" } else { "<=" };
-            let condition = if range.max_exclusive { ">=" } else { ">" };
-            out.push_str(&format!(
-                "    if value {condition} {} {{\n",
-                format_f64(max)
-            ));
-            out.push_str(&format!(
-                "        return Err(format!(\"parameter '{}' must be {op} {}, got {{}}\", value));\n",
-                parameter_name,
-                format_f64(max)
-            ));
-            out.push_str("    }\n");
-        }
-        for excluded in &range.exclude {
-            if !excluded.is_finite() {
+    let min = range
+        .and_then(|range| range.min.filter(|value| value.is_finite()))
+        .map(range_bound_arg);
+    let max = range
+        .and_then(|range| range.max.filter(|value| value.is_finite()))
+        .map(range_bound_arg);
+    let min_exclusive = range.is_some_and(|range| range.min_exclusive);
+    let max_exclusive = range.is_some_and(|range| range.max_exclusive);
+    let exclude = if let Some(range) = range {
+        let mut excluded = Vec::with_capacity(range.exclude.len());
+        for value in &range.exclude {
+            if !value.is_finite() {
                 return Err(RustBackendError::unsupported(
                     "<generated>",
                     parameter_name,
                     "non-finite parameter exclude constraint",
                 ));
             }
-            out.push_str(&format!("    if value == {} {{\n", format_f64(*excluded)));
-            out.push_str(&format!(
-                "        return Err(format!(\"parameter '{}' must not equal {}, got {{}}\", value));\n",
-                parameter_name,
-                format_f64(*excluded)
-            ));
-            out.push_str("    }\n");
+            excluded.push(range_excluded_arg(*value));
         }
-    }
+        format!("&[{}]", excluded.join(", "))
+    } else {
+        "&[]".to_string()
+    };
 
-    out.push_str("    Ok(())\n");
-    out.push_str("}\n");
-    Ok(out)
+    Ok(format!(
+        "validate_parameter({parameter_name:?}, {value_expr}, {}, {min_exclusive}, {}, {max_exclusive}, {exclude})",
+        min.unwrap_or_else(|| "None".to_string()),
+        max.unwrap_or_else(|| "None".to_string())
+    ))
+}
+
+fn parameter_range_has_runtime_constraints(
+    parameter_name: &str,
+    range: Option<&crate::canonical_ir::HirParamRange>,
+) -> Result<bool, RustBackendError> {
+    let Some(range) = range else {
+        return Ok(false);
+    };
+    if range.exclude.iter().any(|value| !value.is_finite()) {
+        return Err(RustBackendError::unsupported(
+            "<generated>",
+            parameter_name,
+            "non-finite parameter exclude constraint",
+        ));
+    }
+    Ok(range.min.is_some_and(|value| value.is_finite())
+        || range.max.is_some_and(|value| value.is_finite())
+        || !range.exclude.is_empty())
+}
+
+fn range_bound_arg(value: f64) -> String {
+    let label = format_f64(value);
+    format!("Some(({}, {:?}))", label, label)
+}
+
+fn range_excluded_arg(value: f64) -> String {
+    let label = format_f64(value);
+    format!("({}, {:?})", label, label)
+}
+
+fn generate_shared_parameter_validator() -> String {
+    [
+        "fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {",
+        "    if !value.is_finite() {",
+        "        return Err(format!(\"parameter '{}' must be finite, got {}\", name, value));",
+        "    }",
+        "    Ok(())",
+        "}",
+        "",
+        "fn validate_parameter(",
+        "    name: &str,",
+        "    value: f64,",
+        "    min: Option<(f64, &str)>,",
+        "    min_exclusive: bool,",
+        "    max: Option<(f64, &str)>,",
+        "    max_exclusive: bool,",
+        "    excluded: &[(f64, &str)],",
+        ") -> Result<(), String> {",
+        "    validate_finite_parameter(name, value)?;",
+        "    if let Some((min, label)) = min {",
+        "        if min_exclusive {",
+        "            if value <= min {",
+        "                return Err(format!(\"parameter '{}' must be > {}, got {}\", name, label, value));",
+        "            }",
+        "        } else if value < min {",
+        "            return Err(format!(\"parameter '{}' must be >= {}, got {}\", name, label, value));",
+        "        }",
+        "    }",
+        "    if let Some((max, label)) = max {",
+        "        if max_exclusive {",
+        "            if value >= max {",
+        "                return Err(format!(\"parameter '{}' must be < {}, got {}\", name, label, value));",
+        "            }",
+        "        } else if value > max {",
+        "            return Err(format!(\"parameter '{}' must be <= {}, got {}\", name, label, value));",
+        "        }",
+        "    }",
+        "    for (excluded, label) in excluded {",
+        "        if value == *excluded {",
+        "            return Err(format!(\"parameter '{}' must not equal {}, got {}\", name, label, value));",
+        "        }",
+        "    }",
+        "    Ok(())",
+        "}",
+    ]
+    .join("\n")
 }
 
 fn generate_stamp_file(
@@ -1846,16 +1983,28 @@ fn generate_stamp_file(
         "use {}::{{GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};\n\n",
         options.runtime_path
     ));
+    out.push_str(&format!(
+        "use {}::support::{{AdValue as GenericAdValue, ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch}};\n\n",
+        options.runtime_path
+    ));
+    out.push_str(
+        "type AdValue = GenericAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n",
+    );
+    out.push_str(
+        "type Scratch = GenericScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n",
+    );
+    out.push_str(
+        "type ReactiveScratch = GenericReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n\n",
+    );
     out.push_str("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;\n\n");
-    out.push_str(&generate_scratch_struct());
-    out.push('\n');
-    out.push_str(&generate_ad_value_struct());
-    out.push('\n');
     let mut helper_modules = StampHelperModules::default();
     out.push_str("impl Instance {\n");
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
+    out.push_str("        let p = self.params;\n");
+    out.push_str("        let nodes = self.nodes;\n");
+    out.push_str("        let branches = self.branches;\n");
     emit_stamp_body(
         artifact,
         parameter_fields,
@@ -1873,6 +2022,9 @@ fn generate_stamp_file(
     out.push_str(
         "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
     );
+    out.push_str("        let p = self.params;\n");
+    out.push_str("        let nodes = self.nodes;\n");
+    out.push_str("        let branches = self.branches;\n");
     emit_stamp_body(
         artifact,
         parameter_fields,
@@ -1888,6 +2040,7 @@ fn generate_stamp_file(
     )?;
     out.push_str("    }\n");
     out.push_str("}\n");
+    split_marked_equation_chunks(&mut out, &mut helper_modules);
     let helpers = helper_modules.finish();
     if !helpers.is_empty() {
         let declarations = helpers
@@ -1924,7 +2077,7 @@ struct StampFiles {
 }
 
 fn generate_scratch_struct() -> String {
-    [
+    let mut out = [
         "struct Scratch {",
         "    values: [f64; Instance::VARIABLE_COUNT],",
         "    node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
@@ -1951,7 +2104,26 @@ fn generate_scratch_struct() -> String {
         "        self.node_derivatives[index] = value.node_derivatives;",
         "        self.branch_derivatives[index] = value.branch_derivatives;",
         "    }",
-        "}",
+        "",
+        "    #[inline]",
+        "    fn copy_ad(&mut self, target: usize, source: usize) {",
+        "        self.values[target] = self.values[source];",
+        "        self.node_derivatives[target] = self.node_derivatives[source];",
+        "        self.branch_derivatives[target] = self.branch_derivatives[source];",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scalar(&mut self, index: usize, value: f64) {",
+        "        self.values[index] = value;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "    }",
+    ]
+    .join("\n");
+    out.push('\n');
+    out.push_str(&generate_scratch_operation_helpers());
+    out.push_str("\n}\n\n");
+    out.push_str(&[
         "",
         "struct ReactiveScratch {",
         "    values: [f64; Instance::VARIABLE_COUNT],",
@@ -1985,7 +2157,558 @@ fn generate_scratch_struct() -> String {
         "        self.node_derivatives[index] = value.node_derivatives;",
         "        self.branch_derivatives[index] = value.branch_derivatives;",
         "    }",
-        "}",
+        "",
+        "    #[inline]",
+        "    fn copy_ad(&mut self, target: usize, source: usize) {",
+        "        self.values[target] = self.values[source];",
+        "        self.node_derivatives[target] = self.node_derivatives[source];",
+        "        self.branch_derivatives[target] = self.branch_derivatives[source];",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scalar(&mut self, index: usize, value: f64) {",
+        "        self.values[index] = value;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "    }",
+    ]
+    .join("\n"));
+    out.push('\n');
+    out.push_str(&generate_scratch_operation_helpers());
+    out.push_str("\n}\n\n");
+    out
+}
+
+fn generate_scratch_operation_helpers() -> String {
+    [
+        "",
+        "    #[inline]",
+        "    fn store_ad_value(&mut self, index: usize, value: AdValue) {",
+        "        self.values[index] = value.value;",
+        "        self.node_derivatives[index] = value.node_derivatives;",
+        "        self.branch_derivatives[index] = value.branch_derivatives;",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::add(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::sub(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::mul(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::div(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_rem_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::rem(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_pow_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::pow(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_min_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::min(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_max_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::max(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_hypot_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::hypot(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_atan2_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
+        "        self.store_ad_value(index, AdValue::atan2(left, right));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scale_ad(&mut self, index: usize, value: AdValue, scale: f64) {",
+        "        self.store_ad_value(index, AdValue::scale(value, scale));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset_ad(&mut self, index: usize, value: AdValue, offset: f64) {",
+        "        self.store_ad_value(index, AdValue::offset(value, offset));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_neg_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::neg(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::sqrt(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_exp_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::exp(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::ln(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_abs_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::abs(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_square_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::square(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limexp_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::limexp(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limited_exp_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::limited_exp(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_log10_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::log10(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sin_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::sin(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_cos_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::cos(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_tan_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::tan(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_atan_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::atan(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sinh_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::sinh(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_cosh_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::cosh(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_tanh_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::tanh(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_asinh_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::asinh(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_acosh_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::acosh(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_atanh_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::atanh(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_floor_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::floor(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ceil_ad(&mut self, index: usize, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::ceil(value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::sub_from_scalar(scalar, value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::div_from_scalar(scalar, value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_rem_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::rem_from_scalar(scalar, value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_pow_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::pow_from_scalar(scalar, value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_min_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::min_from_scalar(scalar, value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_max_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
+        "        self.store_ad_value(index, AdValue::max_from_scalar(scalar, value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_rem_with_scalar_ad(&mut self, index: usize, value: AdValue, scalar: f64) {",
+        "        self.store_ad_value(index, AdValue::rem_with_scalar(value, scalar));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_min_with_scalar_ad(&mut self, index: usize, value: AdValue, scalar: f64) {",
+        "        self.store_ad_value(index, AdValue::min_with_scalar(value, scalar));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_max_with_scalar_ad(&mut self, index: usize, value: AdValue, scalar: f64) {",
+        "        self.store_ad_value(index, AdValue::max_with_scalar(value, scalar));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_powf_ad(&mut self, index: usize, value: AdValue, exponent: f64) {",
+        "        self.store_ad_value(index, AdValue::powf(value, exponent));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_value + right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_value - right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] - right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_value * right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_square(&mut self, index: usize, source: usize) {",
+        "        let source_value = self.values[source];",
+        "        self.store_unary_scaled(index, source, source_value * source_value, 2.0 * source_value);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let right_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
+        "        let left_value = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        self.values[index] = left_value + right.value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right.node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right.branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left.value + right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] + right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
+        "        let left_value = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        self.values[index] = left_value - right.value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] - right.node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] - right.branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left.value - right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
+        "        let left_value = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        self.values[index] = left_value * right.value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left.value * right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value + left.value * right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value + left.value * right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
+        "        let left_value = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let reciprocal = 1.0 / right.value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let right_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left.value * reciprocal;",
+        "        let right_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_add(&mut self, index: usize, left: usize, right: usize, scale: f64) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = (left_value + right_value) * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] + right_node_derivatives[axis]) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] + right_branch_derivatives[axis]) * scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_sub(&mut self, index: usize, left: usize, right: usize, scale: f64) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = (left_value - right_value) * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] - right_node_derivatives[axis]) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] - right_branch_derivatives[axis]) * scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_mul(&mut self, index: usize, left: usize, right: usize, scale: f64) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_value * right_value * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_div(&mut self, index: usize, left: usize, right: usize, scale: f64) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let right_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale) * scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scale(&mut self, index: usize, source: usize, scale: f64) {",
+        "        self.store_unary_scaled(index, source, self.values[source] * scale, scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset(&mut self, index: usize, source: usize, offset: f64) {",
+        "        self.values[index] = self.values[source] + offset;",
+        "        self.node_derivatives[index] = self.node_derivatives[source];",
+        "        self.branch_derivatives[index] = self.branch_derivatives[source];",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset_scaled(&mut self, index: usize, source: usize, scale: f64, offset: f64) {",
+        "        self.store_unary_scaled(index, source, self.values[source] * scale + offset, scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_offset(&mut self, index: usize, source: usize, offset: f64, scale: f64) {",
+        "        self.store_unary_scaled(index, source, (self.values[source] + offset) * scale, scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_neg(&mut self, index: usize, source: usize) {",
+        "        self.store_scale(index, source, -1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_from_scalar(&mut self, index: usize, scalar: f64, source: usize) {",
+        "        self.store_unary_scaled(index, source, scalar - self.values[source], -1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar(&mut self, index: usize, scalar: f64, source: usize) {",
+        "        let reciprocal = 1.0 / self.values[source];",
+        "        let quotient = scalar * reciprocal;",
+        "        self.store_unary_scaled(index, source, quotient, -quotient * reciprocal);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt(&mut self, index: usize, source: usize) {",
+        "        let value = self.values[source].sqrt();",
+        "        self.store_unary_scaled(index, source, value, 1.0 / (2.0 * value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_exp(&mut self, index: usize, source: usize) {",
+        "        let value = self.values[source].exp();",
+        "        self.store_unary_scaled(index, source, value, value);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_exp(&mut self, index: usize, source: usize, scale: f64) {",
+        "        let value = self.values[source].exp() * scale;",
+        "        self.store_unary_scaled(index, source, value, value);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln(&mut self, index: usize, source: usize) {",
+        "        let raw = self.values[source];",
+        "        self.store_unary_scaled(index, source, raw.ln(), 1.0 / raw);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_sqrt(&mut self, index: usize, source: usize, scale: f64) {",
+        "        let value = self.values[source].sqrt();",
+        "        self.store_unary_scaled(index, source, value * scale, scale / (2.0 * value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sin(&mut self, index: usize, source: usize) {",
+        "        let raw = self.values[source];",
+        "        self.store_unary_scaled(index, source, raw.sin(), raw.cos());",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sinh(&mut self, index: usize, source: usize) {",
+        "        let raw = self.values[source];",
+        "        self.store_unary_scaled(index, source, raw.sinh(), raw.cosh());",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_asinh(&mut self, index: usize, source: usize) {",
+        "        let raw = self.values[source];",
+        "        self.store_unary_scaled(index, source, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt());",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_powf(&mut self, index: usize, source: usize, exponent: f64) {",
+        "        let base = self.values[source];",
+        "        let value = base.powf(exponent);",
+        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, 1.0, 0.0);",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_unary_scaled(&mut self, index: usize, source: usize, value: f64, derivative_scale: f64) {",
+        "        let node_derivatives = self.node_derivatives[source];",
+        "        let branch_derivatives = self.branch_derivatives[source];",
+        "        self.values[index] = value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = derivative_scale * node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = derivative_scale * branch_derivatives[axis]; }",
+        "    }",
         "",
     ]
     .join("\n")
@@ -2074,6 +2797,31 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn rem(left: Self, right: Self) -> Self {",
+        "        let quotient = (left.value / right.value).trunc();",
+        "        let mut value = Self::constant(left.value % right.value);",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = left.node_derivatives[index] - quotient * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = left.branch_derivatives[index] - quotient * right.branch_derivatives[index]; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn rem_with_scalar(left: Self, right: f64) -> Self {",
+        "        let mut value = left;",
+        "        value.value %= right;",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn rem_from_scalar(left: f64, right: Self) -> Self {",
+        "        let quotient = (left / right.value).trunc();",
+        "        let mut value = Self::constant(left % right.value);",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = -quotient * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = -quotient * right.branch_derivatives[index]; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_from_scalar(scalar: f64, right: Self) -> Self {",
         "        let reciprocal = 1.0 / right.value;",
         "        let quotient = scalar * reciprocal;",
@@ -2121,6 +2869,10 @@ fn generate_ad_value_struct() -> String {
         "    #[inline]",
         "    fn exp(arg: Self) -> Self { let value = arg.value.exp(); Self::unary_intrinsic(arg, value, value) }",
         "    #[inline]",
+        "    fn limexp(arg: Self) -> Self { let raw = arg.value; if raw < 80.0 { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } else { let scale = 80.0_f64.exp(); Self::unary_intrinsic(arg, scale * (1.0 + (raw - 80.0)), scale) } }",
+        "    #[inline]",
+        "    fn limited_exp(arg: Self) -> Self { let raw = arg.value; if raw > 80.0 { Self::unary_intrinsic(arg, 5.540622384e34 * (1.0 + raw - 80.0), 5.540622384e34) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } }",
+        "    #[inline]",
         "    fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }",
         "    #[inline]",
         "    fn log10(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10)) }",
@@ -2131,11 +2883,19 @@ fn generate_ad_value_struct() -> String {
         "    #[inline]",
         "    fn tan(arg: Self) -> Self { let raw = arg.value; let cos = raw.cos(); Self::unary_intrinsic(arg, raw.tan(), 1.0 / (cos * cos)) }",
         "    #[inline]",
+        "    fn atan(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.atan(), 1.0 / (1.0 + raw * raw)) }",
+        "    #[inline]",
         "    fn sinh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.sinh(), raw.cosh()) }",
         "    #[inline]",
         "    fn cosh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.cosh(), raw.sinh()) }",
         "    #[inline]",
         "    fn tanh(arg: Self) -> Self { let raw = arg.value; let cosh = raw.cosh(); Self::unary_intrinsic(arg, raw.tanh(), 1.0 / (cosh * cosh)) }",
+        "    #[inline]",
+        "    fn asinh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt()) }",
+        "    #[inline]",
+        "    fn acosh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.acosh(), 1.0 / ((raw - 1.0).sqrt() * (raw + 1.0).sqrt())) }",
+        "    #[inline]",
+        "    fn atanh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.atanh(), 1.0 / (1.0 - raw * raw)) }",
         "    #[inline]",
         "    fn floor(arg: Self) -> Self { Self::constant(arg.value.floor()) }",
         "    #[inline]",
@@ -2210,6 +2970,14 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn idt(mut operand: Self, derivative_scale: f64, value: f64) -> Self {",
+        "        operand.value = value;",
+        "        for derivative in &mut operand.node_derivatives { *derivative *= derivative_scale; }",
+        "        for derivative in &mut operand.branch_derivatives { *derivative *= derivative_scale; }",
+        "        operand",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn ddx_projection(expr: &Self, pos: Option<usize>, neg: Option<usize>) -> f64 {",
         "        let pos = pos.map(|index| expr.node_derivatives[index]).unwrap_or(0.0);",
         "        if let Some(neg) = neg { 0.5 * (pos - expr.node_derivatives[neg]) } else { pos }",
@@ -2218,6 +2986,131 @@ fn generate_ad_value_struct() -> String {
         "",
     ]
     .join("\n")
+}
+
+pub fn render_runtime_support_module() -> String {
+    let mut support = String::new();
+    support.push_str("#![allow(dead_code)]\n\n");
+    support.push_str("use super::GeneratedEvalContext;\n\n");
+    support.push_str(&generate_scratch_struct());
+    support.push('\n');
+    support.push_str(&generate_ad_value_struct());
+    support.push('\n');
+
+    support = support
+        .replace(
+            "struct Scratch {",
+            "pub(crate) struct Scratch<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: usize> {",
+        )
+        .replace(
+            "impl Scratch {",
+            "impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: usize> Scratch<VARIABLE_COUNT, NODE_COUNT, BRANCH_COUNT> {",
+        )
+        .replace(
+            "struct ReactiveScratch {",
+            "pub(crate) struct ReactiveScratch<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: usize> {",
+        )
+        .replace(
+            "impl ReactiveScratch {",
+            "impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: usize> ReactiveScratch<VARIABLE_COUNT, NODE_COUNT, BRANCH_COUNT> {",
+        )
+        .replace(
+            "struct AdValue {",
+            "pub(crate) struct AdValue<const NODE_COUNT: usize, const BRANCH_COUNT: usize> {",
+        )
+        .replace(
+            "impl AdValue {",
+            "impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRANCH_COUNT> {",
+        )
+        .replace("Instance::VARIABLE_COUNT", "VARIABLE_COUNT")
+        .replace("Instance::NODE_COUNT", "NODE_COUNT")
+        .replace("Instance::BRANCH_COUNT", "BRANCH_COUNT")
+        .replace("    values:", "    pub(crate) values:")
+        .replace(
+            "    node_derivatives:",
+            "    pub(crate) node_derivatives:",
+        )
+        .replace(
+            "    branch_derivatives:",
+            "    pub(crate) branch_derivatives:",
+        )
+        .replace("    reactive_values:", "    pub(crate) reactive_values:")
+        .replace(
+            "    reactive_node_derivatives:",
+            "    pub(crate) reactive_node_derivatives:",
+        )
+        .replace(
+            "    reactive_branch_derivatives:",
+            "    pub(crate) reactive_branch_derivatives:",
+        )
+        .replace("    value:", "    pub(crate) value:")
+        .replace("\n    fn ", "\n    pub(crate) fn ")
+        .replace("-> AdValue {", "-> AdValue<NODE_COUNT, BRANCH_COUNT> {")
+        .replace(
+            "AdValue::pow_derivative",
+            "AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative",
+        )
+        .replace(
+            "value: &AdValue)",
+            "value: &AdValue<NODE_COUNT, BRANCH_COUNT>)",
+        )
+        .replace(
+            "right: AdValue)",
+            "right: AdValue<NODE_COUNT, BRANCH_COUNT>)",
+        )
+        .replace(
+            "right: AdValue,",
+            "right: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
+            "left: AdValue,",
+            "left: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
+            "value: AdValue)",
+            "value: AdValue<NODE_COUNT, BRANCH_COUNT>)",
+        )
+        .replace(
+            "value: AdValue,",
+            "value: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace("            pub(crate) values:", "            values:")
+        .replace(
+            "            pub(crate) node_derivatives:",
+            "            node_derivatives:",
+        )
+        .replace(
+            "            pub(crate) branch_derivatives:",
+            "            branch_derivatives:",
+        )
+        .replace(
+            "            pub(crate) reactive_values:",
+            "            reactive_values:",
+        )
+        .replace(
+            "            pub(crate) reactive_node_derivatives:",
+            "            reactive_node_derivatives:",
+        )
+        .replace(
+            "            pub(crate) reactive_branch_derivatives:",
+            "            reactive_branch_derivatives:",
+        );
+
+    compact_runtime_support_surface(support)
+}
+
+fn compact_runtime_support_surface(mut source: String) -> String {
+    for (from, to) in [
+        ("reactive_node_derivatives", "rdn"),
+        ("reactive_branch_derivatives", "rdb"),
+        ("reactive_values", "rv"),
+        ("node_derivatives", "dn"),
+        ("branch_derivatives", "db"),
+        ("values", "v"),
+    ] {
+        source = source.replace(from, to);
+    }
+    source
 }
 
 fn emit_stamp_body(
@@ -2299,13 +3192,44 @@ fn emit_stamp_body(
         }
     }
 
+    let equation_inline = equation_inline_plan(artifact)?;
+    let split_equations = uses_scratch && artifact.mir.equations.len() > 8;
     let mut branch_currents = HashMap::new();
     for (index, equation) in artifact.mir.equations.iter().enumerate() {
         if reactive && !reactive_liveness.is_equation_reactive(equation.id) {
             continue;
         }
 
+        let helper_safe = split_equations && !equation_inline[index];
         let prefix = format!("eq{index}");
+        if !reactive
+            && should_emit_compact_equation_stamp(
+                artifact,
+                equation,
+                potential_branch_slots.declared_slots(),
+                equation_inline[index],
+            )?
+        {
+            if helper_safe {
+                out.push_str(&format!(
+                    "        // __rspice_equation_chunk_start {helper_prefix} {reactive} {index}\n"
+                ));
+            }
+            emit_compact_equation_stamp(
+                artifact,
+                equation,
+                &prefix,
+                parameter_fields,
+                &variables,
+                ddt_slots,
+                potential_branch_slots,
+                out,
+            )?;
+            if helper_safe {
+                out.push_str("        // __rspice_equation_chunk_end\n");
+            }
+            continue;
+        }
         let lowered = if reactive {
             lower_reactive_expr_with_branch_currents(
                 artifact,
@@ -2331,45 +3255,82 @@ fn emit_stamp_body(
         };
         if reactive {
             if lowered.has_reactive {
+                if helper_safe {
+                    out.push_str(&format!(
+                        "        // __rspice_equation_chunk_start {helper_prefix} {reactive} {index}\n"
+                    ));
+                }
                 for line in &lowered.lines {
                     out.push_str("        ");
                     out.push_str(line);
                     out.push('\n');
                 }
+                let dense_reactive = should_emit_dense_stamp(
+                    &lowered.reactive_derivatives,
+                    &lowered.reactive_branch_derivatives,
+                );
                 match equation.kind {
                     MirEquationKind::Current => {
-                        out.push_str("        stamper.stamp_current_reactive(\n");
-                        out.push_str(&format!(
-                            "            {},\n",
-                            optional_node_expr(equation.branch.pos_node)
-                        ));
-                        out.push_str(&format!(
-                            "            {},\n",
-                            optional_node_expr(equation.branch.neg_node)
-                        ));
-                        out.push_str("            &[\n");
-                        for node_index in 0..artifact.mir.nodes.len() {
-                            if is_zero_derivative(&lowered.reactive_derivatives[node_index]) {
-                                continue;
-                            }
+                        if dense_reactive {
+                            emit_dense_derivative_arrays(
+                                out,
+                                &format!("{prefix}_reactive"),
+                                &lowered.reactive_derivatives,
+                                &lowered.reactive_branch_derivatives,
+                            );
+                            out.push_str("        stamper.stamp_current_reactive_dense(\n");
                             out.push_str(&format!(
-                                "                GeneratedDerivative::node(self.nodes[{node_index}], self.multiplicity * ({})),\n",
-                                lowered.reactive_derivatives[node_index]
+                                "            {},\n",
+                                optional_node_expr(equation.branch.pos_node)
                             ));
-                        }
-                        for branch_index in 0..lowered.reactive_branch_derivatives.len() {
-                            if is_zero_derivative(
-                                &lowered.reactive_branch_derivatives[branch_index],
-                            ) {
-                                continue;
-                            }
                             out.push_str(&format!(
-                                "                GeneratedDerivative::branch(self.branches[{branch_index}], self.multiplicity * ({})),\n",
-                                lowered.reactive_branch_derivatives[branch_index]
+                                "            {},\n",
+                                optional_node_expr(equation.branch.neg_node)
                             ));
+                            out.push_str("            &self.nodes,\n");
+                            out.push_str(&format!(
+                                "            &{prefix}_reactive_node_derivatives,\n"
+                            ));
+                            out.push_str("            &self.branches,\n");
+                            out.push_str(&format!(
+                                "            &{prefix}_reactive_branch_derivatives,\n"
+                            ));
+                            out.push_str("            self.multiplicity,\n");
+                            out.push_str("        );\n");
+                        } else {
+                            out.push_str("        stamper.stamp_current_reactive(\n");
+                            out.push_str(&format!(
+                                "            {},\n",
+                                optional_node_expr(equation.branch.pos_node)
+                            ));
+                            out.push_str(&format!(
+                                "            {},\n",
+                                optional_node_expr(equation.branch.neg_node)
+                            ));
+                            out.push_str("            &[\n");
+                            for node_index in 0..artifact.mir.nodes.len() {
+                                if is_zero_derivative(&lowered.reactive_derivatives[node_index]) {
+                                    continue;
+                                }
+                                out.push_str(&format!(
+                                    "                GeneratedDerivative::node(self.nodes[{node_index}], self.multiplicity * ({})),\n",
+                                    lowered.reactive_derivatives[node_index]
+                                ));
+                            }
+                            for branch_index in 0..lowered.reactive_branch_derivatives.len() {
+                                if is_zero_derivative(
+                                    &lowered.reactive_branch_derivatives[branch_index],
+                                ) {
+                                    continue;
+                                }
+                                out.push_str(&format!(
+                                    "                GeneratedDerivative::branch(self.branches[{branch_index}], self.multiplicity * ({})),\n",
+                                    lowered.reactive_branch_derivatives[branch_index]
+                                ));
+                            }
+                            out.push_str("            ],\n");
+                            out.push_str("        );\n");
                         }
-                        out.push_str("            ],\n");
-                        out.push_str("        );\n");
                     }
                     MirEquationKind::Potential => {
                         let slot =
@@ -2385,40 +3346,68 @@ fn emit_stamp_body(
                                         ),
                                     )
                                 })?;
-                        out.push_str("        stamper.stamp_potential_reactive(\n");
-                        out.push_str(&format!("            self.branches[{slot}],\n"));
-                        out.push_str("            &[\n");
-                        for node_index in 0..artifact.mir.nodes.len() {
-                            if is_zero_derivative(&lowered.reactive_derivatives[node_index]) {
-                                continue;
-                            }
+                        if dense_reactive {
+                            emit_dense_derivative_arrays(
+                                out,
+                                &format!("{prefix}_reactive"),
+                                &lowered.reactive_derivatives,
+                                &lowered.reactive_branch_derivatives,
+                            );
+                            out.push_str("        stamper.stamp_potential_reactive_dense(\n");
+                            out.push_str(&format!("            self.branches[{slot}],\n"));
+                            out.push_str("            &self.nodes,\n");
                             out.push_str(&format!(
-                                "                GeneratedDerivative::node(self.nodes[{node_index}], {}),\n",
-                                lowered.reactive_derivatives[node_index]
+                                "            &{prefix}_reactive_node_derivatives,\n"
                             ));
-                        }
-                        for branch_index in 0..lowered.reactive_branch_derivatives.len() {
-                            if is_zero_derivative(
-                                &lowered.reactive_branch_derivatives[branch_index],
-                            ) {
-                                continue;
-                            }
+                            out.push_str("            &self.branches,\n");
                             out.push_str(&format!(
-                                "                GeneratedDerivative::branch(self.branches[{branch_index}], {}),\n",
-                                lowered.reactive_branch_derivatives[branch_index]
+                                "            &{prefix}_reactive_branch_derivatives,\n"
                             ));
+                            out.push_str("        );\n");
+                        } else {
+                            out.push_str("        stamper.stamp_potential_reactive(\n");
+                            out.push_str(&format!("            self.branches[{slot}],\n"));
+                            out.push_str("            &[\n");
+                            for node_index in 0..artifact.mir.nodes.len() {
+                                if is_zero_derivative(&lowered.reactive_derivatives[node_index]) {
+                                    continue;
+                                }
+                                out.push_str(&format!(
+                                    "                GeneratedDerivative::node(self.nodes[{node_index}], {}),\n",
+                                    lowered.reactive_derivatives[node_index]
+                                ));
+                            }
+                            for branch_index in 0..lowered.reactive_branch_derivatives.len() {
+                                if is_zero_derivative(
+                                    &lowered.reactive_branch_derivatives[branch_index],
+                                ) {
+                                    continue;
+                                }
+                                out.push_str(&format!(
+                                    "                GeneratedDerivative::branch(self.branches[{branch_index}], {}),\n",
+                                    lowered.reactive_branch_derivatives[branch_index]
+                                ));
+                            }
+                            out.push_str("            ],\n");
+                            out.push_str("        );\n");
                         }
-                        out.push_str("            ],\n");
-                        out.push_str("        );\n");
                     }
                     MirEquationKind::Indirect => {
                         return Err(unsupported(artifact, "indirect contributions"));
                     }
                 }
+                if helper_safe {
+                    out.push_str("        // __rspice_equation_chunk_end\n");
+                }
             }
             continue;
         }
 
+        if helper_safe {
+            out.push_str(&format!(
+                "        // __rspice_equation_chunk_start {helper_prefix} {reactive} {index}\n"
+            ));
+        }
         for line in &lowered.lines {
             out.push_str("        ");
             out.push_str(line);
@@ -2427,9 +3416,13 @@ fn emit_stamp_body(
 
         let value = format!("{prefix}_value");
         out.push_str(&format!("        let {value}: f64 = {};\n", lowered.value));
+        let dense_stamp =
+            should_emit_dense_stamp(&lowered.derivatives, &lowered.branch_derivatives);
         let mut node_derivatives = Vec::with_capacity(lowered.derivatives.len());
         for (node_index, derivative) in lowered.derivatives.iter().enumerate() {
-            if is_zero_derivative(derivative) {
+            if dense_stamp {
+                node_derivatives.push(derivative.clone());
+            } else if is_zero_derivative(derivative) {
                 node_derivatives.push("0.0".to_string());
             } else if is_inline_derivative_expr(derivative) {
                 node_derivatives.push(derivative.clone());
@@ -2441,7 +3434,9 @@ fn emit_stamp_body(
         }
         let mut branch_derivatives = Vec::with_capacity(lowered.branch_derivatives.len());
         for (branch_index, derivative) in lowered.branch_derivatives.iter().enumerate() {
-            if is_zero_derivative(derivative) {
+            if dense_stamp {
+                branch_derivatives.push(derivative.clone());
+            } else if is_zero_derivative(derivative) {
                 branch_derivatives.push("0.0".to_string());
             } else if is_inline_derivative_expr(derivative) {
                 branch_derivatives.push(derivative.clone());
@@ -2464,35 +3459,60 @@ fn emit_stamp_body(
         }
         match equation.kind {
             MirEquationKind::Current => {
-                out.push_str("        stamper.stamp_current(\n");
-                out.push_str(&format!(
-                    "            {},\n",
-                    optional_node_expr(equation.branch.pos_node)
-                ));
-                out.push_str(&format!(
-                    "            {},\n",
-                    optional_node_expr(equation.branch.neg_node)
-                ));
-                out.push_str(&format!("            self.multiplicity * ({value}),\n"));
-                out.push_str("            &[\n");
-                for (node_index, derivative) in node_derivatives.iter().enumerate() {
-                    if is_zero_derivative(derivative) {
-                        continue;
-                    }
+                if dense_stamp {
+                    emit_dense_derivative_arrays(
+                        out,
+                        &prefix,
+                        &node_derivatives,
+                        &branch_derivatives,
+                    );
+                    out.push_str("        stamper.stamp_current_dense(\n");
                     out.push_str(&format!(
-                        "                GeneratedDerivative::node(self.nodes[{node_index}], self.multiplicity * {derivative}),\n"
+                        "            {},\n",
+                        optional_node_expr(equation.branch.pos_node)
                     ));
-                }
-                for (branch_index, derivative) in branch_derivatives.iter().enumerate() {
-                    if is_zero_derivative(derivative) {
-                        continue;
-                    }
                     out.push_str(&format!(
-                        "                GeneratedDerivative::branch(self.branches[{branch_index}], self.multiplicity * {derivative}),\n"
+                        "            {},\n",
+                        optional_node_expr(equation.branch.neg_node)
                     ));
+                    out.push_str(&format!("            self.multiplicity * ({value}),\n"));
+                    out.push_str("            &self.nodes,\n");
+                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
+                    out.push_str("            &self.branches,\n");
+                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                    out.push_str("            self.multiplicity,\n");
+                    out.push_str("        );\n");
+                } else {
+                    out.push_str("        stamper.stamp_current(\n");
+                    out.push_str(&format!(
+                        "            {},\n",
+                        optional_node_expr(equation.branch.pos_node)
+                    ));
+                    out.push_str(&format!(
+                        "            {},\n",
+                        optional_node_expr(equation.branch.neg_node)
+                    ));
+                    out.push_str(&format!("            self.multiplicity * ({value}),\n"));
+                    out.push_str("            &[\n");
+                    for (node_index, derivative) in node_derivatives.iter().enumerate() {
+                        if is_zero_derivative(derivative) {
+                            continue;
+                        }
+                        out.push_str(&format!(
+                            "                GeneratedDerivative::node(self.nodes[{node_index}], self.multiplicity * {derivative}),\n"
+                        ));
+                    }
+                    for (branch_index, derivative) in branch_derivatives.iter().enumerate() {
+                        if is_zero_derivative(derivative) {
+                            continue;
+                        }
+                        out.push_str(&format!(
+                            "                GeneratedDerivative::branch(self.branches[{branch_index}], self.multiplicity * {derivative}),\n"
+                        ));
+                    }
+                    out.push_str("            ],\n");
+                    out.push_str("        );\n");
                 }
-                out.push_str("            ],\n");
-                out.push_str("        );\n");
             }
             MirEquationKind::Potential => {
                 let slot = potential_branch_slots
@@ -2507,35 +3527,180 @@ fn emit_stamp_body(
                             ),
                         )
                     })?;
-                out.push_str("        stamper.stamp_potential(\n");
-                out.push_str(&format!("            self.branches[{slot}],\n"));
-                out.push_str(&format!("            {value},\n"));
-                out.push_str("            &[\n");
-                for (node_index, derivative) in node_derivatives.iter().enumerate() {
-                    if is_zero_derivative(derivative) {
-                        continue;
+                if dense_stamp {
+                    emit_dense_derivative_arrays(
+                        out,
+                        &prefix,
+                        &node_derivatives,
+                        &branch_derivatives,
+                    );
+                    out.push_str("        stamper.stamp_potential_dense(\n");
+                    out.push_str(&format!("            self.branches[{slot}],\n"));
+                    out.push_str(&format!("            {value},\n"));
+                    out.push_str("            &self.nodes,\n");
+                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
+                    out.push_str("            &self.branches,\n");
+                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                    out.push_str("        );\n");
+                } else {
+                    out.push_str("        stamper.stamp_potential(\n");
+                    out.push_str(&format!("            self.branches[{slot}],\n"));
+                    out.push_str(&format!("            {value},\n"));
+                    out.push_str("            &[\n");
+                    for (node_index, derivative) in node_derivatives.iter().enumerate() {
+                        if is_zero_derivative(derivative) {
+                            continue;
+                        }
+                        out.push_str(&format!(
+                            "                GeneratedDerivative::node(self.nodes[{node_index}], {derivative}),\n"
+                        ));
                     }
-                    out.push_str(&format!(
-                        "                GeneratedDerivative::node(self.nodes[{node_index}], {derivative}),\n"
-                    ));
-                }
-                for (branch_index, derivative) in branch_derivatives.iter().enumerate() {
-                    if is_zero_derivative(derivative) {
-                        continue;
+                    for (branch_index, derivative) in branch_derivatives.iter().enumerate() {
+                        if is_zero_derivative(derivative) {
+                            continue;
+                        }
+                        out.push_str(&format!(
+                            "                GeneratedDerivative::branch(self.branches[{branch_index}], {derivative}),\n"
+                        ));
                     }
-                    out.push_str(&format!(
-                        "                GeneratedDerivative::branch(self.branches[{branch_index}], {derivative}),\n"
-                    ));
+                    out.push_str("            ],\n");
+                    out.push_str("        );\n");
                 }
-                out.push_str("            ],\n");
-                out.push_str("        );\n");
             }
             MirEquationKind::Indirect => {
                 return Err(unsupported(artifact, "indirect contributions"));
             }
         }
+        if helper_safe {
+            out.push_str("        // __rspice_equation_chunk_end\n");
+        }
     }
     Ok(())
+}
+
+fn should_emit_dense_stamp(node_derivatives: &[String], branch_derivatives: &[String]) -> bool {
+    node_derivatives
+        .iter()
+        .chain(branch_derivatives.iter())
+        .filter(|derivative| !is_zero_derivative(derivative))
+        .count()
+        > DENSE_STAMP_DERIVATIVE_THRESHOLD
+}
+
+fn should_emit_compact_equation_stamp(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    branch_current_unknowns: &HashMap<String, usize>,
+    force_inline: bool,
+) -> Result<bool, RustBackendError> {
+    if force_inline || equation.kind == MirEquationKind::Indirect {
+        return Ok(false);
+    }
+    let derivative_axis_count =
+        artifact.mir.nodes.len() + branch_derivative_axis_count(branch_current_unknowns);
+    if derivative_axis_count == 0 {
+        return Ok(false);
+    }
+    Ok(expression_node_count(artifact, equation.expression.id)?
+        >= COMPACT_EQUATION_EXPR_NODE_THRESHOLD)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_compact_equation_stamp(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    prefix: &str,
+    parameter_fields: &HashMap<String, String>,
+    variables: &HashMap<String, LoweredVariable>,
+    ddt_slots: &DdtSlots,
+    potential_branch_slots: &PotentialBranchSlots,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let mut emitter = CompactAdEmitter {
+        artifact,
+        prefix,
+        parameter_fields,
+        variables,
+        ddt_slots,
+        branch_current_unknowns: potential_branch_slots.declared_slots(),
+        emitted: HashMap::new(),
+        lines: Vec::new(),
+    };
+    let lowered = emitter.lower(equation.expression.id)?;
+    for line in emitter.lines {
+        out.push_str("        ");
+        out.push_str(&line);
+        out.push('\n');
+    }
+
+    let ad_value = format!("{prefix}_ad");
+    out.push_str(&format!("        let {ad_value}: AdValue = {lowered};\n"));
+    match equation.kind {
+        MirEquationKind::Current => {
+            out.push_str("        stamper.stamp_current_dense(\n");
+            out.push_str(&format!(
+                "            {},\n",
+                optional_node_expr(equation.branch.pos_node)
+            ));
+            out.push_str(&format!(
+                "            {},\n",
+                optional_node_expr(equation.branch.neg_node)
+            ));
+            out.push_str(&format!(
+                "            self.multiplicity * {ad_value}.value,\n"
+            ));
+            out.push_str("            &self.nodes,\n");
+            out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
+            out.push_str("            &self.branches,\n");
+            out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
+            out.push_str("            self.multiplicity,\n");
+            out.push_str("        );\n");
+        }
+        MirEquationKind::Potential => {
+            let slot = potential_branch_slots
+                .slot_for(equation.id)
+                .ok_or_else(|| {
+                    RustBackendError::internal(
+                        artifact.metadata.source_package.as_str(),
+                        artifact.mir.module_name.as_str(),
+                        format!(
+                            "potential equation {} has no generated branch slot",
+                            equation.id
+                        ),
+                    )
+                })?;
+            out.push_str("        stamper.stamp_potential_dense(\n");
+            out.push_str(&format!("            self.branches[{slot}],\n"));
+            out.push_str(&format!("            {ad_value}.value,\n"));
+            out.push_str("            &self.nodes,\n");
+            out.push_str(&format!("            &{ad_value}.node_derivatives,\n"));
+            out.push_str("            &self.branches,\n");
+            out.push_str(&format!("            &{ad_value}.branch_derivatives,\n"));
+            out.push_str("        );\n");
+        }
+        MirEquationKind::Indirect => {
+            return Err(unsupported(artifact, "indirect contributions"));
+        }
+    }
+    Ok(())
+}
+
+fn emit_dense_derivative_arrays(
+    out: &mut String,
+    prefix: &str,
+    node_derivatives: &[String],
+    branch_derivatives: &[String],
+) {
+    out.push_str(&format!(
+        "        let {prefix}_node_derivatives: [f64; {}] = [{}];\n",
+        node_derivatives.len(),
+        node_derivatives.join(", ")
+    ));
+    out.push_str(&format!(
+        "        let {prefix}_branch_derivatives: [f64; {}] = [{}];\n",
+        branch_derivatives.len(),
+        branch_derivatives.join(", ")
+    ));
 }
 
 fn cache_named_branch_current(
@@ -2797,6 +3962,46 @@ fn emit_chunked_stamp_helpers(
     out.push('\n');
 }
 
+fn split_marked_equation_chunks(out: &mut String, helper_modules: &mut StampHelperModules) {
+    const START: &str = "// __rspice_equation_chunk_start ";
+    const END: &str = "// __rspice_equation_chunk_end";
+
+    let mut rewritten = String::with_capacity(out.len());
+    let mut lines = out.lines();
+    while let Some(line) = lines.next() {
+        let Some(marker) = line.trim_start().strip_prefix(START) else {
+            rewritten.push_str(line);
+            rewritten.push('\n');
+            continue;
+        };
+
+        let mut parts = marker.split_whitespace();
+        let Some(helper_prefix) = parts.next() else {
+            continue;
+        };
+        let reactive = matches!(parts.next(), Some("true"));
+        let Some(equation_index) = parts.next() else {
+            continue;
+        };
+        let method_prefix = format!("{helper_prefix}_equation_{equation_index}");
+        let mut block = String::new();
+        for block_line in lines.by_ref() {
+            if block_line.trim_start() == END {
+                break;
+            }
+            block.push_str(block_line);
+            block.push('\n');
+        }
+
+        emit_stamp_helper_method(&method_prefix, reactive, 0, &block, helper_modules);
+        rewritten.push_str(&format!(
+            "        self.{method_prefix}_block_0(ctx, stamper, &mut scratch);\n"
+        ));
+    }
+
+    *out = rewritten;
+}
+
 fn emit_stamp_helper_method(
     helper_prefix: &str,
     reactive: bool,
@@ -2818,6 +4023,9 @@ fn emit_stamp_helper_method(
         "\n    pub(super) fn {helper_prefix}_block_{block_index}(\n        &mut self,\n        ctx: &GeneratedEvalContext<'_>,\n        stamper: &mut {stamper_type}<'_>,\n        scratch: &mut {scratch_type},\n    ) {{\n"
     );
     method.push_str("        let _ = stamper;\n");
+    method.push_str("        let p = self.params;\n");
+    method.push_str("        let nodes = self.nodes;\n");
+    method.push_str("        let branches = self.branches;\n");
     method.push_str(block);
     method.push_str("    }\n");
     helper_modules.push_method(method, reactive);
@@ -2884,7 +4092,8 @@ struct StampHelperModule {
 impl StampHelperModule {
     fn finish(self) -> String {
         let mut imports = vec![
-            "AdValue",
+            "A",
+            "GeneratedDerivative",
             "GeneratedEvalContext",
             "GeneratedReactiveStamper",
             "GeneratedStamper",
@@ -3145,7 +4354,8 @@ fn emit_assignment_statement(
         }
     } else {
         reactive_derivative_locals = zero_derivative_vec(artifact.mir.nodes.len());
-        reactive_branch_derivative_locals = zero_derivative_vec(branch_current_unknowns.len());
+        reactive_branch_derivative_locals =
+            zero_derivative_vec(branch_derivative_axis_count(branch_current_unknowns));
     }
     variables.insert(
         target.name.to_string(),
@@ -3193,6 +4403,7 @@ fn emit_compact_assignment_statement(
             )
         })?;
     let target_index = usize::from(target.id);
+    let branch_axis_count = branch_derivative_axis_count(branch_current_unknowns);
     let mut emitter = CompactAdEmitter {
         artifact,
         prefix,
@@ -3215,7 +4426,7 @@ fn emit_compact_assignment_statement(
         drop(emitter);
         variables.insert(
             target.name.to_string(),
-            scratch_backed_variable(artifact, target_index, branch_current_unknowns.len(), false),
+            scratch_backed_variable(artifact, target_index, branch_axis_count, false),
         );
         return Ok(());
     }
@@ -3230,7 +4441,22 @@ fn emit_compact_assignment_statement(
         drop(emitter);
         variables.insert(
             target.name.to_string(),
-            scratch_backed_variable(artifact, target_index, branch_current_unknowns.len(), false),
+            scratch_backed_variable(artifact, target_index, branch_axis_count, false),
+        );
+        return Ok(());
+    }
+
+    if emit_compact_conditional_ad_branch_assignment(
+        &mut emitter,
+        assignment.expr.id,
+        target_index,
+        out,
+        indent,
+    )? {
+        drop(emitter);
+        variables.insert(
+            target.name.to_string(),
+            scratch_backed_variable(artifact, target_index, branch_axis_count, false),
         );
         return Ok(());
     }
@@ -3241,7 +4467,7 @@ fn emit_compact_assignment_statement(
         }
         variables.insert(
             target.name.to_string(),
-            scratch_backed_variable(artifact, target_index, branch_current_unknowns.len(), false),
+            scratch_backed_variable(artifact, target_index, branch_axis_count, false),
         );
         return Ok(());
     }
@@ -3252,7 +4478,7 @@ fn emit_compact_assignment_statement(
         ));
         variables.insert(
             target.name.to_string(),
-            zero_derivative_scratch_variable(artifact, target_index, branch_current_unknowns.len()),
+            zero_derivative_scratch_variable(artifact, target_index, branch_axis_count),
         );
         return Ok(());
     }
@@ -3264,12 +4490,10 @@ fn emit_compact_assignment_statement(
         out.push('\n');
     }
 
-    out.push_str(&format!(
-        "{indent}scratch.store_ad({target_index}, &{value});\n"
-    ));
+    push_compact_ad_value_store(out, indent, target_index, &value);
     variables.insert(
         target.name.to_string(),
-        scratch_backed_variable(artifact, target_index, branch_current_unknowns.len(), false),
+        scratch_backed_variable(artifact, target_index, branch_axis_count, false),
     );
     Ok(())
 }
@@ -3355,6 +4579,84 @@ fn emit_compact_conditional_scalar_branch_assignment(
     Ok(true)
 }
 
+fn emit_compact_conditional_ad_branch_assignment(
+    emitter: &mut CompactAdEmitter<'_>,
+    expr: ExprId,
+    target_index: usize,
+    out: &mut String,
+    indent: &str,
+) -> Result<bool, RustBackendError> {
+    let HirExprKind::Conditional {
+        then_expr,
+        else_expr,
+        ..
+    } = emitter.expression(expr)?.kind.clone()
+    else {
+        return Ok(false);
+    };
+
+    if emitter.zero_derivative_value_expr(then_expr)?.is_some()
+        && emitter.zero_derivative_value_expr(else_expr)?.is_some()
+    {
+        return Ok(false);
+    }
+
+    push_compact_conditional_assignment_expr(emitter, expr, target_index, out, indent)?;
+    Ok(true)
+}
+
+fn push_compact_conditional_assignment_expr(
+    emitter: &mut CompactAdEmitter<'_>,
+    expr: ExprId,
+    target_index: usize,
+    out: &mut String,
+    indent: &str,
+) -> Result<(), RustBackendError> {
+    if let Some(value) = emitter.zero_derivative_value_expr(expr)? {
+        push_compact_scalar_store(out, indent, target_index, &value);
+        return Ok(());
+    }
+
+    let HirExprKind::Conditional {
+        condition,
+        then_expr,
+        else_expr,
+    } = emitter.expression(expr)?.kind.clone()
+    else {
+        let branch = emitter.lower_isolated_branch(expr)?;
+        push_compact_ad_store(out, indent, target_index, &branch);
+        return Ok(());
+    };
+
+    let condition = emitter.lower_condition(condition)?;
+    for line in emitter.lines.drain(..) {
+        out.push_str(indent);
+        out.push_str(&line);
+        out.push('\n');
+    }
+
+    out.push_str(&format!("{indent}if {condition} {{\n"));
+    let branch_indent = format!("{indent}    ");
+    push_compact_conditional_assignment_expr(
+        emitter,
+        then_expr,
+        target_index,
+        out,
+        &branch_indent,
+    )?;
+    out.push_str(&format!("{indent}}} else {{\n"));
+    push_compact_conditional_assignment_expr(
+        emitter,
+        else_expr,
+        target_index,
+        out,
+        &branch_indent,
+    )?;
+    out.push_str(&format!("{indent}}}\n"));
+
+    Ok(())
+}
+
 fn push_compact_ad_store(
     out: &mut String,
     indent: &str,
@@ -3370,10 +4672,28 @@ fn push_compact_ad_store(
         }
         return;
     }
+    if let Some(line) = compact_scratch_store_helper_call(target_index, &branch.value) {
+        push_indented_compact_line(out, indent, &line);
+        return;
+    }
+    push_compact_ad_value_store(out, indent, target_index, &branch.value);
+}
+
+fn push_compact_ad_value_store(out: &mut String, indent: &str, target_index: usize, value: &str) {
+    if let Some(source_index) = compact_scratch_ad_value_index(value) {
+        if source_index != target_index {
+            push_compact_ad_copy(out, indent, target_index, source_index);
+        }
+        return;
+    }
+    if let Some(line) = compact_scratch_store_helper_call(target_index, value) {
+        push_indented_compact_line(out, indent, &line);
+        return;
+    }
     push_indented_compact_line(
         out,
         indent,
-        &format!("scratch.store_ad({target_index}, &{});", branch.value),
+        &format!("scratch.store_ad({target_index}, &{value});"),
     );
 }
 
@@ -3381,17 +4701,7 @@ fn push_compact_scalar_store(out: &mut String, indent: &str, target_index: usize
     push_indented_compact_line(
         out,
         indent,
-        &format!("scratch.values[{target_index}] = {value};"),
-    );
-    push_indented_compact_line(
-        out,
-        indent,
-        &format!("scratch.node_derivatives[{target_index}] = [0.0; Instance::NODE_COUNT];"),
-    );
-    push_indented_compact_line(
-        out,
-        indent,
-        &format!("scratch.branch_derivatives[{target_index}] = [0.0; Instance::BRANCH_COUNT];"),
+        &format!("scratch.store_scalar({target_index}, {value});"),
     );
 }
 
@@ -3399,30 +4709,422 @@ fn push_compact_ad_copy(out: &mut String, indent: &str, target_index: usize, sou
     push_indented_compact_line(
         out,
         indent,
-        &format!("scratch.values[{target_index}] = scratch.values[{source_index}];"),
-    );
-    push_indented_compact_line(
-        out,
-        indent,
-        &format!(
-            "scratch.node_derivatives[{target_index}] = scratch.node_derivatives[{source_index}];"
-        ),
-    );
-    push_indented_compact_line(
-        out,
-        indent,
-        &format!(
-            "scratch.branch_derivatives[{target_index}] = scratch.branch_derivatives[{source_index}];"
-        ),
+        &format!("scratch.copy_ad({target_index}, {source_index});"),
     );
 }
 
 fn compact_scratch_ad_value_index(value: &str) -> Option<usize> {
     value
+        .trim()
         .strip_prefix("scratch.ad_value(")?
         .strip_suffix(')')?
         .parse()
         .ok()
+}
+
+fn compact_non_atomic_ad_value(value: &str) -> bool {
+    let value = value.trim();
+    if compact_scratch_ad_value_index(value).is_some() {
+        return false;
+    }
+    if compact_ad_call_args(value, "constant").is_some()
+        || compact_ad_call_args(value, "voltage").is_some()
+        || compact_ad_call_args(value, "branch_current").is_some()
+    {
+        return false;
+    }
+    value.starts_with("AdValue::") || compact_generated_ad_local(value)
+}
+
+fn compact_generated_ad_local(value: &str) -> bool {
+    let value = value.trim();
+    let Some((prefix, suffix)) = value.split_once("_ad_e") else {
+        return false;
+    };
+    value.starts_with("assign")
+        && prefix
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && !suffix.is_empty()
+        && suffix.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "constant")
+        && args.len() == 1
+    {
+        return Some(format!(
+            "scratch.store_scalar({target_index}, {});",
+            args[0]
+        ));
+    }
+
+    if let Some(line) = compact_nested_scale_store_helper_call(target_index, value) {
+        return Some(line);
+    }
+    if let Some(line) = compact_nested_offset_store_helper_call(target_index, value) {
+        return Some(line);
+    }
+    if let Some(line) = compact_mixed_scratch_ad_store_helper_call(target_index, value) {
+        return Some(line);
+    }
+    if let Some(line) = compact_general_ad_store_helper_call(target_index, value) {
+        return Some(line);
+    }
+
+    for (name, helper) in [
+        ("add", "store_add"),
+        ("sub", "store_sub"),
+        ("mul", "store_mul"),
+        ("div", "store_div"),
+    ] {
+        if let Some(args) = compact_ad_call_args(value, name) {
+            if args.len() != 2 {
+                continue;
+            }
+            let left = compact_scratch_ad_value_index(args[0])?;
+            let right = compact_scratch_ad_value_index(args[1])?;
+            return Some(format!(
+                "scratch.{helper}({target_index}, {left}, {right});"
+            ));
+        }
+    }
+
+    for (name, helper) in [("scale", "store_scale"), ("offset", "store_offset")] {
+        if let Some(args) = compact_ad_call_args(value, name) {
+            if args.len() != 2 {
+                continue;
+            }
+            let source = compact_scratch_ad_value_index(args[0])?;
+            return Some(format!(
+                "scratch.{helper}({target_index}, {source}, {});",
+                args[1]
+            ));
+        }
+    }
+
+    for (name, helper) in [
+        ("sub_from_scalar", "store_sub_from_scalar"),
+        ("div_from_scalar", "store_div_from_scalar"),
+    ] {
+        if let Some(args) = compact_ad_call_args(value, name) {
+            if args.len() != 2 {
+                continue;
+            }
+            let source = compact_scratch_ad_value_index(args[1])?;
+            return Some(format!(
+                "scratch.{helper}({target_index}, {}, {source});",
+                args[0]
+            ));
+        }
+    }
+
+    for (name, helper) in [
+        ("neg", "store_neg"),
+        ("square", "store_square"),
+        ("sqrt", "store_sqrt"),
+        ("exp", "store_exp"),
+        ("ln", "store_ln"),
+        ("sin", "store_sin"),
+        ("sinh", "store_sinh"),
+        ("asinh", "store_asinh"),
+    ] {
+        if let Some(args) = compact_ad_call_args(value, name) {
+            if args.len() != 1 {
+                continue;
+            }
+            let source = compact_scratch_ad_value_index(args[0])?;
+            return Some(format!("scratch.{helper}({target_index}, {source});"));
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "powf")
+        && args.len() == 2
+    {
+        let source = compact_scratch_ad_value_index(args[0])?;
+        return Some(format!(
+            "scratch.store_powf({target_index}, {source}, {});",
+            args[1]
+        ));
+    }
+
+    None
+}
+
+fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    for (name, helper) in [
+        ("add", "store_add_ad"),
+        ("sub", "store_sub_ad"),
+        ("mul", "store_mul_ad"),
+        ("div", "store_div_ad"),
+        ("rem", "store_rem_ad"),
+        ("pow", "store_pow_ad"),
+        ("min", "store_min_ad"),
+        ("max", "store_max_ad"),
+        ("hypot", "store_hypot_ad"),
+        ("atan2", "store_atan2_ad"),
+    ] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 2 {
+            return None;
+        }
+        if !compact_non_atomic_ad_value(args[0]) || !compact_non_atomic_ad_value(args[1]) {
+            return None;
+        }
+        return Some(format!(
+            "scratch.{helper}({target_index}, {}, {});",
+            args[0], args[1]
+        ));
+    }
+
+    for (name, helper) in [
+        ("scale", "store_scale_ad"),
+        ("offset", "store_offset_ad"),
+        ("rem_with_scalar", "store_rem_with_scalar_ad"),
+        ("min_with_scalar", "store_min_with_scalar_ad"),
+        ("max_with_scalar", "store_max_with_scalar_ad"),
+    ] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 2 {
+            return None;
+        }
+        if !compact_non_atomic_ad_value(args[0]) {
+            return None;
+        }
+        return Some(format!(
+            "scratch.{helper}({target_index}, {}, {});",
+            args[0], args[1]
+        ));
+    }
+
+    for (name, helper) in [
+        ("sub_from_scalar", "store_sub_from_scalar_ad"),
+        ("div_from_scalar", "store_div_from_scalar_ad"),
+        ("rem_from_scalar", "store_rem_from_scalar_ad"),
+        ("pow_from_scalar", "store_pow_from_scalar_ad"),
+        ("min_from_scalar", "store_min_from_scalar_ad"),
+        ("max_from_scalar", "store_max_from_scalar_ad"),
+    ] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 2 {
+            return None;
+        }
+        if !compact_non_atomic_ad_value(args[1]) {
+            return None;
+        }
+        return Some(format!(
+            "scratch.{helper}({target_index}, {}, {});",
+            args[0], args[1]
+        ));
+    }
+
+    for (name, helper) in [
+        ("neg", "store_neg_ad"),
+        ("square", "store_square_ad"),
+        ("sqrt", "store_sqrt_ad"),
+        ("exp", "store_exp_ad"),
+        ("limexp", "store_limexp_ad"),
+        ("limited_exp", "store_limited_exp_ad"),
+        ("ln", "store_ln_ad"),
+        ("log10", "store_log10_ad"),
+        ("abs", "store_abs_ad"),
+        ("sin", "store_sin_ad"),
+        ("cos", "store_cos_ad"),
+        ("tan", "store_tan_ad"),
+        ("atan", "store_atan_ad"),
+        ("sinh", "store_sinh_ad"),
+        ("cosh", "store_cosh_ad"),
+        ("tanh", "store_tanh_ad"),
+        ("asinh", "store_asinh_ad"),
+        ("acosh", "store_acosh_ad"),
+        ("atanh", "store_atanh_ad"),
+        ("floor", "store_floor_ad"),
+        ("ceil", "store_ceil_ad"),
+    ] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 1 {
+            return None;
+        }
+        if !compact_non_atomic_ad_value(args[0]) {
+            return None;
+        }
+        return Some(format!("scratch.{helper}({target_index}, {});", args[0]));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "powf") {
+        if args.len() != 2 {
+            return None;
+        }
+        if !compact_non_atomic_ad_value(args[0]) {
+            return None;
+        }
+        return Some(format!(
+            "scratch.store_powf_ad({target_index}, {}, {});",
+            args[0], args[1]
+        ));
+    }
+
+    None
+}
+
+fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    for (name, rhs_helper, lhs_helper) in [
+        ("add", "store_add_ad_rhs", "store_add_ad_lhs"),
+        ("sub", "store_sub_ad_rhs", "store_sub_ad_lhs"),
+        ("mul", "store_mul_ad_rhs", "store_mul_ad_lhs"),
+        ("div", "store_div_ad_rhs", "store_div_ad_lhs"),
+    ] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 2 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0]);
+        let right = compact_scratch_ad_value_index(args[1]);
+        return match (left, right) {
+            (Some(_), Some(_)) | (None, None) => None,
+            (Some(left), None) => Some(format!(
+                "scratch.{rhs_helper}({target_index}, {left}, {});",
+                args[1]
+            )),
+            (None, Some(right)) => Some(format!(
+                "scratch.{lhs_helper}({target_index}, {}, {right});",
+                args[0]
+            )),
+        };
+    }
+    None
+}
+
+fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    let args = compact_ad_call_args(value, "scale")?;
+    if args.len() != 2 {
+        return None;
+    }
+    let inner = args[0];
+    let scale = args[1];
+
+    for (name, helper) in [
+        ("add", "store_scaled_add"),
+        ("sub", "store_scaled_sub"),
+        ("mul", "store_scaled_mul"),
+        ("div", "store_scaled_div"),
+    ] {
+        if let Some(inner_args) = compact_ad_call_args(inner, name) {
+            if inner_args.len() != 2 {
+                return None;
+            }
+            let left = compact_scratch_ad_value_index(inner_args[0])?;
+            let right = compact_scratch_ad_value_index(inner_args[1])?;
+            return Some(format!(
+                "scratch.{helper}({target_index}, {left}, {right}, {scale});"
+            ));
+        }
+    }
+
+    if let Some(inner_args) = compact_ad_call_args(inner, "offset") {
+        if inner_args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(inner_args[0])?;
+        return Some(format!(
+            "scratch.store_scaled_offset({target_index}, {source}, {}, {scale});",
+            inner_args[1]
+        ));
+    }
+
+    for (name, helper) in [("exp", "store_scaled_exp"), ("sqrt", "store_scaled_sqrt")] {
+        if let Some(inner_args) = compact_ad_call_args(inner, name) {
+            if inner_args.len() != 1 {
+                return None;
+            }
+            let source = compact_scratch_ad_value_index(inner_args[0])?;
+            return Some(format!(
+                "scratch.{helper}({target_index}, {source}, {scale});"
+            ));
+        }
+    }
+
+    None
+}
+
+fn compact_nested_offset_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    let args = compact_ad_call_args(value, "offset")?;
+    if args.len() != 2 {
+        return None;
+    }
+    let inner = args[0];
+    let offset = args[1];
+
+    if let Some(inner_args) = compact_ad_call_args(inner, "scale") {
+        if inner_args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(inner_args[0])?;
+        return Some(format!(
+            "scratch.store_offset_scaled({target_index}, {source}, {}, {offset});",
+            inner_args[1]
+        ));
+    }
+
+    if let Some(inner_args) = compact_ad_call_args(inner, "offset") {
+        if inner_args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(inner_args[0])?;
+        return Some(format!(
+            "scratch.store_offset({target_index}, {source}, (({}) + ({})));",
+            inner_args[1], offset
+        ));
+    }
+
+    None
+}
+
+fn compact_ad_call_args<'a>(value: &'a str, name: &str) -> Option<Vec<&'a str>> {
+    let value = value.trim();
+    let prefix = format!("AdValue::{name}(");
+    let inner = value.strip_prefix(prefix.as_str())?.strip_suffix(')')?;
+    split_top_level_args(inner)
+}
+
+fn split_top_level_args(input: &str) -> Option<Vec<&str>> {
+    let mut args = Vec::new();
+    let mut start = 0;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '(' => paren_depth = paren_depth.checked_add(1)?,
+            ')' => paren_depth = paren_depth.checked_sub(1)?,
+            '[' => bracket_depth = bracket_depth.checked_add(1)?,
+            ']' => bracket_depth = bracket_depth.checked_sub(1)?,
+            '{' => brace_depth = brace_depth.checked_add(1)?,
+            '}' => brace_depth = brace_depth.checked_sub(1)?,
+            ',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                args.push(input[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    if paren_depth != 0 || bracket_depth != 0 || brace_depth != 0 {
+        return None;
+    }
+    args.push(input[start..].trim());
+    Some(args)
 }
 
 fn scratch_backed_variable(
@@ -3640,6 +5342,19 @@ impl CompactAdEmitter<'_> {
                                 format!("AdValue::div({left}, {right})")
                             }
                         }
+                        "Mod" => {
+                            if let Some(modulus) = self.scalar_constant(*right)? {
+                                let left = self.lower(*left)?;
+                                format!("AdValue::rem_with_scalar({left}, {modulus})")
+                            } else if let Some(scalar) = self.scalar_constant(*left)? {
+                                let right = self.lower(*right)?;
+                                format!("AdValue::rem_from_scalar({scalar}, {right})")
+                            } else {
+                                let left = self.lower(*left)?;
+                                let right = self.lower(*right)?;
+                                format!("AdValue::rem({left}, {right})")
+                            }
+                        }
                         _ => return Err(self.unsupported(format!("binary operator {op}"))),
                     }
                 }
@@ -3654,6 +5369,10 @@ impl CompactAdEmitter<'_> {
             }
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
                 self.lower_ddt(id, args.as_slice())?
+            }
+            HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
+                let (expr, ic) = compact_idt_operands(args.as_slice(), self)?;
+                self.lower_idt(id, expr, ic)?
             }
             HirExprKind::Call { name, args } if is_ddx_name(name.as_str()) => {
                 let (expr, probe) = compact_ddx_operands(args.as_slice(), self)?;
@@ -3675,11 +5394,25 @@ impl CompactAdEmitter<'_> {
                 self.lower_ddt(id, &[*expr])?
             }
             HirExprKind::AnalogOperator {
+                op:
+                    HirAnalogOperator::Idt {
+                        expr,
+                        ic,
+                        assert,
+                        abstol,
+                    },
+            } => {
+                if assert.is_some() || abstol.is_some() {
+                    return Err(self.unsupported("idt assert/abstol argument"));
+                }
+                self.lower_idt(id, *expr, *ic)?
+            }
+            HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddx { expr, probe },
             } => self.lower_ddx(*expr, *probe)?,
             HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Limexp { .. },
-            } => return Err(self.unsupported("convergence-limited limexp operator")),
+                op: HirAnalogOperator::Limexp { expr },
+            } => format!("AdValue::limexp({})", self.lower(*expr)?),
             other => return Err(self.unsupported(format!("expression kind {other:?}"))),
         };
         if rhs.len() <= 512 && !compact_kind_has_side_effect(&kind) {
@@ -3815,7 +5548,7 @@ impl CompactAdEmitter<'_> {
 
     fn lower_identifier(&self, name: &str) -> Result<String, RustBackendError> {
         if let Some(field) = self.parameter_fields.get(name) {
-            Ok(format!("AdValue::constant(self.params.{field})"))
+            Ok(format!("AdValue::constant(params.{field})"))
         } else if let Some(variable) = self.variables.get(name) {
             if lowered_variable_has_zero_derivatives(variable) {
                 return Ok(format!("AdValue::constant({})", variable.value));
@@ -3866,7 +5599,7 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Number { value, .. } => Ok(Some(format_f64(value))),
             HirExprKind::Identifier { name } => {
                 if let Some(field) = self.parameter_fields.get(name.as_str()) {
-                    Ok(Some(format!("self.params.{field}")))
+                    Ok(Some(format!("params.{field}")))
                 } else if let Some(variable) = self.variables.get(name.as_str()) {
                     Ok(lowered_variable_has_zero_derivatives(variable)
                         .then(|| variable.value.clone()))
@@ -3905,6 +5638,7 @@ impl CompactAdEmitter<'_> {
                     "Sub" => compact_scalar_sub(&left, &right),
                     "Mul" => compact_scalar_mul(&left, &right),
                     "Div" => compact_scalar_div(&left, &right),
+                    "Mod" => compact_scalar_mod(&left, &right),
                     _ => return Ok(None),
                 };
                 Ok(Some(value))
@@ -3938,6 +5672,7 @@ impl CompactAdEmitter<'_> {
             "Sub" => compact_scalar_sub(&left, &right),
             "Mul" => compact_scalar_mul(&left, &right),
             "Div" => compact_scalar_div(&left, &right),
+            "Mod" => compact_scalar_mod(&left, &right),
             _ => return Ok(None),
         };
         Ok(Some(value))
@@ -3949,7 +5684,7 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Number { value, .. } => Ok(Some(format_f64(value))),
             HirExprKind::Identifier { name } => {
                 if let Some(field) = self.parameter_fields.get(name.as_str()) {
-                    Ok(Some(format!("self.params.{field}")))
+                    Ok(Some(format!("params.{field}")))
                 } else if let Some(variable) = self.variables.get(name.as_str()) {
                     Ok(lowered_variable_has_zero_derivatives(variable)
                         .then(|| variable.value.clone()))
@@ -3994,6 +5729,7 @@ impl CompactAdEmitter<'_> {
                     "Sub" => Some(compact_scalar_sub(&left, &right)),
                     "Mul" => Some(compact_scalar_mul(&left, &right)),
                     "Div" => Some(compact_scalar_div(&left, &right)),
+                    "Mod" => Some(compact_scalar_mod(&left, &right)),
                     _ => None,
                 })
             }
@@ -4104,6 +5840,8 @@ impl CompactAdEmitter<'_> {
             }
             "sqrt" => arg(0, self)?.map(|value| format!("{}.sqrt()", compact_f64_receiver(&value))),
             "exp" => arg(0, self)?.map(|value| format!("{}.exp()", compact_f64_receiver(&value))),
+            "limexp" => arg(0, self)?.map(compact_scalar_limexp),
+            "__rspice_limited_exp" => arg(0, self)?.map(compact_scalar_limited_exp),
             "ln" | "log" => {
                 arg(0, self)?.map(|value| format!("{}.ln()", compact_f64_receiver(&value)))
             }
@@ -4113,9 +5851,19 @@ impl CompactAdEmitter<'_> {
             "sin" => arg(0, self)?.map(|value| format!("{}.sin()", compact_f64_receiver(&value))),
             "cos" => arg(0, self)?.map(|value| format!("{}.cos()", compact_f64_receiver(&value))),
             "tan" => arg(0, self)?.map(|value| format!("{}.tan()", compact_f64_receiver(&value))),
+            "atan" => arg(0, self)?.map(|value| format!("{}.atan()", compact_f64_receiver(&value))),
             "sinh" => arg(0, self)?.map(|value| format!("{}.sinh()", compact_f64_receiver(&value))),
             "cosh" => arg(0, self)?.map(|value| format!("{}.cosh()", compact_f64_receiver(&value))),
             "tanh" => arg(0, self)?.map(|value| format!("{}.tanh()", compact_f64_receiver(&value))),
+            "asinh" => {
+                arg(0, self)?.map(|value| format!("{}.asinh()", compact_f64_receiver(&value)))
+            }
+            "acosh" => {
+                arg(0, self)?.map(|value| format!("{}.acosh()", compact_f64_receiver(&value)))
+            }
+            "atanh" => {
+                arg(0, self)?.map(|value| format!("{}.atanh()", compact_f64_receiver(&value)))
+            }
             "floor" => {
                 arg(0, self)?.map(|value| format!("{}.floor()", compact_f64_receiver(&value)))
             }
@@ -4127,19 +5875,30 @@ impl CompactAdEmitter<'_> {
                 _ => None,
             },
             "min" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(left), Some(right)) => Some(format!("({left}).min({right})")),
+                (Some(left), Some(right)) => Some(format!(
+                    "{}.min({right})",
+                    compact_f64_binary_receiver(&left)
+                )),
                 _ => None,
             },
             "max" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(left), Some(right)) => Some(format!("({left}).max({right})")),
+                (Some(left), Some(right)) => Some(format!(
+                    "{}.max({right})",
+                    compact_f64_binary_receiver(&left)
+                )),
                 _ => None,
             },
             "hypot" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(left), Some(right)) => Some(format!("({left}).hypot({right})")),
+                (Some(left), Some(right)) => Some(format!(
+                    "{}.hypot({right})",
+                    compact_f64_binary_receiver(&left)
+                )),
                 _ => None,
             },
             "atan2" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(y), Some(x)) => Some(format!("({y}).atan2({x})")),
+                (Some(y), Some(x)) => {
+                    Some(format!("{}.atan2({x})", compact_f64_binary_receiver(&y)))
+                }
                 _ => None,
             },
             _ => None,
@@ -4432,14 +6191,20 @@ impl CompactAdEmitter<'_> {
             "abs" | "fabs" => format!("AdValue::abs({})", lower_arg(0)?),
             "sqrt" => format!("AdValue::sqrt({})", lower_arg(0)?),
             "exp" => format!("AdValue::exp({})", lower_arg(0)?),
+            "limexp" => format!("AdValue::limexp({})", lower_arg(0)?),
+            "__rspice_limited_exp" => format!("AdValue::limited_exp({})", lower_arg(0)?),
             "ln" | "log" => format!("AdValue::ln({})", lower_arg(0)?),
             "log10" => format!("AdValue::log10({})", lower_arg(0)?),
             "sin" => format!("AdValue::sin({})", lower_arg(0)?),
             "cos" => format!("AdValue::cos({})", lower_arg(0)?),
             "tan" => format!("AdValue::tan({})", lower_arg(0)?),
+            "atan" => format!("AdValue::atan({})", lower_arg(0)?),
             "sinh" => format!("AdValue::sinh({})", lower_arg(0)?),
             "cosh" => format!("AdValue::cosh({})", lower_arg(0)?),
             "tanh" => format!("AdValue::tanh({})", lower_arg(0)?),
+            "asinh" => format!("AdValue::asinh({})", lower_arg(0)?),
+            "acosh" => format!("AdValue::acosh({})", lower_arg(0)?),
+            "atanh" => format!("AdValue::atanh({})", lower_arg(0)?),
             "floor" => format!("AdValue::floor({})", lower_arg(0)?),
             "ceil" => format!("AdValue::ceil({})", lower_arg(0)?),
             "min" => format!("AdValue::min({}, {})", lower_arg(0)?, lower_arg(1)?),
@@ -4519,6 +6284,26 @@ impl CompactAdEmitter<'_> {
         })?;
         Ok(format!(
             "AdValue::ddt({operand}, self.ddt_jacobian(1.0), self.eval_ddt({slot}, {operand}.value))"
+        ))
+    }
+
+    fn lower_idt(
+        &mut self,
+        id: ExprId,
+        expr: ExprId,
+        ic: Option<ExprId>,
+    ) -> Result<String, RustBackendError> {
+        let operand = self.lower(expr)?;
+        let ic = if let Some(ic) = ic {
+            self.lower(ic)?
+        } else {
+            "AdValue::constant(0.0)".to_string()
+        };
+        let slot = self.ddt_slots.idt_slot_for(id).ok_or_else(|| {
+            self.internal(format!("idt expression {id} has no generated state slot"))
+        })?;
+        Ok(format!(
+            "AdValue::idt({operand}, self.idt_jacobian(1.0), self.eval_idt({slot}, {operand}.value, {ic}.value))"
         ))
     }
 
@@ -4624,7 +6409,7 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Number { value, .. } => Ok(Some(format_f64(value))),
             HirExprKind::Identifier { name } => {
                 if let Some(field) = self.parameter_fields.get(name.as_str()) {
-                    Ok(Some(format!("self.params.{field}")))
+                    Ok(Some(format!("params.{field}")))
                 } else if let Some(index) = self.variable_index(name.as_str())? {
                     Ok(Some(format!("scratch.values[{index}]")))
                 } else {
@@ -4689,6 +6474,7 @@ impl CompactAdEmitter<'_> {
                     "Sub" => Some(compact_scalar_sub(&left, &right)),
                     "Mul" => Some(compact_scalar_mul(&left, &right)),
                     "Div" => Some(compact_scalar_div(&left, &right)),
+                    "Mod" => Some(compact_scalar_mod(&left, &right)),
                     _ => None,
                 })
             }
@@ -4880,6 +6666,7 @@ impl CompactAdEmitter<'_> {
             }
             "sqrt" => arg(0, self)?.map(|value| format!("{}.sqrt()", compact_f64_receiver(&value))),
             "exp" => arg(0, self)?.map(|value| format!("{}.exp()", compact_f64_receiver(&value))),
+            "limexp" => arg(0, self)?.map(compact_scalar_limexp),
             "ln" | "log" => {
                 arg(0, self)?.map(|value| format!("{}.ln()", compact_f64_receiver(&value)))
             }
@@ -4889,9 +6676,19 @@ impl CompactAdEmitter<'_> {
             "sin" => arg(0, self)?.map(|value| format!("{}.sin()", compact_f64_receiver(&value))),
             "cos" => arg(0, self)?.map(|value| format!("{}.cos()", compact_f64_receiver(&value))),
             "tan" => arg(0, self)?.map(|value| format!("{}.tan()", compact_f64_receiver(&value))),
+            "atan" => arg(0, self)?.map(|value| format!("{}.atan()", compact_f64_receiver(&value))),
             "sinh" => arg(0, self)?.map(|value| format!("{}.sinh()", compact_f64_receiver(&value))),
             "cosh" => arg(0, self)?.map(|value| format!("{}.cosh()", compact_f64_receiver(&value))),
             "tanh" => arg(0, self)?.map(|value| format!("{}.tanh()", compact_f64_receiver(&value))),
+            "asinh" => {
+                arg(0, self)?.map(|value| format!("{}.asinh()", compact_f64_receiver(&value)))
+            }
+            "acosh" => {
+                arg(0, self)?.map(|value| format!("{}.acosh()", compact_f64_receiver(&value)))
+            }
+            "atanh" => {
+                arg(0, self)?.map(|value| format!("{}.atanh()", compact_f64_receiver(&value)))
+            }
             "floor" => {
                 arg(0, self)?.map(|value| format!("{}.floor()", compact_f64_receiver(&value)))
             }
@@ -4903,19 +6700,30 @@ impl CompactAdEmitter<'_> {
                 _ => None,
             },
             "min" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(left), Some(right)) => Some(format!("({left}).min({right})")),
+                (Some(left), Some(right)) => Some(format!(
+                    "{}.min({right})",
+                    compact_f64_binary_receiver(&left)
+                )),
                 _ => None,
             },
             "max" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(left), Some(right)) => Some(format!("({left}).max({right})")),
+                (Some(left), Some(right)) => Some(format!(
+                    "{}.max({right})",
+                    compact_f64_binary_receiver(&left)
+                )),
                 _ => None,
             },
             "hypot" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(left), Some(right)) => Some(format!("({left}).hypot({right})")),
+                (Some(left), Some(right)) => Some(format!(
+                    "{}.hypot({right})",
+                    compact_f64_binary_receiver(&left)
+                )),
                 _ => None,
             },
             "atan2" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(y), Some(x)) => Some(format!("({y}).atan2({x})")),
+                (Some(y), Some(x)) => {
+                    Some(format!("{}.atan2({x})", compact_f64_binary_receiver(&y)))
+                }
                 _ => None,
             },
             _ => None,
@@ -4976,8 +6784,15 @@ fn compact_scalar_sub(left: &str, right: &str) -> String {
 }
 
 fn compact_scalar_negate(value: &str) -> String {
-    if value == "0.0" {
+    let value = value.trim();
+    if value == "0.0" || value == "-0.0" {
         "0.0".to_string()
+    } else if let Some(positive) = value.strip_prefix('-') {
+        if scan_numeric_literal(positive).is_some() {
+            positive.to_string()
+        } else {
+            format!("(-{value})")
+        }
     } else {
         format!("(-{value})")
     }
@@ -5009,8 +6824,88 @@ fn compact_scalar_div(left: &str, right: &str) -> String {
     }
 }
 
+fn compact_scalar_mod(left: &str, right: &str) -> String {
+    if left == "0.0" {
+        "0.0".to_string()
+    } else {
+        format!("({left} % {right})")
+    }
+}
+
+fn compact_scalar_limexp(value: String) -> String {
+    format!(
+        "if {value} < 80.0 {{ {}.exp() }} else {{ 80.0_f64.exp() * (1.0 + ({value} - 80.0)) }}",
+        compact_f64_receiver(&value)
+    )
+}
+
+fn compact_scalar_limited_exp(value: String) -> String {
+    let receiver = compact_f64_receiver(&value);
+    format!(
+        "if {value} > 80.0 {{ 5.540622384e34 * (1.0 + ({value}) - 80.0) }} else if {value} < -80.0 {{ 1.804851387e-35 }} else {{ {receiver}.exp() }}"
+    )
+}
+
 fn compact_f64_receiver(value: &str) -> String {
     format!("(({value}) as f64)")
+}
+
+fn compact_f64_binary_receiver(value: &str) -> String {
+    if let Some(typed) = typed_f64_literal(value) {
+        format!("({typed})")
+    } else {
+        format!("({value})")
+    }
+}
+
+fn typed_f64_literal(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.ends_with("_f64") || value.starts_with("f64::") {
+        return None;
+    }
+    let saw_float_marker = scan_numeric_literal(value)?;
+    if saw_float_marker {
+        Some(format!("{value}_f64"))
+    } else {
+        None
+    }
+}
+
+fn scan_numeric_literal(value: &str) -> Option<bool> {
+    let unsigned = value.strip_prefix('-').unwrap_or(value);
+    if unsigned.is_empty() || !unsigned.as_bytes()[0].is_ascii_digit() {
+        return None;
+    }
+
+    let mut saw_digit = false;
+    let mut saw_float_marker = false;
+    let mut previous_was_exponent = false;
+    for byte in unsigned.bytes() {
+        match byte {
+            b'0'..=b'9' => {
+                saw_digit = true;
+                previous_was_exponent = false;
+            }
+            b'.' => {
+                saw_float_marker = true;
+                previous_was_exponent = false;
+            }
+            b'e' | b'E' => {
+                saw_float_marker = true;
+                previous_was_exponent = true;
+            }
+            b'+' | b'-' if previous_was_exponent => {
+                previous_was_exponent = false;
+            }
+            _ => return None,
+        }
+    }
+
+    if saw_digit {
+        Some(saw_float_marker)
+    } else {
+        None
+    }
 }
 
 struct CompactBranch {
@@ -5077,11 +6972,32 @@ fn compact_voltage_value(pos: Option<usize>, neg: Option<usize>) -> String {
 
 fn compact_kind_has_side_effect(kind: &HirExprKind) -> bool {
     match kind {
-        HirExprKind::Call { name, .. } if is_ddt_name(name.as_str()) => true,
+        HirExprKind::Call { name, .. }
+            if is_ddt_name(name.as_str()) || is_idt_name(name.as_str()) =>
+        {
+            true
+        }
         HirExprKind::AnalogOperator {
             op: HirAnalogOperator::Ddt { .. },
         } => true,
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Idt { .. },
+        } => true,
         _ => false,
+    }
+}
+
+fn compact_idt_operands(
+    args: &[ExprId],
+    emitter: &CompactAdEmitter<'_>,
+) -> Result<(ExprId, Option<ExprId>), RustBackendError> {
+    match args {
+        [expr] => Ok((*expr, None)),
+        [expr, ic] => Ok((*expr, Some(*ic))),
+        _ => Err(emitter.unsupported(format!(
+            "idt expects one or two operands, found {}",
+            args.len()
+        ))),
     }
 }
 
@@ -5255,4 +7171,13 @@ fn is_rust_identifier(value: &str) -> bool {
 
 fn zero_derivative_vec(count: usize) -> Vec<String> {
     (0..count).map(|_| "0.0".to_string()).collect()
+}
+
+fn branch_derivative_axis_count(branch_current_unknowns: &HashMap<String, usize>) -> usize {
+    branch_current_unknowns
+        .values()
+        .copied()
+        .max()
+        .map(|slot| slot + 1)
+        .unwrap_or(0)
 }

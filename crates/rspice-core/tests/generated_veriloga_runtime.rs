@@ -48,6 +48,30 @@ fn generated_builtins_are_materialized_in_source_tree() {
 }
 
 #[test]
+fn generated_dense_stamper_abi_is_slice_based() {
+    let generated_root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/device/veriloga_generated");
+    let runtime_path = generated_root.join("mod.rs");
+    let runtime = std::fs::read_to_string(&runtime_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
+
+    assert!(
+        !runtime.contains("stamp_current_dense<const"),
+        "dense current stamps should not monomorphize on node or branch array lengths"
+    );
+    assert!(
+        !runtime.contains("stamp_potential_dense<\n        const"),
+        "dense potential stamps should not monomorphize on node or branch array lengths"
+    );
+    assert!(
+        !runtime.contains("[Value; DN]") && !runtime.contains("[usize; N]"),
+        "dense stamp ABI should accept slices, not const-generic array references"
+    );
+    assert!(runtime.contains("node_derivatives: &[Value],"));
+    assert!(runtime.contains("branch_derivatives: &[Value],"));
+}
+
+#[test]
 fn generated_stamper_linearizes_current_contribution() {
     let voltages = [1.0, 0.5];
     let mut rhs = vec![0.0; 2];

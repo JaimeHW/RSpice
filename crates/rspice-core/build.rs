@@ -1,16 +1,23 @@
-use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 
+use rspice_veriloga::canonical_ir::StableDigest;
 use rspice_veriloga::rust_backend::{
-    GeneratedRustDevice, RustTranspiler, cleanup_stale_generated_device_folders,
-    discover_veriloga_sources, write_generated_device, write_text_file_if_changed,
+    GeneratedBuiltinManifest, GeneratedRustDevice, RustTranspiler,
+    cleanup_stale_generated_device_folders, discover_veriloga_sources,
+    parse_generated_builtin_manifest, render_generated_builtin_manifest,
+    render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
+    write_text_file_if_changed,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
+const MANIFEST_FILE_NAME: &str = "manifest.txt";
+
 fn main() {
     println!("cargo:rerun-if-env-changed=RSPICE_VERILOGA_BUILTINS_DIR");
+    println!("cargo:rerun-if-env-changed=RSPICE_VERILOGA_REGENERATE_BUILTINS");
     println!("cargo:rustc-check-cfg=cfg(rspice_veriloga_builtins_generated)");
 
     let generated_root = generated_source_root();
@@ -39,6 +46,21 @@ fn main() {
         );
     }
 
+    let source_tree_digest = tree_digest(&model_root, true)
+        .unwrap_or_else(|error| panic!("failed to fingerprint Verilog-A built-ins: {error}"));
+    let generator_digest = tree_digest(&generator_source_root(), false)
+        .unwrap_or_else(|error| panic!("failed to fingerprint Verilog-A generator: {error}"));
+    let force_regenerate = env::var_os("RSPICE_VERILOGA_REGENERATE_BUILTINS").is_some();
+
+    if !force_regenerate
+        && let Some(manifest) =
+            read_generated_manifest(&generated_root, &source_tree_digest, &generator_digest)
+    {
+        let _ = manifest;
+        println!("cargo:rustc-cfg=rspice_veriloga_builtins_generated");
+        return;
+    }
+
     let devices = generate_devices(&model_root, &generated_root)
         .unwrap_or_else(|error| panic!("failed to generate Verilog-A built-ins: {error}"));
     if devices.is_empty() {
@@ -48,18 +70,18 @@ fn main() {
         );
     }
 
-    println!(
-        "cargo:warning=Generated {} Verilog-A built-in device(s): {}",
-        devices.len(),
-        devices
-            .iter()
-            .map(|device| device.public_model_name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-
     println!("cargo:rustc-cfg=rspice_veriloga_builtins_generated");
+    write_support(&generated_root).expect("write generated Verilog-A support runtime");
     write_registry(&generated_root, &devices).expect("write generated Verilog-A registry");
+    write_generated_manifest(
+        &generated_root,
+        GeneratedBuiltinManifest {
+            source_tree_digest,
+            generator_digest,
+            device_count: devices.len(),
+        },
+    )
+    .expect("write generated Verilog-A manifest");
 }
 
 fn generated_source_root() -> PathBuf {
@@ -74,6 +96,97 @@ fn default_model_root() -> PathBuf {
         .and_then(Path::parent)
         .expect("rspice-core must live under workspace crates directory")
         .join("models/veriloga")
+}
+
+fn generator_source_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .expect("rspice-core must live under workspace crates directory")
+        .join("rspice-veriloga/src")
+}
+
+fn read_generated_manifest(
+    generated_root: &Path,
+    source_tree_digest: &str,
+    generator_digest: &str,
+) -> Option<GeneratedBuiltinManifest> {
+    if !generated_root.join("registry.rs").is_file() {
+        return None;
+    }
+    if !generated_root.join("support.rs").is_file() {
+        return None;
+    }
+    let manifest_path = generated_root.join(MANIFEST_FILE_NAME);
+    let manifest = parse_generated_builtin_manifest(&fs::read_to_string(manifest_path).ok()?)?;
+    (manifest.source_tree_digest == source_tree_digest
+        && manifest.generator_digest == generator_digest
+        && manifest.device_count > 0)
+        .then_some(manifest)
+}
+
+fn write_support(generated_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(generated_root)?;
+    write_text_file_if_changed(
+        generated_root.join("support.rs"),
+        &render_runtime_support_module(),
+    )?;
+    Ok(())
+}
+
+fn write_generated_manifest(
+    generated_root: &Path,
+    manifest: GeneratedBuiltinManifest,
+) -> Result<(), Box<dyn std::error::Error>> {
+    write_text_file_if_changed(
+        generated_root.join(MANIFEST_FILE_NAME),
+        &render_generated_builtin_manifest(&manifest),
+    )?;
+    Ok(())
+}
+
+fn tree_digest(root: &Path, emit_rerun: bool) -> Result<String, Box<dyn std::error::Error>> {
+    let mut files = Vec::new();
+    collect_tree_files(root, &mut files)?;
+    files.sort();
+
+    let mut input = String::new();
+    for path in files {
+        if emit_rerun {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let bytes = fs::read(&path)?;
+        input.push_str(&relative);
+        input.push('\0');
+        input.push_str(&bytes.len().to_string());
+        input.push('\0');
+        input.push_str(&String::from_utf8_lossy(&bytes));
+        input.push('\0');
+    }
+
+    Ok(StableDigest::from_text(&input).as_hex())
+}
+
+fn collect_tree_files(
+    root: &Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_tree_files(&path, files)?;
+        } else if file_type.is_file() {
+            files.push(path);
+        }
+    }
+    Ok(())
 }
 
 fn generate_devices(
@@ -105,7 +218,6 @@ fn generate_devices(
             .cmp(&right.public_model_name)
             .then_with(|| left.folder_name.cmp(&right.folder_name))
     });
-    reject_duplicate_public_names(&devices)?;
     cleanup_stale_generated_device_folders(
         devices_root,
         devices.iter().map(|device| device.folder_name.as_str()),
@@ -116,28 +228,12 @@ fn generate_devices(
     Ok(devices)
 }
 
-fn reject_duplicate_public_names(
-    devices: &[GeneratedRustDevice],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut seen = BTreeMap::new();
-    for device in devices {
-        let key = device.public_model_name.to_ascii_uppercase();
-        if let Some(previous) = seen.insert(key, device) {
-            return Err(format!(
-                "duplicate generated Verilog-A model name '{}': '{}' and '{}' both resolve to the same public model name",
-                device.public_model_name, previous.folder_name, device.folder_name
-            )
-            .into());
-        }
-    }
-    Ok(())
-}
-
 fn write_registry(
     registry_root: &Path,
     devices: &[GeneratedRustDevice],
 ) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(registry_root)?;
+    let registry_model_names = resolve_generated_registry_model_names(devices);
 
     let mut out = String::new();
     out.push_str("// Generated by rspice-core/build.rs. Do not edit.\n\n");
@@ -150,7 +246,7 @@ fn write_registry(
     }
     out.push('\n');
 
-    out.push_str("#[derive(Debug, Clone)]\n");
+    out.push_str("#[derive(Clone)]\n");
     out.push_str("pub enum GeneratedBuiltinKind {\n");
     for (index, device) in devices.iter().enumerate() {
         writeln!(out, "    Device{index}({}::Instance),", device.folder_name)?;
@@ -232,8 +328,8 @@ fn write_registry(
     out.push_str("}\n\n");
 
     out.push_str("pub const BUILTIN_NAMES: &[&str] = &[\n");
-    for device in devices {
-        writeln!(out, "    {:?},", device.public_model_name)?;
+    for registry_name in &registry_model_names {
+        writeln!(out, "    {:?},", registry_name)?;
     }
     out.push_str("];\n\n");
     out.push_str("pub fn builtin_names() -> &'static [&'static str] {\n");
@@ -242,11 +338,11 @@ fn write_registry(
     out.push_str("\n");
     out.push_str("pub fn node_count(model_name: &str) -> Option<usize> {\n");
     out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for device in devices {
+    for (device, registry_name) in devices.iter().zip(&registry_model_names) {
         writeln!(
             out,
             "        {:?} => Some({}::Instance::TERMINAL_COUNT),",
-            device.public_model_name.to_ascii_uppercase(),
+            registry_name.to_ascii_uppercase(),
             device.folder_name
         )?;
     }
@@ -255,11 +351,11 @@ fn write_registry(
     out.push_str("}\n\n");
     out.push_str("pub fn total_node_count(model_name: &str) -> Option<usize> {\n");
     out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for device in devices {
+    for (device, registry_name) in devices.iter().zip(&registry_model_names) {
         writeln!(
             out,
             "        {:?} => Some({}::Instance::NODE_COUNT),",
-            device.public_model_name.to_ascii_uppercase(),
+            registry_name.to_ascii_uppercase(),
             device.folder_name
         )?;
     }
@@ -270,11 +366,11 @@ fn write_registry(
         "pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> {\n",
     );
     out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for device in devices {
+    for (device, registry_name) in devices.iter().zip(&registry_model_names) {
         writeln!(
             out,
             "        {:?} => Some(&{}::Instance::INTERNAL_NODE_NAMES),",
-            device.public_model_name.to_ascii_uppercase(),
+            registry_name.to_ascii_uppercase(),
             device.folder_name
         )?;
     }
@@ -283,11 +379,11 @@ fn write_registry(
     out.push_str("}\n\n");
     out.push_str("pub fn branch_count(model_name: &str) -> Option<usize> {\n");
     out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-    for device in devices {
+    for (device, registry_name) in devices.iter().zip(&registry_model_names) {
         writeln!(
             out,
             "        {:?} => Some({}::Instance::BRANCH_COUNT),",
-            device.public_model_name.to_ascii_uppercase(),
+            registry_name.to_ascii_uppercase(),
             device.folder_name
         )?;
     }
@@ -302,11 +398,13 @@ fn write_registry(
         out.push_str("    Ok(None)\n");
     } else {
         out.push_str("    match model_name.to_ascii_uppercase().as_str() {\n");
-        for (index, device) in devices.iter().enumerate() {
+        for (index, (device, registry_name)) in
+            devices.iter().zip(&registry_model_names).enumerate()
+        {
             writeln!(
                 out,
                 "        {:?} => {{",
-                device.public_model_name.to_ascii_uppercase()
+                registry_name.to_ascii_uppercase()
             )?;
             writeln!(
                 out,

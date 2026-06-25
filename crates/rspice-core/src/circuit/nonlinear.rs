@@ -468,12 +468,6 @@ impl CircuitData {
         for switch in &mut self.generic_switches {
             switch.stamp_time_dependent(time, &mut stamper);
         }
-        #[cfg(feature = "veriloga-builtins")]
-        {
-            let num_nodes = self.num_nodes;
-            self.generated_veriloga_devices_mut()
-                .stamp_all(matrix, rhs, voltages, num_nodes);
-        }
     }
 
     /// Stamp behavioral sources with the given analysis time.
@@ -486,6 +480,12 @@ impl CircuitData {
     ) {
         self.behavioral_sources
             .stamp_all(matrix, rhs, solution, self.num_nodes, time);
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            let num_nodes = self.num_nodes;
+            self.generated_veriloga_devices_mut()
+                .stamp_all(matrix, rhs, solution, num_nodes);
+        }
     }
 
     /// Check if all nonlinear devices have converged

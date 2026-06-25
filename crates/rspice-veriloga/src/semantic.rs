@@ -15,6 +15,8 @@ use crate::types::{FunctionRegistry, ParameterRange as TypedParameterRange, Valu
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
+const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
+
 mod analyzed;
 mod symbols;
 
@@ -933,6 +935,225 @@ impl SemanticAnalyzer {
         func.params
             .iter()
             .any(|param| param.direction != ParamDirection::Input)
+    }
+
+    fn is_recognized_limited_exp_function(func: &FunctionDef) -> bool {
+        if !func.name.eq_ignore_ascii_case("lexp")
+            || func.return_type != VarType::Real
+            || func.params.len() != 1
+            || func.params[0].direction != ParamDirection::Input
+            || func.params[0].param_type != VarType::Real
+        {
+            return false;
+        }
+
+        let input = &func.params[0].name;
+        let mut has_exp_return = false;
+        let mut has_upper_linear_return = false;
+        let mut has_lower_clamp_return = false;
+        Self::collect_limited_exp_return_features(
+            &func.body.statements,
+            &func.name,
+            input,
+            &mut has_exp_return,
+            &mut has_upper_linear_return,
+            &mut has_lower_clamp_return,
+        );
+        has_exp_return && has_upper_linear_return && has_lower_clamp_return
+    }
+
+    fn collect_limited_exp_return_features(
+        statements: &[AnalogStatement],
+        return_name: &SmolStr,
+        input_name: &SmolStr,
+        has_exp_return: &mut bool,
+        has_upper_linear_return: &mut bool,
+        has_lower_clamp_return: &mut bool,
+    ) {
+        for statement in statements {
+            match statement {
+                AnalogStatement::Assignment(assignment) if matches!(&assignment.target, LValue::Variable { name, .. } if name == return_name) =>
+                {
+                    let value = &assignment.value;
+                    if Self::expr_contains_call(value, "exp")
+                        && Self::expr_contains_identifier(value, input_name)
+                    {
+                        *has_exp_return = true;
+                    }
+                    if Self::expr_contains_identifier(value, input_name)
+                        && Self::expr_contains_number_close(value, 5.540622384e34)
+                    {
+                        *has_upper_linear_return = true;
+                    }
+                    if Self::expr_contains_number_close(value, 1.804851387e-35) {
+                        *has_lower_clamp_return = true;
+                    }
+                }
+                AnalogStatement::Conditional(conditional) => {
+                    Self::collect_limited_exp_return_features(
+                        std::slice::from_ref(&conditional.then_branch),
+                        return_name,
+                        input_name,
+                        has_exp_return,
+                        has_upper_linear_return,
+                        has_lower_clamp_return,
+                    );
+                    if let Some(else_branch) = &conditional.else_branch {
+                        Self::collect_limited_exp_return_features(
+                            std::slice::from_ref(else_branch),
+                            return_name,
+                            input_name,
+                            has_exp_return,
+                            has_upper_linear_return,
+                            has_lower_clamp_return,
+                        );
+                    }
+                }
+                AnalogStatement::Block(block) => Self::collect_limited_exp_return_features(
+                    &block.statements,
+                    return_name,
+                    input_name,
+                    has_exp_return,
+                    has_upper_linear_return,
+                    has_lower_clamp_return,
+                ),
+                AnalogStatement::Case(case) => {
+                    for item in &case.items {
+                        Self::collect_limited_exp_return_features(
+                            std::slice::from_ref(&item.statement),
+                            return_name,
+                            input_name,
+                            has_exp_return,
+                            has_upper_linear_return,
+                            has_lower_clamp_return,
+                        );
+                    }
+                    if let Some(default) = &case.default {
+                        Self::collect_limited_exp_return_features(
+                            std::slice::from_ref(default),
+                            return_name,
+                            input_name,
+                            has_exp_return,
+                            has_upper_linear_return,
+                            has_lower_clamp_return,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn expr_contains_identifier(expr: &Expression, expected: &SmolStr) -> bool {
+        match expr {
+            Expression::Identifier(identifier) => &identifier.name == expected,
+            Expression::Binary(binary) => {
+                Self::expr_contains_identifier(&binary.left, expected)
+                    || Self::expr_contains_identifier(&binary.right, expected)
+            }
+            Expression::Unary(unary) => Self::expr_contains_identifier(&unary.operand, expected),
+            Expression::Conditional(conditional) => {
+                Self::expr_contains_identifier(&conditional.condition, expected)
+                    || Self::expr_contains_identifier(&conditional.then_expr, expected)
+                    || Self::expr_contains_identifier(&conditional.else_expr, expected)
+            }
+            Expression::Call(call) => call
+                .args
+                .iter()
+                .any(|arg| Self::expr_contains_identifier(arg, expected)),
+            Expression::SystemFunction(function) => function
+                .args
+                .iter()
+                .any(|arg| Self::expr_contains_identifier(arg, expected)),
+            Expression::ArrayAccess(access) => {
+                Self::expr_contains_identifier(&access.index, expected)
+            }
+            Expression::ArrayLiteral(array) => array
+                .elements
+                .iter()
+                .any(|element| Self::expr_contains_identifier(element, expected)),
+            Expression::Number(_)
+            | Expression::StringLit(_)
+            | Expression::BranchAccess(_)
+            | Expression::AnalogOperator(_)
+            | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    fn expr_contains_call(expr: &Expression, expected: &str) -> bool {
+        match expr {
+            Expression::Call(call) => {
+                call.name.eq_ignore_ascii_case(expected)
+                    || call
+                        .args
+                        .iter()
+                        .any(|arg| Self::expr_contains_call(arg, expected))
+            }
+            Expression::Binary(binary) => {
+                Self::expr_contains_call(&binary.left, expected)
+                    || Self::expr_contains_call(&binary.right, expected)
+            }
+            Expression::Unary(unary) => Self::expr_contains_call(&unary.operand, expected),
+            Expression::Conditional(conditional) => {
+                Self::expr_contains_call(&conditional.condition, expected)
+                    || Self::expr_contains_call(&conditional.then_expr, expected)
+                    || Self::expr_contains_call(&conditional.else_expr, expected)
+            }
+            Expression::SystemFunction(function) => function
+                .args
+                .iter()
+                .any(|arg| Self::expr_contains_call(arg, expected)),
+            Expression::ArrayAccess(access) => Self::expr_contains_call(&access.index, expected),
+            Expression::ArrayLiteral(array) => array
+                .elements
+                .iter()
+                .any(|element| Self::expr_contains_call(element, expected)),
+            Expression::Number(_)
+            | Expression::StringLit(_)
+            | Expression::Identifier(_)
+            | Expression::BranchAccess(_)
+            | Expression::AnalogOperator(_)
+            | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    fn expr_contains_number_close(expr: &Expression, expected: f64) -> bool {
+        match expr {
+            Expression::Number(number) => {
+                let tolerance = expected.abs().max(1.0) * 1.0e-12;
+                (number.value - expected).abs() <= tolerance
+            }
+            Expression::Binary(binary) => {
+                Self::expr_contains_number_close(&binary.left, expected)
+                    || Self::expr_contains_number_close(&binary.right, expected)
+            }
+            Expression::Unary(unary) => Self::expr_contains_number_close(&unary.operand, expected),
+            Expression::Conditional(conditional) => {
+                Self::expr_contains_number_close(&conditional.condition, expected)
+                    || Self::expr_contains_number_close(&conditional.then_expr, expected)
+                    || Self::expr_contains_number_close(&conditional.else_expr, expected)
+            }
+            Expression::Call(call) => call
+                .args
+                .iter()
+                .any(|arg| Self::expr_contains_number_close(arg, expected)),
+            Expression::SystemFunction(function) => function
+                .args
+                .iter()
+                .any(|arg| Self::expr_contains_number_close(arg, expected)),
+            Expression::ArrayAccess(access) => {
+                Self::expr_contains_number_close(&access.index, expected)
+            }
+            Expression::ArrayLiteral(array) => array
+                .elements
+                .iter()
+                .any(|element| Self::expr_contains_number_close(element, expected)),
+            Expression::StringLit(_)
+            | Expression::Identifier(_)
+            | Expression::BranchAccess(_)
+            | Expression::AnalogOperator(_)
+            | Expression::NoiseSource(_) => false,
+        }
     }
 
     /// Analyze a statement, lowering control flow into guarded dataflow.
@@ -3306,6 +3527,18 @@ impl SemanticAnalyzer {
                 }
 
                 if let Some(func) = self.user_functions.get(&call.name) {
+                    if Self::is_recognized_limited_exp_function(func) {
+                        let args = call
+                            .args
+                            .iter()
+                            .map(|a| self.lower_expression(a))
+                            .collect::<CompileResult<Vec<_>>>()?;
+                        return Ok(Expression::Call(CallExpr {
+                            name: RSPICE_LIMITED_EXP_INTRINSIC.into(),
+                            args,
+                            span: call.span,
+                        }));
+                    }
                     if Self::function_needs_materialization(func) {
                         return Err(CompileError::Semantic(SemanticError::new(
                             SemanticErrorKind::InvalidAnalogOperator(format!(

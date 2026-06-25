@@ -1554,9 +1554,16 @@ impl HirLowerer {
                 pos: pos.clone(),
                 neg: neg.clone(),
             },
-            BranchAccess::Branch { access, name, .. } => HirExprKind::NamedBranchAccess {
+            BranchAccess::Branch { access, name, .. } if self.declared_branches.contains(name) => {
+                HirExprKind::NamedBranchAccess {
+                    access: access.clone(),
+                    name: name.clone(),
+                }
+            }
+            BranchAccess::Branch { access, name, .. } => HirExprKind::BranchAccess {
                 access: access.clone(),
-                name: name.clone(),
+                pos: name.clone(),
+                neg: None,
             },
         }
     }

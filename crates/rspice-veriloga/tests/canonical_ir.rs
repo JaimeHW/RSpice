@@ -231,6 +231,20 @@ endmodule
 "#
 }
 
+fn implicit_terminal_branch_access_source() -> &'static str {
+    r#"
+module implicit_terminal_branch_access(p, n);
+    inout p, n;
+    electrical p, n;
+    real ip;
+    analog begin
+        ip = I(<p>);
+        I(p, n) <+ ip;
+    end
+endmodule
+"#
+}
+
 fn hir_validation_surface_source() -> &'static str {
     r#"
 module validation_surface(p, n);
@@ -2191,6 +2205,31 @@ fn hir_lowering_canonicalizes_single_argument_named_branch_accesses() {
         &expression.kind,
         HirExprKind::NamedBranchAccess { access, name }
             if access.as_str() == "V" && name.as_str() == "probe"
+    )));
+    assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn hir_lowering_preserves_angle_bracket_terminal_current_accesses() {
+    let analyzed = analyze_fixture(
+        implicit_terminal_branch_access_source(),
+        "implicit_terminal_branch_access",
+    )
+    .expect("analyze fixture");
+    let metadata =
+        CanonicalMetadata::for_source("fixture", implicit_terminal_branch_access_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    assert!(hir.branches.is_empty());
+    assert!(hir.expressions.iter().any(|expression| matches!(
+        &expression.kind,
+        HirExprKind::BranchAccess { access, pos, neg }
+            if access.as_str() == "I" && pos.as_str() == "p" && neg.is_none()
+    )));
+    assert!(!hir.expressions.iter().any(|expression| matches!(
+        &expression.kind,
+        HirExprKind::NamedBranchAccess { access, name }
+            if access.as_str() == "I" && name.as_str() == "p"
     )));
     assert!(hir.validate().is_ok());
 }
