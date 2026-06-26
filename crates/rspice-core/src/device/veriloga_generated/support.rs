@@ -4033,6 +4033,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_ln_neg_add(&mut self, index: usize, left: usize, right: usize) {
+        let raw = -(self.v[left] + self.v[right]);
+        self.store_unary_add_scaled(index, left, right, raw.ln(), -1.0 / raw);
+    }
+
+    #[inline]
     pub(crate) fn store_ln_sub(&mut self, index: usize, left: usize, right: usize) {
         let raw = self.v[left] - self.v[right];
         self.store_unary_sub_scaled(index, left, right, raw.ln(), 1.0 / raw);
@@ -12240,6 +12246,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_ln_add(&mut self, index: usize, left: usize, right: usize) {
         let raw = self.v[left] + self.v[right];
         self.store_unary_add_scaled(index, left, right, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_neg_add(&mut self, index: usize, left: usize, right: usize) {
+        let raw = -(self.v[left] + self.v[right]);
+        self.store_unary_add_scaled(index, left, right, raw.ln(), -1.0 / raw);
     }
 
     #[inline]
