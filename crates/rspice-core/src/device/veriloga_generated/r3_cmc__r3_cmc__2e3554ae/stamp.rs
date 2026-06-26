@@ -105,20 +105,20 @@ impl Instance {
         Self::stamp_transient_block_2(ctx, s, p, nodes, branches);
         Self::stamp_transient_block_3(s, p);
 
-        stamper.stamp_potential_branch(
-            Some(nodes[0]),
-            Some(nodes[4]),
-            branches[0],
+        stamper.stamp_potential_branch_local(
+            Some(0),
+            Some(4),
+            0,
             multiplicity,
         );
-        stamper.stamp_potential_branch(
-            Some(nodes[2]),
-            Some(nodes[5]),
-            branches[1],
+        stamper.stamp_potential_branch_local(
+            Some(2),
+            Some(5),
+            1,
             multiplicity,
         );
 
-        Self::stamp_transient_equations_block_0(stamper, s, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_0(stamper, s, multiplicity);
         let (eq5_e153, eq5_e153_d_n0, eq5_e153_d_n1, eq5_e153_d_n2, eq5_e153_d_n3, eq5_e153_d_n4, eq5_e153_d_n5, eq5_e153_d_b0, eq5_e153_d_b1,) = {
     if s.b[321] {
         let eq5_e149: f64 = (bi0 * s.v[54]);
@@ -147,15 +147,13 @@ impl Instance {
         let eq5_value: f64 = eq5_e153;
         let eq5_node_derivatives: [f64; 6] = [eq5_e153_d_n0, eq5_e153_d_n1, eq5_e153_d_n2, eq5_e153_d_n3, eq5_e153_d_n4, eq5_e153_d_n5];
         let eq5_branch_derivatives: [f64; 2] = [eq5_e153_d_b0, eq5_e153_d_b1];
-        stamper.stamp_potential_dense(
-            branches[0],
+        stamper.stamp_potential_dense_local(
+            0,
             eq5_value,
-            nodes,
             &eq5_node_derivatives,
-            branches,
             &eq5_branch_derivatives,
         );
-        Self::stamp_transient_equations_block_1(ctx, stamper, s, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_1(ctx, stamper, s, nodes, multiplicity);
         let (eq7_e170, eq7_e170_d_n0, eq7_e170_d_n1, eq7_e170_d_n2, eq7_e170_d_n3, eq7_e170_d_n4, eq7_e170_d_n5, eq7_e170_d_b0, eq7_e170_d_b1,) = {
     if s.b[322] {
         let eq7_e166: f64 = (bi1 * s.v[55]);
@@ -184,15 +182,13 @@ impl Instance {
         let eq7_value: f64 = eq7_e170;
         let eq7_node_derivatives: [f64; 6] = [eq7_e170_d_n0, eq7_e170_d_n1, eq7_e170_d_n2, eq7_e170_d_n3, eq7_e170_d_n4, eq7_e170_d_n5];
         let eq7_branch_derivatives: [f64; 2] = [eq7_e170_d_b0, eq7_e170_d_b1];
-        stamper.stamp_potential_dense(
-            branches[1],
+        stamper.stamp_potential_dense_local(
+            1,
             eq7_value,
-            nodes,
             &eq7_node_derivatives,
-            branches,
             &eq7_branch_derivatives,
         );
-        Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

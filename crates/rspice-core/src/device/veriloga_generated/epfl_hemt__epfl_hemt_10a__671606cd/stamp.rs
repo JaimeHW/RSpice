@@ -105,63 +105,57 @@ impl Instance {
         Self::stamp_transient_block_3(s);
         Self::stamp_transient_block_4(ctx, s, p, nodes);
 
-        stamper.stamp_potential_branch(
-            Some(nodes[6]),
-            Some(nodes[2]),
-            branches[0],
+        stamper.stamp_potential_branch_local(
+            Some(6),
+            Some(2),
+            0,
             multiplicity,
         );
-        stamper.stamp_potential_branch(
-            Some(nodes[0]),
-            Some(nodes[5]),
-            branches[1],
+        stamper.stamp_potential_branch_local(
+            Some(0),
+            Some(5),
+            1,
             multiplicity,
         );
-        stamper.stamp_potential_branch(
-            Some(nodes[3]),
-            Some(nodes[9]),
-            branches[2],
+        stamper.stamp_potential_branch_local(
+            Some(3),
+            Some(9),
+            2,
             multiplicity,
         );
 
         let eq0_value: f64 = s.v[25];
         let eq0_node_derivatives: [f64; 12] = [s.dn[25][0], s.dn[25][1], s.dn[25][2], s.dn[25][3], s.dn[25][4], s.dn[25][5], s.dn[25][6], s.dn[25][7], s.dn[25][8], s.dn[25][9], s.dn[25][10], s.dn[25][11]];
         let eq0_branch_derivatives: [f64; 3] = [s.db[25][0], s.db[25][1], s.db[25][2]];
-        stamper.stamp_potential_dense(
-            branches[0],
+        stamper.stamp_potential_dense_local(
+            0,
             eq0_value,
-            nodes,
             &eq0_node_derivatives,
-            branches,
             &eq0_branch_derivatives,
         );
         let eq1_value: f64 = s.v[128];
         let eq1_node_derivatives: [f64; 12] = [s.dn[128][0], s.dn[128][1], s.dn[128][2], s.dn[128][3], s.dn[128][4], s.dn[128][5], s.dn[128][6], s.dn[128][7], s.dn[128][8], s.dn[128][9], s.dn[128][10], s.dn[128][11]];
         let eq1_branch_derivatives: [f64; 3] = [s.db[128][0], s.db[128][1], s.db[128][2]];
-        stamper.stamp_current_dense(
-            Some(nodes[5]),
-            Some(nodes[6]),
+        stamper.stamp_current_dense_local(
+            Some(5),
+            Some(6),
             multiplicity * (eq1_value),
-            nodes,
             &eq1_node_derivatives,
-            branches,
             &eq1_branch_derivatives,
             multiplicity,
         );
         let eq2_value: f64 = s.v[24];
         let eq2_node_derivatives: [f64; 12] = [s.dn[24][0], s.dn[24][1], s.dn[24][2], s.dn[24][3], s.dn[24][4], s.dn[24][5], s.dn[24][6], s.dn[24][7], s.dn[24][8], s.dn[24][9], s.dn[24][10], s.dn[24][11]];
         let eq2_branch_derivatives: [f64; 3] = [s.db[24][0], s.db[24][1], s.db[24][2]];
-        stamper.stamp_potential_dense(
-            branches[1],
+        stamper.stamp_potential_dense_local(
+            1,
             eq2_value,
-            nodes,
             &eq2_node_derivatives,
-            branches,
             &eq2_branch_derivatives,
         );
         let eq3_value: f64 = 0.0;
-        stamper.stamp_potential_const(
-            branches[2],
+        stamper.stamp_potential_const_local(
+            2,
             eq3_value,
         );
         let (eq4_e64, eq4_e64_d_n4,) = {
@@ -176,11 +170,11 @@ impl Instance {
     }
 };
         let eq4_value: f64 = eq4_e64;
-        stamper.stamp_current_node1(
-            Some(nodes[4]),
+        stamper.stamp_current_node1_local(
+            Some(4),
             None,
             multiplicity * (eq4_value),
-            nodes[4],
+            4,
             multiplicity * (eq4_e64_d_n4),
         );
         let (eq5_e68, eq5_e68_d_n0, eq5_e68_d_n1, eq5_e68_d_n2, eq5_e68_d_n3, eq5_e68_d_n4, eq5_e68_d_n5, eq5_e68_d_n6, eq5_e68_d_n7, eq5_e68_d_n8, eq5_e68_d_n9, eq5_e68_d_n10, eq5_e68_d_n11, eq5_e68_d_b0, eq5_e68_d_b1, eq5_e68_d_b2,) = {
@@ -193,13 +187,11 @@ impl Instance {
         let eq5_value: f64 = eq5_e68;
         let eq5_node_derivatives: [f64; 12] = [eq5_e68_d_n0, eq5_e68_d_n1, eq5_e68_d_n2, eq5_e68_d_n3, eq5_e68_d_n4, eq5_e68_d_n5, eq5_e68_d_n6, eq5_e68_d_n7, eq5_e68_d_n8, eq5_e68_d_n9, eq5_e68_d_n10, eq5_e68_d_n11];
         let eq5_branch_derivatives: [f64; 3] = [eq5_e68_d_b0, eq5_e68_d_b1, eq5_e68_d_b2];
-        stamper.stamp_current_dense(
-            Some(nodes[4]),
+        stamper.stamp_current_dense_local(
+            Some(4),
             None,
             multiplicity * (eq5_value),
-            nodes,
             &eq5_node_derivatives,
-            branches,
             &eq5_branch_derivatives,
             multiplicity,
         );
@@ -213,11 +205,11 @@ impl Instance {
     }
 };
         let eq6_value: f64 = eq6_e74;
-        stamper.stamp_current_node1(
-            Some(nodes[4]),
+        stamper.stamp_current_node1_local(
+            Some(4),
             None,
             multiplicity * (eq6_value),
-            nodes[4],
+            4,
             multiplicity * (eq6_e74_d_n4),
         );
         let (eq7_e81, eq7_e81_d_n4,) = {
@@ -230,11 +222,11 @@ impl Instance {
     }
 };
         let eq7_value: f64 = eq7_e81;
-        stamper.stamp_current_node1(
-            Some(nodes[4]),
+        stamper.stamp_current_node1_local(
+            Some(4),
             None,
             multiplicity * (eq7_value),
-            nodes[4],
+            4,
             multiplicity * (eq7_e81_d_n4),
         );
     }

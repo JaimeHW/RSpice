@@ -1538,7 +1538,6 @@ impl Instance {
         stamper: &mut GeneratedStamper<'_>,
         s: &mut Scratch,
         p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
         multiplicity: f64,
         ddt_active: bool,
         ddt_scale: f64,
@@ -1557,15 +1556,15 @@ impl Instance {
         let eq0_e86_d_n2: f64 = ((eq0_e84_d_n2 * s.v[150]) + (eq0_e84 * s.dn[150][2]));
         let eq0_e86_d_n3: f64 = ((eq0_e84_d_n3 * s.v[150]) + (eq0_e84 * s.dn[150][3]));
         let eq0_value: f64 = eq0_e86;
-        stamper.stamp_current(
-            Some(nodes[0]),
-            Some(nodes[2]),
+        stamper.stamp_current_local(
+            Some(0),
+            Some(2),
             multiplicity * (eq0_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq0_e86_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq0_e86_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq0_e86_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq0_e86_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq0_e86_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq0_e86_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq0_e86_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq0_e86_d_n3),
             ],
         );
         let (eq1_e92, eq1_e92_d_n0, eq1_e92_d_n1, eq1_e92_d_n2, eq1_e92_d_n3,) = {
@@ -1581,15 +1580,15 @@ impl Instance {
     }
 };
         let eq1_value: f64 = eq1_e92;
-        stamper.stamp_current(
-            Some(nodes[0]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(0),
+            Some(3),
             multiplicity * (eq1_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq1_e92_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq1_e92_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq1_e92_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq1_e92_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq1_e92_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq1_e92_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq1_e92_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq1_e92_d_n3),
             ],
         );
         let (eq2_e98, eq2_e98_d_n0, eq2_e98_d_n1, eq2_e98_d_n2, eq2_e98_d_n3,) = {
@@ -1605,15 +1604,15 @@ impl Instance {
     }
 };
         let eq2_value: f64 = eq2_e98;
-        stamper.stamp_current(
-            Some(nodes[2]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(2),
+            Some(3),
             multiplicity * (eq2_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq2_e98_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq2_e98_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq2_e98_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq2_e98_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq2_e98_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq2_e98_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq2_e98_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq2_e98_d_n3),
             ],
         );
         let (eq3_e104, eq3_e104_d_n0, eq3_e104_d_n1, eq3_e104_d_n2, eq3_e104_d_n3,) = {
@@ -1629,15 +1628,15 @@ impl Instance {
     }
 };
         let eq3_value: f64 = eq3_e104;
-        stamper.stamp_current(
-            Some(nodes[0]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(0),
+            Some(3),
             multiplicity * (eq3_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq3_e104_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq3_e104_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq3_e104_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq3_e104_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq3_e104_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq3_e104_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq3_e104_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq3_e104_d_n3),
             ],
         );
         let (eq4_e111, eq4_e111_d_n0, eq4_e111_d_n1, eq4_e111_d_n2, eq4_e111_d_n3,) = {
@@ -1653,15 +1652,15 @@ impl Instance {
     }
 };
         let eq4_value: f64 = eq4_e111;
-        stamper.stamp_current(
-            Some(nodes[2]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(2),
+            Some(3),
             multiplicity * (eq4_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq4_e111_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq4_e111_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq4_e111_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq4_e111_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq4_e111_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq4_e111_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq4_e111_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq4_e111_d_n3),
             ],
         );
         let (eq5_e118, eq5_e118_d_n0, eq5_e118_d_n1, eq5_e118_d_n2, eq5_e118_d_n3,) = {
@@ -1677,15 +1676,15 @@ impl Instance {
     }
 };
         let eq5_value: f64 = eq5_e118;
-        stamper.stamp_current(
-            Some(nodes[0]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(0),
+            Some(3),
             multiplicity * (eq5_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq5_e118_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq5_e118_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq5_e118_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq5_e118_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq5_e118_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq5_e118_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq5_e118_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq5_e118_d_n3),
             ],
         );
         let (eq6_e125, eq6_e125_d_n0, eq6_e125_d_n1, eq6_e125_d_n2, eq6_e125_d_n3,) = {
@@ -1701,15 +1700,15 @@ impl Instance {
     }
 };
         let eq6_value: f64 = eq6_e125;
-        stamper.stamp_current(
-            Some(nodes[2]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(2),
+            Some(3),
             multiplicity * (eq6_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq6_e125_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq6_e125_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq6_e125_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq6_e125_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq6_e125_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq6_e125_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq6_e125_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq6_e125_d_n3),
             ],
         );
         let eq7_e128: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, s.v[106]);
@@ -1723,15 +1722,15 @@ impl Instance {
         let eq7_e129_d_n2: f64 = (p.p0 * eq7_e128_d_n2);
         let eq7_e129_d_n3: f64 = (p.p0 * eq7_e128_d_n3);
         let eq7_value: f64 = eq7_e129;
-        stamper.stamp_current(
-            Some(nodes[1]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(1),
+            Some(3),
             multiplicity * (eq7_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq7_e129_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq7_e129_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq7_e129_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq7_e129_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq7_e129_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq7_e129_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq7_e129_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq7_e129_d_n3),
             ],
         );
         let (eq8_e140,) = {
@@ -1743,9 +1742,9 @@ impl Instance {
     }
 };
         let eq8_value: f64 = eq8_e140;
-        stamper.stamp_current_const(
-            Some(nodes[0]),
-            Some(nodes[2]),
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(2),
             multiplicity * (eq8_value),
         );
         let eq9_e144: f64 = (s.v[223]).exp();
@@ -1794,15 +1793,15 @@ impl Instance {
         let eq9_e158_d_n2: f64 = (eq9_e156_d_n2 * p.p7);
         let eq9_e158_d_n3: f64 = (eq9_e156_d_n3 * p.p7);
         let eq9_value: f64 = eq9_e158;
-        stamper.stamp_current(
-            Some(nodes[0]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(0),
+            Some(3),
             multiplicity * (eq9_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq9_e158_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq9_e158_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq9_e158_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq9_e158_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq9_e158_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq9_e158_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq9_e158_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq9_e158_d_n3),
             ],
         );
         let eq10_e162: f64 = (s.v[225]).exp();
@@ -1851,15 +1850,15 @@ impl Instance {
         let eq10_e176_d_n2: f64 = (eq10_e174_d_n2 * p.p7);
         let eq10_e176_d_n3: f64 = (eq10_e174_d_n3 * p.p7);
         let eq10_value: f64 = eq10_e176;
-        stamper.stamp_current(
-            Some(nodes[2]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(2),
+            Some(3),
             multiplicity * (eq10_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq10_e176_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq10_e176_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq10_e176_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq10_e176_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq10_e176_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq10_e176_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq10_e176_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq10_e176_d_n3),
             ],
         );
         let eq11_e178: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, s.v[236]);
@@ -1878,15 +1877,15 @@ impl Instance {
         let eq11_e182_d_n2: f64 = (eq11_e180_d_n2 * p.p7);
         let eq11_e182_d_n3: f64 = (eq11_e180_d_n3 * p.p7);
         let eq11_value: f64 = eq11_e182;
-        stamper.stamp_current(
-            Some(nodes[0]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(0),
+            Some(3),
             multiplicity * (eq11_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq11_e182_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq11_e182_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq11_e182_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq11_e182_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq11_e182_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq11_e182_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq11_e182_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq11_e182_d_n3),
             ],
         );
         let eq12_e184: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 4, s.v[237]);
@@ -1905,15 +1904,15 @@ impl Instance {
         let eq12_e188_d_n2: f64 = (eq12_e186_d_n2 * p.p7);
         let eq12_e188_d_n3: f64 = (eq12_e186_d_n3 * p.p7);
         let eq12_value: f64 = eq12_e188;
-        stamper.stamp_current(
-            Some(nodes[2]),
-            Some(nodes[3]),
+        stamper.stamp_current_local(
+            Some(2),
+            Some(3),
             multiplicity * (eq12_value),
             &[
-                GeneratedDerivative::node(nodes[0], multiplicity * eq12_e188_d_n0),
-                GeneratedDerivative::node(nodes[1], multiplicity * eq12_e188_d_n1),
-                GeneratedDerivative::node(nodes[2], multiplicity * eq12_e188_d_n2),
-                GeneratedDerivative::node(nodes[3], multiplicity * eq12_e188_d_n3),
+                GeneratedDerivative::node(0, multiplicity * eq12_e188_d_n0),
+                GeneratedDerivative::node(1, multiplicity * eq12_e188_d_n1),
+                GeneratedDerivative::node(2, multiplicity * eq12_e188_d_n2),
+                GeneratedDerivative::node(3, multiplicity * eq12_e188_d_n3),
             ],
         );
     }

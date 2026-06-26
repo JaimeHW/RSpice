@@ -433,25 +433,25 @@ impl Instance {
         }
 
         let eq0_value: f64 = s.v[1];
-        stamper.stamp_current_node2(
-            Some(nodes[0]),
-            Some(nodes[1]),
+        stamper.stamp_current_node2_local(
+            Some(0),
+            Some(1),
             multiplicity * (eq0_value),
-            nodes[0],
+            0,
             multiplicity * (s.dn[1][0]),
-            nodes[1],
+            1,
             multiplicity * (s.dn[1][1]),
         );
         let eq1_value: f64 = 0.0;
-        stamper.stamp_current_const(
-            Some(nodes[0]),
-            Some(nodes[1]),
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
             multiplicity * (eq1_value),
         );
         let eq2_value: f64 = 0.0;
-        stamper.stamp_current_const(
-            Some(nodes[0]),
-            Some(nodes[1]),
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
             multiplicity * (eq2_value),
         );
     }

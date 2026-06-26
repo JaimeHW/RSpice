@@ -140,41 +140,41 @@ impl Instance {
         Self::stamp_transient_block_30(s, p);
         Self::stamp_transient_block_31(s, p);
 
-        stamper.stamp_potential_branch(
-            Some(nodes[1]),
-            Some(nodes[9]),
-            branches[0],
+        stamper.stamp_potential_branch_local(
+            Some(1),
+            Some(9),
+            0,
             multiplicity,
         );
-        stamper.stamp_potential_branch(
-            Some(nodes[2]),
-            Some(nodes[6]),
-            branches[1],
+        stamper.stamp_potential_branch_local(
+            Some(2),
+            Some(6),
+            1,
             multiplicity,
         );
-        stamper.stamp_potential_branch(
-            Some(nodes[0]),
-            Some(nodes[7]),
-            branches[2],
+        stamper.stamp_potential_branch_local(
+            Some(0),
+            Some(7),
+            2,
             multiplicity,
         );
-        stamper.stamp_potential_branch(
-            Some(nodes[3]),
-            Some(nodes[8]),
-            branches[3],
+        stamper.stamp_potential_branch_local(
+            Some(3),
+            Some(8),
+            3,
             multiplicity,
         );
 
-        Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_2(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity);
+        Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_2(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq30_value: f64 = 0.0;
-        stamper.stamp_current_const(
-            Some(nodes[5]),
+        stamper.stamp_current_const_local(
+            Some(5),
             None,
             multiplicity * (eq30_value),
         );
-        Self::stamp_transient_equations_block_3(ctx, stamper, s, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_3(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq36_e707: f64 = (s.v[330] * s.v[1795]);
         let eq36_e707_d_n0: f64 = ((s.dn[330][0] * s.v[1795]) + (s.v[330] * s.dn[1795][0]));
         let eq36_e707_d_n1: f64 = ((s.dn[330][1] * s.v[1795]) + (s.v[330] * s.dn[1795][1]));
@@ -208,17 +208,15 @@ impl Instance {
         let eq36_value: f64 = eq36_e709;
         let eq36_node_derivatives: [f64; 10] = [eq36_e709_d_n0, eq36_e709_d_n1, eq36_e709_d_n2, eq36_e709_d_n3, eq36_e709_d_n4, eq36_e709_d_n5, eq36_e709_d_n6, eq36_e709_d_n7, eq36_e709_d_n8, eq36_e709_d_n9];
         let eq36_branch_derivatives: [f64; 4] = [eq36_e709_d_b0, eq36_e709_d_b1, eq36_e709_d_b2, eq36_e709_d_b3];
-        stamper.stamp_current_dense(
-            Some(nodes[7]),
-            Some(nodes[6]),
+        stamper.stamp_current_dense_local(
+            Some(7),
+            Some(6),
             multiplicity * (eq36_value),
-            nodes,
             &eq36_node_derivatives,
-            branches,
             &eq36_branch_derivatives,
             multiplicity,
         );
-        Self::stamp_transient_equations_block_4(stamper, nodes, multiplicity);
+        Self::stamp_transient_equations_block_4(stamper, multiplicity);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

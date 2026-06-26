@@ -118,13 +118,13 @@ impl Instance {
         let eq0_e75_d_n0: f64 = (eq0_e73 * s.dn[544][0]);
         let eq0_e75_d_n1: f64 = (eq0_e73 * s.dn[544][1]);
         let eq0_value: f64 = eq0_e75;
-        stamper.stamp_current_node2(
-            Some(nodes[0]),
-            Some(nodes[1]),
+        stamper.stamp_current_node2_local(
+            Some(0),
+            Some(1),
             multiplicity * (eq0_value),
-            nodes[0],
+            0,
             multiplicity * (eq0_e75_d_n0),
-            nodes[1],
+            1,
             multiplicity * (eq0_e75_d_n1),
         );
         let eq1_e78: f64 = (p.p1 * s.v[0]);
@@ -136,19 +136,19 @@ impl Instance {
         let eq1_e83_d_n0: f64 = (eq1_e82_d_n0 * ddt_scale);
         let eq1_e83_d_n1: f64 = (eq1_e82_d_n1 * ddt_scale);
         let eq1_value: f64 = eq1_e83;
-        stamper.stamp_current_node2(
-            Some(nodes[0]),
-            Some(nodes[1]),
+        stamper.stamp_current_node2_local(
+            Some(0),
+            Some(1),
             multiplicity * (eq1_value),
-            nodes[0],
+            0,
             multiplicity * (eq1_e83_d_n0),
-            nodes[1],
+            1,
             multiplicity * (eq1_e83_d_n1),
         );
         let eq2_value: f64 = 0.0;
-        stamper.stamp_current_const(
-            Some(nodes[0]),
-            Some(nodes[1]),
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(1),
             multiplicity * (eq2_value),
         );
     }

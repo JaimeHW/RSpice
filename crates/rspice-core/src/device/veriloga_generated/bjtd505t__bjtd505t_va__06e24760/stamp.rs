@@ -104,23 +104,23 @@ impl Instance {
         Self::stamp_transient_block_3(s, p);
         Self::stamp_transient_block_4(ctx, s, p, nodes, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
 
-        stamper.stamp_potential_branch(
-            Some(nodes[9]),
-            Some(nodes[10]),
-            branches[0],
+        stamper.stamp_potential_branch_local(
+            Some(9),
+            Some(10),
+            0,
             multiplicity,
         );
-        stamper.stamp_potential_branch(
-            Some(nodes[10]),
-            Some(nodes[7]),
-            branches[1],
+        stamper.stamp_potential_branch_local(
+            Some(10),
+            Some(7),
+            1,
             multiplicity,
         );
 
-        Self::stamp_transient_equations_block_0(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_transient_equations_block_1(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_2(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_3(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_0(stamper, s, p, multiplicity);
+        Self::stamp_transient_equations_block_1(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_2(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_3(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
