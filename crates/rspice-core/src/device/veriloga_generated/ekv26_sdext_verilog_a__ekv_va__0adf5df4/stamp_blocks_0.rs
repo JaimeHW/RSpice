@@ -281,7 +281,7 @@ impl Instance {
 
         s.store_sqrt_offset_ad(83, A::mul(A::sub_scaled_inputs(s.ad_value(87), 1.0, A::ln(s.ad_value(7)), 0.75), s.ad_value(160)), 0.25);
 
-        s.store_ad_value(11, A::add_scaled_offset_product_rhs(s.ad_value(173), 1.0, s.ad_value(158), s.ad_value(83), (-0.5), 1.0));
+        s.store_add_scaled_offset_product_rhs(11, 173, 1.0, 158, 83, (-0.5), 1.0);
 
         s.store_sub(159, 77, 11);
 
@@ -1108,7 +1108,7 @@ impl Instance {
 
         s.store_sqrt_offset_ad(83, A::mul(A::sub_scaled_inputs(s.ad_value(87), 1.0, A::ln(s.ad_value(7)), 0.75), s.ad_value(160)), 0.25);
 
-        s.store_ad_value(11, A::add_scaled_offset_product_rhs(s.ad_value(173), 1.0, s.ad_value(158), s.ad_value(83), (-0.5), 1.0));
+        s.store_add_scaled_offset_product_rhs(11, 173, 1.0, 158, 83, (-0.5), 1.0);
 
         s.store_sub(159, 77, 11);
 

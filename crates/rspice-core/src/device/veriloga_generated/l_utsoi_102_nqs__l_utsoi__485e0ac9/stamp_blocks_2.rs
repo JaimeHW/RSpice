@@ -4748,7 +4748,7 @@ impl Instance {
 
         if ((s.b[1213] && (!s.b[1214])) && s.b[1215]) {
             s.store_sub(691, 683, 692);
-            s.store_ad_value(694, A::add_scaled_offset_product_rhs(s.ad_value(691), 2.0, s.ad_value(709), s.ad_value(693), (-1.0), 1.0));
+            s.store_add_scaled_offset_product_rhs(694, 691, 2.0, 709, 693, (-1.0), 1.0);
             s.store_add_scaled_square_product(695, s.ad_value(691), 1.0, s.ad_value(709), A::sub(A::offset(s.ad_value(692), 1.0), s.ad_value(693)), 1.0);
             s.store_sub_from_scalar_ad(696, 1.0, A::mul_scaled_lhs(s.ad_value(709), 0.5, s.ad_value(693)));
             s.store_add_scaled_square_product(691, s.ad_value(694), 1.0, s.ad_value(696), s.ad_value(695), (-4.0));

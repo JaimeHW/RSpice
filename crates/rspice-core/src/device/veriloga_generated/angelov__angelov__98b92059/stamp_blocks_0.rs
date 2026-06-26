@@ -121,7 +121,7 @@ impl Instance {
 
         s.store_square(49, 48);
 
-        s.store_ad_value(13, A::add_scaled_value_products(s.ad_value(49), p.p12, s.ad_value(44), s.ad_value(48), 1.0, s.ad_value(48), s.ad_value(49), p.p13));
+        s.store_add_scaled_value_products(13, s.ad_value(49), p.p12, s.ad_value(44), s.ad_value(48), 1.0, s.ad_value(48), s.ad_value(49), p.p13);
 
         s.store_offset_tanh_ad(59, s.ad_value(13), 1.0);
 

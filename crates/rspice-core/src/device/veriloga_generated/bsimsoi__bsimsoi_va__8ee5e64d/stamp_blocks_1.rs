@@ -1414,7 +1414,7 @@ impl Instance {
         if (!s.b[1785]) {
             s.copy_ad(1151, 200);
             s.store_scalar(1315, (-s.v[344]));
-            s.store_ad_value(1151, A::add_scaled_offset_product_rhs(s.ad_value(1151), 1.0, s.ad_value(1315), s.ad_value(769), (-s.v[150]), 1.0));
+            s.store_add_scaled_offset_product_rhs(1151, 1151, 1.0, 1315, 769, (-s.v[150]), 1.0);
         }
 
     }
@@ -1427,10 +1427,10 @@ impl Instance {
             s.copy_ad(1152, 202);
             s.store_scalar(1311, ((((s.v[204] * s.v[711]) * s.v[174]) * s.v[39]) / 1e-7));
             s.store_scale(1314, 1311, s.v[343]);
-            s.store_ad_value(1311, A::add_scaled_offset_product_rhs(s.ad_value(1311), 1.0, s.ad_value(1314), s.ad_value(769), (-s.v[150]), 1.0));
+            s.store_add_scaled_offset_product_rhs(1311, 1311, 1.0, 1314, 769, (-s.v[150]), 1.0);
             s.store_scalar(1312, ((((s.v[205] * s.v[710]) * s.v[174]) * s.v[39]) / 1e-7));
             s.store_scale(1313, 1312, s.v[345]);
-            s.store_ad_value(1312, A::add_scaled_offset_product_rhs(s.ad_value(1312), 1.0, s.ad_value(1313), s.ad_value(769), (-s.v[150]), 1.0));
+            s.store_add_scaled_offset_product_rhs(1312, 1312, 1.0, 1313, 769, (-s.v[150]), 1.0);
             s.store_scale(1329, 1151, 0.9);
         }
 
@@ -1476,7 +1476,7 @@ impl Instance {
             s.store_add_scaled_product(1245, s.ad_value(1322), (s.v[332] * s.v[39]), s.ad_value(1311), s.ad_value(1182), 1.0);
             s.copy_ad(1151, 201);
             s.store_scalar(1315, (-s.v[346]));
-            s.store_ad_value(1151, A::add_scaled_offset_product_rhs(s.ad_value(1151), 1.0, s.ad_value(1315), s.ad_value(769), (-s.v[150]), 1.0));
+            s.store_add_scaled_offset_product_rhs(1151, 1151, 1.0, 1315, 769, (-s.v[150]), 1.0);
             s.store_scalar(1152, s.v[203]);
             s.store_scale(1329, 1151, 0.9);
         }
@@ -5739,7 +5739,7 @@ impl Instance {
 
         if (!s.b[1540]) {
             s.store_div_scaled_product(1181, s.ad_value(470), s.ad_value(778), 1.0, s.ad_value(1199), 1.0);
-            s.store_ad_value(1182, A::add_scaled_value_products(s.ad_value(466), 1.0, s.ad_value(467), s.ad_value(1366), 1.0, s.ad_value(468), s.ad_value(1158), 1.0));
+            s.store_add_scaled_value_products(1182, s.ad_value(466), 1.0, s.ad_value(467), s.ad_value(1366), 1.0, s.ad_value(468), s.ad_value(1158), 1.0);
             s.store_div_scaled_inputs2(1183, A::add_scaled_product(s.ad_value(1181), 1.0, s.ad_value(1182), s.ad_value(1203), 1.0), 1.0, s.ad_value(469), 1.0, s.ad_value(757), 1.0);
         }
 

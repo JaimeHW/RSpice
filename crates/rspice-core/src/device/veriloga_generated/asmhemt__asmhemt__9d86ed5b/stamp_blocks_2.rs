@@ -55,7 +55,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_value_products(s.ad_value(115), s.v[99], s.ad_value(83), assign3570_ad_e5791, (-3.24e17), s.ad_value(83), assign3570_ad_e5829, (-3.24e17)));
+            s.store_add_scaled_value_products(120, s.ad_value(115), s.v[99], s.ad_value(83), assign3570_ad_e5791, (-3.24e17), s.ad_value(83), assign3570_ad_e5829, (-3.24e17));
         }
 
         if s.b[396] {
