@@ -3242,11 +3242,31 @@ fn rust_backend_fuses_expression_nested_quotient_division_chains() {
         "{support}"
     );
     assert!(
+        support.contains(
+            "fn div_scaled_inputs2_by_product(first: Self, first_scale: f64, second: Self, second_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn div_scaled_product_by_product3(product_left: Self, product_right: Self, product_scale: f64, denominator_first: Self, denominator_second: Self, denominator_third: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
         stamp.contains("A::div_scaled_product_by_product("),
         "{stamp}"
     );
     assert!(stamp.contains("A::div_scaled_value_by_product("), "{stamp}");
     assert!(stamp.contains("A::div_scalar_by_product("), "{stamp}");
+    assert!(
+        stamp.contains("A::div_scaled_inputs2_by_product("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::div_scaled_product_by_product3("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("A::div(A::div("), "{stamp}");
     assert!(!stamp.contains("A::div(A::div_scaled_inputs("), "{stamp}");
     assert!(!stamp.contains("A::div(A::div_scaled_product("), "{stamp}");
@@ -11560,6 +11580,8 @@ module compact_expression_nested_quotient_division(p, n);
         c = V(p) - V(n) + gain;
         b = (((a * q) / r) / c)
           + (((a * gain) / r) / c)
+          + ((((a * q) / r) / c) / (q + gain))
+          + (((a + q) / r) / c)
           + ((gain / r) / c)
           + ((a / r) / c)
           + exp((((q * offset) / r) / c));
