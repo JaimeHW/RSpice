@@ -6367,6 +6367,18 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn add_scaled_inputs3(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64) -> Self {
+        let mut value = first;
+        let first_value = value.value * first_scale;
+        let second_value = second.value * second_scale;
+        let third_value = third.value * third_scale;
+        value.value = (first_value + second_value) + third_value;
+        for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * first_scale + second.dn[index] * second_scale) + third.dn[index] * third_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * first_scale + second.db[index] * second_scale) + third.db[index] * third_scale; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn add_scaled_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
         let mut result = value;
         let value_term = result.value * value_scale;
