@@ -188,7 +188,7 @@ impl Instance {
             s.store_scalar(44, 1.0);
         }
 
-        s.store_ad_value(143, A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(145), 1.0, s.ad_value(57), (-1.0), s.ad_value(183), -1.0), 1.0, s.ad_value(61), 1.0, s.ad_value(153), 1.0));
+        s.store_add_ad_lhs(143, A::add_scaled_inputs4(s.ad_value(145), 1.0, s.ad_value(57), (-1.0), s.ad_value(183), -1.0, s.ad_value(61), 1.0), 153);
 
         s.store_sqrt_ad(144, A::add_scaled_inputs(A::square(s.ad_value(143)), 1.0, s.ad_value(30), 2.0));
 
@@ -289,7 +289,7 @@ impl Instance {
 
         s.store_sqrt_square_add(85, 159, 78);
 
-        s.store_mul_ad_lhs(0, A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(5), 1.0, s.ad_value(77), (-1.0), s.ad_value(147), -1.0), 1.0, s.ad_value(84), (-1.0), s.ad_value(85), 1.0), 24);
+        s.store_mul_add_ad_lhs(0, A::add_scaled_inputs4(s.ad_value(5), 1.0, s.ad_value(77), (-1.0), s.ad_value(147), -1.0, s.ad_value(84), -1.0), s.ad_value(85), 24);
 
         s.b[247] = (s.v[0] > (-0.35));
         s.v[247] = if s.b[247] { 1.0 } else { 0.0 };
@@ -1015,7 +1015,7 @@ impl Instance {
             s.store_scalar(44, 1.0);
         }
 
-        s.store_ad_value(143, A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(145), 1.0, s.ad_value(57), (-1.0), s.ad_value(183), -1.0), 1.0, s.ad_value(61), 1.0, s.ad_value(153), 1.0));
+        s.store_add_ad_lhs(143, A::add_scaled_inputs4(s.ad_value(145), 1.0, s.ad_value(57), (-1.0), s.ad_value(183), -1.0, s.ad_value(61), 1.0), 153);
 
         s.store_sqrt_ad(144, A::add_scaled_inputs(A::square(s.ad_value(143)), 1.0, s.ad_value(30), 2.0));
 
@@ -1116,7 +1116,7 @@ impl Instance {
 
         s.store_sqrt_square_add(85, 159, 78);
 
-        s.store_mul_ad_lhs(0, A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(5), 1.0, s.ad_value(77), (-1.0), s.ad_value(147), -1.0), 1.0, s.ad_value(84), (-1.0), s.ad_value(85), 1.0), 24);
+        s.store_mul_add_ad_lhs(0, A::add_scaled_inputs4(s.ad_value(5), 1.0, s.ad_value(77), (-1.0), s.ad_value(147), -1.0, s.ad_value(84), -1.0), s.ad_value(85), 24);
 
         s.b[247] = (s.v[0] > (-0.35));
         s.v[247] = if s.b[247] { 1.0 } else { 0.0 };

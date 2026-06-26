@@ -607,9 +607,9 @@ impl Instance {
 
         s.store_scaled_voltage(257, ctx, nodes, Some(10), Some(11), p.p3);
 
-        s.store_sub_ad_lhs(255, A::add_scaled_inputs3(s.ad_value(254), 1.0, s.ad_value(251), 1.0, s.ad_value(256), -1.0), 258);
+        s.store_ad_value(255, A::add_scaled_inputs4(s.ad_value(254), 1.0, s.ad_value(251), 1.0, s.ad_value(256), -1.0, s.ad_value(258), -1.0));
 
-        s.store_sub_ad_lhs(268, A::add_scaled_inputs3(s.ad_value(266), 1.0, s.ad_value(270), (-1.0), s.ad_value(255), 1.0), 257);
+        s.store_ad_value(268, A::add_scaled_inputs4(s.ad_value(266), 1.0, s.ad_value(270), (-1.0), s.ad_value(255), 1.0, s.ad_value(257), -1.0));
 
         s.store_add(267, 270, 268);
 
@@ -1717,7 +1717,7 @@ impl Instance {
         }
 
         let assign6110_ad_e6278: A = A::add_scaled_inputs_products(A::add_scaled_products3(s.ad_value(159), A::sub(s.ad_value(252), s.ad_value(130)), 1.0, s.ad_value(118), A::sub(s.ad_value(130), s.ad_value(250)), 1.0, s.ad_value(212), s.ad_value(130), (-1.0)), 1.0, A::div_scaled_product(s.ad_value(265), s.ad_value(265), 1.0, s.ad_value(28), 1.0), 1.0, A::square(s.ad_value(268)), s.ad_value(111), 1.0, A::square(s.ad_value(257)), s.ad_value(112), 1.0);
-        let assign6110_ad_e6310: A = A::add_scaled_inputs_products(A::add_scaled_product(assign6110_ad_e6278, 1.0, A::square(s.ad_value(258)), s.ad_value(113), 1.0), 1.0, A::div_scaled_product(s.ad_value(266), s.ad_value(266), 1.0, s.ad_value(30), 1.0), 1.0, s.ad_value(191), s.ad_value(254), 1.0, A::add(A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(161), 1.0, s.ad_value(163), 1.0, s.ad_value(252), s.v[344]), 1.0, s.ad_value(57), (-1.0), s.ad_value(359), 1.0), s.ad_value(358)), s.ad_value(252), 1.0);
+        let assign6110_ad_e6310: A = A::add_scaled_inputs_products(A::add_scaled_product(assign6110_ad_e6278, 1.0, A::square(s.ad_value(258)), s.ad_value(113), 1.0), 1.0, A::div_scaled_product(s.ad_value(266), s.ad_value(266), 1.0, s.ad_value(30), 1.0), 1.0, s.ad_value(191), s.ad_value(254), 1.0, A::add(A::add(A::add_scaled_inputs4(s.ad_value(161), 1.0, s.ad_value(163), 1.0, s.ad_value(252), s.v[344], s.ad_value(57), -1.0), s.ad_value(359)), s.ad_value(358)), s.ad_value(252), 1.0);
         let assign6110_ad_e6342: A = A::add_scaled_value_products(A::add_scaled_value_products3(assign6110_ad_e6310, 1.0, s.ad_value(82), s.ad_value(93), (-1.0), A::add_scaled_inputs3(s.ad_value(162), 1.0, s.ad_value(165), 1.0, s.ad_value(166), 1.0), s.ad_value(253), 1.0, A::add_scaled_inputs3(s.ad_value(167), 1.0, s.ad_value(164), 1.0, s.ad_value(255), s.v[344]), s.ad_value(255), 1.0), 1.0, s.ad_value(179), s.ad_value(267), 1.0, s.ad_value(182), A::sub(s.ad_value(255), s.ad_value(261)), 1.0);
         s.store_ad_value(219, A::add_scaled_value_products3(assign6110_ad_e6342, 1.0, s.ad_value(185), A::sub(s.ad_value(250), s.ad_value(259)), 1.0, s.ad_value(183), A::sub(s.ad_value(267), s.ad_value(260)), 1.0, s.ad_value(184), s.ad_value(259), 1.0));
 
@@ -2032,7 +2032,7 @@ impl Instance {
             s.store_scalar(336, 0.0);
         }
 
-        s.store_scaled_abs_ad(316, A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(161), 1.0, s.ad_value(163), 1.0, s.ad_value(57), -1.0), 1.0, s.ad_value(359), 1.0, s.ad_value(358), 1.0), (2.0 * 1.6021918e-19));
+        s.store_scaled_abs_ad(316, A::add(A::add_scaled_inputs4(s.ad_value(161), 1.0, s.ad_value(163), 1.0, s.ad_value(57), -1.0, s.ad_value(359), 1.0), s.ad_value(358)), (2.0 * 1.6021918e-19));
 
         s.store_add(328, 161, 162);
 
@@ -2584,9 +2584,9 @@ impl Instance {
 
         s.store_scaled_voltage(257, ctx, nodes, Some(10), Some(11), p.p3);
 
-        s.store_sub_ad_lhs(255, A::add_scaled_inputs3(s.ad_value(254), 1.0, s.ad_value(251), 1.0, s.ad_value(256), -1.0), 258);
+        s.store_ad_value(255, A::add_scaled_inputs4(s.ad_value(254), 1.0, s.ad_value(251), 1.0, s.ad_value(256), -1.0, s.ad_value(258), -1.0));
 
-        s.store_sub_ad_lhs(268, A::add_scaled_inputs3(s.ad_value(266), 1.0, s.ad_value(270), (-1.0), s.ad_value(255), 1.0), 257);
+        s.store_ad_value(268, A::add_scaled_inputs4(s.ad_value(266), 1.0, s.ad_value(270), (-1.0), s.ad_value(255), 1.0, s.ad_value(257), -1.0));
 
         s.store_add(267, 270, 268);
 

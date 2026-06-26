@@ -1634,7 +1634,7 @@ impl Instance {
         }
 
         if (s.b[2418] && (!s.b[2540])) {
-            s.store_scaled_add_ad_lhs(242, A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(243), 1.0, s.ad_value(244), 1.0, s.ad_value(245), 1.0), 1.0, s.ad_value(246), 1.0, s.ad_value(247), 1.0), 248, ((((((p.p6 * 2.0) * p.p307) * p.p0) * (1.0 - p.p311)) * p.p2) * p.p306));
+            s.store_scaled_add_ad_lhs(242, A::add(A::add_scaled_inputs4(s.ad_value(243), 1.0, s.ad_value(244), 1.0, s.ad_value(245), 1.0, s.ad_value(246), 1.0), s.ad_value(247)), 248, ((((((p.p6 * 2.0) * p.p307) * p.p0) * (1.0 - p.p311)) * p.p2) * p.p306));
         }
 
         s.b[2546] = ((p.p310 != 0.0) && (p.p311 != 0.0));

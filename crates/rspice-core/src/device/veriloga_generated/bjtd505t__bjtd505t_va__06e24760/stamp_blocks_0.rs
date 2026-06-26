@@ -569,9 +569,9 @@ impl Instance {
 
         s.store_scaled_voltage(243, ctx, nodes, Some(9), Some(10), p.p3);
 
-        s.store_sub_ad_lhs(241, A::add_scaled_inputs3(s.ad_value(240), 1.0, s.ad_value(237), 1.0, s.ad_value(242), -1.0), 244);
+        s.store_ad_value(241, A::add_scaled_inputs4(s.ad_value(240), 1.0, s.ad_value(237), 1.0, s.ad_value(242), -1.0, s.ad_value(244), -1.0));
 
-        s.store_sub_ad_lhs(248, A::add_scaled_inputs3(s.ad_value(246), 1.0, s.ad_value(250), (-1.0), s.ad_value(241), 1.0), 243);
+        s.store_ad_value(248, A::add_scaled_inputs4(s.ad_value(246), 1.0, s.ad_value(250), (-1.0), s.ad_value(241), 1.0, s.ad_value(243), -1.0));
 
         s.store_add(247, 250, 248);
 
@@ -1610,7 +1610,7 @@ impl Instance {
         }
 
         let assign5720_ad_e5783: A = A::add_scaled_inputs_products(A::add_scaled_products3(s.ad_value(152), A::sub(s.ad_value(238), s.ad_value(123)), 1.0, s.ad_value(111), A::sub(s.ad_value(123), s.ad_value(236)), 1.0, s.ad_value(201), s.ad_value(123), (-1.0)), 1.0, A::div_scaled_product(s.ad_value(245), s.ad_value(245), 1.0, s.ad_value(28), 1.0), 1.0, A::square(s.ad_value(248)), s.ad_value(104), 1.0, A::square(s.ad_value(243)), s.ad_value(105), 1.0);
-        let assign5720_ad_e5815: A = A::add_scaled_inputs_products(A::add_scaled_product(assign5720_ad_e5783, 1.0, A::square(s.ad_value(244)), s.ad_value(106), 1.0), 1.0, A::div_scaled_product(s.ad_value(246), s.ad_value(246), 1.0, s.ad_value(30), 1.0), 1.0, s.ad_value(180), s.ad_value(240), 1.0, A::add(A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(154), 1.0, s.ad_value(156), 1.0, s.ad_value(238), s.v[320]), 1.0, s.ad_value(57), (-1.0), s.ad_value(334), 1.0), s.ad_value(333)), s.ad_value(238), 1.0);
+        let assign5720_ad_e5815: A = A::add_scaled_inputs_products(A::add_scaled_product(assign5720_ad_e5783, 1.0, A::square(s.ad_value(244)), s.ad_value(106), 1.0), 1.0, A::div_scaled_product(s.ad_value(246), s.ad_value(246), 1.0, s.ad_value(30), 1.0), 1.0, s.ad_value(180), s.ad_value(240), 1.0, A::add(A::add(A::add_scaled_inputs4(s.ad_value(154), 1.0, s.ad_value(156), 1.0, s.ad_value(238), s.v[320], s.ad_value(57), -1.0), s.ad_value(334)), s.ad_value(333)), s.ad_value(238), 1.0);
         s.store_ad_value(208, A::add_scaled_product(A::add_scaled_value_products3(assign5720_ad_e5815, 1.0, s.ad_value(82), s.ad_value(93), (-1.0), A::add_scaled_inputs3(s.ad_value(155), 1.0, s.ad_value(158), 1.0, s.ad_value(159), 1.0), s.ad_value(239), 1.0, A::add_scaled_inputs3(s.ad_value(160), 1.0, s.ad_value(157), 1.0, s.ad_value(241), s.v[320]), s.ad_value(241), 1.0), 1.0, s.ad_value(172), s.ad_value(247), 1.0));
 
         s.store_scaled_mul(210, 23, 134, (1.0 - p.p67));
@@ -1908,7 +1908,7 @@ impl Instance {
             s.store_scalar(312, 0.0);
         }
 
-        s.store_scaled_abs_ad(295, A::add_scaled_inputs3(A::add_scaled_inputs3(s.ad_value(154), 1.0, s.ad_value(156), 1.0, s.ad_value(57), -1.0), 1.0, s.ad_value(334), 1.0, s.ad_value(333), 1.0), (2.0 * 1.6021918e-19));
+        s.store_scaled_abs_ad(295, A::add(A::add_scaled_inputs4(s.ad_value(154), 1.0, s.ad_value(156), 1.0, s.ad_value(57), -1.0, s.ad_value(334), 1.0), s.ad_value(333)), (2.0 * 1.6021918e-19));
 
         s.store_add(307, 154, 155);
 
@@ -2431,9 +2431,9 @@ impl Instance {
 
         s.store_scaled_voltage(243, ctx, nodes, Some(9), Some(10), p.p3);
 
-        s.store_sub_ad_lhs(241, A::add_scaled_inputs3(s.ad_value(240), 1.0, s.ad_value(237), 1.0, s.ad_value(242), -1.0), 244);
+        s.store_ad_value(241, A::add_scaled_inputs4(s.ad_value(240), 1.0, s.ad_value(237), 1.0, s.ad_value(242), -1.0, s.ad_value(244), -1.0));
 
-        s.store_sub_ad_lhs(248, A::add_scaled_inputs3(s.ad_value(246), 1.0, s.ad_value(250), (-1.0), s.ad_value(241), 1.0), 243);
+        s.store_ad_value(248, A::add_scaled_inputs4(s.ad_value(246), 1.0, s.ad_value(250), (-1.0), s.ad_value(241), 1.0, s.ad_value(243), -1.0));
 
         s.store_add(247, 250, 248);
 
