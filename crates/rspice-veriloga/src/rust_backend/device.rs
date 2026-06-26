@@ -6451,6 +6451,22 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scaled_inputs2(first: Self, first_scale: f64, second: Self, second_scale: f64, denominator: Self, denominator_scale: f64) -> Self {",
+        "        let mut value = first;",
+        "        let first_value = value.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let numerator_value = first_value + second_value;",
+        "        let denominator_value = denominator.value * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let quotient = numerator_value * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * first_scale + second.node_derivatives[index] * second_scale) * reciprocal + denominator.node_derivatives[index] * denominator_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * first_scale + second.branch_derivatives[index] * second_scale) * reciprocal + denominator.branch_derivatives[index] * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_scaled_inputs3(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, denominator: Self, denominator_scale: f64) -> Self {",
         "        let mut value = first;",
         "        let first_value = value.value * first_scale;",
@@ -13668,6 +13684,14 @@ fn compact_div_scaled_ad_expressions(left: &str, right: &str) -> Option<String> 
 
 fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> {
     let (denominator, denominator_scale) = compact_scaled_factor_ad_expression(right);
+    let mut terms = Vec::new();
+    if compact_collect_affine_ad_terms(left, "1.0", &mut terms, 2).is_some() && terms.len() == 2 {
+        return Some(format!(
+            "AdValue::div_scaled_inputs2({}, {}, {}, {}, {denominator}, {denominator_scale})",
+            terms[0].value, terms[0].scale, terms[1].value, terms[1].scale
+        ));
+    }
+
     if let Some(args) = compact_ad_call_args(left, "add_scaled_inputs3") {
         if args.len() == 6 {
             return Some(format!(

@@ -2870,6 +2870,39 @@ fn rust_backend_fuses_expression_scaled_division_operands() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_affine_pair_division_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_affine_pair_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression affine pair division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_inputs2(first: Self, first_scale: f64, second: Self, second_scale: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::div_scaled_inputs2("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::add("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::sub("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::add_scaled_inputs("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::sub_scaled_inputs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_division_source())
@@ -4784,7 +4817,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_div_ad(5, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_ad_value(5, A::div_scaled_inputs2(s.ad_value(0), 1.0, s.ad_value(1), 1.0, A::sub(s.ad_value(0), s.ad_value(1)), 1.0));"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_sqrt_add(6, 0, 1);"), "{stamp}");
@@ -11188,6 +11221,31 @@ module compact_expression_scaled_division(p, n);
         b = exp((a * gain) / q)
           + sqrt(a / (q * gain))
           + ln((a * gain) / (q * offset));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_affine_pair_division_source() -> &'static str {
+    r#"
+module compact_expression_affine_pair_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n) + offset;
+        b = ((a + q) / r)
+          + ((a - q) / (r + gain))
+          + (((gain * a) + (offset * q)) / (a + offset))
+          + (((gain * a) - (offset * q)) / (q + offset));
         I(p, n) <+ b;
     end
 endmodule
