@@ -5609,7 +5609,7 @@ impl Instance {
         s.v[1387] = if s.b[1387] { 1.0 } else { 0.0 };
 
         if s.b[1387] {
-            s.store_offset_ad(172, A::div_scaled_product(s.ad_value(537), s.ad_value(80), 1.0, s.ad_value(135), 1.0), 1.0);
+            s.store_offset_div_scaled_product(172, s.ad_value(537), s.ad_value(80), 1.0, s.ad_value(135), 1.0, 1.0);
         }
 
         if (!s.b[1387]) {

@@ -2978,7 +2978,7 @@ impl Instance {
         s.v[1279] = if s.b[1279] { 1.0 } else { 0.0 };
 
         if s.b[1279] {
-            s.store_offset_ad(360, A::div_scaled_product(s.ad_value(670), s.ad_value(153), 1.0, s.ad_value(351), 1.0), 1e-6);
+            s.store_offset_div_scaled_product(360, s.ad_value(670), s.ad_value(153), 1.0, s.ad_value(351), 1.0, 1e-6);
         }
 
         s.b[1280] = (s.v[360] < 40.0);
@@ -3000,7 +3000,7 @@ impl Instance {
         s.v[1281] = if s.b[1281] { 1.0 } else { 0.0 };
 
         if s.b[1281] {
-            s.store_offset_ad(360, A::div_scaled_product(s.ad_value(671), s.ad_value(153), 1.0, s.ad_value(351), 1.0), 1e-6);
+            s.store_offset_div_scaled_product(360, s.ad_value(671), s.ad_value(153), 1.0, s.ad_value(351), 1.0, 1e-6);
         }
 
         s.b[1282] = (s.v[360] < 40.0);
@@ -3022,7 +3022,7 @@ impl Instance {
         s.v[1283] = if s.b[1283] { 1.0 } else { 0.0 };
 
         if s.b[1283] {
-            s.store_offset_ad(360, A::div_scaled_product(s.ad_value(678), s.ad_value(153), 1.0, s.ad_value(351), 1.0), 1e-6);
+            s.store_offset_div_scaled_product(360, s.ad_value(678), s.ad_value(153), 1.0, s.ad_value(351), 1.0, 1e-6);
         }
 
         s.b[1284] = (s.v[360] < 40.0);
@@ -3042,7 +3042,7 @@ impl Instance {
 
         s.store_offset_sqrt_ad(364, A::offset(A::div(s.ad_value(803), s.ad_value(153)), 1.0), (-1.0));
 
-        s.store_offset_ad(360, A::div_scaled_product(s.ad_value(678), s.ad_value(153), 1.0, s.ad_value(351), 1.0), 1e-6);
+        s.store_offset_div_scaled_product(360, s.ad_value(678), s.ad_value(153), 1.0, s.ad_value(351), 1.0, 1e-6);
 
         s.b[1285] = (s.v[360] < 40.0);
         s.v[1285] = if s.b[1285] { 1.0 } else { 0.0 };

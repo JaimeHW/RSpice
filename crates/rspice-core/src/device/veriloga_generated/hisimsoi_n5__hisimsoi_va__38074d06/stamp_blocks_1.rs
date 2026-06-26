@@ -4146,7 +4146,7 @@ impl Instance {
         }
 
         if s.b[1727] {
-            s.store_mul_ad_lhs(291, A::div_scaled_product(A::square(s.ad_value(199)), s.ad_value(1725), 1.0, A::mul3(s.ad_value(441), s.ad_value(225), s.ad_value(107)), 1.0), 1723);
+            s.store_mul_div_scaled_product_rhs(291, 1723, A::square(s.ad_value(199)), s.ad_value(1725), 1.0, A::mul3(s.ad_value(441), s.ad_value(225), s.ad_value(107)), 1.0);
         }
 
         if (!s.b[1727]) {
