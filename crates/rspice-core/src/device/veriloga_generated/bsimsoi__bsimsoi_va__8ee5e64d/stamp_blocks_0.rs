@@ -5671,7 +5671,7 @@ impl Instance {
         }
 
         if ((s.b[1613] && (!s.b[1648])) && (!s.b[1651])) {
-            s.store_offset_ad(1179, A::div_scaled_inputs2(s.ad_value(1421), 1.0, s.ad_value(1422), 1.0, s.ad_value(715), 1.0), 1.0);
+            s.store_offset_div_scaled_inputs2(1179, s.ad_value(1421), 1.0, s.ad_value(1422), 1.0, s.ad_value(715), 1.0, 1.0);
             s.store_add(1180, 1324, 1325);
             s.store_sqrt_ad(1182, A::add_scaled_inputs(A::square(s.ad_value(1179)), 1.0, s.ad_value(1180), 4.0));
             s.store_scaled_add(1181, 1179, 1182, 0.5);

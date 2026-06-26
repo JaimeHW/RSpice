@@ -625,6 +625,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_offset_div_scaled_inputs2(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, offset: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
+        let numerator_value = first_value + second_value;
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) * reciprocal + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) * reciprocal + denominator.db[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_div_scaled_inputs3(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
         let first_value = first.value * first_scale;
         let second_value = second.value * second_scale;
@@ -9946,6 +9960,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let quotient = numerator_value * reciprocal;
         let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
         self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) * reciprocal + denominator.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) * reciprocal + denominator.db[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_div_scaled_inputs2(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, offset: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
+        let numerator_value = first_value + second_value;
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient + offset;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) * reciprocal + denominator.dn[axis] * denominator_derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) * reciprocal + denominator.db[axis] * denominator_derivative_scale; }
     }
