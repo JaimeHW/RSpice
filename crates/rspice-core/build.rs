@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use rspice_veriloga::canonical_ir::StableDigest;
 use rspice_veriloga::rust_backend::{
-    GeneratedBuiltinManifest, GeneratedRustDevice, RustTranspiler,
+    GeneratedBuiltinManifest, GeneratedRustDevice, RustTranspiler, VERILOGA_DISCOVERY_SKIP_MARKER,
     cleanup_stale_generated_device_folders, discover_veriloga_sources,
     parse_generated_builtin_manifest, render_generated_builtin_manifest,
     render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
@@ -48,7 +48,7 @@ fn main() {
 
     let source_tree_digest = tree_digest(&model_root, true)
         .unwrap_or_else(|error| panic!("failed to fingerprint Verilog-A built-ins: {error}"));
-    let generator_digest = tree_digest(&generator_source_root(), false)
+    let generator_digest = generator_digest()
         .unwrap_or_else(|error| panic!("failed to fingerprint Verilog-A generator: {error}"));
     let force_regenerate = env::var_os("RSPICE_VERILOGA_REGENERATE_BUILTINS").is_some();
 
@@ -61,7 +61,7 @@ fn main() {
         return;
     }
 
-    let devices = generate_devices(&model_root, &generated_root)
+    let devices = generate_devices_with_stack(model_root.clone(), generated_root.clone())
         .unwrap_or_else(|error| panic!("failed to generate Verilog-A built-ins: {error}"));
     if devices.is_empty() {
         panic!(
@@ -104,6 +104,27 @@ fn generator_source_root() -> PathBuf {
         .parent()
         .expect("rspice-core must live under workspace crates directory")
         .join("rspice-veriloga/src")
+}
+
+fn generator_digest() -> Result<String, Box<dyn std::error::Error>> {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let build_script = manifest_dir.join("build.rs");
+    println!("cargo:rerun-if-changed={}", build_script.display());
+
+    let transpiler_digest = tree_digest(&generator_source_root(), false)?;
+    let build_script_bytes = fs::read(&build_script)?;
+    let mut input = String::new();
+    input.push_str("rspice-veriloga/src");
+    input.push('\0');
+    input.push_str(&transpiler_digest);
+    input.push('\0');
+    input.push_str("rspice-core/build.rs");
+    input.push('\0');
+    input.push_str(&build_script_bytes.len().to_string());
+    input.push('\0');
+    input.push_str(&String::from_utf8_lossy(&build_script_bytes));
+    input.push('\0');
+    Ok(StableDigest::from_text(&input).as_hex())
 }
 
 fn read_generated_manifest(
@@ -176,6 +197,10 @@ fn collect_tree_files(
     root: &Path,
     files: &mut Vec<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if root.join(VERILOGA_DISCOVERY_SKIP_MARKER).is_file() {
+        return Ok(());
+    }
+
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
@@ -228,6 +253,19 @@ fn generate_devices(
     Ok(devices)
 }
 
+fn generate_devices_with_stack(
+    model_root: PathBuf,
+    generated_root: PathBuf,
+) -> Result<Vec<GeneratedRustDevice>, Box<dyn std::error::Error + Send + Sync>> {
+    std::thread::Builder::new()
+        .name("rspice-veriloga-builtin-generator".to_string())
+        .stack_size(256 * 1024 * 1024)
+        .spawn(move || generate_devices(&model_root, &generated_root).map_err(|error| error.to_string()))?
+        .join()
+        .map_err(|_| "Verilog-A built-in generator thread panicked")?
+        .map_err(|error| error.into())
+}
+
 fn write_registry(
     registry_root: &Path,
     devices: &[GeneratedRustDevice],
@@ -249,7 +287,11 @@ fn write_registry(
     out.push_str("#[derive(Clone)]\n");
     out.push_str("pub enum GeneratedBuiltinKind {\n");
     for (index, device) in devices.iter().enumerate() {
-        writeln!(out, "    Device{index}({}::Instance),", device.folder_name)?;
+        writeln!(
+            out,
+            "    Device{index}(Box<{}::Instance>),",
+            device.folder_name
+        )?;
     }
     out.push_str("}\n\n");
 
@@ -265,7 +307,7 @@ fn write_registry(
         for (index, _device) in devices.iter().enumerate() {
             writeln!(
                 out,
-                "            (Self::Device{index}(active), Self::Device{index}(snapshot)) => active.restore_from_snapshot(snapshot),"
+                "            (Self::Device{index}(active), Self::Device{index}(snapshot)) => active.restore_from_snapshot(*snapshot),"
             )?;
         }
         out.push_str("            (active, snapshot) => *active = snapshot,\n");
@@ -427,7 +469,7 @@ fn write_registry(
             )?;
             writeln!(
                 out,
-                "            let mut instance = {}::Instance::new(nodes);",
+                "            let mut instance = Box::new({}::Instance::new(nodes));",
                 device.folder_name
             )?;
             out.push_str("            instance.set_branch_indices(branches);\n");

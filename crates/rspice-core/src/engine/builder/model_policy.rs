@@ -221,14 +221,17 @@ pub(super) fn known_advanced_mos_level_without_native(level: i32) -> bool {
             | 77
             | 102
             | 103
+            | 104
             | 107
             | 108
             | 109
             | 110
             | 111
+            | 1000
             | 1031
             | 2000
             | 2001
+            | 2002
             | 70450
             | 70470
             | 10240

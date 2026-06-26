@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use super::RustBackendError;
 use crate::Preprocessor;
 
+pub const VERILOGA_DISCOVERY_SKIP_MARKER: &str = ".rspice-veriloga-skip";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerilogASourceCandidate {
     pub path: PathBuf,
@@ -30,6 +32,10 @@ pub fn discover_veriloga_sources(
 }
 
 fn collect_va_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), RustBackendError> {
+    if root.join(VERILOGA_DISCOVERY_SKIP_MARKER).is_file() {
+        return Ok(());
+    }
+
     for entry in std::fs::read_dir(root).map_err(|error| {
         RustBackendError::internal(
             root.display().to_string(),

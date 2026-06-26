@@ -328,7 +328,7 @@ impl CircuitData {
 
     /// Total device count (for parallel stamping threshold)
     pub fn device_count(&self) -> usize {
-        let count = self.resistors.len()
+        let mut count = self.resistors.len()
             + self.capacitors.len()
             + self.inductors.len()
             + self.voltage_sources.len()
@@ -349,12 +349,13 @@ impl CircuitData {
             + self.jiles_atherton_inductors.len();
         #[cfg(feature = "veriloga")]
         {
-            count + self.veriloga_device_count()
+            count += self.veriloga_device_count();
         }
-        #[cfg(not(feature = "veriloga"))]
+        #[cfg(feature = "veriloga-builtins")]
         {
-            count
+            count += self.generated_veriloga_devices.len();
         }
+        count
     }
 
     /// Create a triplet matrix for this circuit

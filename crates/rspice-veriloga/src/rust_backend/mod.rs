@@ -8,7 +8,9 @@ mod names;
 mod registry;
 
 pub use device::render_runtime_support_module;
-pub use discover::{VerilogASourceCandidate, discover_veriloga_sources};
+pub use discover::{
+    VERILOGA_DISCOVERY_SKIP_MARKER, VerilogASourceCandidate, discover_veriloga_sources,
+};
 pub use error::RustBackendError;
 pub use files::{
     cleanup_stale_generated_device_folders, write_generated_device, write_text_file_if_changed,

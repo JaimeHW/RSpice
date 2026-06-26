@@ -1,0 +1,34 @@
+Correct NI0SUB default parameter for new material mode (mtrlmod=1)
+Remove initial block pseudo event for other compiler then adms
+
+General update in parameter handling inline with common Verilog-A compact model code of
+best practice. Prevent division by 0 by parameter check.
+
+Change contributions to flow.
+
+Remove potential contribution branches for non-XYCE simulators
+
+XYCE allow only current contribution for white_noise function
+
+Use named branches for RD / RS branch for separate potential / flow contribution
+
+For ADMS/Xyce use @(initial_instance) instead of @(initial_step)
+
+Repair bug for wrong wk2 init caused total wrong bulk control
+
+Rename instance parameter min to minsd to avoid to conflict with va builtin function min()
+
+Change model parameter to instance parameter
+
+Use simulator provided gmin 
+
+Remove the ADMS/Xyce specific workaround for non-ability node collapsing
+
+Remove obsolete variables left over by the assumed C code transformation.
+Remaining unused variables are for noise model which is deactivated.
+
+Whenever the provided examples showing reasonable results compared to build-in model
+the va-code looks more as experimental and uses unusual parameter initialization.
+
+Origin of the model version 4.8.0:
+https://github.com/cogenda/VA-BSIM48

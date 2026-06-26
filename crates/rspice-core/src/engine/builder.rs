@@ -50,6 +50,13 @@ mod model_policy;
 use model_policy::*;
 mod advanced_mos;
 use advanced_mos::{Bsim3v3SharedModel, Bsim4v8SharedModel};
+#[cfg(feature = "veriloga-builtins")]
+mod generated_model_routing;
+#[cfg(feature = "veriloga-builtins")]
+use generated_model_routing::{
+    try_route_generated_bjt_model, try_route_generated_diode_model, try_route_generated_mos_model,
+    try_route_generated_resistor_model,
+};
 
 fn validate_source_file_inputs(
     source_name: &str,
@@ -156,7 +163,7 @@ impl Engine {
                     value_expr,
                     model,
                     instance_params,
-                    ..
+                    deferred_params,
                 } => {
                     if let Some(expression) = value_expr.as_deref()
                         && model.is_none()
@@ -170,6 +177,21 @@ impl Engine {
                             instance_params,
                             self.config.temperature,
                         )?;
+                        continue;
+                    }
+
+                    #[cfg(feature = "veriloga-builtins")]
+                    if let Some(model_name) = model.as_deref()
+                        && try_route_generated_resistor_model(
+                            &mut circuit,
+                            netlist,
+                            element,
+                            model_name,
+                            instance_params,
+                            deferred_params,
+                            self.config.temperature,
+                        )?
+                    {
                         continue;
                     }
 
@@ -400,8 +422,21 @@ impl Engine {
                 ElementKind::Diode {
                     model,
                     instance_params,
-                    ..
+                    deferred_params,
                 } => {
+                    #[cfg(feature = "veriloga-builtins")]
+                    if try_route_generated_diode_model(
+                        &mut circuit,
+                        netlist,
+                        element,
+                        model,
+                        instance_params,
+                        deferred_params,
+                        self.config.temperature,
+                    )? {
+                        continue;
+                    }
+
                     let anode = circuit.get_or_create_node(&element.nodes[0]);
                     let cathode = circuit.get_or_create_node(&element.nodes[1]);
                     // Model cards start from ngspice's defaults: parameters a
@@ -520,7 +555,7 @@ impl Engine {
                     model,
                     bjt_type,
                     instance_params,
-                    deferred_params: _,
+                    deferred_params,
                 } => {
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
                     let base = circuit.get_or_create_node(&element.nodes[1]);
@@ -532,6 +567,20 @@ impl Engine {
                         .unwrap_or(0);
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
+                    #[cfg(feature = "veriloga-builtins")]
+                    if try_route_generated_bjt_model(
+                        &mut circuit,
+                        netlist,
+                        element,
+                        model,
+                        model_def,
+                        instance_params,
+                        deferred_params,
+                        self.config.temperature,
+                    )? {
+                        continue;
+                    }
+
                     let resolved_bjt_type = if let Some(device_model) = model_def {
                         resolve_bjt_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(
@@ -703,6 +752,21 @@ impl Engine {
                 } => {
                     // Resolve NMOS/PMOS from model card when available.
                     let model_def = find_binned_model_def(netlist, model, instance_params);
+                    #[cfg(feature = "veriloga-builtins")]
+                    if try_route_generated_mos_model(
+                        &mut circuit,
+                        netlist,
+                        element,
+                        model,
+                        model_def,
+                        *compact_syntax,
+                        instance_params,
+                        deferred_params,
+                        self.config.temperature,
+                    )? {
+                        continue;
+                    }
+
                     let params_map =
                         model_def.map(|device_model| model_params_upper_map(&device_model.params));
                     let resolved_mos_type = if let Some(device_model) = model_def {
