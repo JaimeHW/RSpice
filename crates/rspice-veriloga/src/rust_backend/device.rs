@@ -6522,6 +6522,16 @@ fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
     }
 
     #[inline]
+    fn store_add_scaled_offset_product_rhs_components(&mut self, index: usize, value_raw: f64, value_node_derivatives: [f64; Instance::NODE_COUNT], value_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_offset: f64, product_scale: f64) {
+        let value_term = value_raw * value_scale;
+        let product_right_offset_value = product_right_value + product_right_offset;
+        let product_term = product_left_value * product_right_offset_value * product_scale;
+        self.values[index] = value_term + product_term;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value_node_derivatives[axis] * value_scale + (product_left_node_derivatives[axis] * product_right_offset_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value_branch_derivatives[axis] * value_scale + (product_left_branch_derivatives[axis] * product_right_offset_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; }
+    }
+
+    #[inline]
     fn store_add_scaled_product_value_ad(&mut self, index: usize, value: AdValue, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
         let product_left_value = self.values[product_left];
         let product_right_value = self.values[product_right];
@@ -6736,6 +6746,9 @@ fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
 
 fn generate_mixed_index_product_scratch_helpers() -> String {
     let mut out = String::new();
+    for mask in ["iia", "iai", "aii", "iaa", "aia", "aai"] {
+        out.push_str(&generate_mixed_add_scaled_offset_product_rhs_helper(mask));
+    }
     for mask in ["iaa", "aia", "aai"] {
         out.push_str(&generate_mixed_add_scaled_product_helper(mask));
         out.push_str(&generate_mixed_div_scaled_product_helper(mask));
@@ -6791,6 +6804,26 @@ fn generate_mixed_add_scaled_product_helper(mask: &str) -> String {
     #[inline]
     fn store_add_scaled_product_mixed_{mask}(&mut self, index: usize, value: {value_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64) {{
 {locals}        self.store_add_scaled_product_components(index, {value}, value_scale, {product_left}, {product_right}, product_scale);
+    }}
+"#,
+        value_ty = mixed_helper_type(mask, 0),
+        product_left_ty = mixed_helper_type(mask, 1),
+        product_right_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_mixed_add_scaled_offset_product_rhs_helper(mask: &str) -> String {
+    let operands = ["value", "product_left", "product_right"];
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let value = mixed_helper_component_args(mask, 0, "value");
+    let product_left = mixed_helper_component_args(mask, 1, "product_left");
+    let product_right = mixed_helper_component_args(mask, 2, "product_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn store_add_scaled_offset_product_rhs_mixed_{mask}(&mut self, index: usize, value: {value_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_right_offset: f64, product_scale: f64) {{
+{locals}        self.store_add_scaled_offset_product_rhs_components(index, {value}, value_scale, {product_left}, {product_right}, product_right_offset, product_scale);
     }}
 "#,
         value_ty = mixed_helper_type(mask, 0),
@@ -11028,16 +11061,33 @@ fn compact_common_fused_expression_store_helper_call(
 
     if let Some(args) = compact_ad_call_args(value, "add_scaled_offset_product_rhs")
         && args.len() == 6
-        && let (Some(value), Some(product_left), Some(product_right)) = (
-            compact_scratch_ad_value_index(args[0]),
-            compact_scratch_ad_value_index(args[2]),
-            compact_scratch_ad_value_index(args[3]),
-        )
     {
-        return Some(format!(
-            "scratch.store_add_scaled_offset_product_rhs({target_index}, {value}, {}, {product_left}, {product_right}, {}, {});",
-            args[1], args[4], args[5]
-        ));
+        let value_index = compact_scratch_ad_value_index(args[0]);
+        let product_left_index = compact_scratch_ad_value_index(args[2]);
+        let product_right_index = compact_scratch_ad_value_index(args[3]);
+        if let (Some(value), Some(product_left), Some(product_right)) =
+            (value_index, product_left_index, product_right_index)
+        {
+            return Some(format!(
+                "scratch.store_add_scaled_offset_product_rhs({target_index}, {value}, {}, {product_left}, {product_right}, {}, {});",
+                args[1], args[4], args[5]
+            ));
+        }
+
+        if let Some(helper) = compact_index_or_mixed_product_store_helper_name(
+            "store_add_scaled_offset_product_rhs",
+            &[value_index, product_left_index, product_right_index],
+        ) {
+            return Some(format!(
+                "scratch.{helper}({target_index}, {}, {}, {}, {}, {}, {});",
+                compact_mixed_index_product_arg(value_index, args[0]),
+                args[1],
+                compact_mixed_index_product_arg(product_left_index, args[2]),
+                compact_mixed_index_product_arg(product_right_index, args[3]),
+                args[4],
+                args[5]
+            ));
+        }
     }
 
     if let Some(args) = compact_ad_call_args(value, "add_scaled_value_products")

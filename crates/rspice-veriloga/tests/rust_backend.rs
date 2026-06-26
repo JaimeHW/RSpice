@@ -3509,6 +3509,54 @@ fn rust_backend_directly_stores_offset_product_add_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_mixed_offset_product_add_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_mixed_offset_product_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact mixed offset-product helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_add_scaled_offset_product_rhs_mixed_aii(",
+        "fn store_add_scaled_offset_product_rhs_mixed_iia(",
+        "fn store_add_scaled_offset_product_rhs_mixed_iaa(",
+        "fn store_add_scaled_offset_product_rhs_mixed_aia(",
+    ] {
+        assert!(support.contains(helper), "missing {helper}\n{support}");
+    }
+
+    for helper in [
+        "s.store_add_scaled_offset_product_rhs_mixed_aii(",
+        "s.store_add_scaled_offset_product_rhs_mixed_iia(",
+        "s.store_add_scaled_offset_product_rhs_mixed_iaa(",
+        "s.store_add_scaled_offset_product_rhs_mixed_aia(",
+    ] {
+        assert!(stamp.contains(helper), "missing {helper}\n{stamp}");
+    }
+
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "mixed offset-product root assignments should avoid returned AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_offset_product_rhs("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_directly_stores_value_products_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_value_products_helpers_source())
@@ -12552,6 +12600,35 @@ module compact_expression_direct_store_offset_product_helpers(p, n);
         r = V(n);
         shaped = (a * value_scale) + ((q * (r + offset)) * product_scale);
         I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_mixed_offset_product_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_mixed_offset_product_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real value_scale = 2.0;
+    parameter real product_scale = 3.0;
+    parameter real offset = 4.0;
+    real a;
+    real q;
+    real r;
+    real offset_aii;
+    real offset_iia;
+    real offset_iaa;
+    real offset_aia;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        offset_aii = (sqrt(a) * value_scale) + ((q * (r + offset)) * product_scale);
+        offset_iia = (a * value_scale) + ((q * ((r + q) + offset)) * product_scale);
+        offset_iaa = (a * value_scale) + (((q + r) * ((r + q) + offset)) * product_scale);
+        offset_aia = (sqrt(a) * value_scale) + ((q * ((r + q) + offset)) * product_scale);
+        I(p, n) <+ offset_aii + offset_iia + offset_iaa + offset_aia;
     end
 endmodule
 "#
