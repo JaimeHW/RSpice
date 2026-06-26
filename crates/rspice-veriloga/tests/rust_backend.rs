@@ -2270,6 +2270,43 @@ fn rust_backend_fuses_expression_sub_from_scalar_multiply_chains() {
 }
 
 #[test]
+fn rust_backend_preserves_expression_scaled_sub_from_scalar_self_product_fusion() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_scaled_sub_from_scalar_self_product_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression scaled sub-from-scalar self product");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn mul_sub_from_scalar_scaled_offset_self(scalar: f64, value: Self, input_scale: f64, offset: f64, output_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("A::mul_sub_from_scalar_scaled_offset_self("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::mul_sub_from_scalar_lhs("), "{stamp}");
+    assert!(
+        !stamp.contains("A::mul_sub_from_scalar_lhs_scaled_output("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_sub_from_scalar_value_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_sub_from_scalar_value_product_source())
@@ -3182,6 +3219,34 @@ fn rust_backend_fuses_expression_scaled_add_sub_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_scaled_sub_from_scalar_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_scaled_sub_from_scalar_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression scaled sub-from-scalar");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn scale_offset(mut value: Self, scale: f64, offset: f64) -> Self"),
+        "{support}"
+    );
+    assert!(stamp.contains("A::scale_offset("), "{stamp}");
+    assert!(!stamp.contains("A::scale(A::sub_from_scalar("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_scaled_general_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_general_ad_store_source())
@@ -3277,9 +3342,7 @@ fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
         "{support}"
     );
     assert!(
-        support.contains(
-            "fn store_scaled_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue"
-        ),
+        support.contains("fn store_offset_scaled_ad(&mut self, index: usize, value: AdValue"),
         "{support}"
     );
     assert!(
@@ -3295,15 +3358,16 @@ fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
     assert!(stamp.contains("s.store_scaled_limited_exp_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_abs_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_powf_ad("), "{stamp}");
-    assert!(
-        stamp.contains("s.store_scaled_sub_from_scalar_ad("),
-        "{stamp}"
-    );
+    assert!(stamp.contains("s.store_offset_scaled_ad("), "{stamp}");
     assert!(
         stamp.contains("s.store_scaled_div_from_scalar_ad("),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_scaled_sub_from_scalar_ad("),
+        "{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -10625,6 +10689,26 @@ endmodule
 "#
 }
 
+fn compact_expression_scaled_sub_from_scalar_self_product_source() -> &'static str {
+    r#"
+module compact_expression_scaled_sub_from_scalar_self_product(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    parameter real output_gain = 0.5;
+    real a;
+    real b;
+    analog begin
+        a = V(p, n);
+        b = sqrt(((limit - a) * (((limit - a) * gain) + offset)) * output_gain);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
 fn compact_expression_sub_from_scalar_value_product_source() -> &'static str {
     r#"
 module compact_expression_sub_from_scalar_value_product(p, n);
@@ -11165,6 +11249,28 @@ module compact_expression_scaled_add_sub(p, n);
           + (a - (offset * q))
           + ((a + offset) * gain)
           + ((a * gain) + offset);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_scaled_sub_from_scalar_source() -> &'static str {
+    r#"
+module compact_expression_scaled_sub_from_scalar(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    parameter real gain = 2.0;
+    parameter real exponent = 3.0;
+    real a;
+    real q;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = pow((limit - a) * gain, exponent)
+          + ln(1.0 + exp((limit - q) * gain));
         I(p, n) <+ b;
     end
 endmodule

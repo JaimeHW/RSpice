@@ -11413,6 +11413,108 @@ fn compact_scale_ratio(left: &str, right: &str) -> String {
     }
 }
 
+fn compact_scaled_sub_from_scalar_self_offset(
+    scalar: &str,
+    input_scale: &str,
+    negated_input_scale: &str,
+    combined_offset: &str,
+) -> String {
+    let expected_base = compact_scale_product(scalar, input_scale);
+    let expected_base_alt = compact_scalar_mul(scalar, input_scale);
+    if let Some((left, right)) = compact_split_top_level_add(combined_offset) {
+        if compact_scalar_same_wrapped(left, &expected_base)
+            || compact_scalar_same_wrapped(left, &expected_base_alt)
+        {
+            return compact_unwrap_outer_parens(right).to_string();
+        }
+        if compact_scalar_same_wrapped(right, &expected_base)
+            || compact_scalar_same_wrapped(right, &expected_base_alt)
+        {
+            return compact_unwrap_outer_parens(left).to_string();
+        }
+    }
+
+    compact_scalar_add_grouped(
+        combined_offset,
+        &compact_scalar_mul(scalar, negated_input_scale),
+    )
+}
+
+fn compact_split_top_level_add(input: &str) -> Option<(&str, &str)> {
+    let input = compact_unwrap_outer_parens(input.trim());
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '(' => paren_depth = paren_depth.checked_add(1)?,
+            ')' => paren_depth = paren_depth.checked_sub(1)?,
+            '[' => bracket_depth = bracket_depth.checked_add(1)?,
+            ']' => bracket_depth = bracket_depth.checked_sub(1)?,
+            '{' => brace_depth = brace_depth.checked_add(1)?,
+            '}' => brace_depth = brace_depth.checked_sub(1)?,
+            '+' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                return Some((input[..index].trim(), input[index + ch.len_utf8()..].trim()));
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn compact_scalar_same_wrapped(left: &str, right: &str) -> bool {
+    compact_unwrap_outer_parens(left) == compact_unwrap_outer_parens(right)
+}
+
+fn compact_scalar_negate_wrapped(value: &str) -> String {
+    let value = compact_unwrap_outer_parens(value);
+    if let Some(positive) = value.strip_prefix('-') {
+        positive.to_string()
+    } else {
+        compact_scalar_negate(value)
+    }
+}
+
+fn compact_unwrap_outer_parens(mut value: &str) -> &str {
+    loop {
+        value = value.trim();
+        if !value.starts_with('(') || !value.ends_with(')') {
+            return value;
+        }
+
+        let mut depth = 0usize;
+        let mut wraps = true;
+        for (index, ch) in value.char_indices() {
+            match ch {
+                '(' => {
+                    depth = match depth.checked_add(1) {
+                        Some(depth) => depth,
+                        None => return value,
+                    }
+                }
+                ')' => {
+                    depth = match depth.checked_sub(1) {
+                        Some(depth) => depth,
+                        None => return value,
+                    };
+                    if depth == 0 && index + ch.len_utf8() < value.len() {
+                        wraps = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !wraps || depth != 0 {
+            return value;
+        }
+        value = &value[1..value.len() - 1];
+    }
+}
+
 fn compact_div_from_scalar_affine_input_store_helper_call(
     target_index: usize,
     value: &str,
@@ -13278,21 +13380,39 @@ fn compact_multiply_sub_from_scalar_scaled_offset_self_expression(
     if right_args.len() != 3 {
         return None;
     }
-    let right_sub_args = compact_ad_call_args(right_args[0], "sub_from_scalar")?;
-    if right_sub_args.len() != 2 {
-        return None;
+
+    if let Some(right_sub_args) = compact_ad_call_args(right_args[0], "sub_from_scalar") {
+        if right_sub_args.len() != 2 {
+            return None;
+        }
+
+        if !compact_scalar_same(left_args[0], right_sub_args[0])
+            || !compact_ad_expression_same(left_args[1], right_sub_args[1])
+        {
+            return None;
+        }
+
+        return Some(format!(
+            "AdValue::mul_sub_from_scalar_scaled_offset_self({}, {}, {}, {}, {})",
+            left_args[0], left_args[1], right_args[1], right_args[2], output_scale
+        ));
     }
 
-    if !compact_scalar_same(left_args[0], right_sub_args[0])
-        || !compact_ad_expression_same(left_args[1], right_sub_args[1])
-    {
-        return None;
+    if compact_ad_expression_same(left_args[1], right_args[0]) {
+        let input_scale = compact_scalar_negate_wrapped(right_args[1]);
+        let offset = compact_scaled_sub_from_scalar_self_offset(
+            left_args[0],
+            &input_scale,
+            right_args[1],
+            right_args[2],
+        );
+        return Some(format!(
+            "AdValue::mul_sub_from_scalar_scaled_offset_self({}, {}, {}, {}, {})",
+            left_args[0], left_args[1], input_scale, offset, output_scale
+        ));
     }
 
-    Some(format!(
-        "AdValue::mul_sub_from_scalar_scaled_offset_self({}, {}, {}, {}, {})",
-        left_args[0], left_args[1], right_args[1], right_args[2], output_scale
-    ))
+    None
 }
 
 fn compact_div_scaled_ad_expressions(left: &str, right: &str) -> Option<String> {
@@ -13852,6 +13972,18 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             args[0],
             args[1],
             compact_scale_product(args[2], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::scale_offset({}, {}, {})",
+            args[1],
+            compact_scalar_negate(scale),
+            compact_scale_product(args[0], scale)
         ));
     }
 
