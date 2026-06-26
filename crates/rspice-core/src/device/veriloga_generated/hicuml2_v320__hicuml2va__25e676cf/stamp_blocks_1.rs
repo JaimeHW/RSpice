@@ -53,7 +53,7 @@ impl Instance {
         if ((s.b[473] && s.b[474]) && s.b[476]) {
             s.store_exp(120, 123);
             s.store_div_ad_rhs(124, 120, A::offset(s.ad_value(120), 1.0));
-            s.store_sub_ad_lhs(125, A::mul(s.ad_value(118), A::sub(A::ln(A::offset(s.ad_value(120), 1.0)), A::exp(A::div(A::neg(A::add(s.ad_value(114), s.ad_value(115))), s.ad_value(118))))), 114);
+            s.store_sub_ad_lhs(125, A::mul(s.ad_value(118), A::sub(A::ln(A::offset(s.ad_value(120), 1.0)), A::exp(A::div_scaled_inputs(A::add(s.ad_value(114), s.ad_value(115)), -1.0, s.ad_value(118), 1.0)))), 114);
         }
 
         if ((s.b[473] && s.b[474]) && (!s.b[476])) {
@@ -140,7 +140,7 @@ impl Instance {
         if ((s.b[478] && s.b[479]) && s.b[481]) {
             s.store_exp(120, 123);
             s.store_div_ad_rhs(124, 120, A::offset(s.ad_value(120), 1.0));
-            s.store_sub_ad_lhs(125, A::mul(s.ad_value(118), A::sub(A::ln(A::offset(s.ad_value(120), 1.0)), A::exp(A::div(A::neg(A::add(s.ad_value(114), s.ad_value(115))), s.ad_value(118))))), 114);
+            s.store_sub_ad_lhs(125, A::mul(s.ad_value(118), A::sub(A::ln(A::offset(s.ad_value(120), 1.0)), A::exp(A::div_scaled_inputs(A::add(s.ad_value(114), s.ad_value(115)), -1.0, s.ad_value(118), 1.0)))), 114);
         }
 
         if ((s.b[478] && s.b[479]) && (!s.b[481])) {
@@ -230,7 +230,7 @@ impl Instance {
         if (((s.b[483] && s.b[484]) && s.b[485]) && s.b[487]) {
             s.store_exp(120, 123);
             s.store_div_ad_rhs(124, 120, A::offset(s.ad_value(120), 1.0));
-            s.store_sub_ad_lhs(125, A::mul(s.ad_value(118), A::sub(A::ln(A::offset(s.ad_value(120), 1.0)), A::exp(A::div(A::neg(A::add(s.ad_value(114), s.ad_value(115))), s.ad_value(118))))), 114);
+            s.store_sub_ad_lhs(125, A::mul(s.ad_value(118), A::sub(A::ln(A::offset(s.ad_value(120), 1.0)), A::exp(A::div_scaled_inputs(A::add(s.ad_value(114), s.ad_value(115)), -1.0, s.ad_value(118), 1.0)))), 114);
         }
 
         if (((s.b[483] && s.b[484]) && s.b[485]) && (!s.b[487])) {

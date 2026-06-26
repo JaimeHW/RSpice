@@ -6507,6 +6507,21 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value * left_scale;
+        let right_value = right.value * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        let left_derivative_scale = left_scale * reciprocal;
+        let right_derivative_scale = -quotient * reciprocal * right_scale;
+        value.value = quotient;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * left_derivative_scale + right.dn[index] * right_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * left_derivative_scale + right.db[index] * right_derivative_scale; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn rem(left: Self, right: Self) -> Self {
         let quotient = (left.value / right.value).trunc();
         let mut value = left;
