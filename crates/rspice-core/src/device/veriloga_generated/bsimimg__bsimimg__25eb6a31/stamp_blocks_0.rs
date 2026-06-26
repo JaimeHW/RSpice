@@ -899,7 +899,7 @@ impl Instance {
 
         s.store_scaled_add_ad(150, A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6)))), A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))), A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))))), ((4.0 * 0.001) * 0.001))), 0.5);
 
-        s.store_mul_ad_rhs(353, 353, A::scale_offset(s.ad_value(278), p.p120, 1.0));
+        s.store_mul_scale_offset_rhs(353, 353, 278, p.p120, 1.0);
 
         s.store_mul_offset_ad_rhs(164, 400, A::add_scaled_inputs(A::sub_from_scalar(0.9, A::mul(s.ad_value(353), s.ad_value(97))), 0.5, A::sqrt(A::offset(A::mul_sub_from_scalar_lhs(0.9, A::mul(s.ad_value(353), s.ad_value(97)), A::sub_from_scalar(0.9, A::mul(s.ad_value(353), s.ad_value(97)))), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt()))))));
 
@@ -930,7 +930,7 @@ impl Instance {
 
         s.store_mul_offset_ad_rhs(107, 316, A::add_scaled_inputs(A::scale_offset(s.ad_value(97), p.p309, (((-(-0.9))) + ((-0.0001)))), 0.5, A::sqrt(A::offset(A::mul(A::scale_offset(s.ad_value(97), p.p309, (((-(-0.9))) + ((-0.0001)))), A::scale_offset(s.ad_value(97), p.p309, (((-(-0.9))) + ((-0.0001))))), (-((4.0 * (-0.9)) * 0.0001)))), 0.5), (((-0.9)) + (1.0)));
 
-        s.store_mul_ad_rhs(354, 354, A::scale_offset(s.ad_value(278), p.p131, 1.0));
+        s.store_mul_scale_offset_rhs(354, 354, 278, p.p131, 1.0);
 
         s.store_mul_offset_ad_rhs(165, 401, A::add_scaled_inputs(A::sub_from_scalar(0.9, A::mul(s.ad_value(354), s.ad_value(97))), 0.5, A::sqrt(A::offset(A::mul_sub_from_scalar_lhs(0.9, A::mul(s.ad_value(354), s.ad_value(97)), A::sub_from_scalar(0.9, A::mul(s.ad_value(354), s.ad_value(97)))), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt()))))));
 
@@ -2343,7 +2343,7 @@ impl Instance {
         }
 
         if (s.b[630] && (!s.b[631])) {
-            s.store_mul_ad_rhs(35, 360, A::scale_offset(s.ad_value(46), p.p213, 1.0));
+            s.store_mul_scale_offset_rhs(35, 360, 46, p.p213, 1.0);
         }
 
         if s.b[630] {
@@ -3687,7 +3687,7 @@ impl Instance {
 
         s.store_scaled_add_ad(150, A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6)))), A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))), A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))))), ((4.0 * 0.001) * 0.001))), 0.5);
 
-        s.store_mul_ad_rhs(353, 353, A::scale_offset(s.ad_value(278), p.p120, 1.0));
+        s.store_mul_scale_offset_rhs(353, 353, 278, p.p120, 1.0);
 
         s.store_mul_offset_ad_rhs(164, 400, A::add_scaled_inputs(A::sub_from_scalar(0.9, A::mul(s.ad_value(353), s.ad_value(97))), 0.5, A::sqrt(A::offset(A::mul_sub_from_scalar_lhs(0.9, A::mul(s.ad_value(353), s.ad_value(97)), A::sub_from_scalar(0.9, A::mul(s.ad_value(353), s.ad_value(97)))), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt()))))));
 
@@ -3718,7 +3718,7 @@ impl Instance {
 
         s.store_mul_offset_ad_rhs(107, 316, A::add_scaled_inputs(A::scale_offset(s.ad_value(97), p.p309, (((-(-0.9))) + ((-0.0001)))), 0.5, A::sqrt(A::offset(A::mul(A::scale_offset(s.ad_value(97), p.p309, (((-(-0.9))) + ((-0.0001)))), A::scale_offset(s.ad_value(97), p.p309, (((-(-0.9))) + ((-0.0001))))), (-((4.0 * (-0.9)) * 0.0001)))), 0.5), (((-0.9)) + (1.0)));
 
-        s.store_mul_ad_rhs(354, 354, A::scale_offset(s.ad_value(278), p.p131, 1.0));
+        s.store_mul_scale_offset_rhs(354, 354, 278, p.p131, 1.0);
 
         s.store_mul_offset_ad_rhs(165, 401, A::add_scaled_inputs(A::sub_from_scalar(0.9, A::mul(s.ad_value(354), s.ad_value(97))), 0.5, A::sqrt(A::offset(A::mul_sub_from_scalar_lhs(0.9, A::mul(s.ad_value(354), s.ad_value(97)), A::sub_from_scalar(0.9, A::mul(s.ad_value(354), s.ad_value(97)))), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt()))))));
 
@@ -5125,7 +5125,7 @@ impl Instance {
         }
 
         if (s.b[630] && (!s.b[631])) {
-            s.store_mul_ad_rhs(35, 360, A::scale_offset(s.ad_value(46), p.p213, 1.0));
+            s.store_mul_scale_offset_rhs(35, 360, 46, p.p213, 1.0);
         }
 
         if s.b[630] {

@@ -1402,7 +1402,7 @@ impl Instance {
 
         if (((s.b[531] && s.b[532]) && s.b[533]) && (!s.b[534])) {
             s.store_scalar(281, ((p.p138) as f64).exp());
-            s.store_mul_ad_rhs(314, 281, A::scale_offset(s.ad_value(152), (-1.0 / (p.p41)), (((-p.p138)) + (1.0))));
+            s.store_mul_scale_offset_rhs(314, 281, 152, (-1.0 / (p.p41)), (((-p.p138)) + (1.0)));
         }
 
         if ((s.b[531] && s.b[532]) && s.b[533]) {
@@ -3092,7 +3092,7 @@ impl Instance {
 
         if (((s.b[531] && s.b[532]) && s.b[533]) && (!s.b[534])) {
             s.store_scalar(281, ((p.p138) as f64).exp());
-            s.store_mul_ad_rhs(314, 281, A::scale_offset(s.ad_value(152), (-1.0 / (p.p41)), (((-p.p138)) + (1.0))));
+            s.store_mul_scale_offset_rhs(314, 281, 152, (-1.0 / (p.p41)), (((-p.p138)) + (1.0)));
         }
 
         if ((s.b[531] && s.b[532]) && s.b[533]) {

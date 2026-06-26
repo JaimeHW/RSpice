@@ -3456,6 +3456,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_scale_offset_rhs(&mut self, index: usize, left: usize, right: usize, input_scale: f64, offset: f64) {
+        let left_value = self.v[left];
+        let right_value = self.v[right] * input_scale + offset;
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        self.v[index] = left_value * right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis] * input_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis] * input_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let left_value = self.v[left] * scale;
         let left_dn = self.dn[left];
@@ -12677,6 +12690,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = source_value * right_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * right_value + source_value * value.dn[axis] * scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * right_value + source_value * value.db[axis] * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset_rhs(&mut self, index: usize, left: usize, right: usize, input_scale: f64, offset: f64) {
+        let left_value = self.v[left];
+        let right_value = self.v[right] * input_scale + offset;
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        self.v[index] = left_value * right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis] * input_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis] * input_scale; }
     }
 
     #[inline]

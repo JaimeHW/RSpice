@@ -1213,7 +1213,7 @@ impl Instance {
         }
 
         if (s.b[374] && (!s.b[379])) {
-            s.store_mul_ad_rhs(346, 17, A::scale_offset(s.ad_value(378), 0.5, 1.0));
+            s.store_mul_scale_offset_rhs(346, 17, 378, 0.5, 1.0);
         }
 
         if (!s.b[374]) {
@@ -3870,7 +3870,7 @@ impl Instance {
         }
 
         if (s.b[374] && (!s.b[379])) {
-            s.store_mul_ad_rhs(346, 17, A::scale_offset(s.ad_value(378), 0.5, 1.0));
+            s.store_mul_scale_offset_rhs(346, 17, 378, 0.5, 1.0);
         }
 
         if (!s.b[374]) {

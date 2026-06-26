@@ -212,8 +212,8 @@ impl Instance {
         s.v[91] = if s.b[91] { 1.0 } else { 0.0 };
 
         if s.b[91] {
-            s.store_mul_ad_rhs(36, 29, A::scale_offset(s.ad_value(12), p.p66, 1.0));
-            s.store_mul_ad_rhs(35, 28, A::scale_offset(s.ad_value(12), p.p66, 1.0));
+            s.store_mul_scale_offset_rhs(36, 29, 12, p.p66, 1.0);
+            s.store_mul_scale_offset_rhs(35, 28, 12, p.p66, 1.0);
         }
 
         if (!s.b[91]) {

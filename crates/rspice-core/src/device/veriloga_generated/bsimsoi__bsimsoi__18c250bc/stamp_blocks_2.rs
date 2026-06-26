@@ -235,7 +235,7 @@ impl Instance {
 
         if (s.b[1269] && (!s.b[1270])) {
             s.store_div_from_scalar_offset_input(847, 1.0, 850, 0.8);
-            s.store_mul_ad_lhs(846, A::scale_offset(s.ad_value(850), 20.0, 17.0), 847);
+            s.store_mul_scale_offset_rhs(846, 847, 850, 20.0, 17.0);
             s.store_mul(863, 863, 846);
         }
 
@@ -1427,7 +1427,7 @@ impl Instance {
 
         if (s.b[1358] && (!s.b[1359])) {
             s.store_add_scaled_inputs(843, 269, 1.0 / (s.v[892]), 268, (s.v[892] * 1.0 / (s.v[892])));
-            s.store_mul_ad_rhs(1105, 270, A::scale_offset(s.ad_value(430), p.p320, 1.0));
+            s.store_mul_scale_offset_rhs(1105, 270, 430, p.p320, 1.0);
         }
 
         s.b[1370] = (s.v[398] > 0.0);

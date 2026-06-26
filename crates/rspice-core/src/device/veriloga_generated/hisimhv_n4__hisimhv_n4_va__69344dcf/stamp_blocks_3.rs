@@ -3031,7 +3031,7 @@ impl Instance {
             s.store_offset_mul_ad(338, A::sub(s.ad_value(91), s.ad_value(87)), s.ad_value(334), 1.0);
             s.store_add_scaled_products_indices(339, 335, 131, 1.0, 336, 133, 1.0);
             s.store_div(337, 339, 338);
-            s.store_mul_ad_rhs(251, 337, A::scale_offset(s.ad_value(1434), p.p166, 1.0));
+            s.store_mul_scale_offset_rhs(251, 337, 1434, p.p166, 1.0);
         }
 
         if ((!s.b[1439]) && s.b[2426]) {

@@ -2597,13 +2597,13 @@ impl Instance {
 
         s.store_mul_scale_ad_rhs(665, 720, A::add(A::scale_offset(s.ad_value(639), p.p1031, (((((-1.0)) * (p.p1031))) + (1.0))), A::sqrt(A::offset(A::mul(A::scale_offset(s.ad_value(639), p.p1031, (((((-1.0)) * (p.p1031))) + (1.0))), A::scale_offset(s.ad_value(639), p.p1031, (((((-1.0)) * (p.p1031))) + (1.0)))), ((4.0 * 0.001) * 0.001)))), 0.5);
 
-        s.store_mul_ad_rhs(663, 730, A::scale_offset(s.ad_value(639), p.p1059, (((((-1.0)) * (p.p1059))) + (1.0))));
+        s.store_mul_scale_offset_rhs(663, 730, 639, p.p1059, (((((-1.0)) * (p.p1059))) + (1.0)));
 
         s.b[1577] = (p.p35 != 0.0);
         s.v[1577] = if s.b[1577] { 1.0 } else { 0.0 };
 
         if s.b[1577] {
-            s.store_mul_ad_rhs(664, 731, A::scale_offset(s.ad_value(639), p.p1059, (((((-1.0)) * (p.p1059))) + (1.0))));
+            s.store_mul_scale_offset_rhs(664, 731, 639, p.p1059, (((((-1.0)) * (p.p1059))) + (1.0)));
         }
 
         s.v[338] = (if (p.p30 != 1.0) { (0.3333333333333333 * p.p347) } else { (0.5 * p.p347) });
@@ -5454,7 +5454,7 @@ impl Instance {
 
         if ((s.b[1620] && (!s.b[1694])) && (!s.b[1697])) {
             s.store_add_scaled_inputs(167, 878, 1.0 / (s.v[184]), 877, (s.v[184] * 1.0 / (s.v[184])));
-            s.store_mul_ad_rhs(378, 880, A::scale_offset(s.ad_value(639), p.p666, (((((-1.0)) * (p.p666))) + (1.0))));
+            s.store_mul_scale_offset_rhs(378, 880, 639, p.p666, (((((-1.0)) * (p.p666))) + (1.0)));
         }
 
         s.b[1700] = (s.v[211] > 0.0);

@@ -4544,11 +4544,11 @@ impl Instance {
 
         s.store_scaled_sqrt_ad(607, A::mul3_scaled_output(s.ad_value(530), A::square(s.ad_value(601)), s.ad_value(601), ((32.0 * 9.1093826e-31) * 1.6021918e-19)), 1.0 / ((3.0 * 1.05457168e-34)));
 
-        s.store_mul_ad_rhs(608, 534, A::scale_offset(s.ad_value(537), (s.v[365] - s.v[364]), 1.0));
+        s.store_mul_scale_offset_rhs(608, 534, 537, (s.v[365] - s.v[364]), 1.0);
 
-        s.store_mul_ad_rhs(609, 535, A::scale_offset(s.ad_value(538), (s.v[365] - s.v[364]), 1.0));
+        s.store_mul_scale_offset_rhs(609, 535, 538, (s.v[365] - s.v[364]), 1.0);
 
-        s.store_mul_ad_rhs(610, 536, A::scale_offset(s.ad_value(539), (s.v[365] - s.v[364]), 1.0));
+        s.store_mul_scale_offset_rhs(610, 536, 539, (s.v[365] - s.v[364]), 1.0);
 
         if (!(s.v[608] > 0.0)) {
             s.store_scalar(608, 0.0);
