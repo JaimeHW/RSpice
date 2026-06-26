@@ -351,14 +351,14 @@ impl Instance {
         s.v[96] = if s.b[96] { 1.0 } else { 0.0 };
 
         if (s.b[95] && s.b[96]) {
-            s.store_div_ad_lhs(30, A::mul(A::mul(s.ad_value(25), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(4))), p.p31)), s.ad_value(4)), 3);
+            s.store_div_ad_lhs(30, A::mul3(s.ad_value(25), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(4))), p.p31), s.ad_value(4)), 3);
         }
 
         s.b[97] = ((s.v[19] > 0.0) && (s.v[20] > 0.0));
         s.v[97] = if s.b[97] { 1.0 } else { 0.0 };
 
         if ((s.b[95] && (!s.b[96])) && s.b[97]) {
-            s.store_div_ad_lhs(30, A::mul(A::mul(s.ad_value(25), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(20))), p.p31)), s.ad_value(20)), 19);
+            s.store_div_ad_lhs(30, A::mul3(s.ad_value(25), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(20))), p.p31), s.ad_value(20)), 19);
         }
 
         if ((s.b[95] && (!s.b[96])) && (!s.b[97])) {

@@ -9475,7 +9475,7 @@ impl Instance {
 
         s.store_scaled_add_ad_rhs(29, 1, A::sqrt(A::offset(A::mul(s.ad_value(1), s.ad_value(1)), ((0.25 * 0.1) * 0.1))), 0.5);
 
-        s.store_mul_ad_lhs(77, A::mul_scaled_lhs(s.ad_value(32), 2.0, s.ad_value(61)), 80);
+        s.store_mul3_affine_lhs(77, 32, 61, 2.0, 0.0, 80);
 
         s.store_add_scaled_inputs(75, 29, s.v[74], 77, (s.v[76] * s.v[74]));
 
@@ -18884,7 +18884,7 @@ impl Instance {
 
         s.store_mul_add_ad_rhs(85, 3, A::add_scaled_inputs(s.ad_value(80), 1.0, s.ad_value(90), 2.0), A::mul_scaled_lhs(A::add_scaled_inputs(A::scale_offset(s.ad_value(80), 1.2, 1.0), 1.0, s.ad_value(90), 0.8), 0.5, s.ad_value(4)));
 
-        s.store_scaled_add_ad(28, A::mul(s.ad_value(61), s.ad_value(83)), A::sqrt(A::offset(A::mul(A::mul(s.ad_value(61), s.ad_value(83)), A::mul(s.ad_value(61), s.ad_value(83))), ((0.25 * 0.1) * 0.1))), 0.5);
+        s.store_scaled_add_ad(28, A::mul(s.ad_value(61), s.ad_value(83)), A::sqrt(A::offset(A::mul3(s.ad_value(61), s.ad_value(83), A::mul(s.ad_value(61), s.ad_value(83))), ((0.25 * 0.1) * 0.1))), 0.5);
 
         s.store_mul_add_rhs(27, 61, 84, 85);
 
@@ -18921,7 +18921,7 @@ impl Instance {
 
         s.store_div(127, 134, 126);
 
-        s.store_mul_ad_lhs(129, A::mul_scaled_lhs(A::div(A::mul_scaled_output(s.ad_value(32), s.ad_value(127), ((2.0 * p.p4) * s.v[11])), A::sub_from_scalar(s.v[12], s.ad_value(111))), s.v[47], s.ad_value(61)), 61);
+        s.store_mul_ad_affine_product_lhs(129, A::div(A::mul_scaled_output(s.ad_value(32), s.ad_value(127), ((2.0 * p.p4) * s.v[11])), A::sub_from_scalar(s.v[12], s.ad_value(111))), s.ad_value(61), s.v[47], 0.0, 61);
 
         s.store_mul_ad_product_rhs(128, 129, A::sub(s.ad_value(80), s.ad_value(90)), A::add(A::offset(s.ad_value(80), 1.0), s.ad_value(90)));
 
@@ -18964,7 +18964,7 @@ impl Instance {
 
         s.store_add_ad_lhs(120, A::scale_offset(A::powf(s.ad_value(135), 1.0), ((p.p41) * (s.v[124])), s.v[124]), 122);
 
-        s.store_offset_mul_ad(112, A::mul(A::div(A::scale(A::div_from_scalar(p.p22, A::mul(s.ad_value(137), s.ad_value(78))), (s.v[47] * s.v[11])), A::sub_from_scalar(s.v[12], s.ad_value(111))), s.ad_value(27)), A::add(s.ad_value(120), s.ad_value(119)), 1.0);
+        s.store_offset_ad(112, A::mul3(A::div(A::scale(A::div_from_scalar(p.p22, A::mul(s.ad_value(137), s.ad_value(78))), (s.v[47] * s.v[11])), A::sub_from_scalar(s.v[12], s.ad_value(111))), s.ad_value(27), A::add(s.ad_value(120), s.ad_value(119))), 1.0);
 
         s.store_div(128, 128, 112);
 

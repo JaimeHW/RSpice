@@ -421,7 +421,7 @@ impl Instance {
 
         s.store_limexp(83, 82);
 
-        s.store_mul_ad(50, A::mul(s.ad_value(0), s.ad_value(1)), A::offset(s.ad_value(83), (-1.0)));
+        s.store_mul_ad_product_rhs(50, 0, s.ad_value(1), A::offset(s.ad_value(83), (-1.0)));
 
         s.store_add_scaled_ad_lhs(53, A::scale_offset(s.ad_value(88), s.v[39], 1.0), 90, s.v[38]);
 
@@ -627,7 +627,7 @@ impl Instance {
         if s.b[163] {
             s.store_div_ad(79, A::offset(s.ad_value(77), 1.0), A::offset(s.ad_value(78), 1.0));
             s.store_div_ad_lhs(80, A::add(A::voltage(ctx, nodes, Some(5), Some(6)), A::mul(s.ad_value(48), A::sub(A::sub(s.ad_value(77), s.ad_value(78)), A::ln(s.ad_value(79))))), 13);
-            s.store_div_ad(81, A::mul(A::mul(s.ad_value(43), s.ad_value(13)), s.ad_value(80)), A::offset(A::mul_scaled_lhs(s.ad_value(43), (0.5 * s.v[44]), A::sqrt(A::offset(A::square(A::voltage(ctx, nodes, Some(5), Some(6))), 0.01))), 1.0));
+            s.store_div_ad(81, A::mul3(s.ad_value(43), s.ad_value(13), s.ad_value(80)), A::offset(A::mul_scaled_lhs(s.ad_value(43), (0.5 * s.v[44]), A::sqrt(A::offset(A::square(A::voltage(ctx, nodes, Some(5), Some(6))), 0.01))), 1.0));
             s.store_div_ad_rhs(71, 80, A::sqrt(A::offset(A::square(s.ad_value(81)), 1.0)));
         }
 
@@ -1130,7 +1130,7 @@ impl Instance {
 
         s.store_limexp(83, 82);
 
-        s.store_mul_ad(50, A::mul(s.ad_value(0), s.ad_value(1)), A::offset(s.ad_value(83), (-1.0)));
+        s.store_mul_ad_product_rhs(50, 0, s.ad_value(1), A::offset(s.ad_value(83), (-1.0)));
 
         s.store_add_scaled_ad_lhs(53, A::scale_offset(s.ad_value(88), s.v[39], 1.0), 90, s.v[38]);
 

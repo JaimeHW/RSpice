@@ -6410,6 +6410,39 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn mul3(left: Self, middle: Self, right: Self) -> Self {
+        let mut value = left;
+        let left_value = value.value;
+        let middle_value = middle.value;
+        let right_value = right.value;
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        value.value = left_middle_value * right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * middle_right_value + middle.dn[index] * left_right_value + right.dn[index] * left_middle_value; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * middle_right_value + middle.db[index] * left_right_value + right.db[index] * left_middle_value; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn mul3_scaled_output(left: Self, middle: Self, right: Self, scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value;
+        let middle_value = middle.value;
+        let right_value = right.value;
+        let left_middle_value = left_value * middle_value;
+        let left_right_value = left_value * right_value;
+        let middle_right_value = middle_value * right_value;
+        let scaled_left_middle_value = left_middle_value * scale;
+        let scaled_left_right_value = left_right_value * scale;
+        let scaled_middle_right_value = middle_right_value * scale;
+        value.value = scaled_left_middle_value * right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * scaled_middle_right_value + middle.dn[index] * scaled_left_right_value + right.dn[index] * scaled_left_middle_value; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * scaled_middle_right_value + middle.db[index] * scaled_left_right_value + right.db[index] * scaled_left_middle_value; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn square(arg: Self) -> Self {
         let mut value = arg;
         let raw = value.value;

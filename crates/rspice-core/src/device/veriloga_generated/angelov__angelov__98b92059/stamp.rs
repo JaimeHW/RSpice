@@ -329,7 +329,7 @@ impl Instance {
         }
 
         if (s.b[95] && (!s.b[94])) {
-            s.store_offset_mul_ad(18, A::mul(s.ad_value(31), s.ad_value(67)), s.ad_value(68), p.p24);
+            s.store_offset_ad(18, A::mul3(s.ad_value(31), s.ad_value(67), s.ad_value(68)), p.p24);
             s.store_offset_mul_ad(19, s.ad_value(32), A::offset(A::mul(s.ad_value(69), s.ad_value(70)), (2.0 * p.p37)), p.p26);
         }
 
