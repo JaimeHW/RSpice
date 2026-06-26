@@ -6053,15 +6053,27 @@ fn generate_ad_value_struct() -> String {
         "    #[inline]",
         "    fn abs(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 }) }",
         "    #[inline]",
+        "    fn abs_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; Self::unary_intrinsic(arg, raw.abs(), if raw >= 0.0 { scale } else { -scale }) }",
+        "    #[inline]",
         "    fn sqrt(arg: Self) -> Self { let value = arg.value.sqrt(); Self::unary_intrinsic(arg, value, 1.0 / (2.0 * value)) }",
+        "    #[inline]",
+        "    fn sqrt_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.sqrt(); Self::unary_intrinsic(arg, value, scale / (2.0 * value)) }",
         "    #[inline]",
         "    fn exp(arg: Self) -> Self { let value = arg.value.exp(); Self::unary_intrinsic(arg, value, value) }",
         "    #[inline]",
+        "    fn exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) }",
+        "    #[inline]",
         "    fn limexp(arg: Self) -> Self { let raw = arg.value; if raw < 80.0 { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } else { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX) } }",
+        "    #[inline]",
+        "    fn limexp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; if raw < 80.0 { let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) } else { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX * scale) } }",
         "    #[inline]",
         "    fn limited_exp(arg: Self) -> Self { let raw = arg.value; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } }",
         "    #[inline]",
+        "    fn limited_exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX * scale) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) } }",
+        "    #[inline]",
         "    fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }",
+        "    #[inline]",
+        "    fn ln_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; Self::unary_intrinsic(arg, raw.ln(), scale / raw) }",
         "    #[inline]",
         "    fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) { if raw > 0.0 { (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp())) } else { let exp = raw.exp(); (exp.ln_1p(), exp / (1.0 + exp)) } }",
         "    #[inline]",
@@ -6082,6 +6094,8 @@ fn generate_ad_value_struct() -> String {
         "    fn cosh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.cosh(), raw.sinh()) }",
         "    #[inline]",
         "    fn tanh(arg: Self) -> Self { let raw = arg.value; let cosh = raw.cosh(); Self::unary_intrinsic(arg, raw.tanh(), 1.0 / (cosh * cosh)) }",
+        "    #[inline]",
+        "    fn tanh_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let cosh = raw.cosh(); Self::unary_intrinsic(arg, raw.tanh(), scale / (cosh * cosh)) }",
         "    #[inline]",
         "    fn asinh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt()) }",
         "    #[inline]",
@@ -10110,15 +10124,37 @@ fn compact_scaled_input_unary_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
-    for (name, helper) in [
-        ("sqrt", "store_sqrt_scaled_input"),
-        ("exp", "store_exp_scaled_input"),
-        ("limexp", "store_limexp_scaled_input"),
-        ("limited_exp", "store_limited_exp_scaled_input"),
-        ("ln", "store_ln_scaled_input"),
-        ("ln_one_plus_exp", "store_ln_one_plus_exp_scaled_input"),
-        ("sin", "store_sin_scaled_input"),
+    for (name, fused_name, helper) in [
+        ("sqrt", "sqrt_scaled_input", "store_sqrt_scaled_input"),
+        ("exp", "exp_scaled_input", "store_exp_scaled_input"),
+        ("limexp", "limexp_scaled_input", "store_limexp_scaled_input"),
+        (
+            "limited_exp",
+            "limited_exp_scaled_input",
+            "store_limited_exp_scaled_input",
+        ),
+        ("ln", "ln_scaled_input", "store_ln_scaled_input"),
+        (
+            "ln_one_plus_exp",
+            "ln_one_plus_exp_scaled_input",
+            "store_ln_one_plus_exp_scaled_input",
+        ),
+        ("sin", "sin_scaled_input", "store_sin_scaled_input"),
     ] {
+        if let Some(args) = compact_ad_call_args(value, fused_name) {
+            if args.len() != 2 {
+                return None;
+            }
+            if args[1] == "-1.0" {
+                continue;
+            }
+            let source = compact_scratch_ad_value_index(args[0])?;
+            return Some(format!(
+                "scratch.{helper}({target_index}, {source}, {});",
+                args[1]
+            ));
+        }
+
         let Some(args) = compact_ad_call_args(value, name) else {
             continue;
         };
@@ -10172,14 +10208,30 @@ fn compact_negated_input_unary_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
-    for (name, helper) in [
-        ("sqrt", "store_sqrt_neg_input"),
-        ("exp", "store_exp_neg_input"),
-        ("limexp", "store_limexp_neg_input"),
-        ("limited_exp", "store_limited_exp_neg_input"),
-        ("ln", "store_ln_neg_input"),
-        ("ln_one_plus_exp", "store_ln_one_plus_exp_neg_input"),
+    for (name, fused_name, helper) in [
+        ("sqrt", "sqrt_scaled_input", "store_sqrt_neg_input"),
+        ("exp", "exp_scaled_input", "store_exp_neg_input"),
+        ("limexp", "limexp_scaled_input", "store_limexp_neg_input"),
+        (
+            "limited_exp",
+            "limited_exp_scaled_input",
+            "store_limited_exp_neg_input",
+        ),
+        ("ln", "ln_scaled_input", "store_ln_neg_input"),
+        (
+            "ln_one_plus_exp",
+            "ln_one_plus_exp_scaled_input",
+            "store_ln_one_plus_exp_neg_input",
+        ),
     ] {
+        if let Some(args) = compact_ad_call_args(value, fused_name) {
+            if args.len() != 2 || args[1] != "-1.0" {
+                continue;
+            }
+            let source = compact_scratch_ad_value_index(args[0])?;
+            return Some(format!("scratch.{helper}({target_index}, {source});"));
+        }
+
         let Some(args) = compact_ad_call_args(value, name) else {
             continue;
         };
@@ -10450,6 +10502,17 @@ fn compact_div_from_scalar_affine_input_store_helper_call(
 }
 
 fn compact_sqrt_general_ad_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "sqrt_scaled_input") {
+        if args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_or_non_atomic_ad_arg(args[0])?;
+        return Some(format!(
+            "scratch.store_sqrt_scaled_ad({target_index}, {source}, {});",
+            args[1]
+        ));
+    }
+
     let args = compact_ad_call_args(value, "sqrt")?;
     if args.len() != 1 {
         return None;
@@ -10802,18 +10865,38 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
         ));
     }
 
-    for (name, helper) in [
-        ("sqrt", "store_scaled_sqrt_scaled_input"),
-        ("exp", "store_scaled_exp_scaled_input"),
-        ("limexp", "store_scaled_limexp_scaled_input"),
-        ("limited_exp", "store_scaled_limited_exp_scaled_input"),
-        ("ln", "store_scaled_ln_scaled_input"),
+    for (name, fused_name, helper) in [
+        ("sqrt", "sqrt_scaled_input", "store_scaled_sqrt_scaled_input"),
+        ("exp", "exp_scaled_input", "store_scaled_exp_scaled_input"),
+        (
+            "limexp",
+            "limexp_scaled_input",
+            "store_scaled_limexp_scaled_input",
+        ),
+        (
+            "limited_exp",
+            "limited_exp_scaled_input",
+            "store_scaled_limited_exp_scaled_input",
+        ),
+        ("ln", "ln_scaled_input", "store_scaled_ln_scaled_input"),
         (
             "ln_one_plus_exp",
+            "ln_one_plus_exp_scaled_input",
             "store_scaled_ln_one_plus_exp_scaled_input",
         ),
-        ("sin", "store_scaled_sin_scaled_input"),
+        ("sin", "sin_scaled_input", "store_scaled_sin_scaled_input"),
     ] {
+        if let Some(inner_args) = compact_ad_call_args(inner, fused_name) {
+            if inner_args.len() != 2 {
+                return None;
+            }
+            let source = compact_scratch_ad_value_index(inner_args[0])?;
+            return Some(format!(
+                "scratch.{helper}({target_index}, {source}, {}, {scale});",
+                inner_args[1]
+            ));
+        }
+
         if let Some(inner_args) = compact_ad_call_args(inner, name) {
             if inner_args.len() != 1 {
                 return None;
@@ -12446,6 +12529,23 @@ impl CompactAdEmitter<'_> {
                 self.lower(operand)?
             ));
         }
+        if let Some((operand, scale)) = self.scaled_intrinsic_operand(args)? {
+            if let Some(helper) = match normalized.as_str() {
+                "abs" | "fabs" => Some("abs_scaled_input"),
+                "sqrt" => Some("sqrt_scaled_input"),
+                "exp" => Some("exp_scaled_input"),
+                "limexp" => Some("limexp_scaled_input"),
+                "__rspice_limited_exp" => Some("limited_exp_scaled_input"),
+                "ln" | "log" => Some("ln_scaled_input"),
+                "tanh" => Some("tanh_scaled_input"),
+                _ => None,
+            } {
+                return Ok(format!(
+                    "AdValue::{helper}({}, {scale})",
+                    self.lower(operand)?
+                ));
+            }
+        }
         if normalized == "pow" {
             let base = args
                 .first()
@@ -12530,6 +12630,63 @@ impl CompactAdEmitter<'_> {
             "atan2" => format!("AdValue::atan2({}, {})", lower_arg(0)?, lower_arg(1)?),
             _ => return Err(self.unsupported(format!("intrinsic function '{name}'"))),
         })
+    }
+
+    fn scaled_intrinsic_operand(
+        &self,
+        args: &[ExprId],
+    ) -> Result<Option<(ExprId, String)>, RustBackendError> {
+        let [arg] = args else {
+            return Ok(None);
+        };
+        self.scaled_ad_operand(*arg)
+    }
+
+    fn scaled_ad_operand(
+        &self,
+        id: ExprId,
+    ) -> Result<Option<(ExprId, String)>, RustBackendError> {
+        let kind = self.expression(id)?.kind.clone();
+        match kind {
+            HirExprKind::Unary { op, operand } if op.as_str() == "Neg" => {
+                Ok(Some(self.combine_scaled_ad_operand(operand, "-1.0".to_string())?))
+            }
+            HirExprKind::Binary { op, left, right } if op.as_str() == "Mul" => {
+                if let Some(scale) = self.scalar_constant(left)? {
+                    Ok(Some(self.combine_scaled_ad_operand(right, scale)?))
+                } else if let Some(scale) = self.scalar_constant(right)? {
+                    Ok(Some(self.combine_scaled_ad_operand(left, scale)?))
+                } else {
+                    Ok(None)
+                }
+            }
+            HirExprKind::Binary { op, left, right } if op.as_str() == "Div" => {
+                if let Some(scale) = self.scalar_constant(right)? {
+                    Ok(Some(self.combine_scaled_ad_operand(
+                        left,
+                        format!("1.0 / ({scale})"),
+                    )?))
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn combine_scaled_ad_operand(
+        &self,
+        operand: ExprId,
+        scale: String,
+    ) -> Result<(ExprId, String), RustBackendError> {
+        if let Some((inner_operand, inner_scale)) = self.scaled_ad_operand(operand)? {
+            Ok((
+                inner_operand,
+                compact_scalar_mul(&inner_scale, scale.as_str()),
+            ))
+        } else {
+            Ok((operand, scale))
+        }
     }
 
     fn softplus_operand(&self, args: &[ExprId]) -> Result<Option<ExprId>, RustBackendError> {

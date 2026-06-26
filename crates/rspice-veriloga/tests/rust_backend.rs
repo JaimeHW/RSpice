@@ -1792,6 +1792,54 @@ fn rust_backend_fuses_softplus_ad_operation_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_scaled_input_intrinsics() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_scaled_input_intrinsics_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile expression scaled-input intrinsics");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn exp_scaled_input(arg: Self, scale: f64) -> Self",
+        "fn limexp_scaled_input(arg: Self, scale: f64) -> Self",
+        "fn limited_exp_scaled_input(arg: Self, scale: f64) -> Self",
+        "fn ln_scaled_input(arg: Self, scale: f64) -> Self",
+        "fn sqrt_scaled_input(arg: Self, scale: f64) -> Self",
+        "fn tanh_scaled_input(arg: Self, scale: f64) -> Self",
+        "fn abs_scaled_input(arg: Self, scale: f64) -> Self",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
+
+    assert!(stamp.contains("A::exp_scaled_input("), "{stamp}");
+    assert!(stamp.contains("A::limexp_scaled_input("), "{stamp}");
+    assert!(stamp.contains("A::limited_exp_scaled_input("), "{stamp}");
+    assert!(stamp.contains("A::ln_scaled_input("), "{stamp}");
+    assert!(stamp.contains("A::sqrt_scaled_input("), "{stamp}");
+    assert!(stamp.contains("A::tanh_scaled_input("), "{stamp}");
+    assert!(stamp.contains("A::abs_scaled_input("), "{stamp}");
+    assert!(!stamp.contains("A::exp(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::limexp(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::limited_exp(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::ln(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::sqrt(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::tanh(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::abs(A::scale("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_output_scaled_and_offset_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_output_scaled_and_offset_unary_store_source())
@@ -9226,6 +9274,42 @@ module compact_softplus_store(p, n);
         f = ln(1.0 + exp(a + gain));
         g = ln(1.0 + exp(a * gain)) * gain;
         I(p, n) <+ b + c + d + e + (f * gain) + g;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_scaled_input_intrinsics_source() -> &'static str {
+    r#"
+module compact_expression_scaled_input_intrinsics(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    analog function real lexp;
+        input x;
+        real x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real y;
+    analog begin
+        a = V(p, n) + 3.0;
+        y = exp(a * gain)
+            + limexp(a * gain)
+            + lexp(a * gain)
+            + ln(a * gain)
+            + sqrt(a * gain)
+            + tanh(a * gain)
+            + abs(a * gain);
+        I(p, n) <+ y * V(p, n);
     end
 endmodule
 "#
