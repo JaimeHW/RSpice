@@ -6404,6 +6404,20 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn add_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
+        let mut result = first;
+        let first_value = result.value * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        result.value = first_value + second_value + product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * first_scale + second.dn[index] * second_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * first_scale + second.db[index] * second_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
     pub(crate) fn add_scaled_sub_value_product(scalar: f64, subtrahend: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
         let mut result = subtrahend;
         let value_term = (scalar - result.value) * value_scale;

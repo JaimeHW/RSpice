@@ -1821,7 +1821,7 @@ impl Instance {
         }
 
         if (s.b[1259] && (!s.b[1260])) {
-            let assign10280_ad_e12985: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign10280_ad_e12985: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign10280_ad_e12985, 928);
         }
 
@@ -1950,7 +1950,7 @@ impl Instance {
         }
 
         if (s.b[1259] && s.b[1262]) {
-            let assign10590_ad_e13499: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign10590_ad_e13499: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign10590_ad_e13499, 928);
         }
 
@@ -2082,7 +2082,7 @@ impl Instance {
         p: &Parameters,
     ) {
         if (s.b[1259] && (!s.b[1262])) {
-            let assign10890_ad_e14027: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign10890_ad_e14027: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign10890_ad_e14027, 928);
         }
 
@@ -2255,7 +2255,7 @@ impl Instance {
         }
 
         if (s.b[1267] && (!s.b[1268])) {
-            let assign11370_ad_e14765: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign11370_ad_e14765: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign11370_ad_e14765, 928);
         }
 
@@ -2381,7 +2381,7 @@ impl Instance {
         }
 
         if s.b[1267] {
-            let assign11670_ad_e15230: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign11670_ad_e15230: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign11670_ad_e15230, 928);
         }
 
@@ -2516,7 +2516,7 @@ impl Instance {
         }
 
         if (s.b[1267] && s.b[1271]) {
-            let assign11980_ad_e15726: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign11980_ad_e15726: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign11980_ad_e15726, 928);
         }
 
@@ -2642,7 +2642,7 @@ impl Instance {
         }
 
         if (s.b[1267] && (!s.b[1271])) {
-            let assign12280_ad_e16254: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign12280_ad_e16254: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign12280_ad_e16254, 928);
         }
 
@@ -2768,7 +2768,7 @@ impl Instance {
         }
 
         if s.b[1267] {
-            let assign12580_ad_e16719: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign12580_ad_e16719: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign12580_ad_e16719, 928);
         }
 
@@ -2901,7 +2901,7 @@ impl Instance {
         }
 
         if s.b[1267] {
-            let assign12880_ad_e17166: A = A::add_scaled_product(A::add_scaled_inputs(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90), 1.0, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
+            let assign12880_ad_e17166: A = A::add_scaled_inputs_product(A::sqrt(A::mul(A::offset(A::square(s.ad_value(943)), 1.0), A::add(A::add_scaled_products(s.ad_value(943), s.ad_value(943), (p.p90 * p.p90), s.ad_value(943), s.ad_value(928), (2.0 * p.p90)), A::mul3(A::offset(A::square(s.ad_value(943)), 1.0), s.ad_value(928), s.ad_value(928))))), 1.0, s.ad_value(943), p.p90, A::square(s.ad_value(943)), s.ad_value(928), 1.0);
             s.store_add_ad_lhs(933, assign12880_ad_e17166, 928);
         }
 
@@ -6744,7 +6744,7 @@ impl Instance {
         }
 
         if (!s.b[1420]) {
-            s.store_ad_value(168, A::add_scaled_product(A::sub(s.ad_value(899), s.ad_value(897)), 1.0, s.ad_value(914), s.ad_value(172), 1.0));
+            s.store_ad_value(168, A::add_scaled_inputs_product(s.ad_value(899), 1.0, s.ad_value(897), (-1.0), s.ad_value(914), s.ad_value(172), 1.0));
             s.store_sub(169, 900, 897);
         }
 

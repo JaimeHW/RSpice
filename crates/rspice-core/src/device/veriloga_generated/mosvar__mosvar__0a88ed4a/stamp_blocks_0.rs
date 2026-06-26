@@ -506,7 +506,7 @@ impl Instance {
 
         if ((!s.b[184]) && (!s.b[185])) {
             s.store_sub_from_scalar(181, 1.0, 164);
-            s.store_ad_value(180, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(78), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(181), -1.0)), (-1.0)));
+            s.store_ad_value(180, A::add_scaled_inputs_product(s.ad_value(78), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(181), -1.0)), (-1.0)));
             s.store_offset(172, 50, 3.0);
         }
 
@@ -810,7 +810,7 @@ impl Instance {
 
         if ((s.b[195] && (!s.b[249])) && (!s.b[250])) {
             s.store_sub_from_scalar(246, 1.0, 229);
-            s.store_ad_value(245, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(78), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(246), -1.0)), (-1.0)));
+            s.store_ad_value(245, A::add_scaled_inputs_product(s.ad_value(78), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(246), -1.0)), (-1.0)));
             s.store_offset(237, 50, 3.0);
         }
 
@@ -978,7 +978,7 @@ impl Instance {
 
         if ((!s.b[281]) && s.b[282]) {
             s.store_sub_from_scalar(278, 1.0, 275);
-            s.store_ad_value(279, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(94), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(278), -1.0)), (-1.0)));
+            s.store_ad_value(279, A::add_scaled_inputs_product(s.ad_value(94), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(278), -1.0)), (-1.0)));
         }
 
         s.b[284] = (s.v[279] < 460.51701859880916);
@@ -1044,7 +1044,7 @@ impl Instance {
 
         if ((!s.b[281]) && (!s.b[282])) {
             s.store_sub_from_scalar_ad(272, 1.0, A::mul_scaled_lhs(s.ad_value(36), 0.5, s.ad_value(271)));
-            s.store_ad_value(273, A::add_scaled_product(A::sub_scaled_inputs(s.ad_value(264), 2.0, s.ad_value(270), 2.0), 1.0, s.ad_value(36), A::offset(s.ad_value(271), (-1.0)), 1.0));
+            s.store_ad_value(273, A::add_scaled_inputs_product(s.ad_value(264), 2.0, s.ad_value(270), (-2.0), s.ad_value(36), A::offset(s.ad_value(271), (-1.0)), 1.0));
             s.store_ad_value(274, A::add_scaled_products(A::sub(s.ad_value(264), s.ad_value(270)), A::sub(s.ad_value(264), s.ad_value(270)), 1.0, s.ad_value(36), A::sub(A::offset(s.ad_value(270), 1.0), s.ad_value(271)), 1.0));
             s.store_ad_value(275, A::add_scaled_square_product(s.ad_value(273), 1.0, s.ad_value(272), s.ad_value(274), (-4.0)));
             s.store_ad_value(278, A::div_scaled_inputs(s.ad_value(274), 2.0, A::add(s.ad_value(273), A::sqrt(s.ad_value(275))), 1.0));
@@ -1235,7 +1235,7 @@ impl Instance {
 
         if ((s.b[289] && (!s.b[339])) && s.b[340]) {
             s.store_sub_from_scalar(336, 1.0, 333);
-            s.store_ad_value(337, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(94), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(336), -1.0)), (-1.0)));
+            s.store_ad_value(337, A::add_scaled_inputs_product(s.ad_value(94), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(336), -1.0)), (-1.0)));
         }
 
         s.b[342] = (s.v[337] < 460.51701859880916);
@@ -1290,7 +1290,7 @@ impl Instance {
 
         if ((s.b[289] && (!s.b[339])) && (!s.b[340])) {
             s.store_sub_from_scalar_ad(330, 1.0, A::mul_scaled_lhs(s.ad_value(36), 0.5, s.ad_value(329)));
-            s.store_ad_value(331, A::add_scaled_product(A::sub_scaled_inputs(s.ad_value(322), 2.0, s.ad_value(328), 2.0), 1.0, s.ad_value(36), A::offset(s.ad_value(329), (-1.0)), 1.0));
+            s.store_ad_value(331, A::add_scaled_inputs_product(s.ad_value(322), 2.0, s.ad_value(328), (-2.0), s.ad_value(36), A::offset(s.ad_value(329), (-1.0)), 1.0));
             s.store_ad_value(332, A::add_scaled_products(A::sub(s.ad_value(322), s.ad_value(328)), A::sub(s.ad_value(322), s.ad_value(328)), 1.0, s.ad_value(36), A::sub(A::offset(s.ad_value(328), 1.0), s.ad_value(329)), 1.0));
             s.store_ad_value(333, A::add_scaled_square_product(s.ad_value(331), 1.0, s.ad_value(330), s.ad_value(332), (-4.0)));
             s.store_ad_value(336, A::div_scaled_inputs(s.ad_value(332), 2.0, A::add(s.ad_value(331), A::sqrt(s.ad_value(333))), 1.0));
@@ -1493,7 +1493,7 @@ impl Instance {
         if ((s.b[354] && (!s.b[372])) && s.b[373]) {
             s.store_sub_from_scalar_ad(363, 1.0, A::scale(s.ad_value(362), (0.5 * s.v[111])));
             s.store_ad_value(364, A::add_scaled_inputs3_offset(s.ad_value(114), 2.0, s.ad_value(370), (-2.0), s.ad_value(362), (-s.v[111]), s.v[111]));
-            s.store_ad_value(365, A::add_scaled_product(A::add_scaled_inputs(A::offset(s.ad_value(370), (-1.0)), s.v[111], s.ad_value(362), s.v[111]), (-1.0), A::sub(s.ad_value(114), s.ad_value(370)), A::sub(s.ad_value(114), s.ad_value(370)), 1.0));
+            s.store_ad_value(365, A::add_scaled_inputs_product(A::offset(s.ad_value(370), (-1.0)), (s.v[111] * (-1.0)), s.ad_value(362), (s.v[111] * (-1.0)), A::sub(s.ad_value(114), s.ad_value(370)), A::sub(s.ad_value(114), s.ad_value(370)), 1.0));
             s.store_ad_value(366, A::add_scaled_square_product(s.ad_value(364), 1.0, s.ad_value(363), s.ad_value(365), (-4.0)));
             s.store_ad_value(371, A::div_scaled_inputs(s.ad_value(365), 2.0, A::add(s.ad_value(364), A::sqrt(s.ad_value(366))), 1.0));
             s.store_add(115, 370, 371);
@@ -1532,7 +1532,7 @@ impl Instance {
         if ((s.b[354] && (!s.b[372])) && (!s.b[373])) {
             s.store_sub_from_scalar_ad(363, 1.0, A::scale(s.ad_value(362), (0.5 * s.v[111])));
             s.store_ad_value(364, A::add_scaled_inputs3_offset(s.ad_value(355), 2.0, s.ad_value(361), (-2.0), s.ad_value(362), s.v[111], ((-1.0) * s.v[111])));
-            s.store_ad_value(365, A::add_scaled_product(A::sub_scaled_inputs(A::offset(s.ad_value(361), 1.0), s.v[111], s.ad_value(362), s.v[111]), 1.0, A::sub(s.ad_value(355), s.ad_value(361)), A::sub(s.ad_value(355), s.ad_value(361)), 1.0));
+            s.store_ad_value(365, A::add_scaled_inputs_product(A::offset(s.ad_value(361), 1.0), s.v[111], s.ad_value(362), (-s.v[111]), A::sub(s.ad_value(355), s.ad_value(361)), A::sub(s.ad_value(355), s.ad_value(361)), 1.0));
             s.store_ad_value(366, A::add_scaled_square_product(s.ad_value(364), 1.0, s.ad_value(363), s.ad_value(365), (-4.0)));
             s.store_ad_value(369, A::div_scaled_inputs(s.ad_value(365), 2.0, A::add(s.ad_value(364), A::sqrt(s.ad_value(366))), 1.0));
             s.store_neg_ad(115, A::add(s.ad_value(361), s.ad_value(369)));
@@ -2300,7 +2300,7 @@ impl Instance {
 
         if ((!s.b[184]) && (!s.b[185])) {
             s.store_sub_from_scalar(181, 1.0, 164);
-            s.store_ad_value(180, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(78), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(181), -1.0)), (-1.0)));
+            s.store_ad_value(180, A::add_scaled_inputs_product(s.ad_value(78), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(181), -1.0)), (-1.0)));
             s.store_offset(172, 50, 3.0);
         }
 
@@ -2605,7 +2605,7 @@ impl Instance {
 
         if ((s.b[195] && (!s.b[249])) && (!s.b[250])) {
             s.store_sub_from_scalar(246, 1.0, 229);
-            s.store_ad_value(245, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(78), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(246), -1.0)), (-1.0)));
+            s.store_ad_value(245, A::add_scaled_inputs_product(s.ad_value(78), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(78), 1.0, s.ad_value(36), 0.25, s.ad_value(246), -1.0)), (-1.0)));
             s.store_offset(237, 50, 3.0);
         }
 
@@ -2766,7 +2766,7 @@ impl Instance {
 
         if ((!s.b[281]) && s.b[282]) {
             s.store_sub_from_scalar(278, 1.0, 275);
-            s.store_ad_value(279, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(94), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(278), -1.0)), (-1.0)));
+            s.store_ad_value(279, A::add_scaled_inputs_product(s.ad_value(94), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(278), -1.0)), (-1.0)));
         }
 
         s.b[284] = (s.v[279] < 460.51701859880916);
@@ -2821,7 +2821,7 @@ impl Instance {
 
         if ((!s.b[281]) && (!s.b[282])) {
             s.store_sub_from_scalar_ad(272, 1.0, A::mul_scaled_lhs(s.ad_value(36), 0.5, s.ad_value(271)));
-            s.store_ad_value(273, A::add_scaled_product(A::sub_scaled_inputs(s.ad_value(264), 2.0, s.ad_value(270), 2.0), 1.0, s.ad_value(36), A::offset(s.ad_value(271), (-1.0)), 1.0));
+            s.store_ad_value(273, A::add_scaled_inputs_product(s.ad_value(264), 2.0, s.ad_value(270), (-2.0), s.ad_value(36), A::offset(s.ad_value(271), (-1.0)), 1.0));
             s.store_ad_value(274, A::add_scaled_products(A::sub(s.ad_value(264), s.ad_value(270)), A::sub(s.ad_value(264), s.ad_value(270)), 1.0, s.ad_value(36), A::sub(A::offset(s.ad_value(270), 1.0), s.ad_value(271)), 1.0));
             s.store_ad_value(275, A::add_scaled_square_product(s.ad_value(273), 1.0, s.ad_value(272), s.ad_value(274), (-4.0)));
             s.store_ad_value(278, A::div_scaled_inputs(s.ad_value(274), 2.0, A::add(s.ad_value(273), A::sqrt(s.ad_value(275))), 1.0));
@@ -3012,7 +3012,7 @@ impl Instance {
 
         if ((s.b[289] && (!s.b[339])) && s.b[340]) {
             s.store_sub_from_scalar(336, 1.0, 333);
-            s.store_ad_value(337, A::add_scaled_product(A::add_scaled_inputs(s.ad_value(94), 1.0, s.ad_value(36), 0.5), 1.0, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(336), -1.0)), (-1.0)));
+            s.store_ad_value(337, A::add_scaled_inputs_product(s.ad_value(94), 1.0, s.ad_value(36), 0.5, s.ad_value(34), A::sqrt(A::add_scaled_inputs3(s.ad_value(94), 1.0, s.ad_value(36), 0.25, s.ad_value(336), -1.0)), (-1.0)));
         }
 
         s.b[342] = (s.v[337] < 460.51701859880916);
@@ -3076,7 +3076,7 @@ impl Instance {
 
         if ((s.b[289] && (!s.b[339])) && (!s.b[340])) {
             s.store_sub_from_scalar_ad(330, 1.0, A::mul_scaled_lhs(s.ad_value(36), 0.5, s.ad_value(329)));
-            s.store_ad_value(331, A::add_scaled_product(A::sub_scaled_inputs(s.ad_value(322), 2.0, s.ad_value(328), 2.0), 1.0, s.ad_value(36), A::offset(s.ad_value(329), (-1.0)), 1.0));
+            s.store_ad_value(331, A::add_scaled_inputs_product(s.ad_value(322), 2.0, s.ad_value(328), (-2.0), s.ad_value(36), A::offset(s.ad_value(329), (-1.0)), 1.0));
             s.store_ad_value(332, A::add_scaled_products(A::sub(s.ad_value(322), s.ad_value(328)), A::sub(s.ad_value(322), s.ad_value(328)), 1.0, s.ad_value(36), A::sub(A::offset(s.ad_value(328), 1.0), s.ad_value(329)), 1.0));
             s.store_ad_value(333, A::add_scaled_square_product(s.ad_value(331), 1.0, s.ad_value(330), s.ad_value(332), (-4.0)));
             s.store_ad_value(336, A::div_scaled_inputs(s.ad_value(332), 2.0, A::add(s.ad_value(331), A::sqrt(s.ad_value(333))), 1.0));
