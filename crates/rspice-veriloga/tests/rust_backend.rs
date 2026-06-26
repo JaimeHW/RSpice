@@ -2368,7 +2368,7 @@ fn rust_backend_fuses_expression_affine_product_add_chains() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_add_scaled_inputs_product("),
+        stamp.contains("s.store_add_scaled_inputs_product_indices("),
         "{stamp}"
     );
     assert!(
@@ -3067,18 +3067,24 @@ fn rust_backend_directly_stores_common_fused_expression_helpers() {
 
     assert!(
         support.contains(
-            "fn store_add_scaled_product(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64)"
+            "fn store_add_scaled_product_indices(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64)"
         ),
         "{support}"
     );
     assert!(
         support.contains(
-            "fn store_div_scaled_product(&mut self, index: usize, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64)"
+            "fn store_div_scaled_product_indices(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64)"
         ),
         "{support}"
     );
-    assert!(stamp.contains("s.store_add_scaled_product("), "{stamp}");
-    assert!(stamp.contains("s.store_div_scaled_product("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_add_scaled_product_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_div_scaled_product_indices("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("s.store_ad_value("),
         "direct root assignments should not materialize returned AD temporaries:\n{stamp}"
@@ -3167,7 +3173,7 @@ fn rust_backend_directly_stores_product_sum_expression_helpers() {
 
     assert!(
         support.contains(
-            "fn store_add_scaled_products(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64)"
+            "fn store_add_scaled_products_indices(&mut self, index: usize, left_product_left: usize, left_product_right: usize, left_scale: f64, right_product_left: usize, right_product_right: usize, right_scale: f64)"
         ),
         "{support}"
     );
@@ -3177,7 +3183,10 @@ fn rust_backend_directly_stores_product_sum_expression_helpers() {
         ),
         "{support}"
     );
-    assert!(stamp.contains("s.store_add_scaled_products("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_add_scaled_products_indices("),
+        "{stamp}"
+    );
     assert!(stamp.contains("s.store_add_scaled_products3("), "{stamp}");
     assert!(
         !stamp.contains("s.store_ad_value("),
@@ -3207,7 +3216,7 @@ fn rust_backend_directly_stores_affine_product_expression_helpers() {
 
     assert!(
         support.contains(
-            "fn store_add_scaled_inputs_product(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64)"
+            "fn store_add_scaled_inputs_product_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64)"
         ),
         "{support}"
     );
@@ -3218,7 +3227,7 @@ fn rust_backend_directly_stores_affine_product_expression_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_add_scaled_inputs_product("),
+        stamp.contains("s.store_add_scaled_inputs_product_indices("),
         "{stamp}"
     );
     assert!(
@@ -3311,7 +3320,10 @@ fn rust_backend_directly_stores_product_division_expression_helpers() {
             && support.contains("denominator_scale: f64"),
         "{support}"
     );
-    assert!(stamp.contains("s.store_div_scaled_product("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_div_scaled_product_indices("),
+        "{stamp}"
+    );
     assert!(stamp.contains("s.store_div_scaled_product3("), "{stamp}");
     assert!(
         !stamp.contains("s.store_ad_value("),
@@ -3437,6 +3449,84 @@ fn rust_backend_directly_stores_value_products_helpers() {
     assert!(
         !stamp.contains("A::add_scaled_value_products("),
         "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_indexed_product_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_indexed_product_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact indexed direct product helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_product_indices(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_add_scaled_products_indices(&mut self, index: usize, left_product_left: usize, left_product_right: usize, left_scale: f64, right_product_left: usize, right_product_right: usize, right_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs_product_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_div_scaled_product_indices(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_product_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_products_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs_product_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_div_scaled_product_indices("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_product("),
+        "index-backed product root assignments should not materialize value/product AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_products("),
+        "index-backed product-sum root assignments should not materialize AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_inputs_product("),
+        "index-backed input-product root assignments should not materialize AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_div_scaled_product("),
+        "index-backed product division root assignments should not materialize AD temporaries:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -12113,6 +12203,39 @@ module compact_expression_direct_store_value_products_helpers(p, n);
         r = V(n);
         shaped = (a * value_scale) + ((a * q) * first_scale) + ((q * r) * second_scale);
         I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_indexed_product_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_indexed_product_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real value_scale = 2.0;
+    parameter real first_scale = 3.0;
+    parameter real second_scale = 4.0;
+    parameter real product_scale = 5.0;
+    parameter real offset = 6.0;
+    real a;
+    real q;
+    real r;
+    real den;
+    real add_product;
+    real add_products;
+    real inputs_product;
+    real divided_product;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        den = V(p) + offset;
+        add_product = a + ((q * r) * product_scale);
+        add_products = ((a * q) * first_scale) + ((q * r) * second_scale);
+        inputs_product = (a * value_scale) + (q * second_scale) + ((a * r) * product_scale);
+        divided_product = (a * q) / den;
+        I(p, n) <+ add_product + add_products + inputs_product + divided_product;
     end
 endmodule
 "#
