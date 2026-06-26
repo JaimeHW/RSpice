@@ -1900,6 +1900,44 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul3_ad_middle(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let middle_value = self.v[middle];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let product_value = left.value * middle_value;
+        self.v[index] = product_value * right.value;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle_value + left.value * middle_dn[axis]; self.dn[index][axis] = product_derivative * right.value + product_value * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle_value + left.value * middle_db[axis]; self.db[index][axis] = product_derivative * right.value + product_value * right.db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul3_ad_middle_scaled_output(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let middle_value = self.v[middle];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let product_value = left.value * middle_value;
+        self.v[index] = product_value * right.value * scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle_value + left.value * middle_dn[axis]; self.dn[index][axis] = (product_derivative * right.value + product_value * right.dn[axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle_value + left.value * middle_db[axis]; self.db[index][axis] = (product_derivative * right.value + product_value * right.db[axis]) * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul3_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let product_value = left.value * middle.value;
+        self.v[index] = product_value * right.value;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle.value + left.value * middle.dn[axis]; self.dn[index][axis] = product_derivative * right.value + product_value * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle.value + left.value * middle.db[axis]; self.db[index][axis] = product_derivative * right.value + product_value * right.db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul3_ad_scaled_output(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let product_value = left.value * middle.value;
+        self.v[index] = product_value * right.value * scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle.value + left.value * middle.dn[axis]; self.dn[index][axis] = (product_derivative * right.value + product_value * right.dn[axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle.value + left.value * middle.db[axis]; self.db[index][axis] = (product_derivative * right.value + product_value * right.db[axis]) * scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_ad_product_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, source: usize) {
         let source_value = self.v[source];
         let source_dn = self.dn[source];
@@ -6771,6 +6809,44 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value * product_value;
         for axis in 0..NODE_COUNT { let product_derivative = middle_dn[axis] * right_value + middle_value * right_dn[axis]; self.dn[index][axis] = left_dn[axis] * product_value + left_value * product_derivative; }
         for axis in 0..BRANCH_COUNT { let product_derivative = middle_db[axis] * right_value + middle_value * right_db[axis]; self.db[index][axis] = left_db[axis] * product_value + left_value * product_derivative; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul3_ad_middle(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let middle_value = self.v[middle];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let product_value = left.value * middle_value;
+        self.v[index] = product_value * right.value;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle_value + left.value * middle_dn[axis]; self.dn[index][axis] = product_derivative * right.value + product_value * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle_value + left.value * middle_db[axis]; self.db[index][axis] = product_derivative * right.value + product_value * right.db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul3_ad_middle_scaled_output(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let middle_value = self.v[middle];
+        let middle_dn = self.dn[middle];
+        let middle_db = self.db[middle];
+        let product_value = left.value * middle_value;
+        self.v[index] = product_value * right.value * scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle_value + left.value * middle_dn[axis]; self.dn[index][axis] = (product_derivative * right.value + product_value * right.dn[axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle_value + left.value * middle_db[axis]; self.db[index][axis] = (product_derivative * right.value + product_value * right.db[axis]) * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul3_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let product_value = left.value * middle.value;
+        self.v[index] = product_value * right.value;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle.value + left.value * middle.dn[axis]; self.dn[index][axis] = product_derivative * right.value + product_value * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle.value + left.value * middle.db[axis]; self.db[index][axis] = product_derivative * right.value + product_value * right.db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul3_ad_scaled_output(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, middle: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let product_value = left.value * middle.value;
+        self.v[index] = product_value * right.value * scale;
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * middle.value + left.value * middle.dn[axis]; self.dn[index][axis] = (product_derivative * right.value + product_value * right.dn[axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * middle.value + left.value * middle.db[axis]; self.db[index][axis] = (product_derivative * right.value + product_value * right.db[axis]) * scale; }
     }
 
     #[inline]
