@@ -340,13 +340,13 @@ impl Instance {
             s.store_ad_value(72, A::cosh(s.ad_value(22)));
             s.store_ln(73, 72);
             s.store_add_ad_lhs(77, A::add(s.ad_value(40), A::scale(s.ad_value(5), p.p37)), 74);
-            s.store_add_scaled_ad_lhs(20, A::mul(s.ad_value(31), A::add(A::scale(A::mul(A::sub(A::add(s.ad_value(22), s.ad_value(73)), s.ad_value(77)), s.ad_value(68)), 1.0 / (p.p30)), A::scale(s.ad_value(79), (2.0 * p.p37)))), 79, p.p24);
+            s.store_add_scaled_ad_lhs(20, A::mul(s.ad_value(31), A::add(A::mul_scaled_output(A::sub(A::add(s.ad_value(22), s.ad_value(73)), s.ad_value(77)), s.ad_value(68), 1.0 / (p.p30)), A::scale(s.ad_value(79), (2.0 * p.p37)))), 79, p.p24);
             s.store_cosh_ad(71, A::sub(s.ad_value(41), A::scale(s.ad_value(5), p.p37)));
             s.store_ln(76, 71);
             s.store_ad_value(72, A::cosh(s.ad_value(25)));
             s.store_ln(75, 72);
             s.store_add_ad_lhs(78, A::sub(s.ad_value(41), A::scale(s.ad_value(5), p.p37)), 76);
-            s.store_add_scaled_ad_lhs(21, A::mul(s.ad_value(32), A::add(A::scale(A::mul(A::sub(A::add(s.ad_value(25), s.ad_value(75)), s.ad_value(78)), s.ad_value(69)), 1.0 / (p.p36)), A::scale(s.ad_value(80), (2.0 * p.p37)))), 80, p.p26);
+            s.store_add_scaled_ad_lhs(21, A::mul(s.ad_value(32), A::add(A::mul_scaled_output(A::sub(A::add(s.ad_value(25), s.ad_value(75)), s.ad_value(78)), s.ad_value(69), 1.0 / (p.p36)), A::scale(s.ad_value(80), (2.0 * p.p37)))), 80, p.p26);
             s.store_scalar(18, A::ddx_projection(&s.ad_value(20), Some(8), None));
             s.store_scalar(19, A::ddx_projection(&s.ad_value(21), Some(7), None));
         }
@@ -373,7 +373,7 @@ impl Instance {
         s.v[108] = if s.b[108] { 1.0 } else { 0.0 };
 
         if ((s.b[108] && (!s.b[107])) && (p.p0 != 0.0)) {
-            s.store_scaled_mul(120, 11, 31, ((((4.0 * 1.3806503e-23) * p.p73)) * ((((p.p72 * p.p71)) as f64).sqrt())));
+            s.store_scaled_mul(120, 11, 31, (((4.0 * 1.3806503e-23) * p.p73) * (((p.p72 * p.p71)) as f64).sqrt()));
             s.store_scale(118, 120, 3.141592653589793);
         }
 

@@ -3031,13 +3031,14 @@ impl Instance {
             &eq220_branch_derivatives,
             multiplicity,
         );
-        let eq221_ad: A = {
+        let eq221_ad_e2758: A = {
     if s.b[610] {
-        A::sub(A::sub(A::sub(A::sub(A::mul(A::scale(s.ad_value(94), (-1.0)), s.ad_value(38)), A::mul(s.ad_value(233), s.ad_value(231))), A::mul(s.ad_value(257), s.ad_value(255))), A::mul(s.ad_value(281), s.ad_value(279))), A::mul(s.ad_value(305), s.ad_value(303)))
+        A::sub(A::sub(A::sub(A::sub(A::mul_scaled_lhs(s.ad_value(94), (-1.0), s.ad_value(38)), A::mul_scaled_lhs(s.ad_value(233), 1.0, s.ad_value(231))), A::mul_scaled_lhs(s.ad_value(257), 1.0, s.ad_value(255))), A::mul_scaled_lhs(s.ad_value(281), 1.0, s.ad_value(279))), A::mul_scaled_lhs(s.ad_value(305), 1.0, s.ad_value(303)))
     } else {
         A::constant(0.0)
     }
 };
+        let eq221_ad: A = eq221_ad_e2758;
         stamper.stamp_current_dense_local(
             Some(4),
             None,

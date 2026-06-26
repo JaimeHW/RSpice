@@ -6355,6 +6355,39 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn mul_scaled_lhs(left: Self, scale: f64, right: Self) -> Self {
+        let mut value = left;
+        let left_value = value.value;
+        let scaled_left_value = left_value * scale;
+        value.value = scaled_left_value * right.value;
+        for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * right.value + left_value * right.dn[index]) * scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * right.value + left_value * right.db[index]) * scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn mul_scaled_rhs(left: Self, right: Self, scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value;
+        let scaled_right_value = right.value * scale;
+        value.value = left_value * scaled_right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * right.value + left_value * right.dn[index]) * scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * right.value + left_value * right.db[index]) * scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn mul_scaled_output(left: Self, right: Self, scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value;
+        let product = left_value * right.value;
+        value.value = product * scale;
+        for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * right.value + left_value * right.dn[index]) * scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * right.value + left_value * right.db[index]) * scale; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn square(arg: Self) -> Self {
         let mut value = arg;
         let raw = value.value;

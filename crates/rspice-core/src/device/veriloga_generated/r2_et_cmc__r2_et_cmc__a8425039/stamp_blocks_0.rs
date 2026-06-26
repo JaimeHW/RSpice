@@ -344,7 +344,7 @@ impl Instance {
         s.v[95] = if s.b[95] { 1.0 } else { 0.0 };
 
         if s.b[95] {
-            s.store_div_ad_lhs(29, A::mul(A::scale(s.ad_value(12), (4.0 * 1.3806505e-23)), s.ad_value(24)), 32);
+            s.store_div_ad_lhs(29, A::mul_scaled_lhs(s.ad_value(12), (4.0 * 1.3806505e-23), s.ad_value(24)), 32);
         }
 
         s.b[96] = (((p.p33 != 0.0) && (s.v[3] > 0.0)) && (s.v[4] > 0.0));
