@@ -1276,9 +1276,9 @@ impl Instance {
 
         s.store_add(849, 849, 1899);
 
-        s.store_ad_value(851, A::add_scaled_products3(s.ad_value(640), s.ad_value(1906), 1.0, s.ad_value(641), s.ad_value(1907), 1.0, s.ad_value(642), s.ad_value(1908), 1.0));
+        s.store_add_scaled_products3(851, s.ad_value(640), s.ad_value(1906), 1.0, s.ad_value(641), s.ad_value(1907), 1.0, s.ad_value(642), s.ad_value(1908), 1.0);
 
-        s.store_ad_value(852, A::add_scaled_products3(s.ad_value(667), s.ad_value(1909), 1.0, s.ad_value(668), s.ad_value(1910), 1.0, s.ad_value(669), s.ad_value(1911), 1.0));
+        s.store_add_scaled_products3(852, s.ad_value(667), s.ad_value(1909), 1.0, s.ad_value(668), s.ad_value(1910), 1.0, s.ad_value(669), s.ad_value(1911), 1.0);
 
         s.b[2710] = (s.v[825] < 0.0);
         s.v[2710] = if s.b[2710] { 1.0 } else { 0.0 };

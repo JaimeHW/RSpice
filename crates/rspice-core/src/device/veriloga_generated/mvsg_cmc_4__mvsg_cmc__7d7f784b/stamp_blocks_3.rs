@@ -4502,97 +4502,97 @@ impl Instance {
         s.v[2674] = if s.b[2674] { 1.0 } else { 0.0 };
 
         if s.b[2674] {
-            s.store_ad_value(214, A::add_scaled_products(s.ad_value(13), A::voltage(ctx, nodes, Some(6), Some(2)), (p.p0 * p.p2), s.ad_value(7), A::offset(A::voltage(ctx, nodes, Some(6), Some(2)), (-p.p27)), (p.p0 * p.p2)));
+            s.store_add_scaled_products(214, s.ad_value(13), A::voltage(ctx, nodes, Some(6), Some(2)), (p.p0 * p.p2), s.ad_value(7), A::offset(A::voltage(ctx, nodes, Some(6), Some(2)), (-p.p27)), (p.p0 * p.p2));
         }
 
         s.b[2675] = ((((nv6 - nv2) - p.p27) / p.p28) < (-50.0));
         s.v[2675] = if s.b[2675] { 1.0 } else { 0.0 };
 
         if ((!s.b[2674]) && s.b[2675]) {
-            s.store_ad_value(214, A::add_scaled_products(s.ad_value(13), A::voltage(ctx, nodes, Some(6), Some(2)), (p.p0 * p.p2), s.ad_value(7), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(6), Some(2)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(214, s.ad_value(13), A::voltage(ctx, nodes, Some(6), Some(2)), (p.p0 * p.p2), s.ad_value(7), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(6), Some(2)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }
 
         if ((!s.b[2674]) && (!s.b[2675])) {
-            s.store_ad_value(214, A::add_scaled_products(s.ad_value(13), A::voltage(ctx, nodes, Some(6), Some(2)), (p.p0 * p.p2), s.ad_value(7), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(6), Some(2)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(214, s.ad_value(13), A::voltage(ctx, nodes, Some(6), Some(2)), (p.p0 * p.p2), s.ad_value(7), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(6), Some(2)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2)));
         }
 
         s.b[2676] = ((((nv6 - nv0) - p.p27) / p.p28) > 50.0);
         s.v[2676] = if s.b[2676] { 1.0 } else { 0.0 };
 
         if s.b[2676] {
-            s.store_ad_value(215, A::add_scaled_products(s.ad_value(14), A::voltage(ctx, nodes, Some(6), Some(0)), (p.p0 * p.p2), s.ad_value(8), A::offset(A::voltage(ctx, nodes, Some(6), Some(0)), (-p.p27)), (p.p0 * p.p2)));
+            s.store_add_scaled_products(215, s.ad_value(14), A::voltage(ctx, nodes, Some(6), Some(0)), (p.p0 * p.p2), s.ad_value(8), A::offset(A::voltage(ctx, nodes, Some(6), Some(0)), (-p.p27)), (p.p0 * p.p2));
         }
 
         s.b[2677] = ((((nv6 - nv0) - p.p27) / p.p28) < (-50.0));
         s.v[2677] = if s.b[2677] { 1.0 } else { 0.0 };
 
         if ((!s.b[2676]) && s.b[2677]) {
-            s.store_ad_value(215, A::add_scaled_products(s.ad_value(14), A::voltage(ctx, nodes, Some(6), Some(0)), (p.p0 * p.p2), s.ad_value(8), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(6), Some(0)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(215, s.ad_value(14), A::voltage(ctx, nodes, Some(6), Some(0)), (p.p0 * p.p2), s.ad_value(8), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(6), Some(0)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }
 
         if ((!s.b[2676]) && (!s.b[2677])) {
-            s.store_ad_value(215, A::add_scaled_products(s.ad_value(14), A::voltage(ctx, nodes, Some(6), Some(0)), (p.p0 * p.p2), s.ad_value(8), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(6), Some(0)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(215, s.ad_value(14), A::voltage(ctx, nodes, Some(6), Some(0)), (p.p0 * p.p2), s.ad_value(8), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(6), Some(0)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2)));
         }
 
         s.b[2678] = ((((nv2 - nv0) - p.p27) / p.p28) > 50.0);
         s.v[2678] = if s.b[2678] { 1.0 } else { 0.0 };
 
         if s.b[2678] {
-            s.store_ad_value(216, A::add_scaled_products(s.ad_value(15), A::voltage(ctx, nodes, Some(2), Some(0)), (p.p0 * p.p2), s.ad_value(9), A::offset(A::voltage(ctx, nodes, Some(2), Some(0)), (-p.p27)), (p.p0 * p.p2)));
+            s.store_add_scaled_products(216, s.ad_value(15), A::voltage(ctx, nodes, Some(2), Some(0)), (p.p0 * p.p2), s.ad_value(9), A::offset(A::voltage(ctx, nodes, Some(2), Some(0)), (-p.p27)), (p.p0 * p.p2));
         }
 
         s.b[2679] = ((((nv2 - nv0) - p.p27) / p.p28) < (-50.0));
         s.v[2679] = if s.b[2679] { 1.0 } else { 0.0 };
 
         if ((!s.b[2678]) && s.b[2679]) {
-            s.store_ad_value(216, A::add_scaled_products(s.ad_value(15), A::voltage(ctx, nodes, Some(2), Some(0)), (p.p0 * p.p2), s.ad_value(9), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(2), Some(0)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(216, s.ad_value(15), A::voltage(ctx, nodes, Some(2), Some(0)), (p.p0 * p.p2), s.ad_value(9), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(2), Some(0)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }
 
         if ((!s.b[2678]) && (!s.b[2679])) {
-            s.store_ad_value(216, A::add_scaled_products(s.ad_value(15), A::voltage(ctx, nodes, Some(2), Some(0)), (p.p0 * p.p2), s.ad_value(9), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(2), Some(0)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(216, s.ad_value(15), A::voltage(ctx, nodes, Some(2), Some(0)), (p.p0 * p.p2), s.ad_value(9), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(2), Some(0)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2)));
         }
 
         s.b[2680] = ((((nv3 - nv2) - p.p27) / p.p28) > 50.0);
         s.v[2680] = if s.b[2680] { 1.0 } else { 0.0 };
 
         if s.b[2680] {
-            s.store_ad_value(218, A::add_scaled_products(s.ad_value(16), A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), s.ad_value(10), A::offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27)), (p.p0 * p.p2)));
+            s.store_add_scaled_products(218, s.ad_value(16), A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), s.ad_value(10), A::offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27)), (p.p0 * p.p2));
         }
 
         s.b[2681] = ((((nv3 - nv2) - p.p27) / p.p28) < (-50.0));
         s.v[2681] = if s.b[2681] { 1.0 } else { 0.0 };
 
         if ((!s.b[2680]) && s.b[2681]) {
-            s.store_ad_value(218, A::add_scaled_products(s.ad_value(16), A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), s.ad_value(10), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(218, s.ad_value(16), A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), s.ad_value(10), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }
 
         if ((!s.b[2680]) && (!s.b[2681])) {
-            s.store_ad_value(218, A::add_scaled_products(s.ad_value(16), A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), s.ad_value(10), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(218, s.ad_value(16), A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), s.ad_value(10), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2)));
         }
 
         s.b[2682] = ((((nv3 - nv0) - p.p27) / p.p28) > 50.0);
         s.v[2682] = if s.b[2682] { 1.0 } else { 0.0 };
 
         if s.b[2682] {
-            s.store_ad_value(217, A::add_scaled_products(s.ad_value(17), A::voltage(ctx, nodes, Some(3), Some(0)), (p.p0 * p.p2), s.ad_value(11), A::offset(A::voltage(ctx, nodes, Some(3), Some(0)), (-p.p27)), (p.p0 * p.p2)));
+            s.store_add_scaled_products(217, s.ad_value(17), A::voltage(ctx, nodes, Some(3), Some(0)), (p.p0 * p.p2), s.ad_value(11), A::offset(A::voltage(ctx, nodes, Some(3), Some(0)), (-p.p27)), (p.p0 * p.p2));
         }
 
         s.b[2683] = ((((nv3 - nv0) - p.p27) / p.p28) < (-50.0));
         s.v[2683] = if s.b[2683] { 1.0 } else { 0.0 };
 
         if ((!s.b[2682]) && s.b[2683]) {
-            s.store_ad_value(217, A::add_scaled_products(s.ad_value(17), A::voltage(ctx, nodes, Some(3), Some(0)), (p.p0 * p.p2), s.ad_value(11), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(3), Some(0)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(217, s.ad_value(17), A::voltage(ctx, nodes, Some(3), Some(0)), (p.p0 * p.p2), s.ad_value(11), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(3), Some(0)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }
 
         if ((!s.b[2682]) && (!s.b[2683])) {
-            s.store_ad_value(217, A::add_scaled_products(s.ad_value(17), A::voltage(ctx, nodes, Some(3), Some(0)), (p.p0 * p.p2), s.ad_value(11), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(3), Some(0)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(217, s.ad_value(17), A::voltage(ctx, nodes, Some(3), Some(0)), (p.p0 * p.p2), s.ad_value(11), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(3), Some(0)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2)));
         }
 
         s.b[2684] = ((((nv6 - nv3) - p.p27) / p.p28) > 50.0);
         s.v[2684] = if s.b[2684] { 1.0 } else { 0.0 };
 
         if s.b[2684] {
-            s.store_ad_value(219, A::add_scaled_products(s.ad_value(18), A::voltage(ctx, nodes, Some(6), Some(3)), (p.p0 * p.p2), s.ad_value(12), A::offset(A::voltage(ctx, nodes, Some(6), Some(3)), (-p.p27)), (p.p0 * p.p2)));
+            s.store_add_scaled_products(219, s.ad_value(18), A::voltage(ctx, nodes, Some(6), Some(3)), (p.p0 * p.p2), s.ad_value(12), A::offset(A::voltage(ctx, nodes, Some(6), Some(3)), (-p.p27)), (p.p0 * p.p2));
         }
 
     }
@@ -4609,11 +4609,11 @@ impl Instance {
         s.v[2685] = if s.b[2685] { 1.0 } else { 0.0 };
 
         if ((!s.b[2684]) && s.b[2685]) {
-            s.store_ad_value(219, A::add_scaled_products(s.ad_value(18), A::voltage(ctx, nodes, Some(6), Some(3)), (p.p0 * p.p2), s.ad_value(12), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(6), Some(3)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(219, s.ad_value(18), A::voltage(ctx, nodes, Some(6), Some(3)), (p.p0 * p.p2), s.ad_value(12), A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(6), Some(3)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }
 
         if ((!s.b[2684]) && (!s.b[2685])) {
-            s.store_ad_value(219, A::add_scaled_products(s.ad_value(18), A::voltage(ctx, nodes, Some(6), Some(3)), (p.p0 * p.p2), s.ad_value(12), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(6), Some(3)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2))));
+            s.store_add_scaled_products(219, s.ad_value(18), A::voltage(ctx, nodes, Some(6), Some(3)), (p.p0 * p.p2), s.ad_value(12), A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(6), Some(3)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2)));
         }
 
         s.b[2700] = (p.p320 > 0.0);

@@ -415,7 +415,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign6620_ad_e9969, (-3.24e17), s.ad_value(83), assign6620_ad_e10007, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign6620_ad_e9969, (-3.24e17), s.ad_value(83), assign6620_ad_e10007, (-3.24e17));
         }
 
         if ((s.b[433] && s.b[434]) && s.b[438]) {
@@ -475,7 +475,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign6780_ad_e10266, (-3.24e17), s.ad_value(83), assign6780_ad_e10304, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign6780_ad_e10266, (-3.24e17), s.ad_value(83), assign6780_ad_e10304, (-3.24e17));
         }
 
         if ((s.b[433] && s.b[434]) && s.b[438]) {
@@ -594,7 +594,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign7240_ad_e10998, (-3.24e17), s.ad_value(83), assign7240_ad_e11036, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign7240_ad_e10998, (-3.24e17), s.ad_value(83), assign7240_ad_e11036, (-3.24e17));
         }
 
     }
@@ -661,7 +661,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign7390_ad_e11284, (-3.24e17), s.ad_value(83), assign7390_ad_e11322, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign7390_ad_e11284, (-3.24e17), s.ad_value(83), assign7390_ad_e11322, (-3.24e17));
         }
 
         if ((s.b[433] && s.b[434]) && s.b[440]) {
@@ -831,7 +831,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign8160_ad_e12412, (-3.24e17), s.ad_value(83), assign8160_ad_e12450, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign8160_ad_e12412, (-3.24e17), s.ad_value(83), assign8160_ad_e12450, (-3.24e17));
         }
 
         if (((!s.b[433]) && s.b[442]) && s.b[445]) {
@@ -899,7 +899,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign8320_ad_e12725, (-3.24e17), s.ad_value(83), assign8320_ad_e12763, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign8320_ad_e12725, (-3.24e17), s.ad_value(83), assign8320_ad_e12763, (-3.24e17));
         }
 
         if (((!s.b[433]) && s.b[442]) && s.b[445]) {
@@ -1019,7 +1019,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign8790_ad_e13508, (-3.24e17), s.ad_value(83), assign8790_ad_e13546, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign8790_ad_e13508, (-3.24e17), s.ad_value(83), assign8790_ad_e13546, (-3.24e17));
         }
 
         if (((!s.b[433]) && s.b[442]) && s.b[447]) {
@@ -1078,7 +1078,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign8940_ad_e13809, (-3.24e17), s.ad_value(83), assign8940_ad_e13847, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign8940_ad_e13809, (-3.24e17), s.ad_value(83), assign8940_ad_e13847, (-3.24e17));
         }
 
         if (((!s.b[433]) && s.b[442]) && s.b[447]) {
@@ -1266,7 +1266,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign9710_ad_e14898, (-3.24e17), s.ad_value(83), assign9710_ad_e14936, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign9710_ad_e14898, (-3.24e17), s.ad_value(83), assign9710_ad_e14936, (-3.24e17));
         }
 
         if ((s.b[448] && s.b[449]) && s.b[453]) {
@@ -1326,7 +1326,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign9870_ad_e15195, (-3.24e17), s.ad_value(83), assign9870_ad_e15233, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign9870_ad_e15195, (-3.24e17), s.ad_value(83), assign9870_ad_e15233, (-3.24e17));
         }
 
         if ((s.b[448] && s.b[449]) && s.b[453]) {
@@ -1453,7 +1453,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign10330_ad_e15927, (-3.24e17), s.ad_value(83), assign10330_ad_e15965, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign10330_ad_e15927, (-3.24e17), s.ad_value(83), assign10330_ad_e15965, (-3.24e17));
         }
 
         if ((s.b[448] && s.b[449]) && s.b[455]) {
@@ -1512,7 +1512,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign10480_ad_e16213, (-3.24e17), s.ad_value(83), assign10480_ad_e16251, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign10480_ad_e16213, (-3.24e17), s.ad_value(83), assign10480_ad_e16251, (-3.24e17));
         }
 
         if ((s.b[448] && s.b[449]) && s.b[455]) {
@@ -1682,7 +1682,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign11250_ad_e17341, (-3.24e17), s.ad_value(83), assign11250_ad_e17379, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign11250_ad_e17341, (-3.24e17), s.ad_value(83), assign11250_ad_e17379, (-3.24e17));
         }
 
         if (((!s.b[448]) && s.b[457]) && s.b[460]) {
@@ -1753,7 +1753,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign11410_ad_e17654, (-3.24e17), s.ad_value(83), assign11410_ad_e17692, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign11410_ad_e17654, (-3.24e17), s.ad_value(83), assign11410_ad_e17692, (-3.24e17));
         }
 
         if (((!s.b[448]) && s.b[457]) && s.b[460]) {
@@ -1873,7 +1873,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign11880_ad_e18437, (-3.24e17), s.ad_value(83), assign11880_ad_e18475, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign11880_ad_e18437, (-3.24e17), s.ad_value(83), assign11880_ad_e18475, (-3.24e17));
         }
 
         if (((!s.b[448]) && s.b[457]) && s.b[462]) {
@@ -1932,7 +1932,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign12030_ad_e18738, (-3.24e17), s.ad_value(83), assign12030_ad_e18776, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign12030_ad_e18738, (-3.24e17), s.ad_value(83), assign12030_ad_e18776, (-3.24e17));
         }
 
         if (((!s.b[448]) && s.b[457]) && s.b[462]) {
@@ -2122,7 +2122,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign12800_ad_e19827, (-3.24e17), s.ad_value(83), assign12800_ad_e19865, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign12800_ad_e19827, (-3.24e17), s.ad_value(83), assign12800_ad_e19865, (-3.24e17));
         }
 
         if ((s.b[463] && s.b[464]) && s.b[468]) {
@@ -2182,7 +2182,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign12960_ad_e20124, (-3.24e17), s.ad_value(83), assign12960_ad_e20162, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign12960_ad_e20124, (-3.24e17), s.ad_value(83), assign12960_ad_e20162, (-3.24e17));
         }
 
         if ((s.b[463] && s.b[464]) && s.b[468]) {
@@ -2309,7 +2309,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign13420_ad_e20856, (-3.24e17), s.ad_value(83), assign13420_ad_e20894, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign13420_ad_e20856, (-3.24e17), s.ad_value(83), assign13420_ad_e20894, (-3.24e17));
         }
 
         if ((s.b[463] && s.b[464]) && s.b[470]) {
@@ -2368,7 +2368,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign13570_ad_e21142, (-3.24e17), s.ad_value(83), assign13570_ad_e21180, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign13570_ad_e21142, (-3.24e17), s.ad_value(83), assign13570_ad_e21180, (-3.24e17));
         }
 
         if ((s.b[463] && s.b[464]) && s.b[470]) {
@@ -2538,7 +2538,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign14340_ad_e22270, (-3.24e17), s.ad_value(83), assign14340_ad_e22308, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign14340_ad_e22270, (-3.24e17), s.ad_value(83), assign14340_ad_e22308, (-3.24e17));
         }
 
         if (((!s.b[463]) && s.b[472]) && s.b[475]) {
@@ -2609,7 +2609,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign14500_ad_e22583, (-3.24e17), s.ad_value(83), assign14500_ad_e22621, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign14500_ad_e22583, (-3.24e17), s.ad_value(83), assign14500_ad_e22621, (-3.24e17));
         }
 
         if (((!s.b[463]) && s.b[472]) && s.b[475]) {
@@ -2729,7 +2729,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign14970_ad_e23366, (-3.24e17), s.ad_value(83), assign14970_ad_e23404, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign14970_ad_e23366, (-3.24e17), s.ad_value(83), assign14970_ad_e23404, (-3.24e17));
         }
 
         if (((!s.b[463]) && s.b[472]) && s.b[477]) {
@@ -2788,7 +2788,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign15120_ad_e23667, (-3.24e17), s.ad_value(83), assign15120_ad_e23705, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign15120_ad_e23667, (-3.24e17), s.ad_value(83), assign15120_ad_e23705, (-3.24e17));
         }
 
         if (((!s.b[463]) && s.b[472]) && s.b[477]) {
@@ -2978,7 +2978,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign15890_ad_e24756, (-3.24e17), s.ad_value(83), assign15890_ad_e24794, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign15890_ad_e24756, (-3.24e17), s.ad_value(83), assign15890_ad_e24794, (-3.24e17));
         }
 
         if ((s.b[478] && s.b[479]) && s.b[483]) {
@@ -3038,7 +3038,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign16050_ad_e25053, (-3.24e17), s.ad_value(83), assign16050_ad_e25091, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign16050_ad_e25053, (-3.24e17), s.ad_value(83), assign16050_ad_e25091, (-3.24e17));
         }
 
         if ((s.b[478] && s.b[479]) && s.b[483]) {
@@ -3165,7 +3165,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign16510_ad_e25785, (-3.24e17), s.ad_value(83), assign16510_ad_e25823, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign16510_ad_e25785, (-3.24e17), s.ad_value(83), assign16510_ad_e25823, (-3.24e17));
         }
 
         if ((s.b[478] && s.b[479]) && s.b[485]) {
@@ -3224,7 +3224,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign16660_ad_e26071, (-3.24e17), s.ad_value(83), assign16660_ad_e26109, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign16660_ad_e26071, (-3.24e17), s.ad_value(83), assign16660_ad_e26109, (-3.24e17));
         }
 
         if ((s.b[478] && s.b[479]) && s.b[485]) {
@@ -3394,7 +3394,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign17430_ad_e27199, (-3.24e17), s.ad_value(83), assign17430_ad_e27237, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign17430_ad_e27199, (-3.24e17), s.ad_value(83), assign17430_ad_e27237, (-3.24e17));
         }
 
         if (((!s.b[478]) && s.b[487]) && s.b[490]) {
@@ -3465,7 +3465,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign17590_ad_e27512, (-3.24e17), s.ad_value(83), assign17590_ad_e27550, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign17590_ad_e27512, (-3.24e17), s.ad_value(83), assign17590_ad_e27550, (-3.24e17));
         }
 
         if (((!s.b[478]) && s.b[487]) && s.b[490]) {
@@ -3585,7 +3585,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign18060_ad_e28295, (-3.24e17), s.ad_value(83), assign18060_ad_e28333, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign18060_ad_e28295, (-3.24e17), s.ad_value(83), assign18060_ad_e28333, (-3.24e17));
         }
 
         if (((!s.b[478]) && s.b[487]) && s.b[492]) {
@@ -3644,7 +3644,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign18210_ad_e28596, (-3.24e17), s.ad_value(83), assign18210_ad_e28634, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign18210_ad_e28596, (-3.24e17), s.ad_value(83), assign18210_ad_e28634, (-3.24e17));
         }
 
         if (((!s.b[478]) && s.b[487]) && s.b[492]) {
@@ -3834,7 +3834,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign18980_ad_e29685, (-3.24e17), s.ad_value(83), assign18980_ad_e29723, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign18980_ad_e29685, (-3.24e17), s.ad_value(83), assign18980_ad_e29723, (-3.24e17));
         }
 
         if ((s.b[493] && s.b[494]) && s.b[498]) {
@@ -3894,7 +3894,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign19140_ad_e29982, (-3.24e17), s.ad_value(83), assign19140_ad_e30020, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign19140_ad_e29982, (-3.24e17), s.ad_value(83), assign19140_ad_e30020, (-3.24e17));
         }
 
         if ((s.b[493] && s.b[494]) && s.b[498]) {
@@ -4021,7 +4021,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign19600_ad_e30714, (-3.24e17), s.ad_value(83), assign19600_ad_e30752, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign19600_ad_e30714, (-3.24e17), s.ad_value(83), assign19600_ad_e30752, (-3.24e17));
         }
 
         if ((s.b[493] && s.b[494]) && s.b[500]) {
@@ -4080,7 +4080,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign19750_ad_e31000, (-3.24e17), s.ad_value(83), assign19750_ad_e31038, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign19750_ad_e31000, (-3.24e17), s.ad_value(83), assign19750_ad_e31038, (-3.24e17));
         }
 
         if ((s.b[493] && s.b[494]) && s.b[500]) {
@@ -4250,7 +4250,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign20520_ad_e32128, (-3.24e17), s.ad_value(83), assign20520_ad_e32166, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign20520_ad_e32128, (-3.24e17), s.ad_value(83), assign20520_ad_e32166, (-3.24e17));
         }
 
         if (((!s.b[493]) && s.b[502]) && s.b[505]) {
@@ -4321,7 +4321,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign20680_ad_e32441, (-3.24e17), s.ad_value(83), assign20680_ad_e32479, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign20680_ad_e32441, (-3.24e17), s.ad_value(83), assign20680_ad_e32479, (-3.24e17));
         }
 
         if (((!s.b[493]) && s.b[502]) && s.b[505]) {
@@ -4441,7 +4441,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(106, A::add_scaled_products3(s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign21150_ad_e33224, (-3.24e17), s.ad_value(83), assign21150_ad_e33262, (-3.24e17)));
+            s.store_add_scaled_products3(106, s.ad_value(99), s.ad_value(101), 1.0, s.ad_value(83), assign21150_ad_e33224, (-3.24e17), s.ad_value(83), assign21150_ad_e33262, (-3.24e17));
         }
 
         if (((!s.b[493]) && s.b[502]) && s.b[507]) {
@@ -4500,7 +4500,7 @@ impl Instance {
                     }
                 }
             };
-            s.store_ad_value(120, A::add_scaled_products3(s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign21300_ad_e33525, (-3.24e17), s.ad_value(83), assign21300_ad_e33563, (-3.24e17)));
+            s.store_add_scaled_products3(120, s.ad_value(99), s.ad_value(115), 1.0, s.ad_value(83), assign21300_ad_e33525, (-3.24e17), s.ad_value(83), assign21300_ad_e33563, (-3.24e17));
         }
 
         if (((!s.b[493]) && s.b[502]) && s.b[507]) {

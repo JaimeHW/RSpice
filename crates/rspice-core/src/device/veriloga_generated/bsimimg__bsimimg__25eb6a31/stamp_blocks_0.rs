@@ -1234,7 +1234,7 @@ impl Instance {
 
         s.store_sub(429, 423, 452);
 
-        s.store_ad_value(442, A::add_scaled_products(s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0)));
+        s.store_add_scaled_products(442, s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0));
 
         s.b[600] = (s.v[442] < 0.0);
         s.v[600] = if s.b[600] { 1.0 } else { 0.0 };
@@ -1689,7 +1689,7 @@ impl Instance {
 
         s.store_div_ad(140, A::exp(A::div(s.ad_value(35), s.ad_value(81))), A::add(A::exp(A::div(s.ad_value(34), s.ad_value(81))), A::exp(A::div(s.ad_value(35), s.ad_value(81)))));
 
-        s.store_ad_value(121, A::add_scaled_products(s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0));
+        s.store_add_scaled_products(121, s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0);
 
         s.b[611] = (p.p14 == 1.0);
         s.v[611] = if s.b[611] { 1.0 } else { 0.0 };
@@ -1789,7 +1789,7 @@ impl Instance {
 
         s.store_sub(429, 423, 452);
 
-        s.store_ad_value(442, A::add_scaled_products(s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0)));
+        s.store_add_scaled_products(442, s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0));
 
         s.b[615] = (s.v[442] < 0.0);
         s.v[615] = if s.b[615] { 1.0 } else { 0.0 };
@@ -2270,7 +2270,7 @@ impl Instance {
 
         s.store_div_ad(140, A::exp(A::div(s.ad_value(35), s.ad_value(81))), A::add(A::exp(A::div(s.ad_value(34), s.ad_value(81))), A::exp(A::div(s.ad_value(35), s.ad_value(81)))));
 
-        s.store_ad_value(121, A::add_scaled_products(s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0));
+        s.store_add_scaled_products(121, s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0);
 
         s.store_div_scaled_product(56, s.ad_value(121), s.ad_value(3), s.v[17], s.ad_value(2), 1.0);
 
@@ -4019,7 +4019,7 @@ impl Instance {
 
         s.store_sub(429, 423, 452);
 
-        s.store_ad_value(442, A::add_scaled_products(s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0)));
+        s.store_add_scaled_products(442, s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0));
 
         s.b[600] = (s.v[442] < 0.0);
         s.v[600] = if s.b[600] { 1.0 } else { 0.0 };
@@ -4474,7 +4474,7 @@ impl Instance {
 
         s.store_div_ad(140, A::exp(A::div(s.ad_value(35), s.ad_value(81))), A::add(A::exp(A::div(s.ad_value(34), s.ad_value(81))), A::exp(A::div(s.ad_value(35), s.ad_value(81)))));
 
-        s.store_ad_value(121, A::add_scaled_products(s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0));
+        s.store_add_scaled_products(121, s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0);
 
         s.b[611] = (p.p14 == 1.0);
         s.v[611] = if s.b[611] { 1.0 } else { 0.0 };
@@ -4569,7 +4569,7 @@ impl Instance {
 
         s.store_sub(429, 423, 452);
 
-        s.store_ad_value(442, A::add_scaled_products(s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0)));
+        s.store_add_scaled_products(442, s.ad_value(429), s.ad_value(429), (s.v[420] * s.v[420]), s.ad_value(421), A::exp(s.ad_value(452)), (-1.0));
 
         s.b[615] = (s.v[442] < 0.0);
         s.v[615] = if s.b[615] { 1.0 } else { 0.0 };
@@ -5053,7 +5053,7 @@ impl Instance {
 
         s.store_div_ad(140, A::exp(A::div(s.ad_value(35), s.ad_value(81))), A::add(A::exp(A::div(s.ad_value(34), s.ad_value(81))), A::exp(A::div(s.ad_value(35), s.ad_value(81)))));
 
-        s.store_ad_value(121, A::add_scaled_products(s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0));
+        s.store_add_scaled_products(121, s.ad_value(139), s.ad_value(141), 1.0, s.ad_value(140), s.ad_value(142), 1.0);
 
         s.store_div_scaled_product(56, s.ad_value(121), s.ad_value(3), s.v[17], s.ad_value(2), 1.0);
 
