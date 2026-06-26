@@ -652,12 +652,12 @@ impl Instance {
             s.b[1984] = (p.p49 == 0.0);
             s.v[1984] = if s.b[1984] { 1.0 } else { 0.0 };
             if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && s.b[1984]) {
-                s.store_add_ad_lhs(1835, A::div(A::add_scaled_inputs_product(s.ad_value(1899), 1.0, s.ad_value(1834), 1.0, s.ad_value(965), s.ad_value(1831), (-2.0)), s.ad_value(1904)), 1850);
+                s.store_add_ad_lhs(1835, A::div_scaled_inputs_product(s.ad_value(1899), 1.0, s.ad_value(1834), 1.0, s.ad_value(965), s.ad_value(1831), (-2.0), s.ad_value(1904), 1.0), 1850);
                 s.store_scalar(1836, 1.0);
                 s.store_scalar(1837, 0.0);
             }
             if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && (!s.b[1984])) {
-                s.store_add_ad_rhs(1835, 1850, A::div(A::add_scaled_product(s.ad_value(1899), 1.0, s.ad_value(1827), A::sub_scaled_inputs(s.ad_value(1827), 1.0, s.ad_value(965), 2.0), 1.0), s.ad_value(1904)));
+                s.store_add_ad_rhs(1835, 1850, A::div_scaled_add_product(s.ad_value(1899), 1.0, s.ad_value(1827), A::sub_scaled_inputs(s.ad_value(1827), 1.0, s.ad_value(965), 2.0), 1.0, s.ad_value(1904), 1.0));
                 s.store_scalar(1836, 1.0);
                 s.store_ad_value(1837, A::mul_sub_from_scalar_rhs(A::add_scaled_product(s.ad_value(334), 1.0, A::div(s.ad_value(965), s.ad_value(1827)), s.ad_value(334), (-1.0)), 1.0, s.ad_value(1839)));
             }

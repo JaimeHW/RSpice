@@ -6846,6 +6846,60 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn div_scaled_inputs3(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, denominator: Self, denominator_scale: f64) -> Self {
+        let mut value = first;
+        let first_value = value.value * first_scale;
+        let second_value = second.value * second_scale;
+        let third_value = third.value * third_scale;
+        let numerator_value = (first_value + second_value) + third_value;
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        value.value = quotient;
+        for index in 0..NODE_COUNT { value.dn[index] = ((value.dn[index] * first_scale + second.dn[index] * second_scale) + third.dn[index] * third_scale) * reciprocal + denominator.dn[index] * denominator_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = ((value.db[index] * first_scale + second.db[index] * second_scale) + third.db[index] * third_scale) * reciprocal + denominator.db[index] * denominator_derivative_scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn div_scaled_inputs4(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, fourth: Self, fourth_scale: f64, denominator: Self, denominator_scale: f64) -> Self {
+        let mut value = first;
+        let first_value = value.value * first_scale;
+        let second_value = second.value * second_scale;
+        let third_value = third.value * third_scale;
+        let fourth_value = fourth.value * fourth_scale;
+        let numerator_value = ((first_value + second_value) + third_value) + fourth_value;
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        value.value = quotient;
+        for index in 0..NODE_COUNT { value.dn[index] = (((value.dn[index] * first_scale + second.dn[index] * second_scale) + third.dn[index] * third_scale) + fourth.dn[index] * fourth_scale) * reciprocal + denominator.dn[index] * denominator_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = (((value.db[index] * first_scale + second.db[index] * second_scale) + third.db[index] * third_scale) + fourth.db[index] * fourth_scale) * reciprocal + denominator.db[index] * denominator_derivative_scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn div_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {
+        let mut value = first;
+        let first_value = value.value * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_value = product_left_value * product_right_value * product_scale;
+        let numerator_value = (first_value + second_value) + product_value;
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        value.value = quotient;
+        for index in 0..NODE_COUNT { value.dn[index] = ((value.dn[index] * first_scale + second.dn[index] * second_scale) + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale) * reciprocal + denominator.dn[index] * denominator_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = ((value.db[index] * first_scale + second.db[index] * second_scale) + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale) * reciprocal + denominator.db[index] * denominator_derivative_scale; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn div_scaled_value_by_product(input: Self, input_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {
         let mut value = input;
         let input_value = value.value;
@@ -6859,6 +6913,24 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * input_derivative_scale + (denominator_left.dn[index] * denominator_right_value + denominator_left_value * denominator_right.dn[index]) * denominator_derivative_scale; }
         for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * input_derivative_scale + (denominator_left.db[index] * denominator_right_value + denominator_left_value * denominator_right.db[index]) * denominator_derivative_scale; }
         value
+    }
+
+    #[inline]
+    pub(crate) fn div_scaled_add_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {
+        let mut result = value;
+        let value_term = result.value * value_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        let numerator_value = value_term + product_term;
+        let denominator_value = denominator.value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        result.value = quotient;
+        for index in 0..NODE_COUNT { result.dn[index] = (result.dn[index] * value_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale) * reciprocal + denominator.dn[index] * denominator_derivative_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = (result.db[index] * value_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale) * reciprocal + denominator.db[index] * denominator_derivative_scale; }
+        result
     }
 
     #[inline]
