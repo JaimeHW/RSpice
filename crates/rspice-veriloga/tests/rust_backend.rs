@@ -3287,6 +3287,40 @@ fn rust_backend_directly_stores_affine_division_expression_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_product_division_expression_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_product_division_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression direct product-division stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_div_scaled_product3(&mut self, index: usize")
+            && support.contains("product_middle: AdValue")
+            && support.contains("denominator_scale: f64"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_div_scaled_product("), "{stamp}");
+    assert!(stamp.contains("s.store_div_scaled_product3("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct product-division root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
@@ -11866,6 +11900,31 @@ module compact_expression_direct_store_affine_division_helpers(p, n);
         div3 = ((a + q) - r) / den;
         div4 = (((a + q) + r) - t) / den;
         I(p, n) <+ div1 + div2 + div3 + div4;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_product_division_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_product_division_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real den;
+    real prod2;
+    real prod3;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        den = V(p) + gain;
+        prod2 = (a * q) / den;
+        prod3 = (a * q * r) / den;
+        I(p, n) <+ prod2 + prod3;
     end
 endmodule
 "#
