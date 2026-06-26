@@ -2826,6 +2826,31 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_add_scaled_inputs_product(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, product_left: AdValue, product_right: AdValue, product_scale: f64) {",
+        "        let first_value = first.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        self.values[index] = first_value + second_value + product_term;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_square_product(&mut self, index: usize, square_value: AdValue, square_scale: f64, product_left: AdValue, product_right: AdValue, product_scale: f64) {",
+        "        let square_raw = square_value.value;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let square_term = square_raw * square_raw * square_scale;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        let square_derivative_scale = 2.0 * square_raw * square_scale;",
+        "        self.values[index] = square_term + product_term;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_value.node_derivatives[axis] * square_derivative_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_value.branch_derivatives[axis] * square_derivative_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_add_scaled_products(&mut self, index: usize, left_product_left: AdValue, left_product_right: AdValue, left_scale: f64, right_product_left: AdValue, right_product_right: AdValue, right_scale: f64) {",
         "        let left_product_left_value = left_product_left.value;",
         "        let left_product_right_value = left_product_right.value;",
@@ -9977,6 +10002,24 @@ fn compact_common_fused_expression_store_helper_call(
     {
         return Some(format!(
             "scratch.store_add_scaled_product({target_index}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs_product")
+        && args.len() == 7
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_inputs_product({target_index}, {}, {}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4], args[5], args[6]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_square_product")
+        && args.len() == 5
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_square_product({target_index}, {}, {}, {}, {}, {});",
             args[0], args[1], args[2], args[3], args[4]
         ));
     }

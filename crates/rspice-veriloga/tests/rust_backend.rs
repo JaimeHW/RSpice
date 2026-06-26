@@ -2367,7 +2367,10 @@ fn rust_backend_fuses_expression_affine_product_add_chains() {
         ),
         "{support}"
     );
-    assert!(stamp.contains("A::add_scaled_inputs_product("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs_product("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("A::add_scaled_product(A::add_scaled_inputs("),
         "{stamp}"
@@ -3179,6 +3182,52 @@ fn rust_backend_directly_stores_product_sum_expression_helpers() {
     assert!(
         !stamp.contains("s.store_ad_value("),
         "direct product-sum root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_affine_product_expression_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_affine_product_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression direct affine-product stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs_product(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_add_scaled_square_product(&mut self, index: usize, square_value: AdValue<NODE_COUNT, BRANCH_COUNT>, square_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs_product("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_square_product("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct affine-product root assignments should not materialize returned AD temporaries:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -11762,6 +11811,29 @@ module compact_expression_direct_store_product_sum_helpers(p, n);
         product2 = (a * q) - (r * q);
         product3 = ((a * q) + (r * q)) - (a * r);
         I(p, n) <+ product2 + product3;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_affine_product_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_affine_product_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real affine_product;
+    real square_product;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        affine_product = (a + (gain * q)) + (q * r);
+        square_product = (a * a) - (q * r);
+        I(p, n) <+ affine_product + square_product;
     end
 endmodule
 "#
