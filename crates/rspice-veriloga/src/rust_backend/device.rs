@@ -846,6 +846,51 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_generated_limited_exp_branch_local_as_direct_branch_stores() {
+        let source = r#"
+fn stamp() {
+    let assign39840_ad_e37502: AdValue = {
+        if ((!(scratch.values[2333] > 50.0)) && (!(scratch.values[2333] < (-50.0)))) {
+            AdValue::exp(scratch.ad_value(2333))
+        } else {
+            {
+                if ((!(scratch.values[2333] > 50.0)) && (scratch.values[2333] < (-50.0))) {
+                    AdValue::exp_scaled_input(AdValue::constant(50.0), -1.0)
+                } else {
+                    {
+                        if (scratch.values[2333] > 50.0) {
+                            AdValue::scaled_offset(scratch.ad_value(2333), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
+                        } else {
+                            AdValue::constant(0.0)
+                        }
+                    }
+                }
+            }
+        }
+    };
+    scratch.store_ad_value(2323, assign39840_ad_e37502);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(compact.contains("s.store_exp(2323, 2333);"), "{compact}");
+        assert!(
+            compact.contains("s.store_scalar(2323, (50.0 * (-1.0 as f64)).exp());"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_scaled_offset(2323, 2333, (((-50.0)) + (1.0)), ((50.0) as f64).exp());"
+            ),
+            "{compact}"
+        );
+        assert!(compact.contains("s.store_scalar(2323, 0.0);"), "{compact}");
+        assert!(!compact.contains("let assign39840_ad_e37502"), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_immediate_generated_ad_local_store_as_direct_store() {
         let source = r#"
 fn stamp() {
@@ -13257,18 +13302,56 @@ fn compact_constant_ad_scalar_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
+    let scalar = compact_constant_ad_scalar_expr(value)?;
+    Some(format!("scratch.store_scalar({target_index}, {scalar});"))
+}
+
+fn compact_constant_ad_scalar_expr(value: &str) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "constant") {
+        if args.len() != 1 {
+            return None;
+        }
+        return Some(args[0].trim().to_string());
+    }
+
     if let Some(args) = compact_ad_call_args(value, "scale") {
         if args.len() != 2 {
             return None;
         }
-        let constant_args = compact_ad_call_args(args[0], "constant")?;
-        if constant_args.len() != 1 {
+        let value = compact_constant_ad_scalar_expr(args[0])?;
+        return Some(format!("({value} * {})", args[1]));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "offset") {
+        if args.len() != 2 {
             return None;
         }
-        return Some(format!(
-            "scratch.store_scalar({target_index}, ({} * {}));",
-            constant_args[0], args[1]
-        ));
+        let value = compact_constant_ad_scalar_expr(args[0])?;
+        return Some(format!("({value} + {})", args[1]));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "scaled_offset") {
+        if args.len() != 3 {
+            return None;
+        }
+        let value = compact_constant_ad_scalar_expr(args[0])?;
+        return Some(format!("(({value} + {}) * {})", args[1], args[2]));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "exp") {
+        if args.len() != 1 {
+            return None;
+        }
+        let value = compact_constant_ad_scalar_expr(args[0])?;
+        return Some(format!("({value}).exp()"));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "exp_scaled_input") {
+        if args.len() != 2 {
+            return None;
+        }
+        let value = compact_constant_ad_scalar_expr(args[0])?;
+        return Some(format!("({value} * ({} as f64)).exp()", args[1]));
     }
 
     None
