@@ -832,7 +832,7 @@ impl Instance {
             s.store_scaled_offset_ad(1180, A::sub_scaled_inputs(s.ad_value(1210), 1.0, s.ad_value(1179), 0.5), 1e-20, 12.0);
             s.store_div(1181, 1179, 1180);
             s.store_mul(1182, 1179, 1181);
-            s.store_mul_ad_rhs(1250, 1178, A::add_scaled_inputs3(s.ad_value(1210), 1.0, s.ad_value(1179), (-0.5), s.ad_value(1182), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(1250, 1178, s.ad_value(1210), 1.0, s.ad_value(1179), (-0.5), s.ad_value(1182), 1.0, 0.0);
             s.store_neg(438, 1250);
         }
 

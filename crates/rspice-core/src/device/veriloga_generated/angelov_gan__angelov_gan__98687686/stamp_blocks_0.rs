@@ -196,7 +196,7 @@ impl Instance {
         if (s.b[108] && (!(s.b[106] || s.b[107]))) {
             s.store_sub(63, 3, 58);
             s.store_square(64, 63);
-            s.store_mul_ad_rhs(17, 60, A::add_scaled_inputs3(s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(17, 60, s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0, 0.0);
             s.store_offset_ad(76, A::tanh_scaled_input(A::sub(A::limexp(s.ad_value(17)), A::limexp_scaled_input(s.ad_value(17), -1.0)), 0.5), 1.0);
             s.store_offset_scaled(1, 76, p.p15, p.p14);
             s.store_tanh_ad(81, A::mul(s.ad_value(1), s.ad_value(5)));
@@ -207,10 +207,10 @@ impl Instance {
         if (s.b[109] && (!((s.b[106] || s.b[107]) || s.b[108]))) {
             s.store_sub(63, 3, 58);
             s.store_square(64, 63);
-            s.store_mul_ad_rhs(17, 60, A::add_scaled_inputs3(s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(17, 60, s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0, 0.0);
             s.store_sub(65, 4, 58);
             s.store_square(66, 65);
-            s.store_mul_ad_rhs(71, 60, A::add_scaled_inputs3(s.ad_value(65), 1.0, s.ad_value(66), p.p12, A::mul3(s.ad_value(61), s.ad_value(65), s.ad_value(66)), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(71, 60, s.ad_value(65), 1.0, s.ad_value(66), p.p12, A::mul3(s.ad_value(61), s.ad_value(65), s.ad_value(66)), 1.0, 0.0);
             s.store_offset_ad(76, A::tanh_scaled_input(A::sub(A::limexp(s.ad_value(17)), A::limexp_scaled_input(s.ad_value(17), -1.0)), 0.5), 1.0);
             s.store_offset_ad(78, A::tanh_scaled_input(A::sub(A::limexp(s.ad_value(71)), A::limexp_scaled_input(s.ad_value(71), -1.0)), 0.5), 1.0);
             s.store_offset_scaled(1, 76, p.p15, p.p14);
@@ -673,7 +673,7 @@ impl Instance {
         if (s.b[108] && (!(s.b[106] || s.b[107]))) {
             s.store_sub(63, 3, 58);
             s.store_square(64, 63);
-            s.store_mul_ad_rhs(17, 60, A::add_scaled_inputs3(s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(17, 60, s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0, 0.0);
             s.store_offset_ad(76, A::tanh_scaled_input(A::sub(A::limexp(s.ad_value(17)), A::limexp_scaled_input(s.ad_value(17), -1.0)), 0.5), 1.0);
             s.store_offset_scaled(1, 76, p.p15, p.p14);
             s.store_tanh_ad(81, A::mul(s.ad_value(1), s.ad_value(5)));
@@ -684,10 +684,10 @@ impl Instance {
         if (s.b[109] && (!((s.b[106] || s.b[107]) || s.b[108]))) {
             s.store_sub(63, 3, 58);
             s.store_square(64, 63);
-            s.store_mul_ad_rhs(17, 60, A::add_scaled_inputs3(s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(17, 60, s.ad_value(63), 1.0, s.ad_value(64), p.p12, A::mul3(s.ad_value(61), s.ad_value(64), s.ad_value(63)), 1.0, 0.0);
             s.store_sub(65, 4, 58);
             s.store_square(66, 65);
-            s.store_mul_ad_rhs(71, 60, A::add_scaled_inputs3(s.ad_value(65), 1.0, s.ad_value(66), p.p12, A::mul3(s.ad_value(61), s.ad_value(65), s.ad_value(66)), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(71, 60, s.ad_value(65), 1.0, s.ad_value(66), p.p12, A::mul3(s.ad_value(61), s.ad_value(65), s.ad_value(66)), 1.0, 0.0);
             s.store_offset_ad(76, A::tanh_scaled_input(A::sub(A::limexp(s.ad_value(17)), A::limexp_scaled_input(s.ad_value(17), -1.0)), 0.5), 1.0);
             s.store_offset_ad(78, A::tanh_scaled_input(A::sub(A::limexp(s.ad_value(71)), A::limexp_scaled_input(s.ad_value(71), -1.0)), 0.5), 1.0);
             s.store_offset_scaled(1, 76, p.p15, p.p14);

@@ -6173,7 +6173,7 @@ impl Instance {
         if ((s.b[2288] && s.b[2300]) && (!s.b[2301])) {
             s.store_add_ad_lhs(2207, A::offset(s.ad_value(2200), (-1.0)), 2206);
             s.store_sqrt(2208, 2207);
-            s.store_mul_ad_rhs(2209, 2199, A::add_scaled_inputs3_offset(A::div_from_scalar(1.0, s.ad_value(2206)), 1.0, s.ad_value(2200), (-1.0), s.ad_value(2205), -1.0, (-1.0)));
+            s.store_mul_add_scaled_inputs3_offset_rhs(2209, 2199, A::div_from_scalar(1.0, s.ad_value(2206)), 1.0, s.ad_value(2200), (-1.0), s.ad_value(2205), -1.0, (-1.0));
         }
 
         s.b[2302] = (s.v[2200] > (s.v[2197] - 230.25850929940458));

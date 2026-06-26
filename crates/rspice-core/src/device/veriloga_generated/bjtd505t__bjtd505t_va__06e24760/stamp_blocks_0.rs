@@ -696,7 +696,7 @@ impl Instance {
             s.store_scalar(109, p.p140);
         }
 
-        s.store_mul_ad_rhs(110, 6, A::add_scaled_inputs3(s.ad_value(107), 1.0, s.ad_value(108), (-1.0), A::ln(A::div_scaled_offset_numerator(s.ad_value(107), 1.0, 1.0, A::offset(s.ad_value(108), 1.0), 1.0)), -1.0));
+        s.store_mul_add_scaled_inputs3_offset_rhs(110, 6, s.ad_value(107), 1.0, s.ad_value(108), (-1.0), A::ln(A::div_scaled_offset_numerator(s.ad_value(107), 1.0, 1.0, A::offset(s.ad_value(108), 1.0), 1.0)), -1.0, 0.0);
 
         s.store_div_scaled_inputs2(111, s.ad_value(110), 1.0, s.ad_value(242), 1.0, s.ad_value(31), 1.0);
 
@@ -2551,7 +2551,7 @@ impl Instance {
             s.store_scalar(109, p.p140);
         }
 
-        s.store_mul_ad_rhs(110, 6, A::add_scaled_inputs3(s.ad_value(107), 1.0, s.ad_value(108), (-1.0), A::ln(A::div_scaled_offset_numerator(s.ad_value(107), 1.0, 1.0, A::offset(s.ad_value(108), 1.0), 1.0)), -1.0));
+        s.store_mul_add_scaled_inputs3_offset_rhs(110, 6, s.ad_value(107), 1.0, s.ad_value(108), (-1.0), A::ln(A::div_scaled_offset_numerator(s.ad_value(107), 1.0, 1.0, A::offset(s.ad_value(108), 1.0), 1.0)), -1.0, 0.0);
 
         s.store_div_scaled_inputs2(111, s.ad_value(110), 1.0, s.ad_value(242), 1.0, s.ad_value(31), 1.0);
 

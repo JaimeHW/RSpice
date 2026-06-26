@@ -2207,7 +2207,7 @@ impl Instance {
         }
 
         if ((s.b[1441] && s.b[1442]) && (!s.b[1709])) {
-            s.store_mul_ad_rhs(335, 1547, A::add_scaled_inputs3(s.ad_value(1465), 1.0, s.ad_value(1433), -1.0, s.ad_value(961), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(335, 1547, s.ad_value(1465), 1.0, s.ad_value(1433), -1.0, s.ad_value(961), 1.0, 0.0);
         }
 
         s.b[1728] = (s.v[335] > 0.0);

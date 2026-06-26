@@ -423,7 +423,7 @@ impl Instance {
             s.store_scaled_offset_ad(844, A::sub_scaled_inputs(s.ad_value(875), 1.0, s.ad_value(843), 0.5), 1e-20, 12.0);
             s.store_div(845, 843, 844);
             s.store_mul(846, 843, 845);
-            s.store_mul_ad_rhs(915, 842, A::add_scaled_inputs3(s.ad_value(875), 1.0, s.ad_value(843), (-0.5), s.ad_value(846), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(915, 842, s.ad_value(875), 1.0, s.ad_value(843), (-0.5), s.ad_value(846), 1.0, 0.0);
             s.store_neg(82, 915);
         }
 

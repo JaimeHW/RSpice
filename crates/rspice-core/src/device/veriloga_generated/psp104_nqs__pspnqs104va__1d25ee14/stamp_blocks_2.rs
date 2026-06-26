@@ -370,7 +370,7 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[2340] {
-            s.store_mul_ad_rhs(1880, 2077, A::add_scaled_inputs3(s.ad_value(829), 1.0, s.ad_value(2079), 1.0, s.ad_value(713), -1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(1880, 2077, s.ad_value(829), 1.0, s.ad_value(2079), 1.0, s.ad_value(713), -1.0, 0.0);
             s.store_mul(2080, 2077, 760);
             s.store_scaled_ln_ad(2081, A::add(A::div(s.ad_value(2080), s.ad_value(761)), A::sqrt(s.ad_value(2080))), 2.0);
             s.store_mul(2082, 2077, 2073);
@@ -1382,7 +1382,7 @@ impl Instance {
         if (((s.b[2547] && s.b[2575]) && s.b[2587]) && (!s.b[2588])) {
             s.store_add_ad_lhs(2491, A::offset(s.ad_value(2484), (-1.0)), 2490);
             s.store_sqrt(2492, 2491);
-            s.store_mul_ad_rhs(2493, 2483, A::add_scaled_inputs3_offset(A::div_from_scalar(1.0, s.ad_value(2490)), 1.0, s.ad_value(2484), (-1.0), s.ad_value(2489), -1.0, (-1.0)));
+            s.store_mul_add_scaled_inputs3_offset_rhs(2493, 2483, A::div_from_scalar(1.0, s.ad_value(2490)), 1.0, s.ad_value(2484), (-1.0), s.ad_value(2489), -1.0, (-1.0));
         }
 
         s.b[2589] = (s.v[2484] > (s.v[2481] - 230.25850929940458));
@@ -1695,7 +1695,7 @@ impl Instance {
         if (s.b[2601] && s.b[2602]) {
             s.store_add_scaled_inputs3(2364, s.ad_value(1887), 1.0, s.ad_value(270), (-1.0), s.ad_value(808), 1.0);
             s.store_add_scaled_inputs3(2027, s.ad_value(2364), 0.5, s.ad_value(808), 0.5, A::sqrt(A::add_scaled_product(s.ad_value(809), 1.0, A::sub(s.ad_value(2364), s.ad_value(808)), A::sub(s.ad_value(2364), s.ad_value(808)), 1.0)), 0.5);
-            s.store_mul_ad_rhs(2028, 2027, A::add_scaled_inputs3(s.ad_value(2027), 2.0, s.ad_value(808), (-1.0), s.ad_value(2364), -1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(2028, 2027, s.ad_value(2027), 2.0, s.ad_value(808), (-1.0), s.ad_value(2364), -1.0, 0.0);
             s.store_div(2029, 808, 2027);
             s.store_mul(2365, 2364, 2029);
             s.store_sqrt_sub_from_scalar_ad(2366, 1.0, A::mul(s.ad_value(2365), s.ad_value(272)));

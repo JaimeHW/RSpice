@@ -813,7 +813,7 @@ impl Instance {
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(232, 218, 1.0, A::div_scaled_inputs(s.ad_value(206), p.p49, s.ad_value(215), 1.0), s.v[192]);
         }
 
-        s.store_mul_ad_lhs(236, A::add_scaled_inputs3(s.ad_value(230), 1.0, s.ad_value(231), 1.0, s.ad_value(232), 1.0), 206);
+        s.store_mul_add_scaled_inputs3_offset_rhs(236, 206, s.ad_value(230), 1.0, s.ad_value(231), 1.0, s.ad_value(232), 1.0, 0.0);
 
         s.b[270] = (s.v[207] > 0.0);
         s.v[270] = if s.b[270] { 1.0 } else { 0.0 };
@@ -830,7 +830,7 @@ impl Instance {
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(235, 218, 1.0, A::div_scaled_inputs(s.ad_value(207), p.p49, s.ad_value(215), 1.0), s.v[192]);
         }
 
-        s.store_mul_ad_lhs(237, A::add_scaled_inputs3(s.ad_value(233), 1.0, s.ad_value(234), 1.0, s.ad_value(235), 1.0), 207);
+        s.store_mul_add_scaled_inputs3_offset_rhs(237, 207, s.ad_value(233), 1.0, s.ad_value(234), 1.0, s.ad_value(235), 1.0, 0.0);
 
     }
 
@@ -1503,7 +1503,7 @@ impl Instance {
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(232, 218, 1.0, A::div_scaled_inputs(s.ad_value(206), p.p49, s.ad_value(215), 1.0), s.v[192]);
         }
 
-        s.store_mul_ad_lhs(236, A::add_scaled_inputs3(s.ad_value(230), 1.0, s.ad_value(231), 1.0, s.ad_value(232), 1.0), 206);
+        s.store_mul_add_scaled_inputs3_offset_rhs(236, 206, s.ad_value(230), 1.0, s.ad_value(231), 1.0, s.ad_value(232), 1.0, 0.0);
 
         s.b[270] = (s.v[207] > 0.0);
         s.v[270] = if s.b[270] { 1.0 } else { 0.0 };
@@ -1520,7 +1520,7 @@ impl Instance {
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(235, 218, 1.0, A::div_scaled_inputs(s.ad_value(207), p.p49, s.ad_value(215), 1.0), s.v[192]);
         }
 
-        s.store_mul_ad_lhs(237, A::add_scaled_inputs3(s.ad_value(233), 1.0, s.ad_value(234), 1.0, s.ad_value(235), 1.0), 207);
+        s.store_mul_add_scaled_inputs3_offset_rhs(237, 207, s.ad_value(233), 1.0, s.ad_value(234), 1.0, s.ad_value(235), 1.0, 0.0);
 
     }
 

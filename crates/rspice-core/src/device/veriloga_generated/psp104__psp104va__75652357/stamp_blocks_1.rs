@@ -6097,7 +6097,7 @@ impl Instance {
         if ((s.b[2180] && s.b[2192]) && (!s.b[2193])) {
             s.store_add_ad_lhs(2099, A::offset(s.ad_value(2092), (-1.0)), 2098);
             s.store_sqrt(2100, 2099);
-            s.store_mul_ad_rhs(2101, 2091, A::add_scaled_inputs3_offset(A::div_from_scalar(1.0, s.ad_value(2098)), 1.0, s.ad_value(2092), (-1.0), s.ad_value(2097), -1.0, (-1.0)));
+            s.store_mul_add_scaled_inputs3_offset_rhs(2101, 2091, A::div_from_scalar(1.0, s.ad_value(2098)), 1.0, s.ad_value(2092), (-1.0), s.ad_value(2097), -1.0, (-1.0));
         }
 
         s.b[2194] = (s.v[2092] > (s.v[2089] - 230.25850929940458));

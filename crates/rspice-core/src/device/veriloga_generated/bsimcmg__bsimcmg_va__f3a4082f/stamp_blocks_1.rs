@@ -3197,7 +3197,7 @@ impl Instance {
         if (((s.b[1523] && s.b[1524]) && (!s.b[1525])) && s.b[1526]) {
             s.store_div_scaled_offset_numerator(169, s.ad_value(521), 1.0, p.p1626, s.ad_value(539), 1.0);
             s.store_limited_exp_neg_input(170, 169);
-            s.store_mul_ad_rhs(519, 537, A::add_scaled_inputs3_offset(A::limited_exp(s.ad_value(168)), 1.0, s.ad_value(547), 1.0, s.ad_value(170), (-p.p1628), (-1.0)));
+            s.store_mul_add_scaled_inputs3_offset_rhs(519, 537, A::limited_exp(s.ad_value(168)), 1.0, s.ad_value(547), 1.0, s.ad_value(170), (-p.p1628), (-1.0));
         }
 
         if (((s.b[1523] && s.b[1524]) && (!s.b[1525])) && (!s.b[1526])) {
@@ -3282,7 +3282,7 @@ impl Instance {
             s.store_div(168, 522, 540);
             s.store_div_scaled_offset_numerator(169, s.ad_value(522), 1.0, p.p1627, s.ad_value(540), 1.0);
             s.store_limited_exp_neg_input(170, 169);
-            s.store_mul_ad_rhs(520, 538, A::add_scaled_inputs3_offset(A::limited_exp(s.ad_value(168)), 1.0, s.ad_value(554), 1.0, s.ad_value(170), (-p.p1629), (-1.0)));
+            s.store_mul_add_scaled_inputs3_offset_rhs(520, 538, A::limited_exp(s.ad_value(168)), 1.0, s.ad_value(554), 1.0, s.ad_value(170), (-p.p1629), (-1.0));
         }
 
         if (((s.b[1523] && s.b[1533]) && (!s.b[1534])) && (!s.b[1535])) {
@@ -4939,7 +4939,7 @@ impl Instance {
             s.store_div_from_scalar(174, 1.0, 172);
             s.store_scaled_add_sqrt_square_offset_rhs(175, 174, 174, 0.01, 0.5);
             s.store_mul_offset_ad_lhs(614, A::mul(s.ad_value(709), s.ad_value(175)), p.p908, 189);
-            s.store_mul_ad_rhs(614, 194, A::add_scaled_inputs3(s.ad_value(190), 1.0, s.ad_value(191), 1.0, s.ad_value(614), 1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(614, 194, s.ad_value(190), 1.0, s.ad_value(191), 1.0, s.ad_value(614), 1.0, 0.0);
             s.store_offset_mul_ad(620, A::div_scaled_product_by_product(s.ad_value(183), s.ad_value(613), s.v[115], s.ad_value(618), s.ad_value(619), 1.0), s.ad_value(614), 1.0);
         }
 

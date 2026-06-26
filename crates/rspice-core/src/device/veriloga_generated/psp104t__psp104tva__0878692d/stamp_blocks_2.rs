@@ -333,7 +333,7 @@ impl Instance {
             s.store_div_from_scalar(1979, 1.0, 1978);
             s.store_div_scaled_value_offset_denominator(1980, s.ad_value(819), 2.0, A::sqrt(A::offset(A::mul(s.ad_value(291), s.ad_value(819)), 1.0)), 1.0, 1.0);
             s.store_mul_ad_product_rhs(1981, 290, s.ad_value(1980), A::offset(A::mul(s.ad_value(292), s.ad_value(1976)), 1.0));
-            s.store_mul_ad_rhs(1864, 1979, A::add_scaled_inputs3(s.ad_value(818), 1.0, s.ad_value(1981), 1.0, s.ad_value(714), -1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(1864, 1979, s.ad_value(818), 1.0, s.ad_value(1981), 1.0, s.ad_value(714), -1.0, 0.0);
             s.store_mul(1982, 1979, 749);
             s.store_scaled_ln_ad(1983, A::add(A::div(s.ad_value(1982), s.ad_value(750)), A::sqrt(s.ad_value(1982))), 2.0);
             s.store_mul(1984, 1979, 1975);
@@ -1353,7 +1353,7 @@ impl Instance {
         if (((s.b[2453] && s.b[2481]) && s.b[2493]) && (!s.b[2494])) {
             s.store_add_ad_lhs(2397, A::offset(s.ad_value(2390), (-1.0)), 2396);
             s.store_sqrt(2398, 2397);
-            s.store_mul_ad_rhs(2399, 2389, A::add_scaled_inputs3_offset(A::div_from_scalar(1.0, s.ad_value(2396)), 1.0, s.ad_value(2390), (-1.0), s.ad_value(2395), -1.0, (-1.0)));
+            s.store_mul_add_scaled_inputs3_offset_rhs(2399, 2389, A::div_from_scalar(1.0, s.ad_value(2396)), 1.0, s.ad_value(2390), (-1.0), s.ad_value(2395), -1.0, (-1.0));
         }
 
         s.b[2495] = (s.v[2390] > (s.v[2387] - 230.25850929940458));
@@ -1658,7 +1658,7 @@ impl Instance {
         if (s.b[2507] && s.b[2508]) {
             s.store_add_scaled_inputs3(2270, s.ad_value(1871), 1.0, s.ad_value(268), (-1.0), s.ad_value(797), 1.0);
             s.store_add_scaled_inputs3(1929, s.ad_value(2270), 0.5, s.ad_value(797), 0.5, A::sqrt(A::add_scaled_product(s.ad_value(798), 1.0, A::sub(s.ad_value(2270), s.ad_value(797)), A::sub(s.ad_value(2270), s.ad_value(797)), 1.0)), 0.5);
-            s.store_mul_ad_rhs(1930, 1929, A::add_scaled_inputs3(s.ad_value(1929), 2.0, s.ad_value(797), (-1.0), s.ad_value(2270), -1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(1930, 1929, s.ad_value(1929), 2.0, s.ad_value(797), (-1.0), s.ad_value(2270), -1.0, 0.0);
             s.store_div(1931, 797, 1929);
             s.store_mul(2271, 2270, 1931);
             s.store_sqrt_sub_from_scalar_ad(2272, 1.0, A::mul(s.ad_value(2271), s.ad_value(270)));
