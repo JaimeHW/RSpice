@@ -2722,6 +2722,39 @@ fn rust_backend_fuses_expression_inputs_two_product_add_chains() {
 }
 
 #[test]
+fn rust_backend_stores_expression_inputs_two_product_add_chains_directly() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_inputs_two_product_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression inputs two product store");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs_products_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, first_product_left: usize, first_product_right: usize, first_product_scale: f64, second_product_left: usize, second_product_right: usize, second_product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs_products_indices("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_ad_value("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_offset_product_two_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_product_two_product_add_source())
@@ -12355,6 +12388,29 @@ module compact_expression_inputs_two_product_add(p, n);
         r = V(n);
         b = sqrt(((a + q) + (r * q)) + (a * r))
           + ln((((a + q) + (r * q)) + (a * r)) * gain);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_inputs_two_product_store_source() -> &'static str {
+    r#"
+module compact_expression_inputs_two_product_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real e;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        e = ((a + q) + (r * q)) + (a * r);
+        b = sqrt(e) + ln(e * gain);
         I(p, n) <+ b;
     end
 endmodule
