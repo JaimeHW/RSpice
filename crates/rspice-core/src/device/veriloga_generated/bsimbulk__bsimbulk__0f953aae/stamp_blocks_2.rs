@@ -3797,7 +3797,7 @@ impl Instance {
 
         s.store_ad_value(17, A::div_scaled_product3(s.ad_value(783), s.ad_value(162), s.ad_value(208), 1.0, A::add(A::offset(s.ad_value(200), 1.0), s.ad_value(144)), 1.0));
 
-        s.store_mul_scale_ad_lhs(18, A::add_scaled_product(A::square(s.ad_value(15)), 1.0, s.ad_value(214), s.ad_value(215), 1.0), 0.8, 17);
+        s.store_mul_scale_ad_lhs(18, A::add_scaled_square_product(s.ad_value(15), 1.0, s.ad_value(214), s.ad_value(215), 1.0), 0.8, 17);
 
         s.store_add_scaled_inputs(19, 18, 1.0, 218, 2.0);
 

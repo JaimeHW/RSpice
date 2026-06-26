@@ -6392,6 +6392,21 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn add_scaled_square_product(square_value: Self, square_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
+        let mut result = square_value;
+        let square_raw = result.value;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let square_term = square_raw * square_raw * square_scale;
+        let product_term = product_left_value * product_right_value * product_scale;
+        let square_derivative_scale = 2.0 * square_raw * square_scale;
+        result.value = square_term + product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * square_derivative_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * square_derivative_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
     pub(crate) fn add_scaled_products(left_product_left: Self, left_product_right: Self, left_scale: f64, right_product_left: Self, right_product_right: Self, right_scale: f64) -> Self {
         let mut result = left_product_left;
         let left_product_left_value = result.value;

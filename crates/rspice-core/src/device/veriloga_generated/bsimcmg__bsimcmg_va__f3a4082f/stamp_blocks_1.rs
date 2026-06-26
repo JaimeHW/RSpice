@@ -634,7 +634,7 @@ impl Instance {
             s.store_scale(225, 168, 2.0);
             s.store_ad_value(226, A::add_scaled_product(A::add(s.ad_value(175), s.ad_value(217)), 1.0, s.ad_value(175), s.ad_value(168), 3.0));
             s.store_mul_ad_rhs(227, 175, A::add_scaled_product(s.ad_value(217), 1.0, s.ad_value(175), s.ad_value(168), 2.0));
-            s.store_div_ad(210, A::sub(A::square(s.ad_value(226)), A::add_scaled_product(A::square(s.ad_value(226)), 1.0, s.ad_value(225), s.ad_value(227), (-2.0))), A::mul(A::add(s.ad_value(226), A::sqrt(A::add_scaled_product(A::square(s.ad_value(226)), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)))), s.ad_value(225)));
+            s.store_div_ad(210, A::sub(A::square(s.ad_value(226)), A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0))), A::mul(A::add(s.ad_value(226), A::sqrt(A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)))), s.ad_value(225)));
         }
 
         if (!s.b[1427]) {
@@ -1154,7 +1154,7 @@ impl Instance {
             s.store_scale(225, 168, 2.0);
             s.store_ad_value(226, A::add_scaled_product(A::add(s.ad_value(175), s.ad_value(223)), 1.0, s.ad_value(175), s.ad_value(168), 3.0));
             s.store_mul_ad_rhs(227, 175, A::add_scaled_product(s.ad_value(223), 1.0, s.ad_value(175), s.ad_value(168), 2.0));
-            s.store_div_ad(211, A::sub(A::square(s.ad_value(226)), A::add_scaled_product(A::square(s.ad_value(226)), 1.0, s.ad_value(225), s.ad_value(227), (-2.0))), A::mul(A::add(s.ad_value(226), A::sqrt(A::add_scaled_product(A::square(s.ad_value(226)), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)))), s.ad_value(225)));
+            s.store_div_ad(211, A::sub(A::square(s.ad_value(226)), A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0))), A::mul(A::add(s.ad_value(226), A::sqrt(A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)))), s.ad_value(225)));
         }
 
         if (s.b[1431] && (!s.b[1440])) {
@@ -4920,7 +4920,7 @@ impl Instance {
 
         if s.b[1686] {
             s.store_mul(168, 415, 592);
-            s.store_ad_value(169, A::add_scaled_product(A::square(s.ad_value(153)), 1.0, s.ad_value(168), s.ad_value(197), 1.0));
+            s.store_ad_value(169, A::add_scaled_square_product(s.ad_value(153), 1.0, s.ad_value(168), s.ad_value(197), 1.0));
             s.store_scaled_div(593, 168, 169, p.p1707);
             s.store_scaled_mul(594, 179, 593, (4.0 * 1.60219e-19));
         }
