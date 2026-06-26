@@ -3605,6 +3605,97 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_mixed_index_product_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_mixed_index_product_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact mixed-index direct product helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_add_scaled_product_mixed_iaa(",
+        "fn store_add_scaled_product_mixed_aia(",
+        "fn store_add_scaled_product_mixed_aai(",
+        "fn store_add_scaled_inputs_product_mixed_iaaa(",
+        "fn store_add_scaled_inputs_product_mixed_aiaa(",
+        "fn store_add_scaled_inputs_product_mixed_aaia(",
+        "fn store_add_scaled_inputs_product_mixed_aaai(",
+        "fn store_add_scaled_inputs_product_mixed_iiaa(",
+        "fn store_add_scaled_inputs_product_mixed_iaia(",
+        "fn store_add_scaled_inputs_product_mixed_iaai(",
+        "fn store_add_scaled_inputs_product_mixed_aiia(",
+        "fn store_add_scaled_inputs_product_mixed_aiai(",
+        "fn store_add_scaled_inputs_product_mixed_aaii(",
+        "fn store_add_scaled_products_mixed_iaaa(",
+        "fn store_add_scaled_products_mixed_aiaa(",
+        "fn store_add_scaled_products_mixed_aaia(",
+        "fn store_add_scaled_products_mixed_aaai(",
+        "fn store_add_scaled_products_mixed_iiaa(",
+        "fn store_add_scaled_products_mixed_iaia(",
+        "fn store_add_scaled_products_mixed_iaai(",
+        "fn store_add_scaled_products_mixed_aiia(",
+        "fn store_add_scaled_products_mixed_aiai(",
+        "fn store_add_scaled_products_mixed_aaii(",
+        "fn store_div_scaled_product_mixed_iaa(",
+        "fn store_div_scaled_product_mixed_aia(",
+        "fn store_div_scaled_product_mixed_aai(",
+    ] {
+        assert!(support.contains(helper), "missing {helper}\n{support}");
+    }
+
+    for helper in [
+        "s.store_add_scaled_product_mixed_iaa(",
+        "s.store_add_scaled_product_mixed_aia(",
+        "s.store_add_scaled_product_mixed_aai(",
+        "s.store_add_scaled_inputs_product_mixed_iiaa(",
+        "s.store_add_scaled_products_mixed_iaaa(",
+        "s.store_add_scaled_products_mixed_aiaa(",
+        "s.store_add_scaled_products_mixed_aaia(",
+        "s.store_add_scaled_products_mixed_aaai(",
+        "s.store_add_scaled_products_mixed_iiaa(",
+        "s.store_add_scaled_products_mixed_iaia(",
+        "s.store_add_scaled_products_mixed_iaai(",
+        "s.store_add_scaled_products_mixed_aiia(",
+        "s.store_add_scaled_products_mixed_aiai(",
+        "s.store_add_scaled_products_mixed_aaii(",
+        "s.store_div_scaled_product_mixed_iaa(",
+        "s.store_div_scaled_product_mixed_aia(",
+        "s.store_div_scaled_product_mixed_aai(",
+    ] {
+        assert!(stamp.contains(helper), "missing {helper}\n{stamp}");
+    }
+
+    assert!(
+        !stamp.contains("s.store_add_scaled_product("),
+        "mixed product-add root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_inputs_product("),
+        "mixed input-product root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_products("),
+        "mixed product-sum root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_div_scaled_product("),
+        "mixed product-division root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
@@ -12366,6 +12457,68 @@ module compact_expression_direct_store_hybrid_index_product_helpers(p, n);
                  + products_left_left_ad + products_left_right_ad
                  + products_right_left_ad + products_right_right_ad
                  + div_left_ad + div_right_ad + div_denominator_ad;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_mixed_index_product_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_mixed_index_product_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real first_scale = 2.0;
+    parameter real second_scale = 3.0;
+    parameter real product_scale = 4.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real add_iaa;
+    real add_aia;
+    real add_aai;
+    real inputs_iiaa;
+    real products_iaaa;
+    real products_aiaa;
+    real products_aaia;
+    real products_aaai;
+    real products_iiaa;
+    real products_iaia;
+    real products_iaai;
+    real products_aiia;
+    real products_aiai;
+    real products_aaii;
+    real div_iaa;
+    real div_aia;
+    real div_aai;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) - V(n);
+        add_iaa = a + (((q + t) * (r + t)) * product_scale);
+        add_aia = sqrt(a) + ((q * (r + t)) * product_scale);
+        add_aai = sqrt(a) + (((q + t) * r) * product_scale);
+        inputs_iiaa = (a * first_scale) + (q * second_scale) + (((r + t) * (a + q)) * product_scale);
+        products_iaaa = ((a * (q + t)) * first_scale) + (((r + t) * (a + q)) * second_scale);
+        products_aiaa = (((a + t) * q) * first_scale) + (((r + t) * (a + q)) * second_scale);
+        products_aaia = (((a + t) * (q + t)) * first_scale) + ((r * (a + q)) * second_scale);
+        products_aaai = (((a + t) * (q + t)) * first_scale) + (((r + t) * a) * second_scale);
+        products_iiaa = ((a * q) * first_scale) + (((r + t) * (a + q)) * second_scale);
+        products_iaia = ((a * (q + t)) * first_scale) + ((r * (a + q)) * second_scale);
+        products_iaai = ((a * (q + t)) * first_scale) + (((r + t) * a) * second_scale);
+        products_aiia = (((a + t) * q) * first_scale) + ((r * (a + q)) * second_scale);
+        products_aiai = (((a + t) * q) * first_scale) + (((r + t) * a) * second_scale);
+        products_aaii = (((a + t) * (q + t)) * first_scale) + ((r * a) * second_scale);
+        div_iaa = (a * (q + t)) / (r + t);
+        div_aia = ((a + t) * q) / (r + t);
+        div_aai = ((a + t) * (q + t)) / r;
+        I(p, n) <+ add_iaa + add_aia + add_aai
+                 + inputs_iiaa
+                 + products_iaaa + products_aiaa + products_aaia + products_aaai
+                 + products_iiaa + products_iaia + products_iaai
+                 + products_aiia + products_aiai + products_aaii
+                 + div_iaa + div_aia + div_aai;
     end
 endmodule
 "#

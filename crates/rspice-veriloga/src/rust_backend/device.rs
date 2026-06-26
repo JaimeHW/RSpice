@@ -6437,6 +6437,7 @@ fn generate_scratch_operation_helpers() -> String {
     ]
     .join("\n");
     out.push_str(generate_hybrid_index_product_scratch_helpers());
+    out.push_str(&generate_mixed_index_product_scratch_helpers());
     out
 }
 
@@ -6663,6 +6664,140 @@ fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
         self.store_div_scaled_product_components(index, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, denominator_scale);
     }
 "#
+}
+
+fn generate_mixed_index_product_scratch_helpers() -> String {
+    let mut out = String::new();
+    for mask in ["iaa", "aia", "aai"] {
+        out.push_str(&generate_mixed_add_scaled_product_helper(mask));
+        out.push_str(&generate_mixed_div_scaled_product_helper(mask));
+    }
+    for mask in [
+        "iaaa", "aiaa", "aaia", "aaai", "iiaa", "iaia", "iaai", "aiia", "aiai", "aaii",
+    ] {
+        out.push_str(&generate_mixed_add_scaled_inputs_product_helper(mask));
+        out.push_str(&generate_mixed_add_scaled_products_helper(mask));
+    }
+    out
+}
+
+fn mixed_helper_type(mask: &str, index: usize) -> &'static str {
+    if mask.as_bytes()[index] == b'i' {
+        "usize"
+    } else {
+        "AdValue"
+    }
+}
+
+fn mixed_helper_component_locals(mask: &str, operands: &[&str]) -> String {
+    operands
+        .iter()
+        .enumerate()
+        .filter_map(|(index, operand)| {
+            (mask.as_bytes()[index] == b'i').then(|| {
+                format!(
+                    "        let {operand}_value = self.values[{operand}];\n        let {operand}_node_derivatives = self.node_derivatives[{operand}];\n        let {operand}_branch_derivatives = self.branch_derivatives[{operand}];\n"
+                )
+            })
+        })
+        .collect()
+}
+
+fn mixed_helper_component_args(mask: &str, index: usize, operand: &str) -> String {
+    if mask.as_bytes()[index] == b'i' {
+        format!("{operand}_value, {operand}_node_derivatives, {operand}_branch_derivatives")
+    } else {
+        format!("{operand}.value, {operand}.node_derivatives, {operand}.branch_derivatives")
+    }
+}
+
+fn generate_mixed_add_scaled_product_helper(mask: &str) -> String {
+    let operands = ["value", "product_left", "product_right"];
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let value = mixed_helper_component_args(mask, 0, "value");
+    let product_left = mixed_helper_component_args(mask, 1, "product_left");
+    let product_right = mixed_helper_component_args(mask, 2, "product_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn store_add_scaled_product_mixed_{mask}(&mut self, index: usize, value: {value_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64) {{
+{locals}        self.store_add_scaled_product_components(index, {value}, value_scale, {product_left}, {product_right}, product_scale);
+    }}
+"#,
+        value_ty = mixed_helper_type(mask, 0),
+        product_left_ty = mixed_helper_type(mask, 1),
+        product_right_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_mixed_add_scaled_inputs_product_helper(mask: &str) -> String {
+    let operands = ["first", "second", "product_left", "product_right"];
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let first = mixed_helper_component_args(mask, 0, "first");
+    let second = mixed_helper_component_args(mask, 1, "second");
+    let product_left = mixed_helper_component_args(mask, 2, "product_left");
+    let product_right = mixed_helper_component_args(mask, 3, "product_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn store_add_scaled_inputs_product_mixed_{mask}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64) {{
+{locals}        self.store_add_scaled_inputs_product_components(index, {first}, first_scale, {second}, second_scale, {product_left}, {product_right}, product_scale);
+    }}
+"#,
+        first_ty = mixed_helper_type(mask, 0),
+        second_ty = mixed_helper_type(mask, 1),
+        product_left_ty = mixed_helper_type(mask, 2),
+        product_right_ty = mixed_helper_type(mask, 3),
+    )
+}
+
+fn generate_mixed_add_scaled_products_helper(mask: &str) -> String {
+    let operands = [
+        "left_product_left",
+        "left_product_right",
+        "right_product_left",
+        "right_product_right",
+    ];
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let left_product_left = mixed_helper_component_args(mask, 0, "left_product_left");
+    let left_product_right = mixed_helper_component_args(mask, 1, "left_product_right");
+    let right_product_left = mixed_helper_component_args(mask, 2, "right_product_left");
+    let right_product_right = mixed_helper_component_args(mask, 3, "right_product_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn store_add_scaled_products_mixed_{mask}(&mut self, index: usize, left_product_left: {left_product_left_ty}, left_product_right: {left_product_right_ty}, left_scale: f64, right_product_left: {right_product_left_ty}, right_product_right: {right_product_right_ty}, right_scale: f64) {{
+{locals}        self.store_add_scaled_products_components(index, {left_product_left}, {left_product_right}, left_scale, {right_product_left}, {right_product_right}, right_scale);
+    }}
+"#,
+        left_product_left_ty = mixed_helper_type(mask, 0),
+        left_product_right_ty = mixed_helper_type(mask, 1),
+        right_product_left_ty = mixed_helper_type(mask, 2),
+        right_product_right_ty = mixed_helper_type(mask, 3),
+    )
+}
+
+fn generate_mixed_div_scaled_product_helper(mask: &str) -> String {
+    let operands = ["product_left", "product_right", "denominator"];
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let product_left = mixed_helper_component_args(mask, 0, "product_left");
+    let product_right = mixed_helper_component_args(mask, 1, "product_right");
+    let denominator = mixed_helper_component_args(mask, 2, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn store_div_scaled_product_mixed_{mask}(&mut self, index: usize, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64, denominator: {denominator_ty}, denominator_scale: f64) {{
+{locals}        self.store_div_scaled_product_components(index, {product_left}, {product_right}, product_scale, {denominator}, denominator_scale);
+    }}
+"#,
+        product_left_ty = mixed_helper_type(mask, 0),
+        product_right_ty = mixed_helper_type(mask, 1),
+        denominator_ty = mixed_helper_type(mask, 2),
+    )
 }
 
 fn generate_ad_value_struct() -> String {
@@ -10556,6 +10691,29 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     None
 }
 
+fn compact_mixed_index_product_store_helper_name(
+    base: &str,
+    operand_indices: &[Option<usize>],
+) -> Option<String> {
+    let index_count = operand_indices
+        .iter()
+        .filter(|index| index.is_some())
+        .count();
+    let ad_count = operand_indices.len() - index_count;
+    if index_count == 0 || ad_count < 2 {
+        return None;
+    }
+    let mask = operand_indices
+        .iter()
+        .map(|index| if index.is_some() { 'i' } else { 'a' })
+        .collect::<String>();
+    Some(format!("{base}_mixed_{mask}"))
+}
+
+fn compact_mixed_index_product_arg(index: Option<usize>, expression: &str) -> String {
+    index.map_or_else(|| expression.to_string(), |index| index.to_string())
+}
+
 fn compact_common_fused_expression_store_helper_call(
     target_index: usize,
     value: &str,
@@ -10643,6 +10801,20 @@ fn compact_common_fused_expression_store_helper_call(
             _ => {}
         }
 
+        if let Some(helper) = compact_mixed_index_product_store_helper_name(
+            "store_add_scaled_product",
+            &[value_index, product_left_index, product_right_index],
+        ) {
+            return Some(format!(
+                "scratch.{helper}({target_index}, {}, {}, {}, {}, {});",
+                compact_mixed_index_product_arg(value_index, args[0]),
+                args[1],
+                compact_mixed_index_product_arg(product_left_index, args[2]),
+                compact_mixed_index_product_arg(product_right_index, args[3]),
+                args[4]
+            ));
+        }
+
         return Some(format!(
             "scratch.store_add_scaled_product({target_index}, {}, {}, {}, {}, {});",
             args[0], args[1], args[2], args[3], args[4]
@@ -10716,6 +10888,27 @@ fn compact_common_fused_expression_store_helper_call(
                 ));
             }
             _ => {}
+        }
+
+        if let Some(helper) = compact_mixed_index_product_store_helper_name(
+            "store_add_scaled_inputs_product",
+            &[
+                first_index,
+                second_index,
+                product_left_index,
+                product_right_index,
+            ],
+        ) {
+            return Some(format!(
+                "scratch.{helper}({target_index}, {}, {}, {}, {}, {}, {}, {});",
+                compact_mixed_index_product_arg(first_index, args[0]),
+                args[1],
+                compact_mixed_index_product_arg(second_index, args[2]),
+                args[3],
+                compact_mixed_index_product_arg(product_left_index, args[4]),
+                compact_mixed_index_product_arg(product_right_index, args[5]),
+                args[6]
+            ));
         }
 
         return Some(format!(
@@ -10799,6 +10992,26 @@ fn compact_common_fused_expression_store_helper_call(
             _ => {}
         }
 
+        if let Some(helper) = compact_mixed_index_product_store_helper_name(
+            "store_add_scaled_products",
+            &[
+                left_product_left_index,
+                left_product_right_index,
+                right_product_left_index,
+                right_product_right_index,
+            ],
+        ) {
+            return Some(format!(
+                "scratch.{helper}({target_index}, {}, {}, {}, {}, {}, {});",
+                compact_mixed_index_product_arg(left_product_left_index, args[0]),
+                compact_mixed_index_product_arg(left_product_right_index, args[1]),
+                args[2],
+                compact_mixed_index_product_arg(right_product_left_index, args[3]),
+                compact_mixed_index_product_arg(right_product_right_index, args[4]),
+                args[5]
+            ));
+        }
+
         return Some(format!(
             "scratch.store_add_scaled_products({target_index}, {}, {}, {}, {}, {}, {});",
             args[0], args[1], args[2], args[3], args[4], args[5]
@@ -10846,6 +11059,20 @@ fn compact_common_fused_expression_store_helper_call(
                 ));
             }
             _ => {}
+        }
+
+        if let Some(helper) = compact_mixed_index_product_store_helper_name(
+            "store_div_scaled_product",
+            &[product_left_index, product_right_index, denominator_index],
+        ) {
+            return Some(format!(
+                "scratch.{helper}({target_index}, {}, {}, {}, {}, {});",
+                compact_mixed_index_product_arg(product_left_index, args[0]),
+                compact_mixed_index_product_arg(product_right_index, args[1]),
+                args[2],
+                compact_mixed_index_product_arg(denominator_index, args[3]),
+                args[4]
+            ));
         }
 
         return Some(format!(
