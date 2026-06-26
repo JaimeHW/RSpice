@@ -2397,12 +2397,16 @@ fn rust_backend_fuses_expression_sub_from_scalar_value_product_add_chains() {
 
     assert!(
         support.contains(
-            "fn add_scaled_sub_value_product(scalar: f64, subtrahend: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self"
+            "fn store_add_scaled_sub_value_product_indices(&mut self, index: usize, scalar: f64, subtrahend: usize, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64)"
         ),
         "{support}"
     );
     assert!(
-        stamp.contains("A::add_scaled_sub_value_product("),
+        stamp.contains("s.store_add_scaled_sub_value_product_indices("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_sub_value_product("),
         "{stamp}"
     );
     assert!(
