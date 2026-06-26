@@ -326,7 +326,8 @@ impl CircuitData {
         }
         #[cfg(feature = "veriloga-builtins")]
         {
-            self.generated_veriloga_devices = snapshot.generated_veriloga_devices;
+            self.generated_veriloga_devices
+                .restore_from_snapshot(snapshot.generated_veriloga_devices);
         }
     }
 

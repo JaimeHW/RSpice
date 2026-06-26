@@ -254,6 +254,25 @@ fn write_registry(
     out.push_str("}\n\n");
 
     out.push_str("impl GeneratedBuiltinKind {\n");
+    out.push_str("    pub fn restore_from_snapshot(&mut self, snapshot: Self) {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, snapshot);\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry cannot be restored\")\n",
+        );
+    } else {
+        out.push_str("        match (self, snapshot) {\n");
+        for (index, _device) in devices.iter().enumerate() {
+            writeln!(
+                out,
+                "            (Self::Device{index}(active), Self::Device{index}(snapshot)) => active.restore_from_snapshot(snapshot),"
+            )?;
+        }
+        out.push_str("            (active, snapshot) => *active = snapshot,\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push_str("\n");
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &super::GeneratedEvalContext<'_>, stamper: &mut super::GeneratedStamper<'_>) {\n",
     );

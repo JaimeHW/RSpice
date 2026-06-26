@@ -1,9 +1,10 @@
 #![cfg(feature = "veriloga-builtins")]
 
 use rspice_core::device::veriloga_generated::{
-    GeneratedDerivative, GeneratedEvalContext, GeneratedStamper, builtins, instantiate_builtin,
+    GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper,
+    builtins, instantiate_builtin,
 };
-use rspice_core::solver::StaticMatrix;
+use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 use rspice_core::{CircuitData, netlist::ParamContext};
 
 #[test]
@@ -69,6 +70,64 @@ fn generated_dense_stamper_abi_is_slice_based() {
     );
     assert!(runtime.contains("node_derivatives: &[Value],"));
     assert!(runtime.contains("branch_derivatives: &[Value],"));
+    assert!(
+        !runtime.contains("nodes.get(index)") && !runtime.contains("branches.get(index)"),
+        "dense stamp loops should zip aligned generated slices instead of probing by index:\n{runtime}"
+    );
+    assert!(
+        !runtime.contains("stamp_current_dense_row(")
+            && !runtime.contains("stamp_current_reactive_dense_row("),
+        "dense current stampers should fuse equivalent/current row work instead of walking derivative slices once per row:\n{runtime}"
+    );
+    assert!(
+        !runtime.contains("stamp_current_const_row(")
+            && !runtime.contains("stamp_current_node1_row(")
+            && !runtime.contains("stamp_current_node2_row(")
+            && !runtime.contains("stamp_current_node3_row(")
+            && !runtime.contains("stamp_current_branch1_row(")
+            && !runtime.contains("stamp_current_branch2_row(")
+            && !runtime.contains("stamp_current_reactive_node1_row(")
+            && !runtime.contains("stamp_current_reactive_node2_row(")
+            && !runtime.contains("stamp_current_reactive_node3_row(")
+            && !runtime.contains("stamp_current_reactive_branch1_row(")
+            && !runtime.contains("stamp_current_reactive_branch2_row("),
+        "fixed-arity current stampers should stamp both terminal rows from one derivative path:\n{runtime}"
+    );
+}
+
+#[test]
+fn generated_runtime_restores_snapshots_without_discarding_scratch_storage() {
+    let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let generated_root = manifest_root.join("src/device/veriloga_generated");
+    let runtime_path = generated_root.join("mod.rs");
+    let registry_path = generated_root.join("registry.rs");
+    let nonlinear_path = manifest_root.join("src/circuit/nonlinear.rs");
+
+    let runtime = std::fs::read_to_string(&runtime_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
+    let registry = std::fs::read_to_string(&registry_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", registry_path.display()));
+    let nonlinear = std::fs::read_to_string(&nonlinear_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", nonlinear_path.display()));
+
+    assert!(
+        runtime.contains("pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self)"),
+        "generated runtime should restore snapshots in place:\n{runtime}"
+    );
+    assert!(
+        runtime.contains("active.restore_from_snapshot(snapshot)"),
+        "generated device vectors should preserve active instance storage when counts match:\n{runtime}"
+    );
+    assert!(
+        registry.contains("pub fn restore_from_snapshot(&mut self, snapshot: Self)"),
+        "generated registry should dispatch variant-matched restores in place:\n{registry}"
+    );
+    assert!(
+        nonlinear.contains(
+            "self.generated_veriloga_devices\n                .restore_from_snapshot(snapshot.generated_veriloga_devices);"
+        ),
+        "nonlinear restore should not replace generated devices wholesale:\n{nonlinear}"
+    );
 }
 
 #[test]
@@ -111,6 +170,115 @@ fn generated_stamper_linearizes_current_contribution() {
     let equivalent = 0.2 - (0.01 * 1.0 + -0.01 * 0.5);
     assert_eq!(rhs[0], -equivalent);
     assert_eq!(rhs[1], equivalent);
+}
+
+#[test]
+fn generated_dense_current_stamper_linearizes_in_one_dense_path() {
+    let voltages = [1.0, 2.0, 3.0, 4.0];
+    let mut rhs = vec![0.0; 4];
+    let mut matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 1, 0.0),
+            (0, 2, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 1, 0.0),
+            (1, 2, 0.0),
+            (1, 3, 0.0),
+            (2, 0, 0.0),
+            (2, 1, 0.0),
+            (2, 2, 0.0),
+            (2, 3, 0.0),
+            (3, 0, 0.0),
+            (3, 1, 0.0),
+            (3, 2, 0.0),
+            (3, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+
+    GeneratedStamper::new(&mut matrix, &mut rhs, &voltages, 3).stamp_current_dense(
+        Some(1),
+        Some(2),
+        5.0,
+        &[1, 0, 3],
+        &[0.5, 99.0, -1.0],
+        &[1],
+        &[2.0],
+        3.0,
+    );
+
+    let row0_node1 = matrix.get_index(0, 0).expect("row0 node1").0;
+    let row0_node3 = matrix.get_index(0, 2).expect("row0 node3").0;
+    let row0_branch = matrix.get_index(0, 3).expect("row0 branch").0;
+    let row1_node1 = matrix.get_index(1, 0).expect("row1 node1").0;
+    let row1_node3 = matrix.get_index(1, 2).expect("row1 node3").0;
+    let row1_branch = matrix.get_index(1, 3).expect("row1 branch").0;
+    let values = matrix.values_mut();
+
+    assert_eq!(values[row0_node1], 1.5);
+    assert_eq!(values[row0_node3], -3.0);
+    assert_eq!(values[row0_branch], 6.0);
+    assert_eq!(values[row1_node1], -1.5);
+    assert_eq!(values[row1_node3], 3.0);
+    assert_eq!(values[row1_branch], -6.0);
+
+    let equivalent = 5.0 - 1.5 * 1.0 - (-3.0) * 3.0 - 6.0 * 4.0;
+    assert_eq!(rhs[0], -equivalent);
+    assert_eq!(rhs[1], equivalent);
+    assert_eq!(rhs[2], 0.0);
+    assert_eq!(rhs[3], 0.0);
+}
+
+#[test]
+fn generated_dense_reactive_current_stamper_stamps_both_rows() {
+    let real_matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 1, 0.0),
+            (0, 2, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 1, 0.0),
+            (1, 2, 0.0),
+            (1, 3, 0.0),
+            (2, 0, 0.0),
+            (2, 1, 0.0),
+            (2, 2, 0.0),
+            (2, 3, 0.0),
+            (3, 0, 0.0),
+            (3, 1, 0.0),
+            (3, 2, 0.0),
+            (3, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new(&mut matrix, 3, 10.0).stamp_current_reactive_dense(
+        Some(1),
+        Some(2),
+        &[1, 0, 3],
+        &[0.5, 99.0, -1.0],
+        &[1],
+        &[2.0],
+        3.0,
+    );
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[0][0], 15.0);
+    assert_eq!(imag[0][2], -30.0);
+    assert_eq!(imag[0][3], 60.0);
+    assert_eq!(imag[1][0], -15.0);
+    assert_eq!(imag[1][2], 30.0);
+    assert_eq!(imag[1][3], -60.0);
+    assert_eq!(imag[0][1], 0.0);
+    assert_eq!(imag[2][0], 0.0);
 }
 
 #[test]
