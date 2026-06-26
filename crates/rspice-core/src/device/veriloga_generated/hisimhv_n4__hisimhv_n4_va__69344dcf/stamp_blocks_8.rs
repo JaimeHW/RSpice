@@ -431,9 +431,9 @@ impl Instance {
             if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (s.v[79] == 0.0)) {
                 s.store_ad_value(1873, {
                     if (s.v[1872] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1872), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1872), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1872), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1872), (-1e-25), 1.0)
                     }
                 });
             }
@@ -1334,9 +1334,9 @@ impl Instance {
             if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[1971])) && (s.v[79] == 0.0)) {
                 s.store_ad_value(1873, {
                     if (s.v[1872] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1872), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1872), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1872), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1872), (-1e-25), 1.0)
                     }
                 });
             }
@@ -3779,9 +3779,9 @@ impl Instance {
             if ((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (s.v[79] == 0.0)) {
                 s.store_ad_value(2103, {
                     if (s.v[2102] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2102), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2102), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2102), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2102), (-1e-25), 1.0)
                     }
                 });
             }
@@ -4674,9 +4674,9 @@ impl Instance {
             if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2248])) && (s.v[79] == 0.0)) {
                 s.store_ad_value(2103, {
                     if (s.v[2102] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2102), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2102), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2102), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2102), (-1e-25), 1.0)
                     }
                 });
             }

@@ -1358,7 +1358,7 @@ impl Instance {
         s.v[1508] = if s.b[1508] { 1.0 } else { 0.0 };
 
         if s.b[1505] {
-            s.store_mul_scaled_ad_rhs(1484, 75, p.p231, A::abs(A::div(s.ad_value(82), A::offset(A::mul3(s.ad_value(75), A::abs(s.ad_value(82)), s.ad_value(73)), (s.v[327] * s.v[327])))));
+            s.store_mul_scaled_ad_rhs(1484, 75, p.p231, A::abs(A::div_scaled_value_offset_denominator(s.ad_value(82), 1.0, A::mul3(s.ad_value(75), A::abs(s.ad_value(82)), s.ad_value(73)), (s.v[327] * s.v[327]), 1.0)));
         }
 
         if (s.b[1506] && (!s.b[1505])) {
@@ -2924,7 +2924,7 @@ impl Instance {
         if s.b[590] {
             s.store_sqrt_ad(462, A::div_scaled_product(s.ad_value(417), s.ad_value(481), 2.0, A::abs(s.ad_value(109)), (1.602176462e-19 * 1000000.0)));
             s.store_div(463, 417, 462);
-            s.store_ad_value(43, A::div_scaled_inputs(s.ad_value(463), s.v[392], A::offset(s.ad_value(463), s.v[392]), 1.0));
+            s.store_ad_value(43, A::div_scaled_value_offset_denominator(s.ad_value(463), s.v[392], s.ad_value(463), s.v[392], 1.0));
         }
 
         s.store_mul_scaled_ad_rhs(118, 49, 2.0, A::sub({
@@ -5064,7 +5064,7 @@ impl Instance {
         }
 
         if (!s.b[1202]) {
-            s.store_div_ad_rhs(843, 396, A::add(s.ad_value(396), A::div_from_scalar(1.0, A::offset(A::div_from_scalar(1.0, s.ad_value(393)), (1.0 / s.v[913])))));
+            s.store_div_ad_rhs(843, 396, A::add(s.ad_value(396), A::div_scalar_offset_denominator(1.0, A::div_from_scalar(1.0, s.ad_value(393)), (1.0 / s.v[913]), 1.0)));
             s.store_ad_value(1035, A::add_scaled_product(s.ad_value(1034), 1.0, s.ad_value(843), s.ad_value(1042), (-1.0)));
         }
 
@@ -5182,7 +5182,7 @@ impl Instance {
         }
 
         if (!s.b[1202]) {
-            s.store_div_ad_rhs(843, 396, A::add(s.ad_value(396), A::div_from_scalar(1.0, A::offset(A::div_from_scalar(1.0, s.ad_value(393)), (1.0 / s.v[913])))));
+            s.store_div_ad_rhs(843, 396, A::add(s.ad_value(396), A::div_scalar_offset_denominator(1.0, A::div_from_scalar(1.0, s.ad_value(393)), (1.0 / s.v[913]), 1.0)));
             s.store_ad_value(1050, A::add_scaled_product(s.ad_value(1049), 1.0, s.ad_value(843), s.ad_value(1064), (-1.0)));
         }
 

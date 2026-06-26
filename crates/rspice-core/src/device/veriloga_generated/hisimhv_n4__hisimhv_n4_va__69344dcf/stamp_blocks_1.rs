@@ -2332,7 +2332,7 @@ impl Instance {
             assert!(assign31840_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
             if ((((((s.b[1439] && s.b[1440]) && (!s.b[1707])) && (!s.b[1727])) && (!s.b[1729])) && s.b[1730]) && s.b[1732]) {
                 s.store_ad_value(1464, A::add_scaled_inputs3(s.ad_value(1446), 1.0, s.ad_value(1444), 1.0, s.ad_value(965), -1.0));
-                s.store_add_ad(1504, A::div_scalar_by_product(1.034943e-10, s.ad_value(1542), s.ad_value(1446), 1.0), A::div(A::mul_sub_from_scalar_rhs(A::div_from_scalar(1.034943e-10, s.ad_value(1542)), 1.0, A::div(s.ad_value(1532), A::offset(s.ad_value(1532), 1.0))), s.ad_value(1444)));
+                s.store_add_ad(1504, A::div_scalar_by_product(1.034943e-10, s.ad_value(1542), s.ad_value(1446), 1.0), A::div(A::mul_sub_from_scalar_rhs(A::div_from_scalar(1.034943e-10, s.ad_value(1542)), 1.0, A::div_scaled_value_offset_denominator(s.ad_value(1532), 1.0, s.ad_value(1532), 1.0, 1.0)), s.ad_value(1444)));
             }
             s.b[1733] = ((((s.v[1464] / s.v[1504])) as f64).abs() > 0.5);
             s.v[1733] = if s.b[1733] { 1.0 } else { 0.0 };
@@ -3786,7 +3786,7 @@ impl Instance {
             s.store_mul(342, 339, 251);
             s.store_scalar(343, (1.6021918e-19 * 10000.0));
             s.store_div(252, 133, 343);
-            s.store_ad_value(335, A::add_scaled_product(A::div_from_scalar(1.0, A::offset(A::add_scaled_product(s.ad_value(966), 1.0, s.ad_value(968), s.ad_value(252), 1e-11), 1e-25)), 1.0, s.ad_value(977), s.ad_value(342), 1.0));
+            s.store_ad_value(335, A::add_scaled_product(A::div_scalar_offset_denominator(1.0, A::add_scaled_product(s.ad_value(966), 1.0, s.ad_value(968), s.ad_value(252), 1e-11), 1e-25, 1.0), 1.0, s.ad_value(977), s.ad_value(342), 1.0));
             s.store_div_from_scalar(254, 1.0, 335);
             s.store_scale(254, 254, 0.0001);
             s.store_div(1551, 1553, 170);
@@ -3841,7 +3841,7 @@ impl Instance {
             s.store_mul(342, 339, 251);
             s.store_scalar(343, (1.6021918e-19 * 10000.0));
             s.store_div(252, 133, 343);
-            s.store_ad_value(335, A::add_scaled_product(A::div_from_scalar(1.0, A::offset(A::add_scaled_product(s.ad_value(967), 1.0, s.ad_value(969), s.ad_value(252), 1e-11), 1e-25)), 1.0, s.ad_value(977), s.ad_value(342), 1.0));
+            s.store_ad_value(335, A::add_scaled_product(A::div_scalar_offset_denominator(1.0, A::add_scaled_product(s.ad_value(967), 1.0, s.ad_value(969), s.ad_value(252), 1e-11), 1e-25, 1.0), 1.0, s.ad_value(977), s.ad_value(342), 1.0));
             s.store_div_from_scalar(254, 1.0, 335);
             s.store_scale(254, 254, 0.0001);
             s.store_div(1551, 1553, 170);
@@ -4705,9 +4705,9 @@ impl Instance {
             if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (s.v[79] == 0.0)) {
                 s.store_ad_value(1873, {
                     if (s.v[1872] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1872), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1872), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1872), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1872), (-1e-25), 1.0)
                     }
                 });
             }

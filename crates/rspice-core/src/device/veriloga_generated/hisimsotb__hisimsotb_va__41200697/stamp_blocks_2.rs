@@ -1109,9 +1109,9 @@ impl Instance {
             s.store_sqrt(105, 279);
             s.store_mul_sub_from_scalar_rhs(278, 103, 1.0, 105);
             s.store_add(107, 99, 278);
-            s.store_div_from_scalar_add_ad(278, 1.0, s.ad_value(120), A::div_from_scalar(2.0, A::offset(s.ad_value(99), 1e-50)));
+            s.store_div_from_scalar_add_ad(278, 1.0, s.ad_value(120), A::div_scalar_offset_denominator(2.0, s.ad_value(99), 1e-50, 1.0));
             s.store_mul_ln_ad_lhs(109, A::mul(A::div_scalar_by_product(1.0, s.ad_value(101), s.ad_value(102), 1.0), A::square(s.ad_value(99))), 278);
-            s.store_div_ad_rhs(281, 109, A::offset(s.ad_value(99), 1e-50));
+            s.store_ad_value(281, A::div_scaled_value_offset_denominator(s.ad_value(109), 1.0, s.ad_value(99), 1e-50, 1.0));
             s.store_offset_sub(110, 109, 107, (-p.p136));
             s.store_add_scaled_ad_lhs(278, A::square(s.ad_value(110)), 109, (4.0 * p.p136));
             s.store_sqrt_square_offset(639, 278, ((4.0 * 1e-6) * 1e-6));
@@ -1468,7 +1468,7 @@ impl Instance {
 
         if ((!s.b[956]) && s.b[957]) {
             s.store_scaled_offset(936, 940, (-p.p216), 10.0);
-            s.store_sub_from_scalar_ad(938, 1.0, A::div_from_scalar(1.0, A::offset(A::square(s.ad_value(936)), 1.0)));
+            s.store_sub_from_scalar_ad(938, 1.0, A::div_scalar_offset_denominator(1.0, A::square(s.ad_value(936)), 1.0, 1.0));
             s.store_mul(947, 947, 938);
             s.store_scale(937, 951, s.v[952]);
             s.store_div_from_scalar_offset_input(944, p.p209, 937, p.p209);
@@ -1647,7 +1647,7 @@ impl Instance {
         }
 
         if (!s.b[968]) {
-            s.store_ad_value(278, A::div_scaled_inputs(s.ad_value(246), (-s.v[627]), A::offset(s.ad_value(248), 1e-50), 1.0));
+            s.store_ad_value(278, A::div_scaled_value_offset_denominator(s.ad_value(246), (-s.v[627]), s.ad_value(248), 1e-50, 1.0));
         }
 
         s.b[970] = (s.v[278] < (-34.0));
@@ -1677,7 +1677,7 @@ impl Instance {
         }
 
         if (!s.b[971]) {
-            s.store_ad_value(278, A::div_scaled_inputs(s.ad_value(246), (-s.v[627]), A::offset(s.ad_value(249), 1e-50), 1.0));
+            s.store_ad_value(278, A::div_scaled_value_offset_denominator(s.ad_value(246), (-s.v[627]), s.ad_value(249), 1e-50, 1.0));
         }
 
         s.b[973] = (s.v[278] < (-34.0));

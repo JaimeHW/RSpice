@@ -41,7 +41,7 @@ impl Instance {
         }
 
         if (s.b[1467] && (!s.b[1468])) {
-            s.store_div_ad_rhs(14, 417, A::offset(s.ad_value(13), 0.001));
+            s.store_ad_value(14, A::div_scaled_value_offset_denominator(s.ad_value(417), 1.0, s.ad_value(13), 0.001, 1.0));
         }
 
         s.b[1469] = (s.v[561] != 0.0);
@@ -109,7 +109,7 @@ impl Instance {
         }
 
         if (s.b[1467] && (!s.b[1470])) {
-            s.store_div_ad_rhs(14, 418, A::offset(s.ad_value(13), 0.001));
+            s.store_ad_value(14, A::div_scaled_value_offset_denominator(s.ad_value(418), 1.0, s.ad_value(13), 0.001, 1.0));
         }
 
         s.b[1471] = (s.v[565] != 0.0);
@@ -1523,7 +1523,7 @@ impl Instance {
         if s.b[1562] {
             s.store_ad_value(137, A::div_scaled_product_by_product(s.ad_value(499), s.ad_value(108), 1.0, s.ad_value(133), s.ad_value(411), s.v[34]));
             s.store_ad_value(131, A::div_scaled_product_offset_denominator(s.ad_value(137), A::add(A::square(s.ad_value(200)), s.ad_value(200)), 1.0, A::mul_offset_rhs(s.ad_value(137), s.ad_value(200), 1.0), 1.0, 1.0));
-            s.store_ad_value(145, A::add_scaled_inputs4(s.ad_value(91), 1.0, s.ad_value(233), (-2.0), s.ad_value(131), (-2.0), A::ln(A::max_with_scalar(A::mul(A::mul3_scaled_output(s.ad_value(131), s.ad_value(90), s.ad_value(126), 2.0), A::add(A::mul3_scaled_output(s.ad_value(131), s.ad_value(90), s.ad_value(126), 2.0), A::div(s.ad_value(234), A::offset(s.ad_value(90), (-1.0))))), 1e-38)), -1.0));
+            s.store_ad_value(145, A::add_scaled_inputs4(s.ad_value(91), 1.0, s.ad_value(233), (-2.0), s.ad_value(131), (-2.0), A::ln(A::max_with_scalar(A::mul(A::mul3_scaled_output(s.ad_value(131), s.ad_value(90), s.ad_value(126), 2.0), A::add(A::mul3_scaled_output(s.ad_value(131), s.ad_value(90), s.ad_value(126), 2.0), A::div_scaled_value_offset_denominator(s.ad_value(234), 1.0, s.ad_value(90), (-1.0), 1.0))), 1e-38)), -1.0));
             s.store_mul(146, 145, 108);
         }
 
@@ -1905,7 +1905,7 @@ impl Instance {
                 } else {
                     {
                         if ((1.0 + (s.v[622] * (s.v[395] - 1.0))) < ((-10000.0) * 0.001)) {
-                            A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul_offset_rhs(s.ad_value(622), s.ad_value(395), (-1.0)), 1.0))
+                            A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul_offset_rhs(s.ad_value(622), s.ad_value(395), (-1.0)), 1.0, 1.0)
                         } else {
                             A::constant(0.0)
                         }
@@ -5764,7 +5764,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[568] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(568), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(568), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -5779,7 +5779,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[569] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(569), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(569), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -5798,7 +5798,7 @@ impl Instance {
     } else {
         {
             if ((1.0 + (s.v[577] * (s.v[395] - 1.0))) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul_offset_rhs(s.ad_value(577), s.ad_value(395), (-1.0)), 1.0))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul_offset_rhs(s.ad_value(577), s.ad_value(395), (-1.0)), 1.0, 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -5821,7 +5821,7 @@ impl Instance {
                 } else {
                     {
                         if (((1.0 + (s.v[568] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                            A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(568), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                            A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(568), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
                         } else {
                             A::constant(0.0)
                         }
@@ -5844,7 +5844,7 @@ impl Instance {
                 } else {
                     {
                         if (((1.0 + (s.v[569] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                            A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(569), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                            A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(569), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
                         } else {
                             A::constant(0.0)
                         }
@@ -5908,7 +5908,7 @@ impl Instance {
     } else {
         {
             if ((((1.0 / s.v[496]) * (1.0 + (p.p861 * s.v[396]))) - 2.0) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(A::div_from_scalar(1.0, s.ad_value(496)), A::scale_offset(s.ad_value(396), p.p861, 1.0)), (-2.0)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(A::div_from_scalar(1.0, s.ad_value(496)), A::scale_offset(s.ad_value(396), p.p861, 1.0)), (-2.0), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -5923,7 +5923,7 @@ impl Instance {
     } else {
         {
             if (((1.0 - (s.v[574] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(1.0, A::mul(s.ad_value(574), s.ad_value(396))), (-1e-6)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(1.0, A::mul(s.ad_value(574), s.ad_value(396))), (-1e-6), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -5942,7 +5942,7 @@ impl Instance {
                 } else {
                     {
                         if (((1.0 - (s.v[574] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                            A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(1.0, A::mul(s.ad_value(574), s.ad_value(396))), (-1e-6)))
+                            A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(1.0, A::mul(s.ad_value(574), s.ad_value(396))), (-1e-6), 1.0)
                         } else {
                             A::constant(0.0)
                         }
@@ -5958,7 +5958,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[149] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(149), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(149), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -5973,7 +5973,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[152] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(152), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(152), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -5997,7 +5997,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[576] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(576), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(576), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6012,7 +6012,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[576] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(576), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(576), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6027,7 +6027,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[607] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(607), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(607), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6042,7 +6042,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[608] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(608), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(608), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6057,7 +6057,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[632] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(632), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(632), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6072,7 +6072,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[635] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(635), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(635), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6087,7 +6087,7 @@ impl Instance {
     } else {
         {
             if (((1.0 + (s.v[638] * s.v[396])) - 1e-6) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::mul(s.ad_value(638), s.ad_value(396)), ((1.0) + ((-1e-6)))))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::mul(s.ad_value(638), s.ad_value(396)), ((1.0) + ((-1e-6))), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6192,7 +6192,7 @@ impl Instance {
     } else {
         {
             if (((p.p707 - (p.p892 * s.v[396])) - 0.01) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(p.p707, A::scale(s.ad_value(396), p.p892)), (-0.01)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(p.p707, A::scale(s.ad_value(396), p.p892)), (-0.01), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6207,7 +6207,7 @@ impl Instance {
     } else {
         {
             if (((p.p708 - (p.p892 * s.v[396])) - 0.01) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(p.p708, A::scale(s.ad_value(396), p.p892)), (-0.01)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(p.p708, A::scale(s.ad_value(396), p.p892)), (-0.01), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6222,7 +6222,7 @@ impl Instance {
     } else {
         {
             if (((p.p709 - (p.p893 * s.v[396])) - 0.01) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(p.p709, A::scale(s.ad_value(396), p.p893)), (-0.01)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(p.p709, A::scale(s.ad_value(396), p.p893)), (-0.01), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6237,7 +6237,7 @@ impl Instance {
     } else {
         {
             if (((p.p710 - (p.p893 * s.v[396])) - 0.01) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(p.p710, A::scale(s.ad_value(396), p.p893)), (-0.01)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(p.p710, A::scale(s.ad_value(396), p.p893)), (-0.01), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6252,7 +6252,7 @@ impl Instance {
     } else {
         {
             if (((p.p711 - (p.p894 * s.v[396])) - 0.01) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(p.p711, A::scale(s.ad_value(396), p.p894)), (-0.01)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(p.p711, A::scale(s.ad_value(396), p.p894)), (-0.01), 1.0)
             } else {
                 A::constant(0.0)
             }
@@ -6267,7 +6267,7 @@ impl Instance {
     } else {
         {
             if (((p.p712 - (p.p894 * s.v[396])) - 0.01) < ((-10000.0) * 0.001)) {
-                A::div_from_scalar(((-0.001) * 0.001), A::offset(A::sub_from_scalar(p.p712, A::scale(s.ad_value(396), p.p894)), (-0.01)))
+                A::div_scalar_offset_denominator(((-0.001) * 0.001), A::sub_from_scalar(p.p712, A::scale(s.ad_value(396), p.p894)), (-0.01), 1.0)
             } else {
                 A::constant(0.0)
             }

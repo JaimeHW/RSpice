@@ -862,9 +862,9 @@ impl Instance {
             if (((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && (!s.b[1973])) && (s.v[79] == 0.0)) {
                 s.store_ad_value(1875, {
                     if (s.v[1874] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1874), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1874), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(1874), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(1874), (-1e-25), 1.0)
                     }
                 });
             }
@@ -3307,9 +3307,9 @@ impl Instance {
             if ((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && (s.v[79] == 0.0)) {
                 s.store_ad_value(2105, {
                     if (s.v[2104] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2104), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2104), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2104), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2104), (-1e-25), 1.0)
                     }
                 });
             }
@@ -4202,9 +4202,9 @@ impl Instance {
             if (((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && (!s.b[2250])) && (s.v[79] == 0.0)) {
                 s.store_ad_value(2105, {
                     if (s.v[2104] > 0.0) {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2104), 1e-25))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2104), 1e-25, 1.0)
                     } else {
-                        A::div_from_scalar(1.0, A::offset(s.ad_value(2104), (-1e-25)))
+                        A::div_scalar_offset_denominator(1.0, s.ad_value(2104), (-1e-25), 1.0)
                     }
                 });
             }

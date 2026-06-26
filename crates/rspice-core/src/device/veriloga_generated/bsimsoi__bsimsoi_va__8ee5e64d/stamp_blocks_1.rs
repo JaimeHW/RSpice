@@ -371,7 +371,7 @@ impl Instance {
         }
 
         if ((s.b[1696] && (!s.b[1712])) && (!s.b[1713])) {
-            s.store_div_ad_rhs(1242, 1234, A::offset(s.ad_value(526), s.v[427]));
+            s.store_ad_value(1242, A::div_scaled_value_offset_denominator(s.ad_value(1234), 1.0, s.ad_value(526), s.v[427], 1.0));
         }
 
         if (!s.b[1696]) {
@@ -1774,7 +1774,7 @@ impl Instance {
         s.v[1826] = if s.b[1826] { 1.0 } else { 0.0 };
 
         if s.b[1823] {
-            s.store_mul_scaled_ad_rhs(1815, 410, s.v[245], A::abs(A::div(s.ad_value(438), A::offset(A::mul3(s.ad_value(410), A::abs(s.ad_value(438)), s.ad_value(450)), (s.v[688] * s.v[688])))));
+            s.store_mul_scaled_ad_rhs(1815, 410, s.v[245], A::abs(A::div_scaled_value_offset_denominator(s.ad_value(438), 1.0, A::mul3(s.ad_value(410), A::abs(s.ad_value(438)), s.ad_value(450)), (s.v[688] * s.v[688]), 1.0)));
         }
 
         if (s.b[1824] && (!s.b[1823])) {
@@ -3853,7 +3853,7 @@ impl Instance {
         if s.b[936] {
             s.store_sqrt_ad(812, A::div_scaled_product(s.ad_value(778), s.ad_value(833), 2.0, A::abs(s.ad_value(479)), (1.60219e-19 * 1000000.0)));
             s.store_div(813, 778, 812);
-            s.store_ad_value(336, A::div_scaled_inputs(s.ad_value(813), s.v[753], A::offset(s.ad_value(813), s.v[753]), 1.0));
+            s.store_ad_value(336, A::div_scaled_value_offset_denominator(s.ad_value(813), s.v[753], s.ad_value(813), s.v[753], 1.0));
         }
 
         s.store_mul_scaled_ad_rhs(488, 409, 2.0, {
@@ -5926,7 +5926,7 @@ impl Instance {
         }
 
         if (!s.b[1540]) {
-            s.store_div_ad_rhs(1179, 757, A::add(s.ad_value(757), A::div_from_scalar(1.0, A::offset(A::div_from_scalar(1.0, s.ad_value(754)), (1.0 / s.v[1248])))));
+            s.store_div_ad_rhs(1179, 757, A::add(s.ad_value(757), A::div_scalar_offset_denominator(1.0, A::div_from_scalar(1.0, s.ad_value(754)), (1.0 / s.v[1248]), 1.0)));
             s.store_ad_value(1369, A::add_scaled_product(s.ad_value(1368), 1.0, s.ad_value(1179), s.ad_value(1376), (-1.0)));
         }
 

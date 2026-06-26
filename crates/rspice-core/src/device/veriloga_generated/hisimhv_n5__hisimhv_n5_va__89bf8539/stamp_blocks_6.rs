@@ -2616,7 +2616,7 @@ impl Instance {
 
         if s.b[1277] {
             s.store_scalar(650, ((2.0 * 1.034943e-10) / (1.6021918e-19 * s.v[459])));
-            s.store_ad_value(651, A::div_scaled_inputs(s.ad_value(622), (((2.0 * 1.034943e-10) / 1.6021918e-19) * 1.0 / (s.v[459])), A::offset(s.ad_value(622), s.v[459]), 1.0));
+            s.store_ad_value(651, A::div_scaled_value_offset_denominator(s.ad_value(622), (((2.0 * 1.034943e-10) / 1.6021918e-19) * 1.0 / (s.v[459])), s.ad_value(622), s.v[459], 1.0));
         }
 
         if (!s.b[1277]) {
@@ -2639,7 +2639,7 @@ impl Instance {
         }
 
         if s.b[1282] {
-            s.store_offset_ad(658, A::div_scaled_inputs(s.ad_value(335), p.p107, A::offset(s.ad_value(335), p.p107), 1.0), 1.0);
+            s.store_offset_ad(658, A::div_scaled_value_offset_denominator(s.ad_value(335), p.p107, s.ad_value(335), p.p107, 1.0), 1.0);
         }
 
         if (!s.b[1282]) {
@@ -2654,7 +2654,7 @@ impl Instance {
         }
 
         if (!s.b[1282]) {
-            s.store_offset_ad(658, A::div_scaled_inputs(s.ad_value(335), p.p107, A::offset(s.ad_value(335), p.p107), 1.0), ((p.p109) + (1e-25)));
+            s.store_offset_ad(658, A::div_scaled_value_offset_denominator(s.ad_value(335), p.p107, s.ad_value(335), p.p107, 1.0), ((p.p109) + (1e-25)));
         }
 
         s.b[1286] = (s.v[658] < 0.1);
@@ -2666,7 +2666,7 @@ impl Instance {
 
         if (p.p23 != 0.0) {
             s.store_scalar(336, ((s.v[163]) as f64).powf(p.p201));
-            s.store_scaled_div_ad_rhs(659, 336, A::offset(s.ad_value(336), s.v[548]), (s.v[485] * (1.0 + (s.v[547] / ((s.v[582]) as f64).powf(p.p199)))));
+            s.store_ad_value(659, A::div_scaled_value_offset_denominator(s.ad_value(336), (s.v[485] * (1.0 + (s.v[547] / ((s.v[582]) as f64).powf(p.p199)))), s.ad_value(336), s.v[548], 1.0));
             s.store_scalar(660, (s.v[484] * (1.0 + (s.v[549] / ((s.v[582]) as f64).powf(p.p184)))));
             s.store_scalar(661, (s.v[552] * (1.0 + (s.v[550] / ((s.v[582]) as f64).powf(p.p203)))));
             s.store_scalar(662, (s.v[481] * (1.0 + (s.v[551] / ((s.v[582]) as f64).powf(p.p191)))));

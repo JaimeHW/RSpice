@@ -1543,7 +1543,7 @@ impl Instance {
 
         s.store_scaled_mul(120, 74, 51, s.v[119]);
 
-        s.store_div_ad_rhs(121, 120, A::offset(s.ad_value(120), 1.0));
+        s.store_ad_value(121, A::div_scaled_value_offset_denominator(s.ad_value(120), 1.0, s.ad_value(120), 1.0, 1.0));
 
         s.store_scaled_mul(108, 144, 50, 0.6944444444444444);
 
@@ -2590,7 +2590,7 @@ impl Instance {
 
         s.store_scaled_mul(120, 74, 51, s.v[119]);
 
-        s.store_div_ad_rhs(121, 120, A::offset(s.ad_value(120), 1.0));
+        s.store_ad_value(121, A::div_scaled_value_offset_denominator(s.ad_value(120), 1.0, s.ad_value(120), 1.0, 1.0));
 
         s.store_scaled_mul(108, 144, 50, 0.6944444444444444);
 

@@ -135,7 +135,7 @@ impl Instance {
 
         s.store_scale(12, 11, p.p64);
 
-        s.store_scaled_offset_ad(59, A::div_from_scalar(p.p18, A::offset(A::square(s.ad_value(63)), 1e-12)), 1.0, p.p11);
+        s.store_scaled_offset_ad(59, A::div_scalar_offset_denominator(p.p18, A::square(s.ad_value(63)), 1e-12, 1.0), 1.0, p.p11);
 
         s.store_mul_ad_rhs(60, 59, A::scale_offset(A::abs(s.ad_value(16)), p.p69, 1.0));
 
@@ -236,13 +236,13 @@ impl Instance {
         s.v[111] = if s.b[111] { 1.0 } else { 0.0 };
 
         if s.b[111] {
-            s.store_offset_div_ad(40, s.ad_value(46), A::offset(s.ad_value(75), 1.0), p.p57);
+            s.store_offset_ad(40, A::div_scaled_value_offset_denominator(s.ad_value(46), 1.0, s.ad_value(75), 1.0, 1.0), p.p57);
             s.store_offset_scaled(41, 75, p.p48, p.p47);
             s.store_offset_scaled(42, 75, p.p48, p.p50);
         }
 
         if (!s.b[111]) {
-            s.store_offset_div_ad(40, s.ad_value(46), A::offset(s.ad_value(76), 1.0), p.p57);
+            s.store_offset_ad(40, A::div_scaled_value_offset_denominator(s.ad_value(46), 1.0, s.ad_value(76), 1.0, 1.0), p.p57);
             s.store_offset_scaled(41, 76, p.p48, p.p47);
             s.store_offset_scaled(42, 76, p.p48, p.p50);
         }
@@ -612,7 +612,7 @@ impl Instance {
 
         s.store_scale(12, 11, p.p64);
 
-        s.store_scaled_offset_ad(59, A::div_from_scalar(p.p18, A::offset(A::square(s.ad_value(63)), 1e-12)), 1.0, p.p11);
+        s.store_scaled_offset_ad(59, A::div_scalar_offset_denominator(p.p18, A::square(s.ad_value(63)), 1e-12, 1.0), 1.0, p.p11);
 
         s.store_mul_ad_rhs(60, 59, A::scale_offset(A::abs(s.ad_value(16)), p.p69, 1.0));
 
@@ -713,13 +713,13 @@ impl Instance {
         s.v[111] = if s.b[111] { 1.0 } else { 0.0 };
 
         if s.b[111] {
-            s.store_offset_div_ad(40, s.ad_value(46), A::offset(s.ad_value(75), 1.0), p.p57);
+            s.store_offset_ad(40, A::div_scaled_value_offset_denominator(s.ad_value(46), 1.0, s.ad_value(75), 1.0, 1.0), p.p57);
             s.store_offset_scaled(41, 75, p.p48, p.p47);
             s.store_offset_scaled(42, 75, p.p48, p.p50);
         }
 
         if (!s.b[111]) {
-            s.store_offset_div_ad(40, s.ad_value(46), A::offset(s.ad_value(76), 1.0), p.p57);
+            s.store_offset_ad(40, A::div_scaled_value_offset_denominator(s.ad_value(46), 1.0, s.ad_value(76), 1.0, 1.0), p.p57);
             s.store_offset_scaled(41, 76, p.p48, p.p47);
             s.store_offset_scaled(42, 76, p.p48, p.p50);
         }

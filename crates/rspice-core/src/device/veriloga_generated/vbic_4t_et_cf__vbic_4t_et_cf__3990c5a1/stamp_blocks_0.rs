@@ -721,7 +721,7 @@ impl Instance {
 
         s.store_scale(94, 49, (s.v[93] * s.v[46]));
 
-        s.store_div_ad_rhs(95, 94, A::offset(s.ad_value(94), 1.0));
+        s.store_ad_value(95, A::div_scaled_value_offset_denominator(s.ad_value(94), 1.0, s.ad_value(94), 1.0, 1.0));
 
         s.store_scaled_mul_ad(96, A::scale_offset(s.ad_value(54), p.p57, 1.0), A::offset(A::mul_offset_rhs_scaled_output(A::limexp_scaled_input(s.ad_value(134), (s.v[45] * 1.0 / (1.44))), A::square(s.ad_value(95)), s.v[47], (p.p58 * s.v[93])), 1.0), p.p56);
 
@@ -1268,7 +1268,7 @@ impl Instance {
 
         s.store_scale(94, 49, (s.v[93] * s.v[46]));
 
-        s.store_div_ad_rhs(95, 94, A::offset(s.ad_value(94), 1.0));
+        s.store_ad_value(95, A::div_scaled_value_offset_denominator(s.ad_value(94), 1.0, s.ad_value(94), 1.0, 1.0));
 
         s.store_scaled_mul_ad(96, A::scale_offset(s.ad_value(54), p.p57, 1.0), A::offset(A::mul_offset_rhs_scaled_output(A::limexp_scaled_input(s.ad_value(134), (s.v[45] * 1.0 / (1.44))), A::square(s.ad_value(95)), s.v[47], (p.p58 * s.v[93])), 1.0), p.p56);
 

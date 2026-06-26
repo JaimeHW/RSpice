@@ -158,11 +158,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e865: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e864: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -178,11 +178,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e999: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e998: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -203,7 +203,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e1094: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -216,7 +216,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e1178: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -229,7 +229,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e1260: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -242,7 +242,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e1334: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -300,11 +300,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e1659: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e1658: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -320,11 +320,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e1793: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e1792: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -345,7 +345,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e1888: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -358,7 +358,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e1972: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -371,7 +371,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e2054: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -384,7 +384,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e2128: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -447,7 +447,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e2395: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -460,7 +460,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e2479: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -473,7 +473,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e2561: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -486,7 +486,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e2635: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -541,7 +541,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e2890: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -554,7 +554,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e2974: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -567,7 +567,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e3056: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -580,7 +580,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e3130: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -635,7 +635,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e3383: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -648,7 +648,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e3467: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -661,7 +661,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e3549: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -674,7 +674,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e3623: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -729,7 +729,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e3868: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -742,7 +742,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e3952: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -755,7 +755,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e4034: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -768,7 +768,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e4108: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -978,11 +978,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e5107: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e5106: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -998,11 +998,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e5241: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e5240: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1023,7 +1023,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e5336: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1036,7 +1036,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e5420: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1049,7 +1049,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e5502: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1062,7 +1062,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e5576: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1120,11 +1120,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e5901: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e5900: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1140,11 +1140,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e6035: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e6034: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1165,7 +1165,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e6130: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1178,7 +1178,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e6214: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1191,7 +1191,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e6296: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1204,7 +1204,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e6370: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1267,7 +1267,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e6637: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1280,7 +1280,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e6721: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1293,7 +1293,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e6803: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1306,7 +1306,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e6877: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1361,7 +1361,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e7132: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1374,7 +1374,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e7216: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1387,7 +1387,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e7298: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1400,7 +1400,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e7372: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1455,7 +1455,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e7625: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1468,7 +1468,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e7709: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1481,7 +1481,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e7791: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1494,7 +1494,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e7865: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1549,7 +1549,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e8110: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1562,7 +1562,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e8194: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1575,7 +1575,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e8276: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1588,7 +1588,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e8350: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1806,11 +1806,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e9403: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e9402: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1826,11 +1826,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e9537: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e9536: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1851,7 +1851,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e9632: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1864,7 +1864,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e9716: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1877,7 +1877,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e9798: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1890,7 +1890,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e9872: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1948,11 +1948,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e10197: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e10196: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1968,11 +1968,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e10331: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e10330: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -1993,7 +1993,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e10426: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2006,7 +2006,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e10510: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2019,7 +2019,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e10592: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2032,7 +2032,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e10666: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2095,7 +2095,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e10933: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2108,7 +2108,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e11017: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2121,7 +2121,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e11099: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2134,7 +2134,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e11173: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2189,7 +2189,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e11428: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2202,7 +2202,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e11512: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2215,7 +2215,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e11594: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2228,7 +2228,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e11668: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2283,7 +2283,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e11921: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2296,7 +2296,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e12005: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2309,7 +2309,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e12087: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2322,7 +2322,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e12161: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2377,7 +2377,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e12406: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2390,7 +2390,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e12490: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2403,7 +2403,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e12572: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2416,7 +2416,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e12646: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2626,11 +2626,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e13645: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e13644: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2646,11 +2646,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e13779: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e13778: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2671,7 +2671,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e13874: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2684,7 +2684,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e13958: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2697,7 +2697,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e14040: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2710,7 +2710,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e14114: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2768,11 +2768,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
                                             let assign780_ad_e14439: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e14438: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2788,11 +2788,11 @@ impl Instance {
                                             };
                                             let assign780_ad_e14573: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign780_ad_e14572: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2813,7 +2813,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e14668: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2826,7 +2826,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e14752: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2839,7 +2839,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e14834: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2852,7 +2852,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e14908: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2915,7 +2915,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e15175: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2928,7 +2928,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e15259: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2941,7 +2941,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e15341: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -2954,7 +2954,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e15415: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3009,7 +3009,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e15670: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3022,7 +3022,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e15754: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3035,7 +3035,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e15836: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3048,7 +3048,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e15910: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3103,7 +3103,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e16163: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3116,7 +3116,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e16247: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3129,7 +3129,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e16329: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3142,7 +3142,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e16403: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3197,7 +3197,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                                     let assign780_ad_e16648: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3210,7 +3210,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e16732: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3223,7 +3223,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e16814: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3236,7 +3236,7 @@ impl Instance {
                                                     };
                                                     let assign780_ad_e16888: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3457,7 +3457,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e17828: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3470,7 +3470,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e17912: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3483,7 +3483,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e17994: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3496,7 +3496,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e18068: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3551,7 +3551,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e18323: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3564,7 +3564,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e18407: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3577,7 +3577,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e18489: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3590,7 +3590,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e18563: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3645,7 +3645,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e18816: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3658,7 +3658,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e18900: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3671,7 +3671,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e18982: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3684,7 +3684,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e19056: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3739,7 +3739,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e19301: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3752,7 +3752,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e19385: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3765,7 +3765,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e19467: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3778,7 +3778,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e19541: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3985,7 +3985,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e20441: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -3998,7 +3998,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e20525: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4011,7 +4011,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e20607: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4024,7 +4024,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e20681: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4079,7 +4079,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e20936: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4092,7 +4092,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e21020: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4105,7 +4105,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e21102: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4118,7 +4118,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e21176: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4173,7 +4173,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e21429: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4186,7 +4186,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e21513: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4199,7 +4199,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e21595: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4212,7 +4212,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e21669: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4267,7 +4267,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e21914: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4280,7 +4280,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e21998: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4293,7 +4293,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e22080: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4306,7 +4306,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e22154: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4513,7 +4513,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e23054: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4526,7 +4526,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e23138: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4539,7 +4539,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e23220: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4552,7 +4552,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e23294: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4607,7 +4607,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e23549: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4620,7 +4620,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e23633: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4633,7 +4633,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e23715: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4646,7 +4646,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e23789: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4701,7 +4701,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e24042: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4714,7 +4714,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e24126: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4727,7 +4727,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e24208: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4740,7 +4740,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e24282: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4795,7 +4795,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e24527: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4808,7 +4808,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e24611: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4821,7 +4821,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e24693: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -4834,7 +4834,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e24767: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5041,7 +5041,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e25677: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5054,7 +5054,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e25761: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5067,7 +5067,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e25843: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5080,7 +5080,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e25917: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5135,7 +5135,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e26172: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5148,7 +5148,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e26256: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5161,7 +5161,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e26338: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5174,7 +5174,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e26412: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5229,7 +5229,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e26665: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5242,7 +5242,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e26749: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5255,7 +5255,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e26831: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5268,7 +5268,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e26905: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5323,7 +5323,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                             let assign780_ad_e27150: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5336,7 +5336,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e27234: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5349,7 +5349,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e27316: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -5362,7 +5362,7 @@ impl Instance {
                                             };
                                             let assign780_ad_e27390: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6167,7 +6167,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e30917: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6180,7 +6180,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e31001: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6193,7 +6193,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e31083: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6206,7 +6206,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e31157: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6261,7 +6261,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e31412: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6274,7 +6274,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e31496: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6287,7 +6287,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e31578: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6300,7 +6300,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e31652: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6355,7 +6355,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e31905: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6368,7 +6368,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e31989: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6381,7 +6381,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e32071: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6394,7 +6394,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e32145: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6449,7 +6449,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e32390: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6462,7 +6462,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e32474: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6475,7 +6475,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e32556: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6488,7 +6488,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e32630: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6695,7 +6695,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e33530: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6708,7 +6708,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e33614: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6721,7 +6721,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e33696: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6734,7 +6734,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e33770: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6789,7 +6789,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e34025: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6802,7 +6802,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e34109: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6815,7 +6815,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e34191: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6828,7 +6828,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e34265: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6883,7 +6883,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e34518: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6896,7 +6896,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e34602: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6909,7 +6909,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e34684: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6922,7 +6922,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e34758: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6977,7 +6977,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e35003: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -6990,7 +6990,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e35087: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7003,7 +7003,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e35169: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7016,7 +7016,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e35243: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7223,7 +7223,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e36143: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7236,7 +7236,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e36227: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7249,7 +7249,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e36309: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7262,7 +7262,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e36383: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7317,7 +7317,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e36638: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7330,7 +7330,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e36722: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7343,7 +7343,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e36804: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7356,7 +7356,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e36878: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7411,7 +7411,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e37131: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7424,7 +7424,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e37215: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7437,7 +7437,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e37297: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7450,7 +7450,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e37371: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7505,7 +7505,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e37616: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7518,7 +7518,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e37700: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7531,7 +7531,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e37782: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7544,7 +7544,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e37856: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7751,7 +7751,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e38766: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7764,7 +7764,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e38850: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7777,7 +7777,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e38932: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7790,7 +7790,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e39006: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7845,7 +7845,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e39261: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7858,7 +7858,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e39345: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7871,7 +7871,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e39427: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7884,7 +7884,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e39501: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7939,7 +7939,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e39754: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7952,7 +7952,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e39838: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7965,7 +7965,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e39920: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -7978,7 +7978,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e39994: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -8033,7 +8033,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
                                         let assign780_ad_e40239: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -8046,7 +8046,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e40323: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -8059,7 +8059,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e40405: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -8072,7 +8072,7 @@ impl Instance {
                                         };
                                         let assign780_ad_e40479: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(20), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(45), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
@@ -9553,11 +9553,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e47091: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e47090: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9573,11 +9573,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e47225: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e47224: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9598,7 +9598,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e47320: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9611,7 +9611,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e47404: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9624,7 +9624,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e47486: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9637,7 +9637,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e47560: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9695,11 +9695,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e47885: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e47884: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9715,11 +9715,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e48019: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e48018: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9740,7 +9740,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e48114: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9753,7 +9753,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e48198: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9766,7 +9766,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e48280: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9779,7 +9779,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e48354: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9842,7 +9842,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e48621: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9855,7 +9855,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e48705: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9868,7 +9868,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e48787: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9881,7 +9881,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e48861: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9936,7 +9936,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e49116: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9949,7 +9949,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e49200: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9962,7 +9962,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e49282: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -9975,7 +9975,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e49356: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10030,7 +10030,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e49609: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10043,7 +10043,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e49693: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10056,7 +10056,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e49775: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10069,7 +10069,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e49849: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10124,7 +10124,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e50094: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10137,7 +10137,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e50178: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10150,7 +10150,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e50260: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10163,7 +10163,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e50334: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10373,11 +10373,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e51333: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e51332: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10393,11 +10393,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e51467: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e51466: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10418,7 +10418,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e51562: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10431,7 +10431,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e51646: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10444,7 +10444,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e51728: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10457,7 +10457,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e51802: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10515,11 +10515,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e52127: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e52126: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10535,11 +10535,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e52261: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e52260: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10560,7 +10560,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e52356: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10573,7 +10573,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e52440: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10586,7 +10586,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e52522: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10599,7 +10599,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e52596: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10662,7 +10662,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e52863: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10675,7 +10675,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e52947: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10688,7 +10688,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e53029: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10701,7 +10701,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e53103: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10756,7 +10756,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e53358: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10769,7 +10769,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e53442: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10782,7 +10782,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e53524: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10795,7 +10795,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e53598: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10850,7 +10850,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e53851: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10863,7 +10863,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e53935: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10876,7 +10876,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e54017: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10889,7 +10889,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e54091: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10944,7 +10944,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e54336: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10957,7 +10957,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e54420: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10970,7 +10970,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e54502: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -10983,7 +10983,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e54576: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11201,11 +11201,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e55629: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e55628: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11221,11 +11221,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e55763: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e55762: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11246,7 +11246,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e55858: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11259,7 +11259,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e55942: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11272,7 +11272,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e56024: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11285,7 +11285,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e56098: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11343,11 +11343,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e56423: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e56422: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11363,11 +11363,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e56557: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e56556: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11388,7 +11388,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e56652: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11401,7 +11401,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e56736: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11414,7 +11414,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e56818: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11427,7 +11427,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e56892: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11490,7 +11490,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e57159: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11503,7 +11503,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e57243: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11516,7 +11516,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e57325: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11529,7 +11529,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e57399: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11584,7 +11584,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e57654: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11597,7 +11597,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e57738: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11610,7 +11610,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e57820: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11623,7 +11623,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e57894: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11678,7 +11678,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e58147: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11691,7 +11691,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e58231: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11704,7 +11704,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e58313: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11717,7 +11717,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e58387: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11772,7 +11772,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e58632: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11785,7 +11785,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e58716: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11798,7 +11798,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e58798: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -11811,7 +11811,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e58872: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12021,11 +12021,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e59871: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e59870: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12041,11 +12041,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e60005: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e60004: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12066,7 +12066,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e60100: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12079,7 +12079,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e60184: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12092,7 +12092,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e60266: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12105,7 +12105,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e60340: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12163,11 +12163,11 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
                                             let assign1170_ad_e60665: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e60664: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12183,11 +12183,11 @@ impl Instance {
                                             };
                                             let assign1170_ad_e60799: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && (!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0))) {
-                                                    A::div_from_scalar(3.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(3.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     let assign1170_ad_e60798: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12208,7 +12208,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e60894: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12221,7 +12221,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e60978: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12234,7 +12234,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e61060: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12247,7 +12247,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e61134: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12310,7 +12310,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e61401: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12323,7 +12323,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e61485: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12336,7 +12336,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e61567: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12349,7 +12349,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e61641: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12404,7 +12404,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e61896: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12417,7 +12417,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e61980: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12430,7 +12430,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e62062: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12443,7 +12443,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e62136: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12498,7 +12498,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e62389: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12511,7 +12511,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e62473: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12524,7 +12524,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e62555: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12537,7 +12537,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e62629: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12592,7 +12592,7 @@ impl Instance {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                                     let assign1170_ad_e62874: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12605,7 +12605,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e62958: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12618,7 +12618,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e63040: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12631,7 +12631,7 @@ impl Instance {
                                                     };
                                                     let assign1170_ad_e63114: A = {
                                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                            A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                            A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                         } else {
                                                             {
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12852,7 +12852,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e64054: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12865,7 +12865,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e64138: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12878,7 +12878,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e64220: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12891,7 +12891,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e64294: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12946,7 +12946,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e64549: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12959,7 +12959,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e64633: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12972,7 +12972,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e64715: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -12985,7 +12985,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e64789: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13040,7 +13040,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e65042: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13053,7 +13053,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e65126: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13066,7 +13066,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e65208: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13079,7 +13079,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e65282: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13134,7 +13134,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e65527: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13147,7 +13147,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e65611: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13160,7 +13160,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e65693: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13173,7 +13173,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e65767: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13380,7 +13380,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e66667: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13393,7 +13393,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e66751: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13406,7 +13406,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e66833: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13419,7 +13419,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e66907: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13474,7 +13474,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e67162: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13487,7 +13487,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e67246: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13500,7 +13500,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e67328: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13513,7 +13513,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e67402: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13568,7 +13568,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e67655: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13581,7 +13581,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e67739: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13594,7 +13594,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e67821: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13607,7 +13607,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e67895: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13662,7 +13662,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e68140: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13675,7 +13675,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e68224: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13688,7 +13688,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e68306: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13701,7 +13701,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e68380: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13908,7 +13908,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e69280: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13921,7 +13921,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e69364: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13934,7 +13934,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e69446: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -13947,7 +13947,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e69520: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14002,7 +14002,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e69775: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14015,7 +14015,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e69859: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14028,7 +14028,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e69941: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14041,7 +14041,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e70015: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14096,7 +14096,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e70268: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14109,7 +14109,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e70352: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14122,7 +14122,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e70434: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14135,7 +14135,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e70508: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14190,7 +14190,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e70753: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14203,7 +14203,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e70837: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14216,7 +14216,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e70919: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14229,7 +14229,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e70993: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14436,7 +14436,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e71903: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14449,7 +14449,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e71987: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14462,7 +14462,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e72069: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14475,7 +14475,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e72143: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14530,7 +14530,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e72398: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14543,7 +14543,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e72482: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14556,7 +14556,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e72564: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14569,7 +14569,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e72638: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14624,7 +14624,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e72891: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14637,7 +14637,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e72975: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14650,7 +14650,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e73057: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14663,7 +14663,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e73131: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14718,7 +14718,7 @@ impl Instance {
                                         if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                             let assign1170_ad_e73376: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14731,7 +14731,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e73460: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14744,7 +14744,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e73542: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -14757,7 +14757,7 @@ impl Instance {
                                             };
                                             let assign1170_ad_e73616: A = {
                                                 if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                    A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                    A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                                 } else {
                                                     {
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15562,7 +15562,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e77143: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15575,7 +15575,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e77227: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15588,7 +15588,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e77309: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15601,7 +15601,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e77383: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15656,7 +15656,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e77638: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15669,7 +15669,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e77722: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15682,7 +15682,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e77804: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15695,7 +15695,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e77878: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15750,7 +15750,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e78131: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15763,7 +15763,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e78215: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15776,7 +15776,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e78297: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15789,7 +15789,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e78371: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15844,7 +15844,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e78616: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15857,7 +15857,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e78700: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15870,7 +15870,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e78782: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -15883,7 +15883,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e78856: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16090,7 +16090,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e79756: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16103,7 +16103,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e79840: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16116,7 +16116,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e79922: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16129,7 +16129,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e79996: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16184,7 +16184,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e80251: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16197,7 +16197,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e80335: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16210,7 +16210,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e80417: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16223,7 +16223,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e80491: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16278,7 +16278,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e80744: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16291,7 +16291,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e80828: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16304,7 +16304,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e80910: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16317,7 +16317,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e80984: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16372,7 +16372,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e81229: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16385,7 +16385,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e81313: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16398,7 +16398,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e81395: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16411,7 +16411,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e81469: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16618,7 +16618,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e82369: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16631,7 +16631,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e82453: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16644,7 +16644,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e82535: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16657,7 +16657,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e82609: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16712,7 +16712,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e82864: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16725,7 +16725,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e82948: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16738,7 +16738,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e83030: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16751,7 +16751,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e83104: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16806,7 +16806,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e83357: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16819,7 +16819,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e83441: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16832,7 +16832,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e83523: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16845,7 +16845,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e83597: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16900,7 +16900,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e83842: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16913,7 +16913,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e83926: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16926,7 +16926,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e84008: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -16939,7 +16939,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e84082: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17146,7 +17146,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e84992: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17159,7 +17159,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e85076: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17172,7 +17172,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e85158: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17185,7 +17185,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e85232: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17240,7 +17240,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e85487: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17253,7 +17253,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e85571: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17266,7 +17266,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e85653: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17279,7 +17279,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e85727: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17334,7 +17334,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e85980: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17347,7 +17347,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e86064: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17360,7 +17360,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e86146: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17373,7 +17373,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e86220: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17428,7 +17428,7 @@ impl Instance {
                                     if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
                                         let assign1170_ad_e86465: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17441,7 +17441,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e86549: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17454,7 +17454,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e86631: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
@@ -17467,7 +17467,7 @@ impl Instance {
                                         };
                                         let assign1170_ad_e86705: A = {
                                             if ((!((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0)) && ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) < 50.0)) {
-                                                A::div_from_scalar(1.0, A::offset(A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5))
+                                                A::div_scalar_offset_denominator(1.0, A::div_scaled_inputs4(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0, s.ad_value(108), -1.0, A::add(A::div_scaled_value_by_product(s.ad_value(63), (s.v[54] * s.v[39]), A::scale(s.ad_value(32), s.v[47]), s.ad_value(63), 1.0), s.ad_value(44)), 1.0), 0.5, 1.0)
                                             } else {
                                                 {
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {

@@ -197,13 +197,13 @@ impl Instance {
         s.v[90] = if s.b[90] { 1.0 } else { 0.0 };
 
         if s.b[90] {
-            s.store_offset_div_ad(27, s.ad_value(33), A::offset(s.ad_value(59), 1.0), p.p52);
+            s.store_offset_ad(27, A::div_scaled_value_offset_denominator(s.ad_value(33), 1.0, s.ad_value(59), 1.0, 1.0), p.p52);
             s.store_offset_scaled(28, 59, p.p44, p.p43);
             s.store_offset_scaled(29, 59, p.p44, p.p46);
         }
 
         if (!s.b[90]) {
-            s.store_offset_div_ad(27, s.ad_value(33), A::offset(s.ad_value(60), 1.0), p.p52);
+            s.store_offset_ad(27, A::div_scaled_value_offset_denominator(s.ad_value(33), 1.0, s.ad_value(60), 1.0, 1.0), p.p52);
             s.store_offset_scaled(28, 60, p.p44, p.p43);
             s.store_offset_scaled(29, 60, p.p44, p.p46);
         }
