@@ -6345,6 +6345,28 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn add_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value * left_scale;
+        let right_value = right.value * right_scale;
+        value.value = left_value + right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * left_scale + right.dn[index] * right_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * left_scale + right.db[index] * right_scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn sub_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value * left_scale;
+        let right_value = right.value * right_scale;
+        value.value = left_value - right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * left_scale - right.dn[index] * right_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * left_scale - right.db[index] * right_scale; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn mul(left: Self, right: Self) -> Self {
         let mut value = left;
         let left_value = value.value;
@@ -6454,6 +6476,22 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     #[inline]
     pub(crate) fn scale(mut value: Self, scale: f64) -> Self {
         value.value *= scale;
+        for derivative in &mut value.dn { *derivative *= scale; }
+        for derivative in &mut value.db { *derivative *= scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn scale_offset(mut value: Self, scale: f64, offset: f64) -> Self {
+        value.value = value.value * scale + offset;
+        for derivative in &mut value.dn { *derivative *= scale; }
+        for derivative in &mut value.db { *derivative *= scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn scaled_offset(mut value: Self, offset: f64, scale: f64) -> Self {
+        value.value = (value.value + offset) * scale;
         for derivative in &mut value.dn { *derivative *= scale; }
         for derivative in &mut value.db { *derivative *= scale; }
         value

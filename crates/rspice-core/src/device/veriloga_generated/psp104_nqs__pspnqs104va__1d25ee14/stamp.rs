@@ -170,7 +170,7 @@ impl Instance {
         Self::stamp_transient_block_41(s, p);
         Self::stamp_transient_block_42(s, p);
         Self::stamp_transient_block_43(s, p);
-        Self::stamp_transient_block_44(s, p);
+        Self::stamp_transient_block_44(s);
         Self::stamp_transient_block_45(s);
         Self::stamp_transient_block_46(ctx, s, nodes);
         Self::stamp_transient_block_47(s);
@@ -752,7 +752,7 @@ impl Instance {
         Self::stamp_reactive_block_22(s, p);
         Self::stamp_reactive_block_23(s);
         Self::stamp_reactive_block_24(ctx, s, nodes);
-        Self::stamp_reactive_block_25(ctx, s, nodes);
+        Self::stamp_reactive_block_25(s);
         Self::stamp_reactive_block_26(s);
         Self::stamp_reactive_block_27(s);
         Self::stamp_reactive_block_28(s);

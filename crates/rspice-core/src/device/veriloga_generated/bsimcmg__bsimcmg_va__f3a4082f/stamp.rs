@@ -289,7 +289,7 @@ impl Instance {
         Self::stamp_reactive_block_12(s, p);
         Self::stamp_reactive_block_13(s, p);
         Self::stamp_reactive_block_14(s, p, param_given);
-        Self::stamp_reactive_block_15(ctx, s, p, nodes, param_given);
+        Self::stamp_reactive_block_15(ctx, s, p, nodes);
         Self::stamp_reactive_block_16(s, p);
         Self::stamp_reactive_block_17(s, p);
         Self::stamp_reactive_block_18(s, p);

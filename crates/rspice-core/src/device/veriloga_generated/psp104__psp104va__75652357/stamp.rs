@@ -141,7 +141,7 @@ impl Instance {
         Self::stamp_transient_block_31(s, p);
         Self::stamp_transient_block_32(s, p);
         Self::stamp_transient_block_33(s, p);
-        Self::stamp_transient_block_34(s, p);
+        Self::stamp_transient_block_34(s);
         Self::stamp_transient_block_35(s, p);
         Self::stamp_transient_block_36(s);
         Self::stamp_transient_block_37(s, p);

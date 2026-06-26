@@ -350,7 +350,7 @@ impl Instance {
         s.v[76] = if s.b[76] { 1.0 } else { 0.0 };
 
         if s.b[76] {
-            s.store_offset_scaled_ad(13, A::exp(A::offset(A::scale(A::offset(s.ad_value(13), (-0.01)), 10.0), (-1.0))), 0.1, 0.01);
+            s.store_offset_scaled_ad(13, A::exp(A::scale_offset(s.ad_value(13), 10.0, (((((-0.01)) * (10.0))) + ((-1.0))))), 0.1, 0.01);
         }
 
         if (!s.b[76]) {
@@ -371,7 +371,7 @@ impl Instance {
             s.store_sqrt_square_offset(23, 32, 1.0);
             s.store_scaled_abs(33, 31, p.p25);
             s.store_powf_ad(24, A::offset(A::mul(A::square(s.ad_value(33)), s.ad_value(33)), 1.0), 0.3333333333333333);
-            s.store_add_scaled_ad_lhs(29, A::offset(A::scale(s.ad_value(23), p.p28), ((1.0 - p.p28) - p.p26)), 24, p.p26);
+            s.store_add_scaled_ad_lhs(29, A::scale_offset(s.ad_value(23), p.p28, ((1.0 - p.p28) - p.p26)), 24, p.p26);
         }
 
         if (!s.b[77]) {

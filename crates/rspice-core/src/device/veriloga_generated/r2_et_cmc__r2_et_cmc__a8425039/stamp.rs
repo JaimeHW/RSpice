@@ -375,7 +375,7 @@ impl Instance {
         s.v[86] = if s.b[86] { 1.0 } else { 0.0 };
 
         if ((!s.b[85]) && s.b[86]) {
-            s.store_add_ad_lhs(46, A::scale(s.ad_value(19), 2.0), 20);
+            s.store_add_scaled_inputs(46, 19, 2.0, 20, 1.0);
         }
 
         if ((!s.b[85]) && (!s.b[86])) {
@@ -384,7 +384,7 @@ impl Instance {
 
         s.store_mul(47, 19, 20);
 
-        s.store_add_scaled_ad_lhs(9, A::offset(A::scale(s.ad_value(46), p.p48), p.p47), 47, p.p49);
+        s.store_add_scaled_ad_lhs(9, A::scale_offset(s.ad_value(46), p.p48, p.p47), 47, p.p49);
 
         s.store_voltage(42, ctx, nodes, Some(2), None);
 

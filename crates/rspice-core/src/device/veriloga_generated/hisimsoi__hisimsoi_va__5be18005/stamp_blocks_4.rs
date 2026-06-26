@@ -22,7 +22,7 @@ impl Instance {
         if (s.b[1833] && (s.v[85] != 0.0)) {
             s.store_add_ad_lhs(584, A::mul(s.ad_value(580), s.ad_value(438)), 473);
             s.store_add_ad_lhs(585, A::mul(s.ad_value(580), A::sub_from_scalar(1.0, s.ad_value(438))), 473);
-            s.store_add_ad_lhs(586, A::sub(A::neg(s.ad_value(580)), s.ad_value(581)), 471);
+            s.store_add_ad_lhs(586, A::sub_scaled_inputs(s.ad_value(580), -1.0, s.ad_value(581), 1.0), 471);
         }
 
         if (s.b[1833] && (s.v[85] == 0.0)) {
@@ -33,7 +33,7 @@ impl Instance {
         }
 
         if ((!s.b[1833]) && (s.v[85] != 0.0)) {
-            s.store_sub_ad_lhs(586, A::sub(A::neg(s.ad_value(584)), s.ad_value(585)), 581);
+            s.store_sub_ad_lhs(586, A::sub_scaled_inputs(s.ad_value(584), -1.0, s.ad_value(585), 1.0), 581);
         }
 
         if ((!s.b[1833]) && (s.v[85] == 0.0)) {

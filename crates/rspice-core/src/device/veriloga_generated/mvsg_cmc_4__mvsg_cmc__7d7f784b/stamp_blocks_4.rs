@@ -28,7 +28,7 @@ impl Instance {
                     } else {
                         {
                             if (((nv26 - nv27) / s.v[113]) > 50.0) {
-                                A::scale(A::offset(A::offset(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), s.ad_value(113)), (-50.0)), 1.0), ((50.0) as f64).exp())
+                                A::scaled_offset(A::div(A::voltage(ctx, nodes, Some(26), Some(27)), s.ad_value(113)), (((-50.0)) + (1.0)), ((50.0) as f64).exp())
                             } else {
                                 A::constant(0.0)
                             }
@@ -38,7 +38,7 @@ impl Instance {
                 eq19_ad_e630
             }
         };
-        A::scale(A::offset(eq19_ad_e631, (-1.0)), p.p346)
+        A::scaled_offset(eq19_ad_e631, (-1.0), p.p346)
     } else {
         A::constant(0.0)
     }

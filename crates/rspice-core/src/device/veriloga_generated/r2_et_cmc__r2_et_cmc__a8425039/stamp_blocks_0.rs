@@ -247,7 +247,7 @@ impl Instance {
         s.v[86] = if s.b[86] { 1.0 } else { 0.0 };
 
         if ((!s.b[85]) && s.b[86]) {
-            s.store_add_ad_lhs(46, A::scale(s.ad_value(19), 2.0), 20);
+            s.store_add_scaled_inputs(46, 19, 2.0, 20, 1.0);
         }
 
         if ((!s.b[85]) && (!s.b[86])) {
@@ -256,9 +256,9 @@ impl Instance {
 
         s.store_mul(47, 19, 20);
 
-        s.store_add_scaled_ad_lhs(41, A::offset(A::scale(s.ad_value(46), p.p45), p.p44), 47, p.p46);
+        s.store_add_scaled_ad_lhs(41, A::scale_offset(s.ad_value(46), p.p45, p.p44), 47, p.p46);
 
-        s.store_add_scaled_ad_lhs(9, A::offset(A::scale(s.ad_value(46), p.p48), p.p47), 47, p.p49);
+        s.store_add_scaled_ad_lhs(9, A::scale_offset(s.ad_value(46), p.p48, p.p47), 47, p.p49);
 
         s.store_voltage(42, ctx, nodes, Some(2), None);
 
@@ -268,7 +268,7 @@ impl Instance {
         s.v[88] = if s.b[88] { 1.0 } else { 0.0 };
 
         if s.b[88] {
-            s.store_offset_exp_ad(28, A::offset(A::offset(s.ad_value(28), (-p.p35)), (-1.0)), p.p35);
+            s.store_offset_exp_ad(28, A::offset(s.ad_value(28), (((-p.p35)) + ((-1.0)))), p.p35);
         }
 
         s.b[89] = (s.v[28] > (p.p36 - 1.0));
@@ -291,7 +291,7 @@ impl Instance {
         s.v[90] = if s.b[90] { 1.0 } else { 0.0 };
 
         if s.b[90] {
-            s.store_offset_scaled_ad(16, A::exp(A::offset(A::scale(A::offset(s.ad_value(16), (-0.01)), 10.0), (-1.0))), 0.1, 0.01);
+            s.store_offset_scaled_ad(16, A::exp(A::scale_offset(s.ad_value(16), 10.0, (((((-0.01)) * (10.0))) + ((-1.0))))), 0.1, 0.01);
         }
 
         if (!s.b[90]) {
@@ -321,7 +321,7 @@ impl Instance {
             s.store_sqrt_square_offset(26, 35, 1.0);
             s.store_scaled_abs(36, 34, p.p26);
             s.store_powf_ad(27, A::offset(A::mul(A::square(s.ad_value(36)), s.ad_value(36)), 1.0), 0.3333333333333333);
-            s.store_add_scaled_ad_lhs(32, A::offset(A::scale(s.ad_value(26), p.p29), ((1.0 - p.p29) - p.p27)), 27, p.p27);
+            s.store_add_scaled_ad_lhs(32, A::scale_offset(s.ad_value(26), p.p29, ((1.0 - p.p29) - p.p27)), 27, p.p27);
         }
 
         if (!s.b[92]) {
