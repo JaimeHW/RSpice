@@ -4552,7 +4552,7 @@ impl Instance {
             if (((((((!s.b[1439]) && s.b[2515]) && (!s.b[2534])) && s.b[2540]) && (!s.b[2550])) && (!s.b[2557])) && (!s.b[2558])) {
                 s.store_mul_offset_rhs(117, 154, 2542, (-p.p456));
                 s.store_exp(228, 117);
-                s.store_mul_ad_rhs(214, 210, A::add_scaled_product(s.ad_value(228), 1.0, s.ad_value(230), A::offset(s.ad_value(116), 1.0), (-1.0)));
+                s.store_mul_ad_rhs(214, 210, A::add_scaled_offset_product_rhs(s.ad_value(228), 1.0, s.ad_value(230), s.ad_value(116), 1.0, (-1.0)));
                 s.store_mul_ad_product_rhs(215, 210, s.ad_value(154), A::sub(s.ad_value(228), s.ad_value(230)));
                 s.store_sqrt_square_add(216, 223, 214);
                 s.store_div_ad_lhs(217, A::add_scaled_product(s.ad_value(215), 0.5, s.ad_value(2549), s.ad_value(223), (2.0 * 0.5)), 216);

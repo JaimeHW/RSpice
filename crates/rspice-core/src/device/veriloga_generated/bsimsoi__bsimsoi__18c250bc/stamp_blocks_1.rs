@@ -1269,11 +1269,11 @@ impl Instance {
         s.v[1475] = if s.b[1475] { 1.0 } else { 0.0 };
 
         if s.b[1475] {
-            s.store_ad_value(895, A::add_scaled_products(A::add(s.ad_value(335), s.ad_value(846)), s.ad_value(1019), 1.0, s.ad_value(846), A::add_scaled_product(s.ad_value(845), 1.0, s.ad_value(238), A::offset(s.ad_value(847), (-1.0)), 0.5), (-1.0)));
+            s.store_ad_value(895, A::add_scaled_products(A::add(s.ad_value(335), s.ad_value(846)), s.ad_value(1019), 1.0, s.ad_value(846), A::add_scaled_offset_product_rhs(s.ad_value(845), 1.0, s.ad_value(238), s.ad_value(847), (-1.0), 0.5), (-1.0)));
         }
 
         if (!s.b[1475]) {
-            s.store_ad_value(895, A::add_scaled_products(A::add(s.ad_value(335), s.ad_value(846)), s.ad_value(820), 1.0, s.ad_value(846), A::add_scaled_product(s.ad_value(845), 1.0, s.ad_value(238), A::offset(s.ad_value(847), (-1.0)), 0.5), (-1.0)));
+            s.store_ad_value(895, A::add_scaled_products(A::add(s.ad_value(335), s.ad_value(846)), s.ad_value(820), 1.0, s.ad_value(846), A::add_scaled_offset_product_rhs(s.ad_value(845), 1.0, s.ad_value(238), s.ad_value(847), (-1.0), 0.5), (-1.0)));
         }
 
         s.b[1476] = (p.p39 == 3.0);
@@ -1299,11 +1299,11 @@ impl Instance {
         s.v[1477] = if s.b[1477] { 1.0 } else { 0.0 };
 
         if s.b[1477] {
-            s.store_ad_value(896, A::add_scaled_products(A::add(s.ad_value(334), s.ad_value(846)), s.ad_value(1018), 1.0, s.ad_value(846), A::add_scaled_product(s.ad_value(845), 1.0, s.ad_value(238), A::offset(s.ad_value(847), (-1.0)), 0.5), (-1.0)));
+            s.store_ad_value(896, A::add_scaled_products(A::add(s.ad_value(334), s.ad_value(846)), s.ad_value(1018), 1.0, s.ad_value(846), A::add_scaled_offset_product_rhs(s.ad_value(845), 1.0, s.ad_value(238), s.ad_value(847), (-1.0), 0.5), (-1.0)));
         }
 
         if (!s.b[1477]) {
-            s.store_ad_value(896, A::add_scaled_products(A::add(s.ad_value(334), s.ad_value(846)), s.ad_value(821), 1.0, s.ad_value(846), A::add_scaled_product(s.ad_value(845), 1.0, s.ad_value(238), A::offset(s.ad_value(847), (-1.0)), 0.5), (-1.0)));
+            s.store_ad_value(896, A::add_scaled_products(A::add(s.ad_value(334), s.ad_value(846)), s.ad_value(821), 1.0, s.ad_value(846), A::add_scaled_offset_product_rhs(s.ad_value(845), 1.0, s.ad_value(238), s.ad_value(847), (-1.0), 0.5), (-1.0)));
         }
 
         s.b[1478] = (p.p3 != 1.0);

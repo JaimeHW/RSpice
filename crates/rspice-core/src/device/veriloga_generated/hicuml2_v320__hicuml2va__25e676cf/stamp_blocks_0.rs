@@ -1969,7 +1969,7 @@ impl Instance {
 
         if ((s.b[430] && s.b[437]) && s.b[442]) {
             s.store_mul_exp_ad_rhs(434, 63, A::div_scaled_inputs(s.ad_value(432), -1.0, A::mul(s.ad_value(433), s.ad_value(436)), 1.0));
-            s.store_mul_ad_rhs(435, 434, A::add_scaled_product(s.ad_value(433), 1.0, A::offset(A::div(s.ad_value(432), s.ad_value(433)), 1.0), A::sub(s.ad_value(431), s.ad_value(433)), 1.0));
+            s.store_mul_ad_rhs(435, 434, A::add_scaled_offset_product_lhs(s.ad_value(433), 1.0, A::div(s.ad_value(432), s.ad_value(433)), 1.0, A::sub(s.ad_value(431), s.ad_value(433)), 1.0));
         }
 
         if ((s.b[430] && s.b[437]) && (!s.b[442])) {

@@ -1372,7 +1372,7 @@ impl Instance {
 
         if ((s.b[332] && s.b[338]) && s.b[339]) {
             s.store_mul_exp_ad_rhs(336, 46, A::div_scaled_inputs(s.ad_value(334), -1.0, s.ad_value(335), 1.0));
-            s.store_mul_ad_rhs(337, 336, A::add_scaled_product(s.ad_value(335), 1.0, A::offset(A::div(s.ad_value(334), s.ad_value(335)), 1.0), A::sub(s.ad_value(333), s.ad_value(335)), 1.0));
+            s.store_mul_ad_rhs(337, 336, A::add_scaled_offset_product_lhs(s.ad_value(335), 1.0, A::div(s.ad_value(334), s.ad_value(335)), 1.0, A::sub(s.ad_value(333), s.ad_value(335)), 1.0));
         }
 
         if ((s.b[332] && s.b[338]) && (!s.b[339])) {
