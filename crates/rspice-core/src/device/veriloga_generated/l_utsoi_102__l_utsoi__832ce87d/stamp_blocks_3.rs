@@ -2400,7 +2400,7 @@ impl Instance {
             s.store_div_scaled_product_offset_denominator(1505, s.ad_value(1504), s.ad_value(1462), 1.0, s.ad_value(1504), 1.0, 1.0);
             s.store_sub(2, 1498, 1505);
             s.store_div_scaled_add_product(1506, s.ad_value(1462), 1.0, s.ad_value(1498), s.ad_value(1495), 1.0, s.ad_value(2), 1.0);
-            s.store_scaled_add_ad_rhs(1506, 1506, A::sqrt(A::offset(A::square(s.ad_value(1506)), 1e-6)), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(1506, 1506, 1506, 1e-6, 0.5);
             s.store_scaled_mul_ad(1507, A::div(s.ad_value(1420), s.ad_value(1492)), A::add(s.ad_value(1501), s.ad_value(1503)), 0.5);
             s.store_sub_from_scalar_ad(1508, 1.0, A::div(s.ad_value(1462), s.ad_value(1505)));
             s.store_offset(1509, 1495, 1.0);

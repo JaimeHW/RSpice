@@ -237,7 +237,7 @@ impl Instance {
             s.store_scaled_add_ad_rhs(246, 1075, A::sqrt(A::offset(A::mul(s.ad_value(1075), s.ad_value(1075)), ((0.25 * 0.1) * 0.1))), 0.5);
             s.store_add(245, 1076, 1077);
             s.store_add_scaled_inputs(167, 245, 1.0 / (p.p230), 246, (p.p231 * 1.0 / (p.p230)));
-            s.store_scaled_add_ad_rhs(167, 167, A::sqrt(A::offset(A::square(s.ad_value(167)), ((4.0 * 0.001) * 0.001))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(167, 167, 167, ((4.0 * 0.001) * 0.001), 0.5);
             s.store_offset_powf_ad(168, s.ad_value(167), (0.7 * p.p229), 1.0);
             s.store_div_from_scalar(427, (p.p228 * 1.9e-9), 168);
             s.store_div_from_scalar_ad(428, (3.9 * 8.8541878128e-12), A::add_scaled_inputs(s.ad_value(429), (3.9 * 1.0 / (p.p110)), s.ad_value(427), 1.0 / (s.v[200])));

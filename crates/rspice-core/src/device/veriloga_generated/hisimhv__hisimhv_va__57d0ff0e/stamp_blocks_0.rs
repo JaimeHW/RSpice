@@ -2170,7 +2170,7 @@ impl Instance {
         if (s.b[1273] && s.b[1277]) {
             s.store_exp(335, 335);
             s.store_scaled_mul(337, 336, 335, s.v[532]);
-            s.store_scaled_add_ad_rhs(647, 337, A::sqrt(A::offset(A::square(s.ad_value(337)), ((((4.0 * 1e-6) / 100.0) * 1e-6) / 100.0))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(647, 337, 337, ((((4.0 * 1e-6) / 100.0) * 1e-6) / 100.0), 0.5);
         }
 
         if (s.b[1273] && (!s.b[1277])) {

@@ -26,7 +26,7 @@ impl Instance {
 
         if (s.b[1467] && (!s.b[1468])) {
             if (!(s.v[13] < ((-10000.0) * 0.01))) {
-                s.store_scaled_add_ad_rhs(13, 13, A::sqrt(A::offset(A::square(s.ad_value(13)), ((4.0 * 0.01) * 0.01))), 0.5);
+                s.store_scaled_add_sqrt_square_offset_rhs(13, 13, 13, ((4.0 * 0.01) * 0.01), 0.5);
             } else {
                 if (s.v[13] < ((-10000.0) * 0.01)) {
                     s.store_div_from_scalar(13, ((-0.01) * 0.01), 13);
@@ -90,7 +90,7 @@ impl Instance {
 
         if (s.b[1467] && (!s.b[1470])) {
             if (!(s.v[13] < ((-10000.0) * 0.01))) {
-                s.store_scaled_add_ad_rhs(13, 13, A::sqrt(A::offset(A::square(s.ad_value(13)), ((4.0 * 0.01) * 0.01))), 0.5);
+                s.store_scaled_add_sqrt_square_offset_rhs(13, 13, 13, ((4.0 * 0.01) * 0.01), 0.5);
             } else {
                 if (s.v[13] < ((-10000.0) * 0.01)) {
                     s.store_div_from_scalar(13, ((-0.01) * 0.01), 13);

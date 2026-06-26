@@ -1393,7 +1393,7 @@ impl Instance {
 
         if s.b[340] {
             s.store_add_scaled_inputs4_offset(160, s.ad_value(102), 1.0 / (p.p24), s.ad_value(103), 1.0 / (p.p25), A::div(s.ad_value(126), s.ad_value(118)), 1.0, s.ad_value(127), 1.0 / (s.v[119]), 1.0);
-            s.store_scaled_add_ad_rhs(161, 160, A::sqrt(A::offset(A::square(s.ad_value(160)), 0.01)), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(161, 160, 160, 0.01, 0.5);
             s.store_div(158, 37, 161);
         }
 

@@ -368,7 +368,7 @@ impl Instance {
         s.v[1279] = if s.b[1279] { 1.0 } else { 0.0 };
 
         if ((s.b[1275] && s.b[1277]) && (!s.b[1279])) {
-            s.store_scaled_add_ad_rhs(844, 844, A::sqrt(A::offset(A::square(s.ad_value(844)), ((4.0 * 0.01) * 0.01))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(844, 844, 844, ((4.0 * 0.01) * 0.01), 0.5);
             s.store_div_scaled_value_offset_denominator(845, s.ad_value(1151), 1.0, s.ad_value(844), 0.001, 1.0);
             s.store_square(847, 824);
         }
@@ -400,7 +400,7 @@ impl Instance {
         s.v[1281] = if s.b[1281] { 1.0 } else { 0.0 };
 
         if ((s.b[1275] && s.b[1277]) && (!s.b[1281])) {
-            s.store_scaled_add_ad_rhs(844, 844, A::sqrt(A::offset(A::square(s.ad_value(844)), ((4.0 * 0.01) * 0.01))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(844, 844, 844, ((4.0 * 0.01) * 0.01), 0.5);
             s.store_div_scaled_value_offset_denominator(845, s.ad_value(1144), 1.0, s.ad_value(844), 0.001, 1.0);
             s.store_square(847, 900);
             s.store_mul_neg_lhs(848, 900, 847);
@@ -423,7 +423,7 @@ impl Instance {
         s.v[1283] = if s.b[1283] { 1.0 } else { 0.0 };
 
         if ((s.b[1275] && (!s.b[1277])) && (!s.b[1283])) {
-            s.store_scaled_add_ad_rhs(844, 844, A::sqrt(A::offset(A::square(s.ad_value(844)), ((4.0 * 0.01) * 0.01))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(844, 844, 844, ((4.0 * 0.01) * 0.01), 0.5);
             s.store_div_scaled_value_offset_denominator(845, s.ad_value(1151), 1.0, s.ad_value(844), 0.001, 1.0);
             s.store_sub(847, 824, 1156);
         }
@@ -458,7 +458,7 @@ impl Instance {
         s.v[1286] = if s.b[1286] { 1.0 } else { 0.0 };
 
         if ((s.b[1275] && (!s.b[1277])) && (!s.b[1286])) {
-            s.store_scaled_add_ad_rhs(844, 844, A::sqrt(A::offset(A::square(s.ad_value(844)), ((4.0 * 0.01) * 0.01))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(844, 844, 844, ((4.0 * 0.01) * 0.01), 0.5);
             s.store_div_scaled_value_offset_denominator(845, s.ad_value(1144), 1.0, s.ad_value(844), 0.001, 1.0);
             s.store_sub(847, 900, 1149);
         }

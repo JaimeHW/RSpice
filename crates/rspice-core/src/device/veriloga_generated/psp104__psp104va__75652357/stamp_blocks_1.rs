@@ -5364,9 +5364,9 @@ impl Instance {
 
         if s.b[2161] {
             s.store_offset_mul(2035, 2032, 2034, (-1.0));
-            s.store_scaled_add_ad_rhs(1919, 2035, A::sqrt(A::offset(A::square(s.ad_value(2035)), 10.0)), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(1919, 2035, 2035, 10.0, 0.5);
             s.store_sub_ad_rhs(2036, 2034, A::ln(s.ad_value(1919)));
-            s.store_scaled_add_ad_rhs(2037, 2036, A::sqrt(A::offset(A::square(s.ad_value(2036)), 2.0)), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(2037, 2036, 2036, 2.0, 0.5);
         }
 
         s.b[2162] = ((s.v[2034] - s.v[2037]) < 230.25850929940458);
@@ -5894,7 +5894,7 @@ impl Instance {
         if ((s.b[2180] && s.b[2181]) && s.b[2184]) {
             s.store_scaled_mul(2073, 2021, 2072, 0.475);
             s.store_add_scaled_product_indices(1919, 2058, 1.0, 2055, 2073, (-1.0));
-            s.store_scaled_add_ad_rhs(2074, 1919, A::sqrt(A::offset(A::square(s.ad_value(1919)), 1e-12)), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(2074, 1919, 1919, 1e-12, 0.5);
             s.store_add_scaled_value_products(2075, s.ad_value(2058), (-1.0), s.ad_value(2021), s.ad_value(2057), 1.0, A::offset(s.ad_value(2055), (-1.0)), s.ad_value(2073), 1.0);
             s.store_offset_ad(2076, A::div_scaled_product(s.ad_value(2007), s.ad_value(2021), 0.5, s.ad_value(2075), 1.0), 1.0);
             s.store_add_scaled_product_indices(1919, 2075, 1.0, 769, 2074, 1.0);
