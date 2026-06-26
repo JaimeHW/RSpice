@@ -21,7 +21,7 @@ impl Instance {
 
         if (s.b[1833] && (s.v[85] != 0.0)) {
             s.store_ad_value(584, A::add_scaled_product(s.ad_value(473), 1.0, s.ad_value(580), s.ad_value(438), 1.0));
-            s.store_ad_value(585, A::add_scaled_product(s.ad_value(473), 1.0, s.ad_value(580), A::sub_from_scalar(1.0, s.ad_value(438)), 1.0));
+            s.store_add_ad_lhs(585, A::mul_sub_from_scalar_rhs(s.ad_value(580), 1.0, s.ad_value(438)), 473);
             s.store_ad_value(586, A::add_scaled_inputs3(s.ad_value(580), -1.0, s.ad_value(581), (-1.0), s.ad_value(471), 1.0));
         }
 

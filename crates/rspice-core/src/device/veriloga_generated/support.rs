@@ -6404,6 +6404,45 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn add_scaled_sub_value_product(scalar: f64, subtrahend: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
+        let mut result = subtrahend;
+        let value_term = (scalar - result.value) * value_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        result.value = value_term + product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = -result.dn[index] * value_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = -result.db[index] * value_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn add_scaled_sub_product_lhs(value: Self, value_scale: f64, scalar: f64, subtrahend: Self, product_right: Self, product_scale: f64) -> Self {
+        let mut result = value;
+        let value_term = result.value * value_scale;
+        let product_left_value = scalar - subtrahend.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        result.value = value_term + product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * value_scale + (-subtrahend.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * value_scale + (-subtrahend.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn add_scaled_sub_product_rhs(value: Self, value_scale: f64, product_left: Self, scalar: f64, subtrahend: Self, product_scale: f64) -> Self {
+        let mut result = value;
+        let value_term = result.value * value_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = scalar - subtrahend.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        result.value = value_term + product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * value_scale + (product_left.dn[index] * product_right_value - product_left_value * subtrahend.dn[index]) * product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * value_scale + (product_left.db[index] * product_right_value - product_left_value * subtrahend.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
     pub(crate) fn add_scaled_square_product(square_value: Self, square_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
         let mut result = square_value;
         let square_raw = result.value;
@@ -6474,6 +6513,64 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * right.value + left_value * right.dn[index]) * scale; }
         for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * right.value + left_value * right.db[index]) * scale; }
         value
+    }
+
+    #[inline]
+    pub(crate) fn mul_sub_from_scalar_lhs(scalar: f64, value: Self, right: Self) -> Self {
+        let mut result = value;
+        let left_value = scalar - result.value;
+        result.value = left_value * right.value;
+        for index in 0..NODE_COUNT { result.dn[index] = -result.dn[index] * right.value + left_value * right.dn[index]; }
+        for index in 0..BRANCH_COUNT { result.db[index] = -result.db[index] * right.value + left_value * right.db[index]; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn mul_sub_from_scalar_rhs(left: Self, scalar: f64, value: Self) -> Self {
+        let mut result = left;
+        let left_value = result.value;
+        let right_value = scalar - value.value;
+        result.value = left_value * right_value;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * right_value - left_value * value.dn[index]; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * right_value - left_value * value.db[index]; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn mul_sub_from_scalar_lhs_scaled_output(scalar: f64, value: Self, right: Self, scale: f64) -> Self {
+        let mut result = value;
+        let left_value = scalar - result.value;
+        let scaled_left_value = left_value * scale;
+        let scaled_right_value = right.value * scale;
+        result.value = scaled_left_value * right.value;
+        for index in 0..NODE_COUNT { result.dn[index] = -result.dn[index] * scaled_right_value + scaled_left_value * right.dn[index]; }
+        for index in 0..BRANCH_COUNT { result.db[index] = -result.db[index] * scaled_right_value + scaled_left_value * right.db[index]; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn mul_sub_from_scalar_rhs_scaled_output(left: Self, scalar: f64, value: Self, scale: f64) -> Self {
+        let mut result = left;
+        let left_value = result.value;
+        let right_value = scalar - value.value;
+        let scaled_left_value = left_value * scale;
+        let scaled_right_value = right_value * scale;
+        result.value = left_value * scaled_right_value;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * scaled_right_value - scaled_left_value * value.dn[index]; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * scaled_right_value - scaled_left_value * value.db[index]; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn mul_sub_from_scalar_scaled_offset_self(scalar: f64, value: Self, input_scale: f64, offset: f64, output_scale: f64) -> Self {
+        let mut result = value;
+        let sub_value = scalar - result.value;
+        let affine_value = sub_value * input_scale + offset;
+        result.value = sub_value * affine_value * output_scale;
+        let derivative_scale = -((2.0 * input_scale * sub_value + offset) * output_scale);
+        for derivative in &mut result.dn { *derivative *= derivative_scale; }
+        for derivative in &mut result.db { *derivative *= derivative_scale; }
+        result
     }
 
     #[inline]

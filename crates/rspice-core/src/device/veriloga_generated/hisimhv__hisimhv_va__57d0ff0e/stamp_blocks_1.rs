@@ -2332,7 +2332,7 @@ impl Instance {
             assert!(assign31880_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
             if ((((((s.b[1443] && s.b[1444]) && (!s.b[1711])) && (!s.b[1731])) && (!s.b[1733])) && s.b[1734]) && s.b[1736]) {
                 s.store_ad_value(1468, A::add_scaled_inputs3(s.ad_value(1450), 1.0, s.ad_value(1448), 1.0, s.ad_value(965), -1.0));
-                s.store_add_ad(1508, A::div(A::div_from_scalar(1.034943e-10, s.ad_value(1546)), s.ad_value(1450)), A::div_scaled_product(A::div_from_scalar(1.034943e-10, s.ad_value(1546)), A::sub_from_scalar(1.0, A::div(s.ad_value(1536), A::offset(s.ad_value(1536), 1.0))), 1.0, s.ad_value(1448), 1.0));
+                s.store_add_ad(1508, A::div(A::div_from_scalar(1.034943e-10, s.ad_value(1546)), s.ad_value(1450)), A::div(A::mul_sub_from_scalar_rhs(A::div_from_scalar(1.034943e-10, s.ad_value(1546)), 1.0, A::div(s.ad_value(1536), A::offset(s.ad_value(1536), 1.0))), s.ad_value(1448)));
             }
             s.b[1737] = ((((s.v[1468] / s.v[1508])) as f64).abs() > 0.5);
             s.v[1737] = if s.b[1737] { 1.0 } else { 0.0 };
@@ -4502,7 +4502,7 @@ impl Instance {
             if ((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[1937])) {
                 s.store_add_ad_rhs(1839, 1853, A::div(A::add_scaled_product(s.ad_value(1903), 1.0, s.ad_value(1830), A::sub_scaled_inputs(s.ad_value(1830), 1.0, s.ad_value(965), 2.0), 1.0), s.ad_value(1908)));
                 s.store_scalar(1840, 1.0);
-                s.store_mul_ad(1841, A::add_scaled_product(s.ad_value(334), 1.0, A::div(s.ad_value(965), s.ad_value(1830)), s.ad_value(334), (-1.0)), A::sub_from_scalar(1.0, s.ad_value(1842)));
+                s.store_ad_value(1841, A::mul_sub_from_scalar_rhs(A::add_scaled_product(s.ad_value(334), 1.0, A::div(s.ad_value(965), s.ad_value(1830)), s.ad_value(334), (-1.0)), 1.0, s.ad_value(1842)));
             }
             s.b[1938] = ((s.v[1839] > (s.v[1851] - s.v[1850])) && (s.v[1850] >= 0.0));
             s.v[1938] = if s.b[1938] { 1.0 } else { 0.0 };

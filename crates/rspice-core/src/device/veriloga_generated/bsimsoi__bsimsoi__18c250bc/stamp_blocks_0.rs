@@ -1904,7 +1904,7 @@ impl Instance {
             s.store_sub(508, 504, 507);
             s.store_mul(497, 511, 499);
             s.store_ad_value(512, A::div_scaled_product(s.ad_value(384), s.ad_value(508), 1.0, s.ad_value(497), 1.0));
-            s.store_div_ad_lhs(513, A::add_scaled_product(s.ad_value(151), 1.0, A::sub_from_scalar(1.0, s.ad_value(384)), s.ad_value(508), (-1.0)), 497);
+            s.store_div_ad_lhs(513, A::sub(s.ad_value(151), A::mul_sub_from_scalar_lhs(1.0, s.ad_value(384), s.ad_value(508))), 497);
         }
 
         s.b[635] = (s.v[512] > 100.0);
@@ -4054,7 +4054,7 @@ impl Instance {
 
         s.store_ad_value(809, A::div_scaled_product(s.ad_value(384), s.ad_value(830), 1.0, s.ad_value(853), 1.0));
 
-        s.store_div_ad_lhs(833, A::add_scaled_product(s.ad_value(151), 1.0, A::sub_from_scalar(1.0, s.ad_value(384)), s.ad_value(830), (-1.0)), 853);
+        s.store_div_ad_lhs(833, A::sub(s.ad_value(151), A::mul_sub_from_scalar_lhs(1.0, s.ad_value(384), s.ad_value(830))), 853);
 
         s.b[1244] = (s.v[809] > 100.0);
         s.v[1244] = if s.b[1244] { 1.0 } else { 0.0 };
@@ -4106,7 +4106,7 @@ impl Instance {
 
         if s.b[1247] {
             s.store_div_from_scalar_sub_from_scalar_ad(843, 1.0, 6e-8, A::scale(s.ad_value(893), 2.0));
-            s.store_mul_scale_ad_lhs(893, A::sub_from_scalar(4e-8, s.ad_value(893)), 2e-8, 843);
+            s.store_ad_value(893, A::mul_sub_from_scalar_lhs_scaled_output(4e-8, s.ad_value(893), s.ad_value(843), 2e-8));
         }
 
         s.b[1248] = (p.p429 == 1.0);

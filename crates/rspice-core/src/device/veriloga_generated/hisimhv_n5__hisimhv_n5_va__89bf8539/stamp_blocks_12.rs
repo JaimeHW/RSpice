@@ -153,7 +153,7 @@ impl Instance {
             s.store_scalar(785, (p.p67 + p.p68));
             s.store_offset(789, 451, 1e-12);
             s.store_scalar(408, s.v[459]);
-            s.store_offset_mul_ad(335, s.ad_value(3351), A::sub_from_scalar(p.p410, A::scale(s.ad_value(3351), p.p411)), 1.0);
+            s.store_offset_ad(335, A::mul_sub_from_scalar_rhs(s.ad_value(3351), p.p410, A::scale(s.ad_value(3351), p.p411)), 1.0);
             s.store_sqrt_square_offset(782, 335, ((4.0 * 0.1) * 0.1));
             s.store_offset_scaled_div(336, 335, 782, 0.5, 0.5);
             s.store_scaled_add(654, 335, 782, 0.5);
@@ -288,7 +288,7 @@ impl Instance {
             s.store_mul(3352, 593, 339);
             s.store_offset(338, 335, 1.0);
             s.store_div_from_scalar(339, 1.0, 338);
-            s.store_offset_ad(338, A::div_scaled_product3(s.ad_value(595), A::sub_from_scalar(1.0, s.ad_value(339)), s.ad_value(598), 1.0, A::offset(s.ad_value(785), (-p.p423)), 1.0), 1.0);
+            s.store_offset_ad(338, A::div_scaled_product(A::mul_sub_from_scalar_rhs(s.ad_value(595), 1.0, s.ad_value(339)), s.ad_value(598), 1.0, A::offset(s.ad_value(785), (-p.p423)), 1.0), 1.0);
             s.store_offset(781, 338, (-0.001));
             s.store_scalar(782, 0.0);
         }
@@ -506,7 +506,7 @@ impl Instance {
             s.store_ad_value(602, A::add_scaled_inputs3(s.ad_value(789), 1.0, s.ad_value(781), (-0.5), s.ad_value(782), (-0.5)));
             s.store_scalar(601, (p.p419 + 1e-25));
             s.store_mul_sub_from_scalar_ad_rhs(596, 649, 1.0, A::mul(s.ad_value(594), A::add(A::div(s.ad_value(599), s.ad_value(601)), A::div(s.ad_value(602), s.ad_value(789)))));
-            s.store_sqrt_add_ad(782, A::square(s.ad_value(596)), A::mul3_scaled_output(A::sub_from_scalar(1.0, s.ad_value(453)), s.ad_value(649), A::mul(A::sub_from_scalar(1.0, s.ad_value(453)), s.ad_value(649)), ((1.0 / (100.0) * 4.0) * 1.0 / (100.0))));
+            s.store_sqrt_ad(782, A::add_scaled_square_product(s.ad_value(596), 1.0, A::mul_sub_from_scalar_lhs(1.0, s.ad_value(453), s.ad_value(649)), A::mul_sub_from_scalar_lhs(1.0, s.ad_value(453), s.ad_value(649)), ((1.0 / (100.0) * 4.0) * 1.0 / (100.0))));
             s.store_offset_scaled_div(343, 596, 782, 0.5, 0.5);
             s.store_scaled_add(596, 596, 782, 0.5);
         }
