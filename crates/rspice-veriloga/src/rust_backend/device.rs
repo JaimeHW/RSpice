@@ -799,6 +799,46 @@ fn stamp() {
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
+
+    #[test]
+    fn rewrites_product3_ad_rvalue_stores_as_direct_stores() {
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(13, AdValue::mul3(AdValue::exp(scratch.ad_value(2)), scratch.ad_value(3), AdValue::sqrt(scratch.ad_value(4))));
+    scratch.store_ad_value(14, AdValue::mul3(AdValue::exp(scratch.ad_value(2)), AdValue::ln(scratch.ad_value(3)), AdValue::sqrt(scratch.ad_value(4))));
+    scratch.store_ad_value(15, AdValue::mul3_scaled_output(AdValue::exp(scratch.ad_value(2)), scratch.ad_value(3), AdValue::sqrt(scratch.ad_value(4)), params.scale));
+    scratch.store_ad_value(16, AdValue::mul3_scaled_output(AdValue::exp(scratch.ad_value(2)), AdValue::ln(scratch.ad_value(3)), AdValue::sqrt(scratch.ad_value(4)), params.scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_mul3_ad_middle(13, A::exp(s.ad_value(2)), 3, A::sqrt(s.ad_value(4)));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul3_ad(14, A::exp(s.ad_value(2)), A::ln(s.ad_value(3)), A::sqrt(s.ad_value(4)));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul3_ad_middle_scaled_output(15, A::exp(s.ad_value(2)), 3, A::sqrt(s.ad_value(4)), p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul3_ad_scaled_output(16, A::exp(s.ad_value(2)), A::ln(s.ad_value(3)), A::sqrt(s.ad_value(4)), p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
 }
 
 #[derive(Debug)]
@@ -5110,6 +5150,44 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_mul3_ad_middle(&mut self, index: usize, left: AdValue, middle: usize, right: AdValue) {",
+    "        let middle_value = self.values[middle];",
+    "        let middle_node_derivatives = self.node_derivatives[middle];",
+    "        let middle_branch_derivatives = self.branch_derivatives[middle];",
+    "        let product_value = left.value * middle_value;",
+    "        self.values[index] = product_value * right.value;",
+    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left.node_derivatives[axis] * middle_value + left.value * middle_node_derivatives[axis]; self.node_derivatives[index][axis] = product_derivative * right.value + product_value * right.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * middle_value + left.value * middle_branch_derivatives[axis]; self.branch_derivatives[index][axis] = product_derivative * right.value + product_value * right.branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul3_ad_middle_scaled_output(&mut self, index: usize, left: AdValue, middle: usize, right: AdValue, scale: f64) {",
+    "        let middle_value = self.values[middle];",
+    "        let middle_node_derivatives = self.node_derivatives[middle];",
+    "        let middle_branch_derivatives = self.branch_derivatives[middle];",
+    "        let product_value = left.value * middle_value;",
+    "        self.values[index] = product_value * right.value * scale;",
+    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left.node_derivatives[axis] * middle_value + left.value * middle_node_derivatives[axis]; self.node_derivatives[index][axis] = (product_derivative * right.value + product_value * right.node_derivatives[axis]) * scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * middle_value + left.value * middle_branch_derivatives[axis]; self.branch_derivatives[index][axis] = (product_derivative * right.value + product_value * right.branch_derivatives[axis]) * scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul3_ad(&mut self, index: usize, left: AdValue, middle: AdValue, right: AdValue) {",
+    "        let product_value = left.value * middle.value;",
+    "        self.values[index] = product_value * right.value;",
+    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left.node_derivatives[axis] * middle.value + left.value * middle.node_derivatives[axis]; self.node_derivatives[index][axis] = product_derivative * right.value + product_value * right.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * middle.value + left.value * middle.branch_derivatives[axis]; self.branch_derivatives[index][axis] = product_derivative * right.value + product_value * right.branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul3_ad_scaled_output(&mut self, index: usize, left: AdValue, middle: AdValue, right: AdValue, scale: f64) {",
+    "        let product_value = left.value * middle.value;",
+    "        self.values[index] = product_value * right.value * scale;",
+    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left.node_derivatives[axis] * middle.value + left.value * middle.node_derivatives[axis]; self.node_derivatives[index][axis] = (product_derivative * right.value + product_value * right.node_derivatives[axis]) * scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * middle.value + left.value * middle.branch_derivatives[axis]; self.branch_derivatives[index][axis] = (product_derivative * right.value + product_value * right.branch_derivatives[axis]) * scale; }",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_mul_ad_product_lhs(&mut self, index: usize, left: AdValue, right: AdValue, source: usize) {",
     "        let source_value = self.values[source];",
     "        let source_node_derivatives = self.node_derivatives[source];",
@@ -8952,6 +9030,10 @@ pub fn render_runtime_support_module() -> String {
         .replace(
             "second: AdValue,",
             "second: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
+            "middle: AdValue,",
+            "middle: AdValue<NODE_COUNT, BRANCH_COUNT>,",
         )
         .replace(
             "third: AdValue,",
@@ -13999,27 +14081,53 @@ fn compact_fused_product3_store_helper_line(
     right: &str,
     scale: &str,
 ) -> Option<String> {
-    let affine = !compact_scalar_same(scale, "1.0");
+    let scaled_output = !compact_scalar_same(scale, "1.0");
     if let Some(source) = compact_scratch_ad_value_index(right) {
         let product = CompactAffineProduct {
             left,
             right: middle,
             scale: scale.to_string(),
             offset: "0.0".to_string(),
-            affine,
+            affine: scaled_output,
         };
         return compact_nested_multiply_lhs_helper_line(target_index, &product, source);
     }
 
-    let source = compact_scratch_ad_value_index(left)?;
-    let product = CompactAffineProduct {
-        left: middle,
-        right,
-        scale: scale.to_string(),
-        offset: "0.0".to_string(),
-        affine,
-    };
-    compact_nested_multiply_rhs_helper_line(target_index, source, &product)
+    if let Some(source) = compact_scratch_ad_value_index(left) {
+        let product = CompactAffineProduct {
+            left: middle,
+            right,
+            scale: scale.to_string(),
+            offset: "0.0".to_string(),
+            affine: scaled_output,
+        };
+        return compact_nested_multiply_rhs_helper_line(target_index, source, &product);
+    }
+
+    if let Some(middle_source) = compact_scratch_ad_value_index(middle) {
+        let left = compact_scratch_or_non_atomic_ad_arg(left)?;
+        let right = compact_scratch_or_non_atomic_ad_arg(right)?;
+        if scaled_output {
+            return Some(format!(
+                "scratch.store_mul3_ad_middle_scaled_output({target_index}, {left}, {middle_source}, {right}, {scale});"
+            ));
+        }
+        return Some(format!(
+            "scratch.store_mul3_ad_middle({target_index}, {left}, {middle_source}, {right});"
+        ));
+    }
+
+    let left = compact_scratch_or_non_atomic_ad_arg(left)?;
+    let middle = compact_scratch_or_non_atomic_ad_arg(middle)?;
+    let right = compact_scratch_or_non_atomic_ad_arg(right)?;
+    if scaled_output {
+        return Some(format!(
+            "scratch.store_mul3_ad_scaled_output({target_index}, {left}, {middle}, {right}, {scale});"
+        ));
+    }
+    Some(format!(
+        "scratch.store_mul3_ad({target_index}, {left}, {middle}, {right});"
+    ))
 }
 
 fn compact_scaled_mixed_multiply_store_helper_call(

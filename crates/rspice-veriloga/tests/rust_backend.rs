@@ -5376,6 +5376,52 @@ fn rust_backend_fuses_nested_mixed_multiply_store_helpers() {
 }
 
 #[test]
+fn rust_backend_fuses_product3_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_product3_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact product3 ad stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul3_ad_middle("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul3_ad_middle_scaled_output("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul3_ad("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul3_ad_scaled_output("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul3_ad_middle("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_mul3_ad_middle_scaled_output("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("s.store_mul3_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_mul3_ad_scaled_output("), "{stamp}");
+    assert!(!stamp.contains("s.store_ad_value("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_affine_nested_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_affine_nested_mixed_multiply_store_source())
@@ -13936,6 +13982,33 @@ module compact_nested_mixed_multiply_store(p, n);
         e = c * (a * b);
         f = (a * exp(b)) * c;
         g = c * (exp(a) * b);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_product3_ad_store_source() -> &'static str {
+    r#"
+module compact_product3_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = exp(a) * b * sqrt(c);
+        e = exp(a) * ln(b) * sqrt(c);
+        f = gain * (exp(a) * b * sqrt(c));
+        g = gain * (exp(a) * ln(b) * sqrt(c));
         I(p, n) <+ d + e + f + g;
     end
 endmodule
