@@ -9,6 +9,7 @@ type A = GenericAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
 type Scratch = GenericScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
 type ReactiveScratch = GenericReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
 
+const LIMEXP_MAX: f64 = 5.54062238439351e34;
 #[path = "stamp_blocks_0.rs"]
 mod stamp_blocks_0;
 #[path = "stamp_blocks_1.rs"]
@@ -17,126 +18,190 @@ mod stamp_blocks_1;
 mod stamp_blocks_2;
 #[path = "stamp_blocks_3.rs"]
 mod stamp_blocks_3;
-#[path = "stamp_blocks_4.rs"]
-mod stamp_blocks_4;
 
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 
+#[inline]
+fn eval_ddt<const STATE_COUNT: usize>(
+    current: &mut [f64; STATE_COUNT],
+    previous: &mut [f64; STATE_COUNT],
+    initialized: &mut [bool; STATE_COUNT],
+    ddt_active: bool,
+    ddt_scale: f64,
+    slot: usize,
+    value: f64,
+) -> f64 {
+    debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
+    let previous_value = if initialized[slot] { previous[slot] } else { value };
+    current[slot] = value;
+    if ddt_active {
+        (value - previous_value) * ddt_scale
+    } else {
+        previous[slot] = value;
+        initialized[slot] = true;
+        0.0
+    }
+}
+
+#[inline]
+fn ddt_jacobian(timestep: f64, derivative: f64) -> f64 {
+    if timestep.abs() > Instance::DDT_EPSILON {
+        derivative / timestep
+    } else {
+        0.0
+    }
+}
+
+#[inline]
+fn eval_idt<const STATE_COUNT: usize>(
+    current: &mut [f64; STATE_COUNT],
+    previous: &mut [f64; STATE_COUNT],
+    initialized: &mut [bool; STATE_COUNT],
+    ddt_active: bool,
+    idt_scale: f64,
+    slot: usize,
+    value: f64,
+    ic: f64,
+) -> f64 {
+    debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
+    let previous_value = if initialized[slot] { previous[slot] } else { ic };
+    let current_value = if ddt_active {
+        previous_value + value * idt_scale
+    } else {
+        ic
+    };
+    current[slot] = current_value;
+    if !ddt_active {
+        previous[slot] = current_value;
+        initialized[slot] = true;
+    }
+    current_value
+}
+
+#[inline]
+fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
+    if timestep.abs() > Instance::DDT_EPSILON {
+        derivative * timestep
+    } else {
+        0.0
+    }
+}
+
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = self.params;
-        let nodes = self.nodes;
-        let branches = self.branches;
-        let mut s = Scratch::new();
+        let p = &self.params;
+        let nodes = &(*self).nodes;
+        let branches = &(*self).branches;
+        let param_given = &self.param_given;
+        let multiplicity = (*self).multiplicity;
+        let timestep = (*self).timestep;
+        let ddt_state_current = &mut self.ddt_state_current;
+        let ddt_state_previous = &mut self.ddt_state_previous;
+        let ddt_state_initialized = &mut self.ddt_state_initialized;
+        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
+        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let s = match &mut self.scratch {
+            Some(buf) => buf.as_mut(),
+            slot @ None => slot.insert(Box::new(Scratch::new())).as_mut(),
+        };
 
-        self.stamp_transient_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_block_1(ctx, stamper, &mut s);
-        self.stamp_transient_block_2(ctx, stamper, &mut s);
-        self.stamp_transient_block_3(ctx, stamper, &mut s);
-        self.stamp_transient_block_4(ctx, stamper, &mut s);
-        self.stamp_transient_block_5(ctx, stamper, &mut s);
-        self.stamp_transient_block_6(ctx, stamper, &mut s);
-        self.stamp_transient_block_7(ctx, stamper, &mut s);
-        self.stamp_transient_block_8(ctx, stamper, &mut s);
-        self.stamp_transient_block_9(ctx, stamper, &mut s);
-        self.stamp_transient_block_10(ctx, stamper, &mut s);
-        self.stamp_transient_block_11(ctx, stamper, &mut s);
-        self.stamp_transient_block_12(ctx, stamper, &mut s);
-        self.stamp_transient_block_13(ctx, stamper, &mut s);
-        self.stamp_transient_block_14(ctx, stamper, &mut s);
-        self.stamp_transient_block_15(ctx, stamper, &mut s);
-        self.stamp_transient_block_16(ctx, stamper, &mut s);
-        self.stamp_transient_block_17(ctx, stamper, &mut s);
-        self.stamp_transient_block_18(ctx, stamper, &mut s);
-        self.stamp_transient_block_19(ctx, stamper, &mut s);
-        self.stamp_transient_block_20(ctx, stamper, &mut s);
-        self.stamp_transient_block_21(ctx, stamper, &mut s);
-        self.stamp_transient_block_22(ctx, stamper, &mut s);
-        self.stamp_transient_block_23(ctx, stamper, &mut s);
-        self.stamp_transient_block_24(ctx, stamper, &mut s);
-        self.stamp_transient_block_25(ctx, stamper, &mut s);
-        self.stamp_transient_block_26(ctx, stamper, &mut s);
+        Self::stamp_transient_block_0(ctx, s, p, param_given);
+        Self::stamp_transient_block_1(s, p);
+        Self::stamp_transient_block_2(s, p);
+        Self::stamp_transient_block_3(s, p);
+        Self::stamp_transient_block_4(s, p);
+        Self::stamp_transient_block_5(s, p);
+        Self::stamp_transient_block_6(s, p);
+        Self::stamp_transient_block_7(s, p);
+        Self::stamp_transient_block_8(s, p);
+        Self::stamp_transient_block_9(s, p);
+        Self::stamp_transient_block_10(s, p);
+        Self::stamp_transient_block_11(s, p);
+        Self::stamp_transient_block_12(s, p);
+        Self::stamp_transient_block_13(s, p);
+        Self::stamp_transient_block_14(s, p);
+        Self::stamp_transient_block_15(s, p);
+        Self::stamp_transient_block_16(s, p);
+        Self::stamp_transient_block_17(s, p);
+        Self::stamp_transient_block_18(s, p);
+        Self::stamp_transient_block_19(s, p);
+        Self::stamp_transient_block_20(s, p);
+        Self::stamp_transient_block_21(s, p);
+        Self::stamp_transient_block_22(ctx, s, p, nodes);
+        Self::stamp_transient_block_23(s, p);
+        Self::stamp_transient_block_24(s, p);
+        Self::stamp_transient_block_25(s, p);
+        Self::stamp_transient_block_26(ctx, s, p, nodes);
+        Self::stamp_transient_block_27(ctx, s, p, nodes);
 
         stamper.stamp_potential_branch(
             Some(nodes[2]),
             Some(nodes[1]),
             branches[0],
-            self.multiplicity,
+            multiplicity,
         );
         stamper.stamp_potential_branch(
             Some(nodes[3]),
             None,
             branches[1],
-            self.multiplicity,
+            multiplicity,
         );
         stamper.stamp_potential_branch(
             Some(nodes[4]),
             None,
             branches[2],
-            self.multiplicity,
+            multiplicity,
         );
         stamper.stamp_potential_branch(
             Some(nodes[5]),
             None,
             branches[3],
-            self.multiplicity,
+            multiplicity,
         );
 
-        self.stamp_transient_equation_0_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_1_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_2_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_3_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_4_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_5_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_6_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_7_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_8_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_9_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_10_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_11_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_12_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_13_block_0(ctx, stamper, &mut s);
-        self.stamp_transient_equation_14_block_0(ctx, stamper, &mut s);
+        Self::stamp_transient_equations_block_0(ctx, stamper, s, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let p = self.params;
-        let nodes = self.nodes;
-        let branches = self.branches;
-        let mut s = ReactiveScratch::new();
+        let p = &self.params;
+        let nodes = &(*self).nodes;
+        let branches = &(*self).branches;
+        let param_given = &self.param_given;
+        let multiplicity = (*self).multiplicity;
+        let s = match &mut self.reactive_scratch {
+            Some(buf) => buf.as_mut(),
+            slot @ None => slot.insert(Box::new(ReactiveScratch::new())).as_mut(),
+        };
 
-        self.stamp_reactive_block_0(ctx, stamper, &mut s);
-        self.stamp_reactive_block_1(ctx, stamper, &mut s);
-        self.stamp_reactive_block_2(ctx, stamper, &mut s);
-        self.stamp_reactive_block_3(ctx, stamper, &mut s);
-        self.stamp_reactive_block_4(ctx, stamper, &mut s);
-        self.stamp_reactive_block_5(ctx, stamper, &mut s);
-        self.stamp_reactive_block_6(ctx, stamper, &mut s);
-        self.stamp_reactive_block_7(ctx, stamper, &mut s);
-        self.stamp_reactive_block_8(ctx, stamper, &mut s);
-        self.stamp_reactive_block_9(ctx, stamper, &mut s);
-        self.stamp_reactive_block_10(ctx, stamper, &mut s);
-        self.stamp_reactive_block_11(ctx, stamper, &mut s);
-        self.stamp_reactive_block_12(ctx, stamper, &mut s);
-        self.stamp_reactive_block_13(ctx, stamper, &mut s);
-        self.stamp_reactive_block_14(ctx, stamper, &mut s);
-        self.stamp_reactive_block_15(ctx, stamper, &mut s);
-        self.stamp_reactive_block_16(ctx, stamper, &mut s);
-        self.stamp_reactive_block_17(ctx, stamper, &mut s);
-        self.stamp_reactive_block_18(ctx, stamper, &mut s);
-        self.stamp_reactive_block_19(ctx, stamper, &mut s);
-        self.stamp_reactive_block_20(ctx, stamper, &mut s);
-        self.stamp_reactive_block_21(ctx, stamper, &mut s);
-        self.stamp_reactive_block_22(ctx, stamper, &mut s);
-        self.stamp_reactive_block_23(ctx, stamper, &mut s);
-        self.stamp_reactive_block_24(ctx, stamper, &mut s);
-        self.stamp_reactive_block_25(ctx, stamper, &mut s);
-        self.stamp_reactive_block_26(ctx, stamper, &mut s);
+        Self::stamp_reactive_block_0(ctx, s, p, param_given);
+        Self::stamp_reactive_block_1(s, p);
+        Self::stamp_reactive_block_2(s, p);
+        Self::stamp_reactive_block_3(s, p);
+        Self::stamp_reactive_block_4(s, p);
+        Self::stamp_reactive_block_5(s, p);
+        Self::stamp_reactive_block_6(s, p);
+        Self::stamp_reactive_block_7(s, p);
+        Self::stamp_reactive_block_8(s, p);
+        Self::stamp_reactive_block_9(s, p);
+        Self::stamp_reactive_block_10(s, p);
+        Self::stamp_reactive_block_11(s, p);
+        Self::stamp_reactive_block_12(s, p);
+        Self::stamp_reactive_block_13(s, p);
+        Self::stamp_reactive_block_14(s, p);
+        Self::stamp_reactive_block_15(s, p);
+        Self::stamp_reactive_block_16(s, p);
+        Self::stamp_reactive_block_17(s, p);
+        Self::stamp_reactive_block_18(s, p);
+        Self::stamp_reactive_block_19(s, p);
+        Self::stamp_reactive_block_20(s, p);
+        Self::stamp_reactive_block_21(s, p);
+        Self::stamp_reactive_block_22(ctx, s, p, nodes);
+        Self::stamp_reactive_block_23(s, p);
+        Self::stamp_reactive_block_24(s, p);
+        Self::stamp_reactive_block_25(s, p);
+        Self::stamp_reactive_block_26(ctx, s, p, nodes);
+        Self::stamp_reactive_block_27(ctx, s, p, nodes);
 
-        self.stamp_reactive_equation_7_block_0(ctx, stamper, &mut s);
-        self.stamp_reactive_equation_8_block_0(ctx, stamper, &mut s);
-        self.stamp_reactive_equation_11_block_0(ctx, stamper, &mut s);
-        self.stamp_reactive_equation_13_block_0(ctx, stamper, &mut s);
-        self.stamp_reactive_equation_14_block_0(ctx, stamper, &mut s);
+        Self::stamp_reactive_equations_block_0(stamper, s, nodes, branches, multiplicity);
     }
 }

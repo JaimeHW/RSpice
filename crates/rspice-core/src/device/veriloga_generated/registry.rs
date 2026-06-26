@@ -138,6 +138,45 @@ pub enum GeneratedBuiltinKind {
 }
 
 impl GeneratedBuiltinKind {
+    pub fn restore_from_snapshot(&mut self, snapshot: Self) {
+        match (self, snapshot) {
+            (Self::Device0(active), Self::Device0(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device1(active), Self::Device1(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device2(active), Self::Device2(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device3(active), Self::Device3(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device4(active), Self::Device4(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device5(active), Self::Device5(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device6(active), Self::Device6(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device7(active), Self::Device7(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device8(active), Self::Device8(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device9(active), Self::Device9(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device10(active), Self::Device10(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device11(active), Self::Device11(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device12(active), Self::Device12(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device13(active), Self::Device13(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device14(active), Self::Device14(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device15(active), Self::Device15(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device16(active), Self::Device16(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device17(active), Self::Device17(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device18(active), Self::Device18(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device19(active), Self::Device19(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device20(active), Self::Device20(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device21(active), Self::Device21(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device22(active), Self::Device22(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device23(active), Self::Device23(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device24(active), Self::Device24(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device25(active), Self::Device25(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device26(active), Self::Device26(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device27(active), Self::Device27(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device28(active), Self::Device28(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device29(active), Self::Device29(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device30(active), Self::Device30(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device31(active), Self::Device31(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device32(active), Self::Device32(snapshot)) => active.restore_from_snapshot(snapshot),
+            (active, snapshot) => *active = snapshot,
+        }
+    }
+
     pub fn stamp(&mut self, ctx: &super::GeneratedEvalContext<'_>, stamper: &mut super::GeneratedStamper<'_>) {
         match self {
             Self::Device0(device) => device.stamp(ctx, stamper),

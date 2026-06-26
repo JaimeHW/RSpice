@@ -1,5 +1,7 @@
 #![allow(dead_code, unused_parens, unused_variables)]
 
+use crate::device::veriloga_generated::support::{ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch};
+
 pub struct Parameters {
     pub p0: f64,
     pub p1: f64,
@@ -1973,13 +1975,31 @@ pub struct Instance {
     pub(crate) idt_state_initialized: [bool; 0],
     pub(crate) time: f64,
     pub(crate) timestep: f64,
+    pub(crate) scratch: Option<Box<GenericScratch<2932, 13, 7>>>,
+    pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<2932, 13, 7>>>,
 }
-
-impl Copy for Instance {}
 
 impl Clone for Instance {
     #[inline]
-    fn clone(&self) -> Self { *self }
+    fn clone(&self) -> Self {
+        Self {
+            nodes: self.nodes,
+            branches: self.branches,
+            params: self.params,
+            param_given: self.param_given,
+            multiplicity: self.multiplicity,
+            ddt_state_current: self.ddt_state_current,
+            ddt_state_previous: self.ddt_state_previous,
+            ddt_state_initialized: self.ddt_state_initialized,
+            idt_state_current: self.idt_state_current,
+            idt_state_previous: self.idt_state_previous,
+            idt_state_initialized: self.idt_state_initialized,
+            time: self.time,
+            timestep: self.timestep,
+            scratch: None,
+            reactive_scratch: None,
+        }
+    }
 }
 
 impl Instance {
@@ -2014,7 +2034,49 @@ impl Instance {
             idt_state_initialized: [false; Self::IDT_STATE_COUNT],
             time: 0.0,
             timestep: 0.0,
+            scratch: Some(Box::new(GenericScratch::new())),
+            reactive_scratch: Some(Box::new(GenericReactiveScratch::new())),
         }
+    }
+
+    #[inline]
+    pub fn restore_from_snapshot(&mut self, snapshot: Self) {
+        let scratch = self.scratch.take();
+        let reactive_scratch = self.reactive_scratch.take();
+        let Self {
+            nodes,
+            branches,
+            params,
+            param_given,
+            multiplicity,
+            ddt_state_current,
+            ddt_state_previous,
+            ddt_state_initialized,
+            idt_state_current,
+            idt_state_previous,
+            idt_state_initialized,
+            time,
+            timestep,
+            scratch: _,
+            reactive_scratch: _,
+        } = snapshot;
+        *self = Self {
+            nodes,
+            branches,
+            params,
+            param_given,
+            multiplicity,
+            ddt_state_current,
+            ddt_state_previous,
+            ddt_state_initialized,
+            idt_state_current,
+            idt_state_previous,
+            idt_state_initialized,
+            time,
+            timestep,
+            scratch,
+            reactive_scratch,
+        };
     }
 
     #[inline]
