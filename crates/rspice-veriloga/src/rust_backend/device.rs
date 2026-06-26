@@ -535,16 +535,22 @@ fn compact_conditional_store_replacement(
     replacement.push_str(" {\n");
     let branch_indent = format!("{indent}    ");
     if let Some(line) = then_store {
-        push_indented_compact_line(&mut replacement, &branch_indent, &line);
+        push_indented_compact_fragment(&mut replacement, &branch_indent, &line);
     }
     replacement.push_str(indent);
     replacement.push_str("} else {\n");
     if let Some(line) = else_store {
-        push_indented_compact_line(&mut replacement, &branch_indent, &line);
+        push_indented_compact_fragment(&mut replacement, &branch_indent, &line);
     }
     replacement.push_str(indent);
     replacement.push_str("}\n");
     replacement
+}
+
+fn push_indented_compact_fragment(out: &mut String, indent: &str, fragment: &str) {
+    for line in fragment.trim_end_matches('\n').lines() {
+        push_indented_compact_line(out, indent, line);
+    }
 }
 
 #[derive(Debug)]
@@ -596,6 +602,21 @@ fn compact_single_expression_branch(value: &str) -> Option<&str> {
 }
 
 fn compact_conditional_ad_branch_store(target_index: usize, value: &str) -> Option<Option<String>> {
+    if let Some(conditional) = parse_compact_if_block(value) {
+        let then_store = compact_conditional_ad_branch_store(target_index, conditional.then_expr)?;
+        let else_store = compact_conditional_ad_branch_store(target_index, conditional.else_expr)?;
+        let replacement = compact_conditional_store_replacement(
+            "",
+            conditional.condition,
+            then_store,
+            else_store,
+        );
+        if replacement.is_empty() {
+            return Some(None);
+        }
+        return Some(Some(replacement));
+    }
+
     if let Some(args) = compact_ad_call_args(value, "constant") {
         if args.len() != 1 {
             return None;
@@ -741,6 +762,87 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value(7, {"), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_nested_conditional_ad_rvalue_store_as_direct_branch_stores() {
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(7, {
+        if (scratch.values[2] >= params.limit) {
+            AdValue::add_scaled_inputs(scratch.ad_value(2), 0.5, scratch.ad_value(3), 0.5)
+        } else {
+            {
+                if (scratch.values[2] < -params.limit) {
+                    AdValue::div_scalar_offset_denominator(params.floor, scratch.ad_value(4), 1.0, params.scale)
+                } else {
+                    AdValue::constant(0.0)
+                }
+            }
+        }
+    });
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(compact.contains("if (s.v[2] >= p.limit) {"), "{compact}");
+        assert!(
+            compact.contains("s.store_scaled_add(7, 2, 3, 0.5);"),
+            "{compact}"
+        );
+        assert!(compact.contains("if (s.v[2] < -p.limit) {"), "{compact}");
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_offset_scaled_input(7, p.floor, 4, p.scale, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(compact.contains("s.store_scalar(7, 0.0);"), "{compact}");
+        assert!(!compact.contains("s.store_ad_value(7, {"), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_nested_conditional_generated_ad_local_store_as_direct_branch_stores() {
+        let source = r#"
+fn stamp() {
+    let assign10_ad_e20: AdValue = {
+        if (scratch.values[2] >= params.limit) {
+            AdValue::add_scaled_inputs(scratch.ad_value(2), 0.5, scratch.ad_value(3), 0.5)
+        } else {
+            {
+                if (scratch.values[2] < -params.limit) {
+                    AdValue::div_scalar_offset_denominator(params.floor, scratch.ad_value(4), 1.0, params.scale)
+                } else {
+                    AdValue::constant(0.0)
+                }
+            }
+        }
+    };
+    scratch.store_ad_value(8, assign10_ad_e20);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(compact.contains("if (s.v[2] >= p.limit) {"), "{compact}");
+        assert!(
+            compact.contains("s.store_scaled_add(8, 2, 3, 0.5);"),
+            "{compact}"
+        );
+        assert!(compact.contains("if (s.v[2] < -p.limit) {"), "{compact}");
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_offset_scaled_input(8, p.floor, 4, p.scale, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(compact.contains("s.store_scalar(8, 0.0);"), "{compact}");
+        assert!(!compact.contains("let assign10_ad_e20"), "{compact}");
+        assert!(
+            !compact.contains("s.store_ad_value(8, assign10_ad_e20);"),
+            "{compact}"
+        );
     }
 
     #[test]
