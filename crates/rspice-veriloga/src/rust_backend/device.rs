@@ -1655,6 +1655,37 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_div_scaled_inputs2_offset_consumers_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_offset_div_scaled_inputs2"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(90, AdValue::offset(AdValue::div_scaled_inputs2(scratch.ad_value(2), params.first_scale, scratch.ad_value(3), params.second_scale, scratch.ad_value(4), params.denominator_scale), params.outer_offset));
+    let assign91_ad_e20: AdValue = AdValue::offset(AdValue::div_scaled_inputs2(AdValue::sqrt(scratch.ad_value(5)), 0.5, AdValue::ln(scratch.ad_value(6)), params.second_scale, AdValue::offset(scratch.ad_value(7), params.bias), params.denominator_scale), (-1.0));
+    scratch.store_ad_value(91, assign91_ad_e20);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_offset_div_scaled_inputs2(90, s.ad_value(2), p.first_scale, s.ad_value(3), p.second_scale, s.ad_value(4), p.denominator_scale, p.outer_offset);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_offset_div_scaled_inputs2(91, A::sqrt(s.ad_value(5)), 0.5, A::ln(s.ad_value(6)), p.second_scale, A::offset(s.ad_value(7), p.bias), p.denominator_scale, (-1.0));"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::div_scaled_inputs2("), "{compact}");
+        assert!(!compact.contains("s.store_offset_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sub_div_same_denominator_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -5224,6 +5255,20 @@ fn generate_scratch_operation_helpers() -> String {
         "        let quotient = numerator_value * reciprocal;",
         "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
         "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) * reciprocal + denominator.branch_derivatives[axis] * denominator_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset_div_scaled_inputs2(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, denominator: AdValue, denominator_scale: f64, offset: f64) {",
+        "        let first_value = first.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let numerator_value = first_value + second_value;",
+        "        let denominator_value = denominator.value * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let quotient = numerator_value * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        self.values[index] = quotient + offset;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) * reciprocal + denominator.branch_derivatives[axis] * denominator_derivative_scale; }",
         "    }",
@@ -13854,6 +13899,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_offset_div_scaled_product_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_offset_div_scaled_inputs2_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_nested_offset_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -16810,6 +16858,23 @@ fn compact_offset_div_scaled_product_store_helper_call(
     ))
 }
 
+fn compact_offset_div_scaled_inputs2_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "offset")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    let (first, first_scale, second, second_scale, denominator, denominator_scale) =
+        compact_div_scaled_inputs2_args(args[0])?;
+    Some(format!(
+        "scratch.store_offset_div_scaled_inputs2({target_index}, {first}, {first_scale}, {second}, {second_scale}, {denominator}, {denominator_scale}, {});",
+        args[1]
+    ))
+}
+
 fn compact_mul_add_scaled_inputs3_store_helper_call(
     target_index: usize,
     value: &str,
@@ -16996,6 +17061,14 @@ fn compact_div_scaled_product_args(value: &str) -> Option<(&str, &str, &str, &st
         return None;
     }
     Some((args[0], args[1], args[2], args[3], args[4]))
+}
+
+fn compact_div_scaled_inputs2_args(value: &str) -> Option<(&str, &str, &str, &str, &str, &str)> {
+    let args = compact_ad_call_args(value, "div_scaled_inputs2")?;
+    if args.len() != 6 {
+        return None;
+    }
+    Some((args[0], args[1], args[2], args[3], args[4], args[5]))
 }
 
 fn compact_scale_offset_scratch_arg(value: &str) -> Option<(usize, &str, &str)> {
