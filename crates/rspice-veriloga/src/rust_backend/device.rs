@@ -6553,6 +6553,21 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scaled_value_offset_denominator(input: Self, input_scale: f64, denominator: Self, denominator_offset: f64, denominator_scale: f64) -> Self {",
+        "        let mut value = input;",
+        "        let input_value = value.value;",
+        "        let denominator_value = (denominator.value + denominator_offset) * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let quotient = input_value * input_scale * reciprocal;",
+        "        let input_derivative_scale = input_scale * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * input_derivative_scale + denominator.node_derivatives[index] * denominator_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * input_derivative_scale + denominator.branch_derivatives[index] * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_scaled_value_by_product(input: Self, input_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {",
         "        let mut value = input;",
         "        let input_value = value.value;",
@@ -6579,6 +6594,19 @@ fn generate_ad_value_struct() -> String {
         "        value.value = quotient;",
         "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.node_derivatives[index]) * denominator_derivative_scale; }",
         "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.branch_derivatives[index]) * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn div_scalar_offset_denominator(scalar: f64, denominator: Self, denominator_offset: f64, denominator_scale: f64) -> Self {",
+        "        let mut value = denominator;",
+        "        let denominator_value = (value.value + denominator_offset) * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for derivative in &mut value.node_derivatives { *derivative *= denominator_derivative_scale; }",
+        "        for derivative in &mut value.branch_derivatives { *derivative *= denominator_derivative_scale; }",
         "        value",
         "    }",
         "",
@@ -11702,6 +11730,37 @@ fn compact_div_from_scalar_affine_input_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "div_scalar_offset_denominator") {
+        if args.len() != 4 {
+            return None;
+        }
+        let scalar = args[0];
+        let denominator = args[1];
+        let offset = args[2];
+        let scale = args[3];
+        if let Some(source) = compact_scratch_ad_value_index(denominator) {
+            if compact_scalar_same(scale, "1.0") {
+                return Some(format!(
+                    "scratch.store_div_from_scalar_offset_input({target_index}, {scalar}, {source}, {offset});"
+                ));
+            }
+            return Some(format!(
+                "scratch.store_div_from_scalar_offset_scaled_input({target_index}, {scalar}, {source}, {scale}, {});",
+                compact_scalar_mul(offset, scale)
+            ));
+        }
+
+        let denominator = compact_scratch_or_non_atomic_ad_arg(denominator)?;
+        if compact_scalar_same(scale, "1.0") {
+            return Some(format!(
+                "scratch.store_div_from_scalar_offset_ad({target_index}, {scalar}, {denominator}, {offset});"
+            ));
+        }
+        return Some(format!(
+            "scratch.store_div_from_scalar_scaled_ad({target_index}, {scalar}, AdValue::offset({denominator}, {offset}), {scale});"
+        ));
+    }
+
     let args = compact_ad_call_args(value, "div_from_scalar")?;
     if args.len() != 2 {
         return None;
@@ -13087,6 +13146,34 @@ fn compact_scaled_factor_ad_expression(value: &str) -> (&str, String) {
     compact_scaled_ad_expression(value).unwrap_or((value, "1.0".to_string()))
 }
 
+fn compact_offset_denominator_ad_expression(value: &str) -> Option<(&str, String, String)> {
+    let (denominator, denominator_scale) = compact_scaled_factor_ad_expression(value);
+    if let Some(args) = compact_ad_call_args(denominator, "offset") {
+        if args.len() != 2 {
+            return None;
+        }
+        return Some((args[0], args[1].to_string(), denominator_scale));
+    }
+
+    let args = compact_ad_call_args(denominator, "scaled_offset")?;
+    if args.len() != 3 {
+        return None;
+    }
+    Some((
+        args[0],
+        args[1].to_string(),
+        compact_scalar_mul(args[2], &denominator_scale),
+    ))
+}
+
+fn compact_div_from_scalar_offset_denominator(scalar: &str, denominator: &str) -> Option<String> {
+    let (denominator, denominator_offset, denominator_scale) =
+        compact_offset_denominator_ad_expression(denominator)?;
+    Some(format!(
+        "AdValue::div_scalar_offset_denominator({scalar}, {denominator}, {denominator_offset}, {denominator_scale})"
+    ))
+}
+
 struct CompactAffineTerm<'a> {
     value: &'a str,
     scale: String,
@@ -13840,6 +13927,16 @@ fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> 
                 args[0],
                 args[2],
                 compact_scalar_mul(args[1], args[2])
+            ));
+        }
+    }
+    if let Some((denominator, denominator_offset, denominator_scale)) =
+        compact_offset_denominator_ad_expression(right)
+    {
+        let (input, input_scale) = compact_scaled_factor_ad_expression(left);
+        if !compact_non_atomic_ad_value(input) {
+            return Some(format!(
+                "AdValue::div_scaled_value_offset_denominator({input}, {input_scale}, {denominator}, {denominator_offset}, {denominator_scale})"
             ));
         }
     }
@@ -14602,6 +14699,20 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         ));
     }
 
+    if let Some(args) = compact_ad_call_args(value, "div_scaled_value_offset_denominator") {
+        if args.len() != 5 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scaled_value_offset_denominator({}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            args[4]
+        ));
+    }
+
     if let Some(args) = compact_ad_call_args(value, "div_scaled_value_by_product") {
         if args.len() != 5 {
             return None;
@@ -14622,6 +14733,19 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         }
         return Some(format!(
             "AdValue::div_scalar_by_product({}, {}, {}, {})",
+            compact_scalar_mul(args[0], scale),
+            args[1],
+            args[2],
+            args[3]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "div_scalar_offset_denominator") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scalar_offset_denominator({}, {}, {}, {})",
             compact_scalar_mul(args[0], scale),
             args[1],
             args[2],
@@ -16291,7 +16415,10 @@ impl CompactAdEmitter<'_> {
         operand: ExprId,
     ) -> Result<String, RustBackendError> {
         let operand = self.lower(operand)?;
-        Ok(format!("AdValue::div_from_scalar({scalar}, {operand})"))
+        Ok(
+            compact_div_from_scalar_offset_denominator(&scalar, &operand)
+                .unwrap_or_else(|| format!("AdValue::div_from_scalar({scalar}, {operand})")),
+        )
     }
 
     fn lower_named_branch_access(
