@@ -44,7 +44,7 @@ impl Instance {
 
         if (s.b[473] && s.b[474]) {
             s.store_add_scaled_inputs(118, 114, 0.1, 4, 4.0);
-            s.store_ad_value(123, A::div_scaled_inputs2(s.ad_value(114), 1.0, s.ad_value(122), 1.0, s.ad_value(118), 1.0));
+            s.store_div_scaled_inputs2(123, s.ad_value(114), 1.0, s.ad_value(122), 1.0, s.ad_value(118), 1.0);
         }
 
         s.b[476] = (s.v[123] < 80.0);
@@ -131,7 +131,7 @@ impl Instance {
 
         if (s.b[478] && s.b[479]) {
             s.store_add_scaled_inputs(118, 114, 0.1, 4, 4.0);
-            s.store_ad_value(123, A::div_scaled_inputs2(s.ad_value(114), 1.0, s.ad_value(122), 1.0, s.ad_value(118), 1.0));
+            s.store_div_scaled_inputs2(123, s.ad_value(114), 1.0, s.ad_value(122), 1.0, s.ad_value(118), 1.0);
         }
 
         s.b[481] = (s.v[123] < 80.0);
@@ -221,7 +221,7 @@ impl Instance {
 
         if ((s.b[483] && s.b[484]) && s.b[485]) {
             s.store_add_scaled_inputs(118, 114, 0.1, 4, 4.0);
-            s.store_ad_value(123, A::div_scaled_inputs2(s.ad_value(114), 1.0, s.ad_value(122), 1.0, s.ad_value(118), 1.0));
+            s.store_div_scaled_inputs2(123, s.ad_value(114), 1.0, s.ad_value(122), 1.0, s.ad_value(118), 1.0);
         }
 
         s.b[487] = (s.v[123] < 80.0);
@@ -316,7 +316,7 @@ impl Instance {
         s.v[494] = if s.b[494] { 1.0 } else { 0.0 };
 
         if s.b[494] {
-            s.store_scaled_div(93, 208, 4, (1.0 / (p.p100)));
+            s.store_div_scaled_inputs(93, s.ad_value(208), 1.0, s.ad_value(4), p.p100);
         }
 
         s.b[495] = (s.v[93] > 80.0);
