@@ -2839,7 +2839,7 @@ impl Instance {
 
         s.store_mul(34, 121, 265);
 
-        s.store_add_scaled_square_product(35, s.ad_value(2), 1.0, s.ad_value(34), s.ad_value(151), 1.0);
+        s.store_add_scaled_square_product_indices(35, 2, 1.0, 34, 151, 1.0);
 
         s.store_scaled_div(266, 34, 35, p.p295);
 
@@ -5507,7 +5507,7 @@ impl Instance {
 
         s.store_mul(34, 121, 265);
 
-        s.store_add_scaled_square_product(35, s.ad_value(2), 1.0, s.ad_value(34), s.ad_value(151), 1.0);
+        s.store_add_scaled_square_product_indices(35, 2, 1.0, 34, 151, 1.0);
 
         s.b[661] = ((p.p20 == 1.0) && (s.v[275] != 0.0));
         s.v[661] = if s.b[661] { 1.0 } else { 0.0 };

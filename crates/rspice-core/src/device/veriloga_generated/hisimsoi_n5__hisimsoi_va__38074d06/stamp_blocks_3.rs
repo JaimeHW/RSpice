@@ -4660,7 +4660,7 @@ impl Instance {
         if s.b[1773] {
             s.store_scaled_mul(1767, 323, 108, (1e-6 * s.v[98]));
             s.store_scale(1768, 555, 1.0 / (s.v[451]));
-            s.store_div_scaled_product3(1769, s.ad_value(227), s.ad_value(1768), s.ad_value(1768), (0.1185185185185185 * 1.6021918e-19), s.ad_value(300), 1.0);
+            s.store_div_scaled_product3_indices(1769, 227, 1768, 1768, (0.1185185185185185 * 1.6021918e-19), 300, 1.0);
         }
 
         s.b[1774] = ((s.v[297] > (10.0 * 2.220446049250313e-16)) && (s.v[157] > (10.0 * 2.220446049250313e-16)));

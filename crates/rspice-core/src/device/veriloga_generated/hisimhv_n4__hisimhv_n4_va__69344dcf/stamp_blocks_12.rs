@@ -435,7 +435,7 @@ impl Instance {
         if (((s.b[3332] && (!s.b[3352])) && s.b[3367]) && s.b[3368]) {
             s.store_div_from_scalar(726, 1.0, 726);
             s.store_mul3_affine_lhs(780, 781, 408, p.p441, 0.0, 726);
-            s.store_div_scaled_product3(334, s.ad_value(408), s.ad_value(725), s.ad_value(726), p.p441, s.ad_value(770), 1.0);
+            s.store_div_scaled_product3_indices(334, 408, 725, 726, p.p441, 770, 1.0);
             s.store_add_scaled_inputs3(336, s.ad_value(408), p.p440, s.ad_value(408), (-p.p441), s.ad_value(780), 1.0);
         }
 

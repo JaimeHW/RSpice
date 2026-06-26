@@ -1282,7 +1282,7 @@ impl Instance {
 
         if (p.p13 != 0.0) {
             s.store_scaled_mul(99, 24, 63, (4.0 * 1.3806505e-23));
-            s.store_div_scaled_product3(100, s.ad_value(80), A::powf(A::abs(A::div(s.ad_value(81), s.ad_value(38))), p.p87), s.ad_value(38), 1.0, s.ad_value(37), 1.0);
+            s.store_div_scaled_product3_mixed_iaii(100, 80, A::powf(A::abs(A::div(s.ad_value(81), s.ad_value(38))), p.p87), 38, 1.0, 37, 1.0);
         }
 
         s.b[323] = (s.v[81] < 0.0);

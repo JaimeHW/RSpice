@@ -6640,7 +6640,7 @@ impl Instance {
 
         s.store_sub(347, 347, 358);
 
-        s.store_div_scaled_product3(184, s.ad_value(416), s.ad_value(163), s.ad_value(158), 1.0, s.ad_value(153), 1.0);
+        s.store_div_scaled_product3_indices(184, 416, 163, 158, 1.0, 153, 1.0);
 
         s.b[1419] = (p.p80 == 0.0);
         s.v[1419] = if s.b[1419] { 1.0 } else { 0.0 };

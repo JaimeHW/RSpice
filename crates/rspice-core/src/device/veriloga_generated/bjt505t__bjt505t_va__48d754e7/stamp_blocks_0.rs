@@ -1687,7 +1687,7 @@ impl Instance {
         }
 
         if (((s.b[575] && s.b[590]) && s.b[591]) && (!s.b[592])) {
-            s.store_div_scaled_product3(212, s.ad_value(159), s.ad_value(210), s.ad_value(211), 1.0, A::add(s.ad_value(210), s.ad_value(211)), 1.0);
+            s.store_div_scaled_product3_mixed_iiia(212, 159, 210, 211, 1.0, A::add(s.ad_value(210), s.ad_value(211)), 1.0);
         }
 
         if ((s.b[575] && s.b[590]) && (!s.b[591])) {
@@ -1854,7 +1854,7 @@ impl Instance {
         }
 
         if (!s.b[601]) {
-            s.store_div_scaled_product3(249, s.ad_value(43), s.ad_value(98), s.ad_value(274), 2.0, A::offset(A::sqrt(A::scale_offset(s.ad_value(180), 4.0, 1.0)), 1.0), 1.0);
+            s.store_div_scaled_product3_mixed_iiia(249, 43, 98, 274, 2.0, A::offset(A::sqrt(A::scale_offset(s.ad_value(180), 4.0, 1.0)), 1.0), 1.0);
         }
 
         s.b[603] = (((p.p5 == 1.0) || (p.p5 == 3.0)) && (p.p33 > 0.0));
@@ -1888,7 +1888,7 @@ impl Instance {
         }
 
         if (s.b[603] && (!s.b[604])) {
-            s.store_div_scaled_product3(247, s.ad_value(43), s.ad_value(98), s.ad_value(275), (2.0 * p.p33), A::offset(A::sqrt(A::scale_offset(s.ad_value(181), 4.0, 1.0)), 1.0), 1.0);
+            s.store_div_scaled_product3_mixed_iiia(247, 43, 98, 275, (2.0 * p.p33), A::offset(A::sqrt(A::scale_offset(s.ad_value(181), 4.0, 1.0)), 1.0), 1.0);
         }
 
         if s.b[603] {
@@ -3594,7 +3594,7 @@ impl Instance {
         }
 
         if (!s.b[601]) {
-            s.store_div_scaled_product3(249, s.ad_value(43), s.ad_value(98), s.ad_value(274), 2.0, A::offset(A::sqrt(A::scale_offset(s.ad_value(180), 4.0, 1.0)), 1.0), 1.0);
+            s.store_div_scaled_product3_mixed_iiia(249, 43, 98, 274, 2.0, A::offset(A::sqrt(A::scale_offset(s.ad_value(180), 4.0, 1.0)), 1.0), 1.0);
         }
 
         s.b[603] = (((p.p5 == 1.0) || (p.p5 == 3.0)) && (p.p33 > 0.0));
@@ -3628,7 +3628,7 @@ impl Instance {
         }
 
         if (s.b[603] && (!s.b[604])) {
-            s.store_div_scaled_product3(247, s.ad_value(43), s.ad_value(98), s.ad_value(275), (2.0 * p.p33), A::offset(A::sqrt(A::scale_offset(s.ad_value(181), 4.0, 1.0)), 1.0), 1.0);
+            s.store_div_scaled_product3_mixed_iiia(247, 43, 98, 275, (2.0 * p.p33), A::offset(A::sqrt(A::scale_offset(s.ad_value(181), 4.0, 1.0)), 1.0), 1.0);
         }
 
         if s.b[603] {

@@ -1559,7 +1559,7 @@ impl Instance {
         }
 
         if (((s.b[521] && s.b[536]) && s.b[537]) && (!s.b[538])) {
-            s.store_div_scaled_product3(198, s.ad_value(149), s.ad_value(196), s.ad_value(197), 1.0, A::add(s.ad_value(196), s.ad_value(197)), 1.0);
+            s.store_div_scaled_product3_mixed_iiia(198, 149, 196, 197, 1.0, A::add(s.ad_value(196), s.ad_value(197)), 1.0);
         }
 
         if ((s.b[521] && s.b[536]) && (!s.b[537])) {

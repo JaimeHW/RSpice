@@ -351,14 +351,14 @@ impl Instance {
         s.v[96] = if s.b[96] { 1.0 } else { 0.0 };
 
         if (s.b[95] && s.b[96]) {
-            s.store_div_scaled_product3(30, s.ad_value(25), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(4))), p.p31), s.ad_value(4), 1.0, s.ad_value(3), 1.0);
+            s.store_div_scaled_product3_mixed_iaii(30, 25, A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(4))), p.p31), 4, 1.0, 3, 1.0);
         }
 
         s.b[97] = ((s.v[19] > 0.0) && (s.v[20] > 0.0));
         s.v[97] = if s.b[97] { 1.0 } else { 0.0 };
 
         if ((s.b[95] && (!s.b[96])) && s.b[97]) {
-            s.store_div_scaled_product3(30, s.ad_value(25), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(20))), p.p31), s.ad_value(20), 1.0, s.ad_value(19), 1.0);
+            s.store_div_scaled_product3_mixed_iaii(30, 25, A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(20))), p.p31), 20, 1.0, 19, 1.0);
         }
 
         if ((s.b[95] && (!s.b[96])) && (!s.b[97])) {

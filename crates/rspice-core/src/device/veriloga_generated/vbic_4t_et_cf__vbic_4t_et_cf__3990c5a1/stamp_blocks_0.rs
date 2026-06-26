@@ -627,7 +627,7 @@ impl Instance {
         if s.b[163] {
             s.store_div_scaled_offset_numerator(79, s.ad_value(77), 1.0, 1.0, A::offset(s.ad_value(78), 1.0), 1.0);
             s.store_div_scaled_add_product(80, A::voltage(ctx, nodes, Some(5), Some(6)), 1.0, s.ad_value(48), A::add_scaled_inputs3(s.ad_value(77), 1.0, s.ad_value(78), (-1.0), A::ln(s.ad_value(79)), -1.0), 1.0, s.ad_value(13), 1.0);
-            s.store_div_scaled_product3(81, s.ad_value(43), s.ad_value(13), s.ad_value(80), 1.0, A::offset(A::mul_scaled_lhs(s.ad_value(43), (0.5 * s.v[44]), A::sqrt(A::offset(A::square(A::voltage(ctx, nodes, Some(5), Some(6))), 0.01))), 1.0), 1.0);
+            s.store_div_scaled_product3_mixed_iiia(81, 43, 13, 80, 1.0, A::offset(A::mul_scaled_lhs(s.ad_value(43), (0.5 * s.v[44]), A::sqrt(A::offset(A::square(A::voltage(ctx, nodes, Some(5), Some(6))), 0.01))), 1.0), 1.0);
             s.store_div_ad_rhs(71, 80, A::sqrt(A::offset(A::square(s.ad_value(81)), 1.0)));
         }
 

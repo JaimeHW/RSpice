@@ -1048,7 +1048,7 @@ impl Instance {
             s.store_square(87, 84);
             s.store_add_scaled_product_indices(88, 85, 1.0, 87, 83, (-1.0));
             s.store_add_ad_lhs(89, A::add_scaled_product(A::mul3(s.ad_value(84), s.ad_value(85), s.ad_value(83)), (-1.0), s.ad_value(84), s.ad_value(87), (2.0 * 0.037037037037037035)), 86);
-            s.store_add_scaled_square_product(90, s.ad_value(89), 0.25, A::square(s.ad_value(88)), s.ad_value(88), 0.037037037037037035);
+            s.store_add_scaled_square_product_mixed_iai(90, 89, 0.25, A::square(s.ad_value(88)), 88, 0.037037037037037035);
         }
 
         s.b[314] = (((s.v[90]) as f64).abs() < 1e-10);
@@ -2571,7 +2571,7 @@ impl Instance {
             s.store_square(87, 84);
             s.store_add_scaled_product_indices(88, 85, 1.0, 87, 83, (-1.0));
             s.store_add_ad_lhs(89, A::add_scaled_product(A::mul3(s.ad_value(84), s.ad_value(85), s.ad_value(83)), (-1.0), s.ad_value(84), s.ad_value(87), (2.0 * 0.037037037037037035)), 86);
-            s.store_add_scaled_square_product(90, s.ad_value(89), 0.25, A::square(s.ad_value(88)), s.ad_value(88), 0.037037037037037035);
+            s.store_add_scaled_square_product_mixed_iai(90, 89, 0.25, A::square(s.ad_value(88)), 88, 0.037037037037037035);
         }
 
         s.b[314] = (((s.v[90]) as f64).abs() < 1e-10);
