@@ -724,7 +724,7 @@ impl Instance {
         }
 
         if (s.b[1019] && s.b[1092]) {
-            s.store_ad_value(122, A::add_scaled_value_products3(s.ad_value(28), 1.0, s.ad_value(29), s.ad_value(308), 1.0, s.ad_value(30), s.ad_value(310), 1.0, s.ad_value(31), s.ad_value(312), 1.0));
+            s.store_add_scaled_value_products3_indices(122, 28, 1.0, 29, 308, 1.0, 30, 310, 1.0, 31, 312, 1.0);
         }
 
         s.b[1097] = (((param_given[668] || param_given[669]) || param_given[670]) || param_given[671]);
