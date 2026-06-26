@@ -2805,6 +2805,37 @@ fn rust_backend_fuses_expression_affine3_offset_add_sub_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_affine4_add_sub_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_affine4_add_sub_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression affine4 add/sub");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_inputs4(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, fourth: Self, fourth_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_inputs4("), "{stamp}");
+    assert!(!stamp.contains("A::sub(A::add_scaled_inputs3("), "{stamp}");
+    assert!(!stamp.contains("A::add(A::add_scaled_inputs3("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_scaled_division_operands() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_division_source())
@@ -4644,11 +4675,11 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_add_ad(3, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_ad_value(3, A::add_scaled_inputs4(s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), 1.0, s.ad_value(1), (-1.0)));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_sub_ad(4, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_ad_value(4, A::add_scaled_inputs4(s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), -1.0, s.ad_value(1), 1.0));"),
         "{stamp}"
     );
     assert!(
@@ -11008,6 +11039,32 @@ module compact_expression_affine3_offset_add_sub(p, n);
         b = sqrt(((gain * a) + offset) + q + r)
           + exp((q - offset) + (gain * a) + r)
           + ln(((a + offset) + (gain * q)) - (offset * r));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_affine4_add_sub_source() -> &'static str {
+    r#"
+module compact_expression_affine4_add_sub(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) - V(n);
+        b = sqrt(((a + q) + r) - t)
+          + exp((a - q) + (r - t))
+          + ln(((gain * a) + (offset * q)) - r + t);
         I(p, n) <+ b;
     end
 endmodule
