@@ -198,13 +198,13 @@ impl Instance {
 
         s.store_sqrt_square_add(76, 70, 30);
 
-        s.store_sqrt_scaled_ad(74, A::add(s.ad_value(70), s.ad_value(76)), 0.5);
+        s.store_sqrt_scaled_input_ad(74, A::add(s.ad_value(70), s.ad_value(76)), 0.5);
 
         s.store_add(69, 61, 146);
 
         s.store_sqrt_square_add(75, 69, 30);
 
-        s.store_sqrt_scaled_ad(73, A::add(s.ad_value(69), s.ad_value(75)), 0.5);
+        s.store_sqrt_scaled_input_ad(73, A::add(s.ad_value(69), s.ad_value(75)), 0.5);
 
         s.v[45] = ((s.v[32] * p.p7) / s.v[192]);
 
@@ -714,7 +714,7 @@ impl Instance {
             s.store_scalar(205, p.p12);
         }
 
-        s.store_ad_value(208, A::exp_scaled_input(A::add_scaled_inputs3(A::div_scaled_inputs(s.ad_value(52), 1.0, s.ad_value(55), THERMAL_VOLTAGE_PER_K), 1.0, A::div(s.ad_value(51), s.ad_value(17)), (-1.0), A::ln(s.ad_value(54)), p.p65), 1.0 / (p.p43)));
+        s.store_exp_scaled_input_ad(208, A::add_scaled_inputs3(A::div_scaled_inputs(s.ad_value(52), 1.0, s.ad_value(55), THERMAL_VOLTAGE_PER_K), 1.0, A::div(s.ad_value(51), s.ad_value(17)), (-1.0), A::ln(s.ad_value(54)), p.p65), 1.0 / (p.p43));
 
         s.store_scale(210, 208, p.p44);
 
@@ -1025,13 +1025,13 @@ impl Instance {
 
         s.store_sqrt_square_add(76, 70, 30);
 
-        s.store_sqrt_scaled_ad(74, A::add(s.ad_value(70), s.ad_value(76)), 0.5);
+        s.store_sqrt_scaled_input_ad(74, A::add(s.ad_value(70), s.ad_value(76)), 0.5);
 
         s.store_add(69, 61, 146);
 
         s.store_sqrt_square_add(75, 69, 30);
 
-        s.store_sqrt_scaled_ad(73, A::add(s.ad_value(69), s.ad_value(75)), 0.5);
+        s.store_sqrt_scaled_input_ad(73, A::add(s.ad_value(69), s.ad_value(75)), 0.5);
 
         s.v[45] = ((s.v[32] * p.p7) / s.v[192]);
 

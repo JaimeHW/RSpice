@@ -1250,7 +1250,7 @@ impl Instance {
         s.v[591] = if s.b[591] { 1.0 } else { 0.0 };
 
         if s.b[591] {
-            s.store_sqrt_scaled_ad(119, A::mul(A::div_from_scalar((3.0 * 3.9), s.ad_value(416)), s.ad_value(242)), p.p66);
+            s.store_sqrt_scaled_input_ad(119, A::mul(A::div_from_scalar((3.0 * 3.9), s.ad_value(416)), s.ad_value(242)), p.p66);
         }
 
         if (!s.b[591]) {

@@ -1123,6 +1123,13 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_unary_ad_scaled(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output: f64, derivative_scale: f64) {
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_abs_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
         self.v[index] = value.value.abs() * scale;
         let derivative_scale = if value.value >= 0.0 { scale } else { -scale };
@@ -1154,6 +1161,62 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = quotient * scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        let output = raw.sqrt();
+        self.store_unary_ad_scaled(index, value, output, scale / (2.0 * output));
+    }
+
+    #[inline]
+    pub(crate) fn store_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        let output = raw.exp();
+        self.store_unary_ad_scaled(index, value, output, output * scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_limexp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        if raw < 80.0 {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output * scale);
+        } else {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX * scale);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_limited_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        if raw > 80.0 {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX * scale);
+        } else if raw < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output * scale);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        self.store_unary_ad_scaled(index, value, raw.ln(), scale / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value * scale);
+        self.store_unary_ad_scaled(index, value, output, derivative_scale * scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sin_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        self.store_unary_ad_scaled(index, value, raw.sin(), raw.cos() * scale);
     }
 
     #[inline]
@@ -1273,6 +1336,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let derivative_scale = 1.0 / value.value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_unary_ad_scaled(index, value, output, derivative_scale);
     }
 
     #[inline]
@@ -5808,6 +5877,13 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_unary_ad_scaled(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output: f64, derivative_scale: f64) {
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_abs_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
         self.v[index] = value.value.abs() * scale;
         let derivative_scale = if value.value >= 0.0 { scale } else { -scale };
@@ -5839,6 +5915,62 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = quotient * scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        let output = raw.sqrt();
+        self.store_unary_ad_scaled(index, value, output, scale / (2.0 * output));
+    }
+
+    #[inline]
+    pub(crate) fn store_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        let output = raw.exp();
+        self.store_unary_ad_scaled(index, value, output, output * scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_limexp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        if raw < 80.0 {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output * scale);
+        } else {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX * scale);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_limited_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        if raw > 80.0 {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX * scale);
+        } else if raw < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output * scale);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        self.store_unary_ad_scaled(index, value, raw.ln(), scale / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value * scale);
+        self.store_unary_ad_scaled(index, value, output, derivative_scale * scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sin_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        self.store_unary_ad_scaled(index, value, raw.sin(), raw.cos() * scale);
     }
 
     #[inline]
@@ -5958,6 +6090,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let derivative_scale = 1.0 / value.value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_unary_ad_scaled(index, value, output, derivative_scale);
     }
 
     #[inline]

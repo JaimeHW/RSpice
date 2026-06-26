@@ -804,7 +804,7 @@ impl Instance {
 
         s.store_mul(292, 290, 32);
 
-        s.store_ad_value(293, A::exp_scaled_input(A::ln_one_plus_exp(A::scale(A::ln(s.ad_value(291)), p.p67)), 1.0 / (p.p67)));
+        s.store_exp_scaled_input_ad(293, A::ln_one_plus_exp(A::scale(A::ln(s.ad_value(291)), p.p67)), 1.0 / (p.p67));
 
         s.store_div(294, 292, 293);
 
@@ -2340,7 +2340,7 @@ impl Instance {
 
         s.store_mul(292, 290, 32);
 
-        s.store_ad_value(293, A::exp_scaled_input(A::ln_one_plus_exp(A::scale(A::ln(s.ad_value(291)), p.p67)), 1.0 / (p.p67)));
+        s.store_exp_scaled_input_ad(293, A::ln_one_plus_exp(A::scale(A::ln(s.ad_value(291)), p.p67)), 1.0 / (p.p67));
 
         s.store_div(294, 292, 293);
 

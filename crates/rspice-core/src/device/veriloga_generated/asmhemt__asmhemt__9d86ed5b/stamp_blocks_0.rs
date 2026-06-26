@@ -390,7 +390,7 @@ impl Instance {
             s.store_mul_div_from_scalar_ad_lhs(90, p.p124, A::scale_offset(s.ad_value(147), p.p123, 1.0), 147);
             s.store_scaled_offset(91, 147, (-p.p127), p.p125);
             s.store_add_scaled_inputs3(148, s.ad_value(90), 0.5, s.ad_value(91), 0.5, A::sqrt(A::offset(A::mul(A::sub(s.ad_value(90), s.ad_value(91)), A::sub(s.ad_value(90), s.ad_value(91))), ((0.25 * p.p128) * p.p128))), 0.5);
-            s.store_ad_value(136, A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(1), Some(2)), (-p.p10)), ((-2.0) * 1.0 / (p.p122))));
+            s.store_exp_scaled_input_ad(136, A::offset(A::voltage(ctx, nodes, Some(1), Some(2)), (-p.p10)), ((-2.0) * 1.0 / (p.p122)));
             s.store_offset_scaled_ad(149, A::div(A::sub_from_scalar(1.0, s.ad_value(136)), A::offset(s.ad_value(136), 1.0)), ((p.p120 - 1e-9) * 0.5), ((((p.p120 - 1e-9) * 0.5)) + (1e-9)));
             s.store_scaled_voltage(184, ctx, nodes, Some(5), None, 1.0 / (p.p121));
             s.store_mul_powf_ad_rhs(185, 184, A::scale(s.ad_value(82), 1.0 / (s.v[35])), p.p126);

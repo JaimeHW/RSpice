@@ -5734,11 +5734,11 @@ impl Instance {
 
         if s.b[1390] {
             s.store_sub_ad(168, A::div(s.ad_value(147), s.ad_value(180)), A::div(s.ad_value(146), s.ad_value(179)));
-            s.store_ad_value(171, A::limited_exp_scaled_input(A::add_scaled_inputs(s.ad_value(168), 1.0, s.ad_value(418), p.p1727), 1.0 / (p.p1620)));
+            s.store_limited_exp_scaled_input_ad(171, A::add_scaled_inputs(s.ad_value(168), 1.0, s.ad_value(418), p.p1727), 1.0 / (p.p1620));
             s.store_scale(275, 171, p.p1614);
             s.store_scale(276, 171, p.p1616);
             s.store_scale(277, 171, p.p1618);
-            s.store_ad_value(171, A::limited_exp_scaled_input(A::add_scaled_inputs(s.ad_value(168), 1.0, s.ad_value(418), p.p1728), 1.0 / (p.p1621)));
+            s.store_limited_exp_scaled_input_ad(171, A::add_scaled_inputs(s.ad_value(168), 1.0, s.ad_value(418), p.p1728), 1.0 / (p.p1621));
             s.store_scale(278, 171, p.p1615);
             s.store_scale(279, 171, p.p1617);
             s.store_scale(280, 171, p.p1619);

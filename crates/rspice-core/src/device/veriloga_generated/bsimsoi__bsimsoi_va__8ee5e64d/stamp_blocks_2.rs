@@ -3131,13 +3131,13 @@ impl Instance {
         }
 
         if ((!s.b[1733]) && s.b[1751]) {
-            s.store_ad_value(1194, A::exp_scaled_input({
+            s.store_exp_scaled_input_ad(1194, {
                 if (s.v[1179] > 1e-38) {
                     A::ln(s.ad_value(1179))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }, (s.v[86] * 0.7)));
+            }, (s.v[86] * 0.7));
         }
 
         if ((!s.b[1733]) && s.b[1751]) {
@@ -3161,13 +3161,13 @@ impl Instance {
         }
 
         if (((!s.b[1733]) && s.b[1751]) && s.b[1776]) {
-            s.store_ad_value(1194, A::exp_scaled_input({
+            s.store_exp_scaled_input_ad(1194, {
                 if (s.v[1179] > 1e-38) {
                     A::ln(s.ad_value(1179))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }, (s.v[86] * 0.7)));
+            }, (s.v[86] * 0.7));
         }
 
         if (((!s.b[1733]) && s.b[1751]) && s.b[1776]) {
@@ -3349,13 +3349,13 @@ impl Instance {
         }
 
         if ((!s.b[1785]) && (!s.b[1786])) {
-            s.store_ad_value(1193, A::exp_scaled_input({
+            s.store_exp_scaled_input_ad(1193, {
                 if (s.v[1147] > 1e-38) {
                     A::ln(s.ad_value(1147))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }, (-p.p173)));
+            }, (-p.p173));
         }
 
         if (!s.b[1785]) {
@@ -3396,13 +3396,13 @@ impl Instance {
         }
 
         if ((!s.b[1785]) && (!s.b[1788])) {
-            s.store_ad_value(1193, A::exp_scaled_input({
+            s.store_exp_scaled_input_ad(1193, {
                 if (s.v[1147] > 1e-38) {
                     A::ln(s.ad_value(1147))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }, (-p.p173)));
+            }, (-p.p173));
         }
 
         if (!s.b[1785]) {

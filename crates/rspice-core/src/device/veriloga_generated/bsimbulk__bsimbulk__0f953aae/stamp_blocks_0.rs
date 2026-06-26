@@ -4183,7 +4183,7 @@ impl Instance {
 
         s.store_ln_ad(13, A::max_with_scalar(s.ad_value(395), 1e-38));
 
-        s.store_ad_value(15, A::limited_exp_scaled_input(A::add_scaled_inputs(s.ad_value(12), 1.0, s.ad_value(13), p.p895), 1.0 / (p.p725)));
+        s.store_limited_exp_scaled_input_ad(15, A::add_scaled_inputs(s.ad_value(12), 1.0, s.ad_value(13), p.p895), 1.0 / (p.p725));
 
         s.store_scale(435, 15, p.p719);
 
@@ -4191,7 +4191,7 @@ impl Instance {
 
         s.store_scale(437, 15, p.p723);
 
-        s.store_ad_value(15, A::limited_exp_scaled_input(A::add_scaled_inputs(s.ad_value(12), 1.0, s.ad_value(13), p.p896), 1.0 / (p.p726)));
+        s.store_limited_exp_scaled_input_ad(15, A::add_scaled_inputs(s.ad_value(12), 1.0, s.ad_value(13), p.p896), 1.0 / (p.p726));
 
         s.store_scale(438, 15, p.p720);
 

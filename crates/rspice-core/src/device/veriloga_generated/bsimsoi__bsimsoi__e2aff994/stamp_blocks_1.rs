@@ -718,7 +718,7 @@ impl Instance {
         }
 
         if ((((s.b[1620] && s.b[1705]) && s.b[1706]) && s.b[1707]) && (!s.b[1708])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p913)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p913));
         }
 
         if (((s.b[1620] && s.b[1705]) && s.b[1706]) && s.b[1707]) {
@@ -763,7 +763,7 @@ impl Instance {
         }
 
         if ((((s.b[1620] && s.b[1709]) && s.b[1710]) && s.b[1711]) && (!s.b[1712])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p915)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p915));
         }
 
         if (((s.b[1620] && s.b[1709]) && s.b[1710]) && s.b[1711]) {
@@ -808,7 +808,7 @@ impl Instance {
         }
 
         if ((((s.b[1620] && s.b[1713]) && s.b[1714]) && s.b[1715]) && (!s.b[1716])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p917)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p917));
         }
 
         if (((s.b[1620] && s.b[1713]) && s.b[1714]) && s.b[1715]) {
@@ -903,7 +903,7 @@ impl Instance {
         }
 
         if ((((s.b[1620] && s.b[1720]) && s.b[1721]) && s.b[1722]) && (!s.b[1723])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p914)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p914));
         }
 
         if (((s.b[1620] && s.b[1720]) && s.b[1721]) && s.b[1722]) {
@@ -948,7 +948,7 @@ impl Instance {
         }
 
         if ((((s.b[1620] && s.b[1724]) && s.b[1725]) && s.b[1726]) && (!s.b[1727])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p916)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p916));
         }
 
         if (((s.b[1620] && s.b[1724]) && s.b[1725]) && s.b[1726]) {
@@ -993,7 +993,7 @@ impl Instance {
         }
 
         if ((((s.b[1620] && s.b[1728]) && s.b[1729]) && s.b[1730]) && (!s.b[1731])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p918)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p918));
         }
 
         if (((s.b[1620] && s.b[1728]) && s.b[1729]) && s.b[1730]) {

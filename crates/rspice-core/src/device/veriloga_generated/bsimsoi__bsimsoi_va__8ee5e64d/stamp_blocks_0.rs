@@ -1912,7 +1912,7 @@ impl Instance {
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
         if s.b[937] {
-            s.store_sqrt_scaled_ad(489, A::mul(A::div_from_scalar((3.0 * 3.9), s.ad_value(777)), s.ad_value(608)), s.v[91]);
+            s.store_sqrt_scaled_input_ad(489, A::mul(A::div_from_scalar((3.0 * 3.9), s.ad_value(777)), s.ad_value(608)), s.v[91]);
         }
 
         if (!s.b[937]) {

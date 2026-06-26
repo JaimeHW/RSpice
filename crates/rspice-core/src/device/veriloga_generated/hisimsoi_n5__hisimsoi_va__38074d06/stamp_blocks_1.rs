@@ -1111,7 +1111,7 @@ impl Instance {
             s.b[1274] = (((s.v[181]) as f64).abs() < 1e-16);
             s.v[1274] = if s.b[1274] { 1.0 } else { 0.0 };
             if (((s.b[1222] && s.b[1268]) && (!s.b[1271])) && s.b[1274]) {
-                s.store_sqrt_scaled_ad(327, A::sub_from_scalar(1.0, A::square(s.ad_value(423))), 1.0 / (2.0));
+                s.store_sqrt_scaled_input_ad(327, A::sub_from_scalar(1.0, A::square(s.ad_value(423))), 1.0 / (2.0));
                 s.store_mul(242, 181, 327);
                 s.store_mul(443, 225, 327);
             }

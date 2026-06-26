@@ -822,7 +822,7 @@ impl Instance {
         }
 
         if (((((!s.b[1620]) && s.b[1920]) && s.b[1921]) && s.b[1922]) && (!s.b[1923])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p913)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p913));
         }
 
         if ((((!s.b[1620]) && s.b[1920]) && s.b[1921]) && s.b[1922]) {
@@ -867,7 +867,7 @@ impl Instance {
         }
 
         if (((((!s.b[1620]) && s.b[1924]) && s.b[1925]) && s.b[1926]) && (!s.b[1927])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p915)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p915));
         }
 
         if ((((!s.b[1620]) && s.b[1924]) && s.b[1925]) && s.b[1926]) {
@@ -912,7 +912,7 @@ impl Instance {
         }
 
         if (((((!s.b[1620]) && s.b[1928]) && s.b[1929]) && s.b[1930]) && (!s.b[1931])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p917)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p917));
         }
 
         if ((((!s.b[1620]) && s.b[1928]) && s.b[1929]) && s.b[1930]) {
@@ -1015,7 +1015,7 @@ impl Instance {
         }
 
         if (((((!s.b[1620]) && s.b[1935]) && s.b[1936]) && s.b[1937]) && (!s.b[1938])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p914)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p914));
         }
 
         if ((((!s.b[1620]) && s.b[1935]) && s.b[1936]) && s.b[1937]) {
@@ -1060,7 +1060,7 @@ impl Instance {
         }
 
         if (((((!s.b[1620]) && s.b[1939]) && s.b[1940]) && s.b[1941]) && (!s.b[1942])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p916)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p916));
         }
 
         if ((((!s.b[1620]) && s.b[1939]) && s.b[1940]) && s.b[1941]) {
@@ -1105,7 +1105,7 @@ impl Instance {
         }
 
         if (((((!s.b[1620]) && s.b[1943]) && s.b[1944]) && s.b[1945]) && (!s.b[1946])) {
-            s.store_ad_value(501, A::limited_exp_scaled_input(A::ln(s.ad_value(500)), (-p.p918)));
+            s.store_limited_exp_scaled_input_ad(501, A::ln(s.ad_value(500)), (-p.p918));
         }
 
         if ((((!s.b[1620]) && s.b[1943]) && s.b[1944]) && s.b[1945]) {

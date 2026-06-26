@@ -4506,7 +4506,7 @@ impl Instance {
             s.b[2553] = (((s.v[116]) as f64).abs() < 1e-16);
             s.v[2553] = if s.b[2553] { 1.0 } else { 0.0 };
             if ((((((!s.b[1439]) && s.b[2515]) && (!s.b[2534])) && s.b[2540]) && (!s.b[2550])) && s.b[2553]) {
-                s.store_sqrt_scaled_ad(334, A::sub_from_scalar(1.0, A::square(s.ad_value(2548))), 1.0 / (2.0));
+                s.store_sqrt_scaled_input_ad(334, A::sub_from_scalar(1.0, A::square(s.ad_value(2548))), 1.0 / (2.0));
                 s.store_mul(223, 116, 334);
                 s.store_mul(2549, 154, 334);
             }
