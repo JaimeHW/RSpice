@@ -370,9 +370,9 @@ impl Instance {
             s.b[873] = (s.v[279] > (0.1 / s.v[606]));
             s.v[873] = if s.b[873] { 1.0 } else { 0.0 };
             if ((!s.b[863]) && s.b[873]) {
-                s.store_mul_div_ad_rhs(368, 368, A::div_from_scalar(0.1, s.ad_value(606)), s.ad_value(279));
-                s.store_mul_div_ad_rhs(369, 369, A::div_from_scalar(0.1, s.ad_value(606)), s.ad_value(279));
-                s.store_mul_div_ad_rhs(370, 370, A::div_from_scalar(0.1, s.ad_value(606)), s.ad_value(279));
+                s.store_mul_ad_rhs(368, 368, A::div_scalar_by_product(0.1, s.ad_value(606), s.ad_value(279), 1.0));
+                s.store_mul_ad_rhs(369, 369, A::div_scalar_by_product(0.1, s.ad_value(606), s.ad_value(279), 1.0));
+                s.store_mul_ad_rhs(370, 370, A::div_scalar_by_product(0.1, s.ad_value(606), s.ad_value(279), 1.0));
             }
             if (!s.b[863]) {
                 s.store_add(308, 308, 368);
@@ -1110,7 +1110,7 @@ impl Instance {
             s.store_mul_sub_from_scalar_rhs(278, 103, 1.0, 105);
             s.store_add(107, 99, 278);
             s.store_div_from_scalar_add_ad(278, 1.0, s.ad_value(120), A::div_from_scalar(2.0, A::offset(s.ad_value(99), 1e-50)));
-            s.store_mul_ln_ad_lhs(109, A::mul(A::div(A::div_from_scalar(1.0, s.ad_value(101)), s.ad_value(102)), A::square(s.ad_value(99))), 278);
+            s.store_mul_ln_ad_lhs(109, A::mul(A::div_scalar_by_product(1.0, s.ad_value(101), s.ad_value(102), 1.0), A::square(s.ad_value(99))), 278);
             s.store_div_ad_rhs(281, 109, A::offset(s.ad_value(99), 1e-50));
             s.store_offset_sub(110, 109, 107, (-p.p136));
             s.store_add_scaled_ad_lhs(278, A::square(s.ad_value(110)), 109, (4.0 * p.p136));
@@ -1719,7 +1719,7 @@ impl Instance {
         s.v[977] = if s.b[977] { 1.0 } else { 0.0 };
 
         if (((!s.b[974]) && s.b[976]) && s.b[977]) {
-            s.store_div_ad_lhs(261, A::div_scaled_product(s.ad_value(151), s.ad_value(122), 1.0, s.ad_value(123), 1.0), 149);
+            s.store_ad_value(261, A::div_scaled_product_by_product(s.ad_value(151), s.ad_value(122), 1.0, s.ad_value(123), s.ad_value(149), 1.0));
         }
 
         s.v[435] = s.v[273];
@@ -2507,12 +2507,12 @@ impl Instance {
         s.v[1018] = if s.b[1018] { 1.0 } else { 0.0 };
 
         if (s.b[1017] && s.b[1018]) {
-            let assign21170_ad_e26697: A = A::add_scaled_product(A::div(A::div_from_scalar(1.0, A::add(s.ad_value(279), s.ad_value(280))), A::add(s.ad_value(281), s.ad_value(280))), 1.0, A::div_scaled_product3(s.ad_value(223), s.ad_value(160), s.ad_value(158), 2.0, A::sub(s.ad_value(281), s.ad_value(279)), 1.0), A::ln(A::div_scaled_inputs2(s.ad_value(281), 1.0, s.ad_value(280), 1.0, A::add(s.ad_value(279), s.ad_value(280)), 1.0)), 1.0);
+            let assign21170_ad_e26697: A = A::add_scaled_product(A::div_scalar_by_product(1.0, A::add(s.ad_value(279), s.ad_value(280)), A::add(s.ad_value(281), s.ad_value(280)), 1.0), 1.0, A::div_scaled_product3(s.ad_value(223), s.ad_value(160), s.ad_value(158), 2.0, A::sub(s.ad_value(281), s.ad_value(279)), 1.0), A::ln(A::div_scaled_inputs2(s.ad_value(281), 1.0, s.ad_value(280), 1.0, A::add(s.ad_value(279), s.ad_value(280)), 1.0)), 1.0);
             s.store_ad_value(282, A::add_scaled_product(assign21170_ad_e26697, 1.0, A::mul3(A::mul3(s.ad_value(223), s.ad_value(160), s.ad_value(158)), s.ad_value(223), s.ad_value(160)), s.ad_value(158), 1.0));
         }
 
         if (s.b[1017] && (!s.b[1018])) {
-            let assign21180_ad_e26748: A = A::add_scaled_inputs_product(A::div(A::div_from_scalar(1.0, A::add(s.ad_value(279), s.ad_value(280))), A::add(s.ad_value(281), s.ad_value(280))), 1.0, A::div_scaled_product3(s.ad_value(223), s.ad_value(160), s.ad_value(158), 2.0, A::add(s.ad_value(279), s.ad_value(280)), 1.0), 1.0, A::mul3(A::mul3(s.ad_value(223), s.ad_value(160), s.ad_value(158)), s.ad_value(223), s.ad_value(160)), s.ad_value(158), 1.0);
+            let assign21180_ad_e26748: A = A::add_scaled_inputs_product(A::div_scalar_by_product(1.0, A::add(s.ad_value(279), s.ad_value(280)), A::add(s.ad_value(281), s.ad_value(280)), 1.0), 1.0, A::div_scaled_product3(s.ad_value(223), s.ad_value(160), s.ad_value(158), 2.0, A::add(s.ad_value(279), s.ad_value(280)), 1.0), 1.0, A::mul3(A::mul3(s.ad_value(223), s.ad_value(160), s.ad_value(158)), s.ad_value(223), s.ad_value(160)), s.ad_value(158), 1.0);
             s.store_ad_value(282, assign21180_ad_e26748);
         }
 

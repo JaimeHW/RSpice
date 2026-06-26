@@ -5862,7 +5862,7 @@ impl Instance {
             s.store_mul(2129, 2001, 2068);
             s.store_div(2070, 2129, 2065);
             s.store_add_scaled_inputs(2071, 2057, 1.0, 2007, 0.5);
-            s.store_div_ad_lhs(1919, A::div_scaled_product(s.ad_value(2007), s.ad_value(2050), 1.0, s.ad_value(2071), 1.0), 2071);
+            s.store_ad_value(1919, A::div_scaled_product_by_product(s.ad_value(2007), s.ad_value(2050), 1.0, s.ad_value(2071), s.ad_value(2071), 1.0));
         }
 
         s.b[2182] = (s.v[1919] > 0.0001);

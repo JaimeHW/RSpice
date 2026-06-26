@@ -313,7 +313,7 @@ impl Instance {
         }
 
         if (s.b[1620] && (!s.b[1736])) {
-            s.store_ln_ad(167, A::max_with_scalar(A::div(A::div_scaled_product(s.ad_value(706), s.ad_value(908), -1.0, s.ad_value(182), 1.0), s.ad_value(182)), 1e-38));
+            s.store_ln_ad(167, A::max_with_scalar(A::div_scaled_product_by_product(s.ad_value(706), s.ad_value(908), -1.0, s.ad_value(182), s.ad_value(182), 1.0), 1e-38));
             s.store_mul3_affine_lhs(215, 379, 637, -1.0, 0.0, 167);
         }
 
@@ -4123,7 +4123,7 @@ impl Instance {
         s.v[1860] = if s.b[1860] { 1.0 } else { 0.0 };
 
         if (((!s.b[1620]) && s.b[1859]) && s.b[1860]) {
-            s.store_div_ad_lhs(168, A::div(s.ad_value(785), A::sub_from_scalar(1.0, A::div_scaled_inputs(s.ad_value(243), p.p414, s.ad_value(311), 1.0))), 268);
+            s.store_ad_value(168, A::div_scaled_value_by_product(s.ad_value(785), 1.0, A::sub_from_scalar(1.0, A::div_scaled_inputs(s.ad_value(243), p.p414, s.ad_value(311), 1.0)), s.ad_value(268), 1.0));
         }
 
         if (((!s.b[1620]) && s.b[1859]) && (!s.b[1860])) {
@@ -4131,14 +4131,14 @@ impl Instance {
         }
 
         if ((!s.b[1620]) && s.b[1859]) {
-            s.store_offset_mul_ad(364, s.ad_value(168), A::ln(A::max_with_scalar(A::offset(A::div(A::div(s.ad_value(355), s.ad_value(168)), s.ad_value(358)), 1.0), 1e-38)), 1.0);
+            s.store_offset_mul_ad(364, s.ad_value(168), A::ln(A::max_with_scalar(A::offset(A::div_scaled_value_by_product(s.ad_value(355), 1.0, s.ad_value(168), s.ad_value(358), 1.0), 1.0), 1e-38)), 1.0);
         }
 
         s.b[1861] = (p.p414 < 0.0);
         s.v[1861] = if s.b[1861] { 1.0 } else { 0.0 };
 
         if (((!s.b[1620]) && (!s.b[1859])) && s.b[1861]) {
-            s.store_div_ad_lhs(168, A::div(s.ad_value(785), A::sub_from_scalar(1.0, A::div_scaled_inputs(s.ad_value(243), p.p414, s.ad_value(311), 1.0))), 268);
+            s.store_ad_value(168, A::div_scaled_value_by_product(s.ad_value(785), 1.0, A::sub_from_scalar(1.0, A::div_scaled_inputs(s.ad_value(243), p.p414, s.ad_value(311), 1.0)), s.ad_value(268), 1.0));
         }
 
         if (((!s.b[1620]) && (!s.b[1859])) && (!s.b[1861])) {

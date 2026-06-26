@@ -4818,12 +4818,12 @@ impl Instance {
         s.v[3320] = if s.b[3320] { 1.0 } else { 0.0 };
 
         if (s.b[3318] && s.b[3320]) {
-            let assign101290_ad_e153400: A = A::add_scaled_product(A::div(A::div_from_scalar(1.0, A::add(s.ad_value(335), s.ad_value(336))), A::add(s.ad_value(337), s.ad_value(336))), 1.0, A::div_scaled_product3(s.ad_value(309), s.ad_value(255), s.ad_value(253), 2.0, A::sub(s.ad_value(337), s.ad_value(335)), 1.0), A::ln(A::div_scaled_inputs2(s.ad_value(337), 1.0, s.ad_value(336), 1.0, A::add(s.ad_value(335), s.ad_value(336)), 1.0)), 1.0);
+            let assign101290_ad_e153400: A = A::add_scaled_product(A::div_scalar_by_product(1.0, A::add(s.ad_value(335), s.ad_value(336)), A::add(s.ad_value(337), s.ad_value(336)), 1.0), 1.0, A::div_scaled_product3(s.ad_value(309), s.ad_value(255), s.ad_value(253), 2.0, A::sub(s.ad_value(337), s.ad_value(335)), 1.0), A::ln(A::div_scaled_inputs2(s.ad_value(337), 1.0, s.ad_value(336), 1.0, A::add(s.ad_value(335), s.ad_value(336)), 1.0)), 1.0);
             s.store_ad_value(338, A::add_scaled_product(assign101290_ad_e153400, 1.0, A::mul3(A::mul3(s.ad_value(309), s.ad_value(255), s.ad_value(253)), s.ad_value(309), s.ad_value(255)), s.ad_value(253), 1.0));
         }
 
         if (s.b[3318] && (!s.b[3320])) {
-            let assign101300_ad_e153451: A = A::add_scaled_inputs_product(A::div(A::div_from_scalar(1.0, A::add(s.ad_value(335), s.ad_value(336))), A::add(s.ad_value(337), s.ad_value(336))), 1.0, A::div_scaled_product3(s.ad_value(309), s.ad_value(255), s.ad_value(253), 2.0, A::add(s.ad_value(335), s.ad_value(336)), 1.0), 1.0, A::mul3(A::mul3(s.ad_value(309), s.ad_value(255), s.ad_value(253)), s.ad_value(309), s.ad_value(255)), s.ad_value(253), 1.0);
+            let assign101300_ad_e153451: A = A::add_scaled_inputs_product(A::div_scalar_by_product(1.0, A::add(s.ad_value(335), s.ad_value(336)), A::add(s.ad_value(337), s.ad_value(336)), 1.0), 1.0, A::div_scaled_product3(s.ad_value(309), s.ad_value(255), s.ad_value(253), 2.0, A::add(s.ad_value(335), s.ad_value(336)), 1.0), 1.0, A::mul3(A::mul3(s.ad_value(309), s.ad_value(255), s.ad_value(253)), s.ad_value(309), s.ad_value(255)), s.ad_value(253), 1.0);
             s.store_ad_value(338, assign101300_ad_e153451);
         }
 

@@ -828,7 +828,7 @@ impl Instance {
             s.store_sqrt_offset_input(213, 1199, 1e-50);
             s.store_add_ad_rhs(215, 207, A::mul_sub_from_scalar_rhs(s.ad_value(211), 1.0, s.ad_value(213)));
             s.store_div_from_scalar_add_ad(327, 1.0, s.ad_value(225), A::div_from_scalar(2.0, A::offset(s.ad_value(207), 1e-50)));
-            s.store_mul_ln_ad_lhs(216, A::mul(A::div(A::div_from_scalar(1.0, s.ad_value(209)), s.ad_value(210)), A::square(s.ad_value(207))), 327);
+            s.store_mul_ln_ad_lhs(216, A::mul(A::div_scalar_by_product(1.0, s.ad_value(209), s.ad_value(210), 1.0), A::square(s.ad_value(207))), 327);
             s.store_div_ad_rhs(1202, 216, A::offset(s.ad_value(207), 1e-50));
             s.store_offset_sub(217, 216, 215, (-0.002));
             s.store_sqrt_ad(327, A::add_scaled_inputs(A::square(s.ad_value(217)), 1.0, s.ad_value(216), (4.0 * 0.002)));
@@ -1113,7 +1113,7 @@ impl Instance {
         }
 
         if (((s.b[1222] && s.b[1252]) && (!s.b[1253])) && (!s.b[1254])) {
-            s.store_div_ad_lhs(328, A::div_from_scalar(1.0, s.ad_value(379)), 434);
+            s.store_ad_value(328, A::div_scalar_by_product(1.0, s.ad_value(379), s.ad_value(434), 1.0));
             s.store_mul_ad_product_rhs(329, 328, A::sub(s.ad_value(1234), s.ad_value(383)), A::sub(s.ad_value(1234), s.ad_value(383)));
             s.store_add_ad_rhs(330, 225, A::div_from_scalar(2.0, A::sub(s.ad_value(1234), s.ad_value(383))));
             s.store_offset_div_ad(377, A::ln(s.ad_value(329)), s.ad_value(330), p.p287);
@@ -1166,7 +1166,7 @@ impl Instance {
         s.v[1258] = if s.b[1258] { 1.0 } else { 0.0 };
 
         if ((((s.b[1222] && s.b[1252]) && s.b[1256]) && (!s.b[1257])) && s.b[1258]) {
-            s.store_div_ad_lhs(328, A::div_from_scalar(1.0, s.ad_value(379)), 434);
+            s.store_ad_value(328, A::div_scalar_by_product(1.0, s.ad_value(379), s.ad_value(434), 1.0));
             s.store_mul_ad_product_rhs(329, 328, A::sub(s.ad_value(1234), s.ad_value(383)), A::sub(s.ad_value(1234), s.ad_value(383)));
             s.store_add_ad_rhs(330, 225, A::div_from_scalar(2.0, A::sub(s.ad_value(1234), s.ad_value(383))));
             s.store_offset_div_ad(377, A::ln(s.ad_value(329)), s.ad_value(330), p.p287);

@@ -2332,7 +2332,7 @@ impl Instance {
             assert!(assign31860_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
             if ((((((s.b[1441] && s.b[1442]) && (!s.b[1709])) && (!s.b[1729])) && (!s.b[1731])) && s.b[1732]) && s.b[1734]) {
                 s.store_ad_value(1466, A::add_scaled_inputs3(s.ad_value(1448), 1.0, s.ad_value(1446), 1.0, s.ad_value(965), -1.0));
-                s.store_add_ad(1506, A::div(A::div_from_scalar(1.034943e-10, s.ad_value(1544)), s.ad_value(1448)), A::div(A::mul_sub_from_scalar_rhs(A::div_from_scalar(1.034943e-10, s.ad_value(1544)), 1.0, A::div(s.ad_value(1534), A::offset(s.ad_value(1534), 1.0))), s.ad_value(1446)));
+                s.store_add_ad(1506, A::div_scalar_by_product(1.034943e-10, s.ad_value(1544), s.ad_value(1448), 1.0), A::div(A::mul_sub_from_scalar_rhs(A::div_from_scalar(1.034943e-10, s.ad_value(1544)), 1.0, A::div(s.ad_value(1534), A::offset(s.ad_value(1534), 1.0))), s.ad_value(1446)));
             }
             s.b[1735] = ((((s.v[1466] / s.v[1506])) as f64).abs() > 0.5);
             s.v[1735] = if s.b[1735] { 1.0 } else { 0.0 };
