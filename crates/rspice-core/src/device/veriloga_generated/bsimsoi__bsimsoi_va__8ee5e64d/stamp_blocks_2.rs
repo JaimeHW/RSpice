@@ -355,7 +355,7 @@ impl Instance {
 
         s.store_sqrt_offset_scaled_input(1179, 498, 1.0 / (s.v[1227]), 1.0);
 
-        s.store_ad_value(1180, A::add_scaled_inputs_product(s.ad_value(491), 1.0, s.ad_value(492), 1.0 / (s.v[1227]), s.ad_value(493), s.ad_value(1177), 1.0));
+        s.store_add_scaled_inputs_product(1180, s.ad_value(491), 1.0, s.ad_value(492), 1.0 / (s.v[1227]), s.ad_value(493), s.ad_value(1177), 1.0);
 
         s.store_add_scaled_product(1238, A::mul3(s.ad_value(737), A::offset(s.ad_value(1179), (-1.0)), s.ad_value(1278)), 1.0, s.ad_value(1180), s.ad_value(772), 1.0);
 
@@ -524,7 +524,7 @@ impl Instance {
 
         s.store_sqrt_offset_scaled_input(1179, 498, 1.0 / (s.v[1227]), 1.0);
 
-        s.store_ad_value(1180, A::add_scaled_inputs_product(s.ad_value(491), 1.0, s.ad_value(492), 1.0 / (s.v[1227]), s.ad_value(493), s.ad_value(1378), 1.0));
+        s.store_add_scaled_inputs_product(1180, s.ad_value(491), 1.0, s.ad_value(492), 1.0 / (s.v[1227]), s.ad_value(493), s.ad_value(1378), 1.0);
 
         s.store_add_scaled_product(1403, A::mul3(s.ad_value(737), A::offset(s.ad_value(1179), (-1.0)), s.ad_value(1278)), 1.0, s.ad_value(1180), s.ad_value(772), 1.0);
 
@@ -1010,7 +1010,7 @@ impl Instance {
 
         s.store_mul(1188, 1224, 1210);
 
-        s.store_ad_value(1179, A::add_scaled_inputs_product(s.ad_value(1174), 1.0, s.ad_value(1173), 1.0, s.ad_value(1188), s.ad_value(1207), 2.0));
+        s.store_add_scaled_inputs_product(1179, s.ad_value(1174), 1.0, s.ad_value(1173), 1.0, s.ad_value(1188), s.ad_value(1207), 2.0);
 
         s.store_mul(1188, 1224, 1195);
 
@@ -1758,7 +1758,7 @@ impl Instance {
 
         if s.b[1664] {
             s.store_sub(1409, 1161, 1160);
-            s.store_ad_value(1162, A::add_scaled_inputs_product(s.ad_value(768), s.v[36], s.ad_value(1277), (-1.0), s.ad_value(707), s.ad_value(1278), (-1.0)));
+            s.store_add_scaled_inputs_product(1162, s.ad_value(768), s.v[36], s.ad_value(1277), (-1.0), s.ad_value(707), s.ad_value(1278), (-1.0));
             s.store_add_scaled_inputs3_offset(1182, s.ad_value(1162), 1.0, s.ad_value(1161), (-1.0), s.ad_value(1160), 1.0, (-0.02));
         }
 

@@ -4839,7 +4839,7 @@ impl Instance {
             s.store_div_from_scalar(335, 1.0, 339);
             s.store_scale(338, 335, 1.034943e-10);
             s.store_scalar(335, (1.0 - s.v[507]));
-            s.store_ad_value(168, A::add_scaled_inputs_product(s.ad_value(790), s.v[507], s.ad_value(109), s.v[507], s.ad_value(335), s.ad_value(91), 1.0));
+            s.store_add_scaled_inputs_product(168, s.ad_value(790), s.v[507], s.ad_value(109), s.v[507], s.ad_value(335), s.ad_value(91), 1.0);
         }
 
         s.b[2306] = ((s.v[168] > (((s.v[109] + s.v[790]) - (10.0 * 2.220446049250313e-16)) - (10.0 * 2.220446049250313e-16))) && ((10.0 * 2.220446049250313e-16) >= 0.0));

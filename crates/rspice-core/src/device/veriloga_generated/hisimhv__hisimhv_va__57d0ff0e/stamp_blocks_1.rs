@@ -2349,7 +2349,7 @@ impl Instance {
             }
             if ((((((s.b[1443] && s.b[1444]) && (!s.b[1711])) && (!s.b[1731])) && (!s.b[1733])) && s.b[1734]) && s.b[1736]) {
                 s.store_add_scaled_product(1458, A::mul3(s.ad_value(1456), s.ad_value(85), s.ad_value(85)), 1.0, s.ad_value(154), s.ad_value(1484), (-1.0));
-                s.store_ad_value(335, A::add_scaled_square_product(s.ad_value(1457), 1.0, s.ad_value(1456), s.ad_value(1458), (-4.0)));
+                s.store_add_scaled_square_product(335, s.ad_value(1457), 1.0, s.ad_value(1456), s.ad_value(1458), (-4.0));
             }
             s.b[1739] = (s.v[335] > 0.0);
             s.v[1739] = if s.b[1739] { 1.0 } else { 0.0 };

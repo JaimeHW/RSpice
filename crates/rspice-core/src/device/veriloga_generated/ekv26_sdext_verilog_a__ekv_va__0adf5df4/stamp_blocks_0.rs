@@ -224,7 +224,7 @@ impl Instance {
 
         s.store_sqrt_ad(66, A::add_scaled_product(s.ad_value(3), 1.0, s.ad_value(4), s.ad_value(4), 0.25));
 
-        s.store_ad_value(5, A::add_scaled_inputs_product(s.ad_value(3), 1.0, s.ad_value(61), (-1.0), s.ad_value(4), A::sub_scaled_inputs(s.ad_value(66), 1.0, s.ad_value(4), 0.5), (-1.0)));
+        s.store_add_scaled_inputs_product(5, s.ad_value(3), 1.0, s.ad_value(61), (-1.0), s.ad_value(4), A::sub_scaled_inputs(s.ad_value(66), 1.0, s.ad_value(4), 0.5), (-1.0));
 
         s.store_mul_sub_lhs(0, 5, 147, 24);
 
@@ -1051,7 +1051,7 @@ impl Instance {
 
         s.store_sqrt_ad(66, A::add_scaled_product(s.ad_value(3), 1.0, s.ad_value(4), s.ad_value(4), 0.25));
 
-        s.store_ad_value(5, A::add_scaled_inputs_product(s.ad_value(3), 1.0, s.ad_value(61), (-1.0), s.ad_value(4), A::sub_scaled_inputs(s.ad_value(66), 1.0, s.ad_value(4), 0.5), (-1.0)));
+        s.store_add_scaled_inputs_product(5, s.ad_value(3), 1.0, s.ad_value(61), (-1.0), s.ad_value(4), A::sub_scaled_inputs(s.ad_value(66), 1.0, s.ad_value(4), 0.5), (-1.0));
 
         s.store_mul_sub_lhs(0, 5, 147, 24);
 

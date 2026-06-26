@@ -115,7 +115,7 @@ impl Instance {
 
         s.store_mul_offset_ad_rhs(44, 45, A::div_from_scalar(p.p18, A::square(s.ad_value(47))), 1.0);
 
-        s.store_ad_value(46, A::add_scaled_inputs_product(A::offset(s.ad_value(39), (-p.p10)), 1.0, A::tanh_scaled_input(s.ad_value(5), p.p15), p.p10, A::offset(s.ad_value(6), (-p.p21)), A::sub(s.ad_value(6), s.ad_value(38)), (-p.p22)));
+        s.store_add_scaled_inputs_product(46, A::offset(s.ad_value(39), (-p.p10)), 1.0, A::tanh_scaled_input(s.ad_value(5), p.p15), p.p10, A::offset(s.ad_value(6), (-p.p21)), A::sub(s.ad_value(6), s.ad_value(38)), (-p.p22));
 
         s.store_sub(48, 4, 46);
 

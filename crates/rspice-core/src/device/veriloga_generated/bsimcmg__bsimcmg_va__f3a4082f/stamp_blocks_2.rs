@@ -6756,7 +6756,7 @@ impl Instance {
         }
 
         if (!s.b[1420]) {
-            s.store_ad_value(168, A::add_scaled_inputs_product(s.ad_value(899), 1.0, s.ad_value(897), (-1.0), s.ad_value(914), s.ad_value(172), 1.0));
+            s.store_add_scaled_inputs_product(168, s.ad_value(899), 1.0, s.ad_value(897), (-1.0), s.ad_value(914), s.ad_value(172), 1.0);
             s.store_sub(169, 900, 897);
         }
 

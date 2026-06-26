@@ -5485,7 +5485,7 @@ impl Instance {
             }
             if (((((s.b[1443] && s.b[1444]) && (!s.b[1578])) && (!s.b[1580])) && s.b[1581]) && s.b[1583]) {
                 s.store_add_scaled_product(1458, A::mul3(s.ad_value(1456), s.ad_value(85), s.ad_value(85)), 1.0, s.ad_value(154), s.ad_value(1483), (-1.0));
-                s.store_ad_value(335, A::add_scaled_square_product(s.ad_value(1457), 1.0, s.ad_value(1456), s.ad_value(1458), (-4.0)));
+                s.store_add_scaled_square_product(335, s.ad_value(1457), 1.0, s.ad_value(1456), s.ad_value(1458), (-4.0));
             }
             s.b[1586] = (s.v[335] > 0.0);
             s.v[1586] = if s.b[1586] { 1.0 } else { 0.0 };
