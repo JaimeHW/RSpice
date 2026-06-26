@@ -1396,9 +1396,9 @@ impl Instance {
 
         s.v[149] = 0.0;
 
-        s.store_ad_value(146, A::add_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(18)), p.p6, A::voltage(ctx, nodes, Some(19), Some(8)), p.p6));
+        s.store_add_scaled_voltages(146, ctx, nodes, Some(19), Some(18), p.p6, Some(19), Some(8), p.p6);
 
-        s.store_ad_value(147, A::add_scaled_inputs(A::voltage(ctx, nodes, Some(18), Some(19)), p.p6, A::voltage(ctx, nodes, Some(18), Some(8)), p.p6));
+        s.store_add_scaled_voltages(147, ctx, nodes, Some(18), Some(19), p.p6, Some(18), Some(8), p.p6);
 
         s.b[2547] = (p.p312 == 1.0);
         s.v[2547] = if s.b[2547] { 1.0 } else { 0.0 };
@@ -1407,8 +1407,8 @@ impl Instance {
         s.v[2548] = if s.b[2548] { 1.0 } else { 0.0 };
 
         if (s.b[2547] && s.b[2548]) {
-            s.store_ad_value(146, A::add_scaled_inputs(A::voltage(ctx, nodes, Some(2), Some(0)), p.p6, A::voltage(ctx, nodes, Some(2), Some(8)), p.p6));
-            s.store_ad_value(147, A::add_scaled_inputs(A::voltage(ctx, nodes, Some(0), Some(2)), p.p6, A::voltage(ctx, nodes, Some(0), Some(8)), p.p6));
+            s.store_add_scaled_voltages(146, ctx, nodes, Some(2), Some(0), p.p6, Some(2), Some(8), p.p6);
+            s.store_add_scaled_voltages(147, ctx, nodes, Some(0), Some(2), p.p6, Some(0), Some(8), p.p6);
         }
 
         if s.b[2547] {

@@ -378,7 +378,7 @@ impl Instance {
         }
 
         if (s.b[389] && (!(s.b[387] || s.b[388]))) {
-            s.store_ad_value(208, A::limited_exp_scaled_input(A::voltage(ctx, nodes, Some(1), Some(2)), (-p.p112)));
+            s.store_limited_exp_scaled_voltage(208, ctx, nodes, Some(1), Some(2), (-p.p112));
             s.store_scaled_voltage(209, ctx, nodes, Some(6), None, p.p113);
             s.store_offset_ad(210, A::add_scaled_inputs(A::voltage(ctx, nodes, Some(5), None), (-p.p116), A::voltage(ctx, nodes, Some(6), None), p.p117), p.p118);
             s.store_scaled_voltage(211, ctx, nodes, Some(6), None, p.p114);

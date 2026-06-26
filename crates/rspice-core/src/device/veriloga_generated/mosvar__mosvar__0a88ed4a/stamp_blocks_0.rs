@@ -416,7 +416,7 @@ impl Instance {
 
         s.v[116] = (1.25 + (s.v[110] * (((((((-1.25)) as f64).exp() + 1.25) - 1.0)) as f64).sqrt()));
 
-        s.store_ad_value(77, A::scaled_offset(A::voltage(ctx, nodes, Some(4), Some(5)), (-s.v[28]), p.p17));
+        s.store_scaled_offset_voltage(77, ctx, nodes, Some(4), Some(5), (-s.v[28]), p.p17);
 
         s.store_scale(78, 77, s.v[26]);
 
@@ -928,7 +928,7 @@ impl Instance {
 
         s.store_neg(92, 90);
 
-        s.store_ad_value(94, A::add_scaled_inputs(s.ad_value(77), s.v[26], A::voltage(ctx, nodes, Some(6), None), s.v[26]));
+        s.store_add_scaled_input_voltage_rhs(94, 77, s.v[26], ctx, nodes, Some(6), None, s.v[26]);
 
         s.b[281] = (((s.v[94]) as f64).abs() <= s.v[40]);
         s.v[281] = if s.b[281] { 1.0 } else { 0.0 };
@@ -1422,7 +1422,7 @@ impl Instance {
             s.store_scalar(136, (p.p18 * s.v[42]));
         }
 
-        s.store_ad_value(114, A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(4), Some(1)), (p.p17 * s.v[26]), s.ad_value(136), (p.p17 * s.v[26])));
+        s.store_sub_scaled_voltage_input(114, ctx, nodes, Some(4), Some(1), (p.p17 * s.v[26]), 136, (p.p17 * s.v[26]));
 
         s.b[354] = ((p.p49 != 0.0) && ((s.v[126] > 0.0) || (s.v[138] > 0.0)));
         s.v[354] = if s.b[354] { 1.0 } else { 0.0 };
@@ -2189,7 +2189,7 @@ impl Instance {
 
         s.store_offset_scaled(60, 34, (((((((-1.25)) as f64).exp() + 1.25) - 1.0)) as f64).sqrt(), 1.25);
 
-        s.store_ad_value(77, A::scaled_offset(A::voltage(ctx, nodes, Some(4), Some(5)), (-s.v[28]), p.p17));
+        s.store_scaled_offset_voltage(77, ctx, nodes, Some(4), Some(5), (-s.v[28]), p.p17);
 
         s.store_scale(78, 77, s.v[26]);
 
@@ -2695,7 +2695,7 @@ impl Instance {
             s.store_sqrt(88, 86);
         }
 
-        s.store_ad_value(94, A::add_scaled_inputs(s.ad_value(77), s.v[26], A::voltage(ctx, nodes, Some(6), None), s.v[26]));
+        s.store_add_scaled_input_voltage_rhs(94, 77, s.v[26], ctx, nodes, Some(6), None, s.v[26]);
 
         s.b[281] = (((s.v[94]) as f64).abs() <= s.v[40]);
         s.v[281] = if s.b[281] { 1.0 } else { 0.0 };

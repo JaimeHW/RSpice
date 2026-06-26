@@ -677,6 +677,128 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_scaled_offset_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, offset: f64, scale: f64) {
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (pos_value - neg_value + offset) * scale;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = pos { self.dn[index][node] += scale; }
+        if let Some(node) = neg { self.dn[index][node] -= scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_input_voltage_rhs(&mut self, index: usize, source: usize, source_scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = source_value * source_scale + (pos_value - neg_value) * voltage_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] += voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] -= voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_voltage_input_lhs(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64, source: usize, source_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (pos_value - neg_value) * voltage_scale + source_value * source_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] += voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] -= voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_input_voltage(&mut self, index: usize, source: usize, source_scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = source_value * source_scale - (pos_value - neg_value) * voltage_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] -= voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] += voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_voltage_input(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64, source: usize, source_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (pos_value - neg_value) * voltage_scale - source_value * source_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] += voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] -= voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_voltages(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], left_pos: Option<usize>, left_neg: Option<usize>, left_scale: f64, right_pos: Option<usize>, right_neg: Option<usize>, right_scale: f64) {
+        let left_pos_value = left_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let left_neg_value = left_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_pos_value = right_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_neg_value = right_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (left_pos_value - left_neg_value) * left_scale + (right_pos_value - right_neg_value) * right_scale;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = left_pos { self.dn[index][node] += left_scale; }
+        if let Some(node) = left_neg { self.dn[index][node] -= left_scale; }
+        if let Some(node) = right_pos { self.dn[index][node] += right_scale; }
+        if let Some(node) = right_neg { self.dn[index][node] -= right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_voltages(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], left_pos: Option<usize>, left_neg: Option<usize>, left_scale: f64, right_pos: Option<usize>, right_neg: Option<usize>, right_scale: f64) {
+        let left_pos_value = left_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let left_neg_value = left_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_pos_value = right_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_neg_value = right_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (left_pos_value - left_neg_value) * left_scale - (right_pos_value - right_neg_value) * right_scale;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = left_pos { self.dn[index][node] += left_scale; }
+        if let Some(node) = left_neg { self.dn[index][node] -= left_scale; }
+        if let Some(node) = right_pos { self.dn[index][node] -= right_scale; }
+        if let Some(node) = right_neg { self.dn[index][node] += right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_limited_exp_scaled_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, scale: f64) {
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let raw = (pos_value - neg_value) * scale;
+        if raw > 80.0 {
+            self.v[index] = LIMEXP_MAX * (1.0 + raw - 80.0);
+            self.dn[index] = [0.0; NODE_COUNT];
+            self.db[index] = [0.0; BRANCH_COUNT];
+            let derivative_scale = LIMEXP_MAX * scale;
+            if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
+            if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
+        } else if raw < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = raw.exp();
+            self.v[index] = output;
+            self.dn[index] = [0.0; NODE_COUNT];
+            self.db[index] = [0.0; BRANCH_COUNT];
+            let derivative_scale = output * scale;
+            if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
+            if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
+        }
+    }
+
+    #[inline]
     pub(crate) fn store_abs_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {
         let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
@@ -1296,6 +1418,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
             let output = raw.exp();
             self.store_unary_ad_scaled(index, value, output, output * scale);
         }
+    }
+
+    #[inline]
+    pub(crate) fn store_abs_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        self.store_unary_ad_scaled(index, value, raw.abs(), if raw >= 0.0 { scale } else { -scale });
     }
 
     #[inline]
@@ -3519,6 +3647,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_abs_scaled_input(&mut self, index: usize, source: usize, scale: f64) {
+        let raw = self.v[source] * scale;
+        self.store_unary_scaled(index, source, raw.abs(), if raw >= 0.0 { scale } else { -scale });
+    }
+
+    #[inline]
     pub(crate) fn store_min_with_scalar(&mut self, index: usize, source: usize, scalar: f64) {
         if self.v[source] <= scalar {
             self.copy_ad(index, source);
@@ -4135,6 +4269,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_ln_div(&mut self, index: usize, left: usize, right: usize) {
         let raw = self.v[left] / self.v[right];
         self.store_unary_div_scaled(index, left, right, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_div_scaled_input_square_denominator(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64) {
+        let numerator_value = self.v[numerator];
+        let denominator_value = self.v[denominator];
+        let numerator_dn = self.dn[numerator];
+        let denominator_dn = self.dn[denominator];
+        let numerator_db = self.db[numerator];
+        let denominator_db = self.db[denominator];
+        self.v[index] = ((numerator_value * numerator_scale) / (denominator_value * denominator_value * denominator_scale)).ln();
+        let numerator_derivative_scale = 1.0 / numerator_value;
+        let denominator_derivative_scale = -2.0 / denominator_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale; }
     }
 
     #[inline]
@@ -9559,6 +9708,128 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_scaled_offset_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, offset: f64, scale: f64) {
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (pos_value - neg_value + offset) * scale;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = pos { self.dn[index][node] += scale; }
+        if let Some(node) = neg { self.dn[index][node] -= scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_input_voltage_rhs(&mut self, index: usize, source: usize, source_scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = source_value * source_scale + (pos_value - neg_value) * voltage_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] += voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] -= voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_voltage_input_lhs(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64, source: usize, source_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (pos_value - neg_value) * voltage_scale + source_value * source_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] += voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] -= voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_input_voltage(&mut self, index: usize, source: usize, source_scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = source_value * source_scale - (pos_value - neg_value) * voltage_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] -= voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] += voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_voltage_input(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64, source: usize, source_scale: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (pos_value - neg_value) * voltage_scale - source_value * source_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -source_dn[axis] * source_scale; }
+        if let Some(node) = pos { self.dn[index][node] += voltage_scale; }
+        if let Some(node) = neg { self.dn[index][node] -= voltage_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -source_db[axis] * source_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_voltages(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], left_pos: Option<usize>, left_neg: Option<usize>, left_scale: f64, right_pos: Option<usize>, right_neg: Option<usize>, right_scale: f64) {
+        let left_pos_value = left_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let left_neg_value = left_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_pos_value = right_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_neg_value = right_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (left_pos_value - left_neg_value) * left_scale + (right_pos_value - right_neg_value) * right_scale;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = left_pos { self.dn[index][node] += left_scale; }
+        if let Some(node) = left_neg { self.dn[index][node] -= left_scale; }
+        if let Some(node) = right_pos { self.dn[index][node] += right_scale; }
+        if let Some(node) = right_neg { self.dn[index][node] -= right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_voltages(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], left_pos: Option<usize>, left_neg: Option<usize>, left_scale: f64, right_pos: Option<usize>, right_neg: Option<usize>, right_scale: f64) {
+        let left_pos_value = left_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let left_neg_value = left_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_pos_value = right_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let right_neg_value = right_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        self.v[index] = (left_pos_value - left_neg_value) * left_scale - (right_pos_value - right_neg_value) * right_scale;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = left_pos { self.dn[index][node] += left_scale; }
+        if let Some(node) = left_neg { self.dn[index][node] -= left_scale; }
+        if let Some(node) = right_pos { self.dn[index][node] -= right_scale; }
+        if let Some(node) = right_neg { self.dn[index][node] += right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_limited_exp_scaled_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, scale: f64) {
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let raw = (pos_value - neg_value) * scale;
+        if raw > 80.0 {
+            self.v[index] = LIMEXP_MAX * (1.0 + raw - 80.0);
+            self.dn[index] = [0.0; NODE_COUNT];
+            self.db[index] = [0.0; BRANCH_COUNT];
+            let derivative_scale = LIMEXP_MAX * scale;
+            if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
+            if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
+        } else if raw < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = raw.exp();
+            self.v[index] = output;
+            self.dn[index] = [0.0; NODE_COUNT];
+            self.db[index] = [0.0; BRANCH_COUNT];
+            let derivative_scale = output * scale;
+            if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
+            if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
+        }
+    }
+
+    #[inline]
     pub(crate) fn store_abs_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {
         let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
@@ -10178,6 +10449,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
             let output = raw.exp();
             self.store_unary_ad_scaled(index, value, output, output * scale);
         }
+    }
+
+    #[inline]
+    pub(crate) fn store_abs_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        let raw = value.value * scale;
+        self.store_unary_ad_scaled(index, value, raw.abs(), if raw >= 0.0 { scale } else { -scale });
     }
 
     #[inline]
@@ -12401,6 +12678,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_abs_scaled_input(&mut self, index: usize, source: usize, scale: f64) {
+        let raw = self.v[source] * scale;
+        self.store_unary_scaled(index, source, raw.abs(), if raw >= 0.0 { scale } else { -scale });
+    }
+
+    #[inline]
     pub(crate) fn store_min_with_scalar(&mut self, index: usize, source: usize, scalar: f64) {
         if self.v[source] <= scalar {
             self.copy_ad(index, source);
@@ -13017,6 +13300,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_ln_div(&mut self, index: usize, left: usize, right: usize) {
         let raw = self.v[left] / self.v[right];
         self.store_unary_div_scaled(index, left, right, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_div_scaled_input_square_denominator(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64) {
+        let numerator_value = self.v[numerator];
+        let denominator_value = self.v[denominator];
+        let numerator_dn = self.dn[numerator];
+        let denominator_dn = self.dn[denominator];
+        let numerator_db = self.db[numerator];
+        let denominator_db = self.db[denominator];
+        self.v[index] = ((numerator_value * numerator_scale) / (denominator_value * denominator_value * denominator_scale)).ln();
+        let numerator_derivative_scale = 1.0 / numerator_value;
+        let denominator_derivative_scale = -2.0 / denominator_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale; }
     }
 
     #[inline]
