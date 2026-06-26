@@ -2290,6 +2290,43 @@ fn rust_backend_fuses_expression_affine3_add_sub_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_affine3_offset_add_sub_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_affine3_offset_add_sub_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression affine3 offset add/sub");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_inputs3_offset(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, offset: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_inputs3_offset("), "{stamp}");
+    assert!(
+        !stamp.contains("A::add_scaled_inputs3(A::scale_offset("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_inputs3(A::scaled_offset("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_scaled_division_operands() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_division_source())
@@ -2489,8 +2526,14 @@ fn rust_backend_fuses_expression_scaled_add_sub_chains() {
     );
     assert!(stamp.contains("A::add_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("A::sub_scaled_inputs("), "{stamp}");
-    assert!(stamp.contains("A::scale_offset("), "{stamp}");
-    assert!(stamp.contains("A::scaled_offset("), "{stamp}");
+    assert!(
+        stamp.contains("A::scale_offset(") || stamp.contains("A::add_scaled_inputs3_offset("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::scaled_offset(") || stamp.contains("A::add_scaled_inputs3_offset("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("A::scale(A::add("), "{stamp}");
     assert!(!stamp.contains("A::scale(A::sub("), "{stamp}");
     assert!(!stamp.contains("A::add(A::scale("), "{stamp}");
@@ -9977,6 +10020,30 @@ module compact_expression_affine3_add_sub(p, n);
           + exp((a - q) + r)
           + ln(((gain * a) + (offset * q)) - r)
           + tanh((a + (gain * q)) - (offset * r));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_affine3_offset_add_sub_source() -> &'static str {
+    r#"
+module compact_expression_affine3_offset_add_sub(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt(((gain * a) + offset) + q + r)
+          + exp((q - offset) + (gain * a) + r)
+          + ln(((a + offset) + (gain * q)) - (offset * r));
         I(p, n) <+ b;
     end
 endmodule

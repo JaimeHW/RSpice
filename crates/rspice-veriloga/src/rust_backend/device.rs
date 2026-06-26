@@ -5981,6 +5981,18 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn add_scaled_inputs3_offset(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, offset: f64) -> Self {",
+        "        let mut value = first;",
+        "        let first_value = value.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let third_value = third.value * third_scale;",
+        "        value.value = ((first_value + second_value) + third_value) + offset;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * first_scale + second.node_derivatives[index] * second_scale) + third.node_derivatives[index] * third_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * first_scale + second.branch_derivatives[index] * second_scale) + third.branch_derivatives[index] * third_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn add_scaled_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
         "        let mut result = value;",
         "        let value_term = result.value * value_scale;",
@@ -12246,6 +12258,10 @@ struct CompactAffineTerm<'a> {
     scale: String,
 }
 
+fn compact_accumulate_scalar_offset(offset: &mut String, term: &str) {
+    *offset = compact_scalar_add(offset, term);
+}
+
 fn compact_collect_affine_ad_terms<'a>(
     value: &'a str,
     scale: &str,
@@ -12325,6 +12341,149 @@ fn compact_collect_affine_ad_terms<'a>(
     Some(())
 }
 
+fn compact_collect_affine_offset_ad_terms<'a>(
+    value: &'a str,
+    scale: &str,
+    terms: &mut Vec<CompactAffineTerm<'a>>,
+    offset: &mut String,
+    max_terms: usize,
+) -> Option<()> {
+    if terms.len() >= max_terms {
+        return None;
+    }
+
+    if let Some((inner, inner_scale)) = compact_scaled_ad_expression(value) {
+        let combined_scale = compact_scalar_mul(scale, &inner_scale);
+        return compact_collect_affine_offset_ad_terms(
+            inner,
+            &combined_scale,
+            terms,
+            offset,
+            max_terms,
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "scale_offset") {
+        if args.len() != 3 {
+            return None;
+        }
+        compact_accumulate_scalar_offset(offset, &compact_scalar_mul(scale, args[2]));
+        return compact_collect_affine_offset_ad_terms(
+            args[0],
+            &compact_scalar_mul(scale, args[1]),
+            terms,
+            offset,
+            max_terms,
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "scaled_offset") {
+        if args.len() != 3 {
+            return None;
+        }
+        compact_accumulate_scalar_offset(
+            offset,
+            &compact_scalar_mul(scale, &compact_scalar_mul(args[1], args[2])),
+        );
+        return compact_collect_affine_offset_ad_terms(
+            args[0],
+            &compact_scalar_mul(scale, args[2]),
+            terms,
+            offset,
+            max_terms,
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "offset") {
+        if args.len() != 2 {
+            return None;
+        }
+        compact_accumulate_scalar_offset(offset, &compact_scalar_mul(scale, args[1]));
+        return compact_collect_affine_offset_ad_terms(args[0], scale, terms, offset, max_terms);
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        compact_accumulate_scalar_offset(offset, &compact_scalar_mul(scale, args[0]));
+        return compact_collect_affine_offset_ad_terms(
+            args[1],
+            &compact_scalar_negate(scale),
+            terms,
+            offset,
+            max_terms,
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add") {
+        if args.len() != 2 {
+            return None;
+        }
+        compact_collect_affine_offset_ad_terms(args[0], scale, terms, offset, max_terms)?;
+        compact_collect_affine_offset_ad_terms(args[1], scale, terms, offset, max_terms)?;
+        return Some(());
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub") {
+        if args.len() != 2 {
+            return None;
+        }
+        compact_collect_affine_offset_ad_terms(args[0], scale, terms, offset, max_terms)?;
+        let right_scale = compact_scalar_negate(scale);
+        compact_collect_affine_offset_ad_terms(args[1], &right_scale, terms, offset, max_terms)?;
+        return Some(());
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs") {
+        if args.len() != 4 {
+            return None;
+        }
+        compact_collect_affine_offset_ad_terms(
+            args[0],
+            &compact_scalar_mul(scale, args[1]),
+            terms,
+            offset,
+            max_terms,
+        )?;
+        compact_collect_affine_offset_ad_terms(
+            args[2],
+            &compact_scalar_mul(scale, args[3]),
+            terms,
+            offset,
+            max_terms,
+        )?;
+        return Some(());
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub_scaled_inputs") {
+        if args.len() != 4 {
+            return None;
+        }
+        compact_collect_affine_offset_ad_terms(
+            args[0],
+            &compact_scalar_mul(scale, args[1]),
+            terms,
+            offset,
+            max_terms,
+        )?;
+        compact_collect_affine_offset_ad_terms(
+            args[2],
+            &compact_scalar_negate(&compact_scalar_mul(scale, args[3])),
+            terms,
+            offset,
+            max_terms,
+        )?;
+        return Some(());
+    }
+
+    terms.push(CompactAffineTerm {
+        value,
+        scale: scale.to_string(),
+    });
+    Some(())
+}
+
 fn compact_add_sub_affine3_ad_expressions(helper: &str, left: &str, right: &str) -> Option<String> {
     let mut terms = Vec::with_capacity(3);
     compact_collect_affine_ad_terms(left, "1.0", &mut terms, 3)?;
@@ -12341,6 +12500,31 @@ fn compact_add_sub_affine3_ad_expressions(helper: &str, left: &str, right: &str)
         terms[1].scale,
         terms[2].value,
         terms[2].scale
+    ))
+}
+
+fn compact_add_sub_affine3_offset_ad_expressions(
+    helper: &str,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    let mut terms = Vec::with_capacity(3);
+    let mut offset = "0.0".to_string();
+    compact_collect_affine_offset_ad_terms(left, "1.0", &mut terms, &mut offset, 3)?;
+    let right_scale = if helper == "sub" { "-1.0" } else { "1.0" };
+    compact_collect_affine_offset_ad_terms(right, right_scale, &mut terms, &mut offset, 3)?;
+    if terms.len() != 3 || compact_scalar_same(&offset, "0.0") {
+        return None;
+    }
+    Some(format!(
+        "AdValue::add_scaled_inputs3_offset({}, {}, {}, {}, {}, {}, {})",
+        terms[0].value,
+        terms[0].scale,
+        terms[1].value,
+        terms[1].scale,
+        terms[2].value,
+        terms[2].scale,
+        offset
     ))
 }
 
@@ -12537,6 +12721,9 @@ fn compact_add_sub_scaled_ad_expressions(helper: &str, left: &str, right: &str) 
     if let Some(fused) = compact_add_sub_product_ad_expressions(helper, left, right) {
         return Some(fused);
     }
+    if let Some(fused) = compact_add_sub_affine3_offset_ad_expressions(helper, left, right) {
+        return Some(fused);
+    }
     if let Some(fused) = compact_add_sub_affine3_ad_expressions(helper, left, right) {
         return Some(fused);
     }
@@ -12657,6 +12844,22 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             compact_scalar_mul(args[3], scale),
             args[4],
             compact_scalar_mul(args[5], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs3_offset") {
+        if args.len() != 7 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_inputs3_offset({}, {}, {}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            compact_scalar_mul(args[3], scale),
+            args[4],
+            compact_scalar_mul(args[5], scale),
+            compact_scalar_mul(args[6], scale)
         ));
     }
 
