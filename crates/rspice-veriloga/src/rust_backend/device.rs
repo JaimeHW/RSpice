@@ -2815,6 +2815,33 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_add_scaled_product(&mut self, index: usize, value: AdValue, value_scale: f64, product_left: AdValue, product_right: AdValue, product_scale: f64) {",
+        "        let value_term = value.value * value_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        self.values[index] = value_term + product_term;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * value_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_scaled_product(&mut self, index: usize, product_left: AdValue, product_right: AdValue, product_scale: f64, denominator: AdValue, denominator_scale: f64) {",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let denominator_value = denominator.value * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let product_value = product_left_value * product_right_value;",
+        "        let scaled_product_value = product_value * product_scale;",
+        "        let quotient = scaled_product_value * reciprocal;",
+        "        let product_derivative_scale = product_scale * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_derivative_scale + denominator.node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_derivative_scale + denominator.branch_derivatives[axis] * denominator_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
         "        self.store_scaled_voltage(index, ctx, nodes, pos, neg, 1.0);",
         "    }",
@@ -7109,6 +7136,10 @@ pub fn render_runtime_support_module() -> String {
             "left: AdValue<NODE_COUNT, BRANCH_COUNT>,",
         )
         .replace(
+            "denominator: AdValue,",
+            "denominator: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
             "value: AdValue)",
             "value: AdValue<NODE_COUNT, BRANCH_COUNT>)",
         )
@@ -9593,6 +9624,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_fused_product3_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_common_fused_expression_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_nested_mixed_multiply_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -9747,6 +9781,31 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         return Some(format!(
             "scratch.store_powf({target_index}, {source}, {});",
             args[1]
+        ));
+    }
+
+    None
+}
+
+fn compact_common_fused_expression_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_product")
+        && args.len() == 5
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_product({target_index}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "div_scaled_product")
+        && args.len() == 5
+    {
+        return Some(format!(
+            "scratch.store_div_scaled_product({target_index}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4]
         ));
     }
 

@@ -3044,6 +3044,46 @@ fn rust_backend_fuses_expression_add_product_division_chains() {
 }
 
 #[test]
+fn rust_backend_directly_stores_common_fused_expression_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_fused_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression direct stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_product(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_div_scaled_product(&mut self, index: usize, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_add_scaled_product("), "{stamp}");
+    assert!(stamp.contains("s.store_div_scaled_product("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
@@ -11486,6 +11526,32 @@ module compact_expression_add_product_division(p, n);
           + (((a * gain) + (q * r)) / (c + offset))
           + (((a - offset) + (q * r)) / (r * gain));
         I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_fused_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_fused_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real c;
+    real sum_product;
+    real product_ratio;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n) + offset;
+        c = V(p) + gain;
+        sum_product = a + (q * r);
+        product_ratio = (a * q) / c;
+        I(p, n) <+ sum_product + product_ratio;
     end
 endmodule
 "#
