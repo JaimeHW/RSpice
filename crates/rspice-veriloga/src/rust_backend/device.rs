@@ -5969,6 +5969,18 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn add_scaled_inputs3(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64) -> Self {",
+        "        let mut value = first;",
+        "        let first_value = value.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let third_value = third.value * third_scale;",
+        "        value.value = (first_value + second_value) + third_value;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * first_scale + second.node_derivatives[index] * second_scale) + third.node_derivatives[index] * third_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * first_scale + second.branch_derivatives[index] * second_scale) + third.branch_derivatives[index] * third_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn add_scaled_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
         "        let mut result = value;",
         "        let value_term = result.value * value_scale;",
@@ -12070,6 +12082,109 @@ fn compact_scaled_factor_ad_expression(value: &str) -> (&str, String) {
     compact_scaled_ad_expression(value).unwrap_or((value, "1.0".to_string()))
 }
 
+struct CompactAffineTerm<'a> {
+    value: &'a str,
+    scale: String,
+}
+
+fn compact_collect_affine_ad_terms<'a>(
+    value: &'a str,
+    scale: &str,
+    terms: &mut Vec<CompactAffineTerm<'a>>,
+    max_terms: usize,
+) -> Option<()> {
+    if terms.len() >= max_terms {
+        return None;
+    }
+
+    if let Some((inner, inner_scale)) = compact_scaled_ad_expression(value) {
+        let combined_scale = compact_scalar_mul(scale, &inner_scale);
+        return compact_collect_affine_ad_terms(inner, &combined_scale, terms, max_terms);
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add") {
+        if args.len() != 2 {
+            return None;
+        }
+        compact_collect_affine_ad_terms(args[0], scale, terms, max_terms)?;
+        compact_collect_affine_ad_terms(args[1], scale, terms, max_terms)?;
+        return Some(());
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub") {
+        if args.len() != 2 {
+            return None;
+        }
+        compact_collect_affine_ad_terms(args[0], scale, terms, max_terms)?;
+        let right_scale = compact_scalar_negate(scale);
+        compact_collect_affine_ad_terms(args[1], &right_scale, terms, max_terms)?;
+        return Some(());
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs") {
+        if args.len() != 4 {
+            return None;
+        }
+        compact_collect_affine_ad_terms(
+            args[0],
+            &compact_scalar_mul(scale, args[1]),
+            terms,
+            max_terms,
+        )?;
+        compact_collect_affine_ad_terms(
+            args[2],
+            &compact_scalar_mul(scale, args[3]),
+            terms,
+            max_terms,
+        )?;
+        return Some(());
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub_scaled_inputs") {
+        if args.len() != 4 {
+            return None;
+        }
+        compact_collect_affine_ad_terms(
+            args[0],
+            &compact_scalar_mul(scale, args[1]),
+            terms,
+            max_terms,
+        )?;
+        compact_collect_affine_ad_terms(
+            args[2],
+            &compact_scalar_negate(&compact_scalar_mul(scale, args[3])),
+            terms,
+            max_terms,
+        )?;
+        return Some(());
+    }
+
+    terms.push(CompactAffineTerm {
+        value,
+        scale: scale.to_string(),
+    });
+    Some(())
+}
+
+fn compact_add_sub_affine3_ad_expressions(helper: &str, left: &str, right: &str) -> Option<String> {
+    let mut terms = Vec::with_capacity(3);
+    compact_collect_affine_ad_terms(left, "1.0", &mut terms, 3)?;
+    let right_scale = if helper == "sub" { "-1.0" } else { "1.0" };
+    compact_collect_affine_ad_terms(right, right_scale, &mut terms, 3)?;
+    if terms.len() != 3 {
+        return None;
+    }
+    Some(format!(
+        "AdValue::add_scaled_inputs3({}, {}, {}, {}, {}, {})",
+        terms[0].value,
+        terms[0].scale,
+        terms[1].value,
+        terms[1].scale,
+        terms[2].value,
+        terms[2].scale
+    ))
+}
+
 fn compact_mul3_ad_expression(left: &str, middle: &str, right: &str, scale: &str) -> String {
     if compact_scalar_same(scale, "1.0") {
         format!("AdValue::mul3({left}, {middle}, {right})")
@@ -12191,6 +12306,9 @@ fn compact_add_sub_scaled_ad_expressions(helper: &str, left: &str, right: &str) 
     if let Some(fused) = compact_add_sub_product_ad_expressions(helper, left, right) {
         return Some(fused);
     }
+    if let Some(fused) = compact_add_sub_affine3_ad_expressions(helper, left, right) {
+        return Some(fused);
+    }
 
     let left_scaled = compact_scaled_ad_expression(left);
     let right_scaled = compact_scaled_ad_expression(right);
@@ -12293,6 +12411,21 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             compact_scalar_mul(args[1], scale),
             args[2],
             compact_scalar_mul(args[3], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs3") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_inputs3({}, {}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            compact_scalar_mul(args[3], scale),
+            args[4],
+            compact_scalar_mul(args[5], scale)
         ));
     }
 

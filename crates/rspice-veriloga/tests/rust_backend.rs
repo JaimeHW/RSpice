@@ -2207,6 +2207,55 @@ fn rust_backend_fuses_expression_product_add_sub_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_affine3_add_sub_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_affine3_add_sub_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression affine3 add/sub");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_inputs3(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_inputs3("), "{stamp}");
+    assert!(!stamp.contains("A::add(A::add("), "{stamp}");
+    assert!(!stamp.contains("A::add(A::sub("), "{stamp}");
+    assert!(!stamp.contains("A::sub(A::add("), "{stamp}");
+    assert!(!stamp.contains("A::sub(A::sub("), "{stamp}");
+    assert!(
+        !stamp.contains("A::add_scaled_inputs(A::add_scaled_inputs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_inputs(A::sub_scaled_inputs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::sub_scaled_inputs(A::add_scaled_inputs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::sub_scaled_inputs(A::sub_scaled_inputs("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_result_scaled_mixed_mul_div_store_source())
@@ -9771,6 +9820,31 @@ module compact_expression_product_add_sub(p, n);
           + exp(r - (a * q))
           + ln(((a * q) + (r * q)) + offset)
           + tanh(((a * gain) * q) + r);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_affine3_add_sub_source() -> &'static str {
+    r#"
+module compact_expression_affine3_add_sub(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt((a + q) + r)
+          + exp((a - q) + r)
+          + ln(((gain * a) + (offset * q)) - r)
+          + tanh((a + (gain * q)) - (offset * r));
         I(p, n) <+ b;
     end
 endmodule
