@@ -3446,10 +3446,7 @@ fn rust_backend_directly_stores_value_products_helpers() {
         !stamp.contains("s.store_ad_value("),
         "direct value-products root assignments should not materialize returned AD temporaries:\n{stamp}"
     );
-    assert!(
-        !stamp.contains("A::add_scaled_value_products("),
-        "{stamp}"
-    );
+    assert!(!stamp.contains("A::add_scaled_value_products("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -3527,6 +3524,82 @@ fn rust_backend_directly_stores_indexed_product_helpers() {
     assert!(
         !stamp.contains("s.store_div_scaled_product("),
         "index-backed product division root assignments should not materialize AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_hybrid_index_product_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_hybrid_index_product_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact hybrid indexed direct product helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_add_scaled_product_value_ad(",
+        "fn store_add_scaled_product_left_ad(",
+        "fn store_add_scaled_product_right_ad(",
+        "fn store_add_scaled_inputs_product_first_ad(",
+        "fn store_add_scaled_inputs_product_second_ad(",
+        "fn store_add_scaled_inputs_product_left_ad(",
+        "fn store_add_scaled_inputs_product_right_ad(",
+        "fn store_add_scaled_products_left_left_ad(",
+        "fn store_add_scaled_products_left_right_ad(",
+        "fn store_add_scaled_products_right_left_ad(",
+        "fn store_add_scaled_products_right_right_ad(",
+        "fn store_div_scaled_product_left_ad(",
+        "fn store_div_scaled_product_right_ad(",
+        "fn store_div_scaled_product_denominator_ad(",
+    ] {
+        assert!(support.contains(helper), "missing {helper}\n{support}");
+    }
+
+    for helper in [
+        "s.store_add_scaled_product_value_ad(",
+        "s.store_add_scaled_product_left_ad(",
+        "s.store_add_scaled_product_right_ad(",
+        "s.store_add_scaled_inputs_product_first_ad(",
+        "s.store_add_scaled_inputs_product_second_ad(",
+        "s.store_add_scaled_inputs_product_left_ad(",
+        "s.store_add_scaled_inputs_product_right_ad(",
+        "s.store_add_scaled_products_left_left_ad(",
+        "s.store_add_scaled_products_left_right_ad(",
+        "s.store_add_scaled_products_right_left_ad(",
+        "s.store_add_scaled_products_right_right_ad(",
+        "s.store_div_scaled_product_left_ad(",
+        "s.store_div_scaled_product_right_ad(",
+        "s.store_div_scaled_product_denominator_ad(",
+    ] {
+        assert!(stamp.contains(helper), "missing {helper}\n{stamp}");
+    }
+
+    assert!(
+        !stamp.contains("s.store_add_scaled_product("),
+        "hybrid product-add root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_inputs_product("),
+        "hybrid input-product root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_products("),
+        "hybrid product-sum root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_div_scaled_product("),
+        "hybrid product-division root assignments should avoid by-value product stores:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -12236,6 +12309,63 @@ module compact_expression_direct_store_indexed_product_helpers(p, n);
         inputs_product = (a * value_scale) + (q * second_scale) + ((a * r) * product_scale);
         divided_product = (a * q) / den;
         I(p, n) <+ add_product + add_products + inputs_product + divided_product;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_hybrid_index_product_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_hybrid_index_product_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real value_scale = 2.0;
+    parameter real first_scale = 3.0;
+    parameter real second_scale = 4.0;
+    parameter real product_scale = 5.0;
+    parameter real offset = 6.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real add_value_ad;
+    real add_left_ad;
+    real add_right_ad;
+    real inputs_first_ad;
+    real inputs_second_ad;
+    real inputs_left_ad;
+    real inputs_right_ad;
+    real products_left_left_ad;
+    real products_left_right_ad;
+    real products_right_left_ad;
+    real products_right_right_ad;
+    real div_left_ad;
+    real div_right_ad;
+    real div_denominator_ad;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) - V(n);
+        add_value_ad = (a + offset) + ((q * r) * product_scale);
+        add_left_ad = a + (((q + t) * r) * product_scale);
+        add_right_ad = a + ((q * (r + t)) * product_scale);
+        inputs_first_ad = ((a + offset) * value_scale) + (q * second_scale) + ((r * t) * product_scale);
+        inputs_second_ad = (a * value_scale) + ((q + offset) * second_scale) + ((r * t) * product_scale);
+        inputs_left_ad = (a * value_scale) + (q * second_scale) + (((r + offset) * t) * product_scale);
+        inputs_right_ad = (a * value_scale) + (q * second_scale) + ((r * (t + offset)) * product_scale);
+        products_left_left_ad = (((a + offset) * q) * first_scale) + ((r * t) * second_scale);
+        products_left_right_ad = ((a * (q + offset)) * first_scale) + ((r * t) * second_scale);
+        products_right_left_ad = ((a * q) * first_scale) + (((r + offset) * t) * second_scale);
+        products_right_right_ad = ((a * q) * first_scale) + ((r * (t + offset)) * second_scale);
+        div_left_ad = ((a + t) * q) / r;
+        div_right_ad = (a * (q + t)) / r;
+        div_denominator_ad = (a * q) / (r + t);
+        I(p, n) <+ add_value_ad + add_left_ad + add_right_ad
+                 + inputs_first_ad + inputs_second_ad + inputs_left_ad + inputs_right_ad
+                 + products_left_left_ad + products_left_right_ad
+                 + products_right_left_ad + products_right_right_ad
+                 + div_left_ad + div_right_ad + div_denominator_ad;
     end
 endmodule
 "#

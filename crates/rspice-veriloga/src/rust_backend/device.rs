@@ -2805,7 +2805,7 @@ fn generate_scratch_struct() -> String {
 }
 
 fn generate_scratch_operation_helpers() -> String {
-    [
+    let mut out = [
         "",
         "    #[inline]",
         "    fn store_ad_value(&mut self, index: usize, value: AdValue) {",
@@ -6435,7 +6435,234 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
     ]
-    .join("\n")
+    .join("\n");
+    out.push_str(generate_hybrid_index_product_scratch_helpers());
+    out
+}
+
+fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
+    r#"
+
+    #[inline]
+    fn store_add_scaled_product_components(&mut self, index: usize, value_raw: f64, value_node_derivatives: [f64; Instance::NODE_COUNT], value_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_scale: f64) {
+        let value_term = value_raw * value_scale;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.values[index] = value_term + product_term;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value_node_derivatives[axis] * value_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value_branch_derivatives[axis] * value_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; }
+    }
+
+    #[inline]
+    fn store_add_scaled_product_value_ad(&mut self, index: usize, value: AdValue, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let product_left_value = self.values[product_left];
+        let product_right_value = self.values[product_right];
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        self.store_add_scaled_product_components(index, value.value, value.node_derivatives, value.branch_derivatives, value_scale, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_product_left_ad(&mut self, index: usize, value: usize, value_scale: f64, product_left: AdValue, product_right: usize, product_scale: f64) {
+        let value_raw = self.values[value];
+        let product_right_value = self.values[product_right];
+        let value_node_derivatives = self.node_derivatives[value];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let value_branch_derivatives = self.branch_derivatives[value];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        self.store_add_scaled_product_components(index, value_raw, value_node_derivatives, value_branch_derivatives, value_scale, product_left.value, product_left.node_derivatives, product_left.branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_product_right_ad(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, product_right: AdValue, product_scale: f64) {
+        let value_raw = self.values[value];
+        let product_left_value = self.values[product_left];
+        let value_node_derivatives = self.node_derivatives[value];
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let value_branch_derivatives = self.branch_derivatives[value];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        self.store_add_scaled_product_components(index, value_raw, value_node_derivatives, value_branch_derivatives, value_scale, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right.value, product_right.node_derivatives, product_right.branch_derivatives, product_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_inputs_product_components(&mut self, index: usize, first_raw: f64, first_node_derivatives: [f64; Instance::NODE_COUNT], first_branch_derivatives: [f64; Instance::BRANCH_COUNT], first_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_scale: f64) {
+        let first_value = first_raw * first_scale;
+        let second_value = second_raw * second_scale;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.values[index] = first_value + second_value + product_term;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = first_node_derivatives[axis] * first_scale + second_node_derivatives[axis] * second_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = first_branch_derivatives[axis] * first_scale + second_branch_derivatives[axis] * second_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; }
+    }
+
+    #[inline]
+    fn store_add_scaled_inputs_product_first_ad(&mut self, index: usize, first: AdValue, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let second_raw = self.values[second];
+        let product_left_value = self.values[product_left];
+        let product_right_value = self.values[product_right];
+        let second_node_derivatives = self.node_derivatives[second];
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let second_branch_derivatives = self.branch_derivatives[second];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.node_derivatives, first.branch_derivatives, first_scale, second_raw, second_node_derivatives, second_branch_derivatives, second_scale, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_inputs_product_second_ad(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let first_raw = self.values[first];
+        let product_left_value = self.values[product_left];
+        let product_right_value = self.values[product_right];
+        let first_node_derivatives = self.node_derivatives[first];
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let first_branch_derivatives = self.branch_derivatives[first];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        self.store_add_scaled_inputs_product_components(index, first_raw, first_node_derivatives, first_branch_derivatives, first_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_inputs_product_left_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue, product_right: usize, product_scale: f64) {
+        let first_raw = self.values[first];
+        let second_raw = self.values[second];
+        let product_right_value = self.values[product_right];
+        let first_node_derivatives = self.node_derivatives[first];
+        let second_node_derivatives = self.node_derivatives[second];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let first_branch_derivatives = self.branch_derivatives[first];
+        let second_branch_derivatives = self.branch_derivatives[second];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        self.store_add_scaled_inputs_product_components(index, first_raw, first_node_derivatives, first_branch_derivatives, first_scale, second_raw, second_node_derivatives, second_branch_derivatives, second_scale, product_left.value, product_left.node_derivatives, product_left.branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_inputs_product_right_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue, product_scale: f64) {
+        let first_raw = self.values[first];
+        let second_raw = self.values[second];
+        let product_left_value = self.values[product_left];
+        let first_node_derivatives = self.node_derivatives[first];
+        let second_node_derivatives = self.node_derivatives[second];
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let first_branch_derivatives = self.branch_derivatives[first];
+        let second_branch_derivatives = self.branch_derivatives[second];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        self.store_add_scaled_inputs_product_components(index, first_raw, first_node_derivatives, first_branch_derivatives, first_scale, second_raw, second_node_derivatives, second_branch_derivatives, second_scale, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right.value, product_right.node_derivatives, product_right.branch_derivatives, product_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_products_components(&mut self, index: usize, left_product_left_value: f64, left_product_left_node_derivatives: [f64; Instance::NODE_COUNT], left_product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_product_right_value: f64, left_product_right_node_derivatives: [f64; Instance::NODE_COUNT], left_product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_product_left_value: f64, right_product_left_node_derivatives: [f64; Instance::NODE_COUNT], right_product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_product_right_value: f64, right_product_right_node_derivatives: [f64; Instance::NODE_COUNT], right_product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {
+        let left_product_term = left_product_left_value * left_product_right_value * left_scale;
+        let right_product_term = right_product_left_value * right_product_right_value * right_scale;
+        self.values[index] = left_product_term + right_product_term;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_product_left_node_derivatives[axis] * left_product_right_value + left_product_left_value * left_product_right_node_derivatives[axis]) * left_scale + (right_product_left_node_derivatives[axis] * right_product_right_value + right_product_left_value * right_product_right_node_derivatives[axis]) * right_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_product_left_branch_derivatives[axis] * left_product_right_value + left_product_left_value * left_product_right_branch_derivatives[axis]) * left_scale + (right_product_left_branch_derivatives[axis] * right_product_right_value + right_product_left_value * right_product_right_branch_derivatives[axis]) * right_scale; }
+    }
+
+    #[inline]
+    fn store_add_scaled_products_left_left_ad(&mut self, index: usize, left_product_left: AdValue, left_product_right: usize, left_scale: f64, right_product_left: usize, right_product_right: usize, right_scale: f64) {
+        let left_product_right_value = self.values[left_product_right];
+        let right_product_left_value = self.values[right_product_left];
+        let right_product_right_value = self.values[right_product_right];
+        let left_product_right_node_derivatives = self.node_derivatives[left_product_right];
+        let right_product_left_node_derivatives = self.node_derivatives[right_product_left];
+        let right_product_right_node_derivatives = self.node_derivatives[right_product_right];
+        let left_product_right_branch_derivatives = self.branch_derivatives[left_product_right];
+        let right_product_left_branch_derivatives = self.branch_derivatives[right_product_left];
+        let right_product_right_branch_derivatives = self.branch_derivatives[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.node_derivatives, left_product_left.branch_derivatives, left_product_right_value, left_product_right_node_derivatives, left_product_right_branch_derivatives, left_scale, right_product_left_value, right_product_left_node_derivatives, right_product_left_branch_derivatives, right_product_right_value, right_product_right_node_derivatives, right_product_right_branch_derivatives, right_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_products_left_right_ad(&mut self, index: usize, left_product_left: usize, left_product_right: AdValue, left_scale: f64, right_product_left: usize, right_product_right: usize, right_scale: f64) {
+        let left_product_left_value = self.values[left_product_left];
+        let right_product_left_value = self.values[right_product_left];
+        let right_product_right_value = self.values[right_product_right];
+        let left_product_left_node_derivatives = self.node_derivatives[left_product_left];
+        let right_product_left_node_derivatives = self.node_derivatives[right_product_left];
+        let right_product_right_node_derivatives = self.node_derivatives[right_product_right];
+        let left_product_left_branch_derivatives = self.branch_derivatives[left_product_left];
+        let right_product_left_branch_derivatives = self.branch_derivatives[right_product_left];
+        let right_product_right_branch_derivatives = self.branch_derivatives[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_node_derivatives, left_product_left_branch_derivatives, left_product_right.value, left_product_right.node_derivatives, left_product_right.branch_derivatives, left_scale, right_product_left_value, right_product_left_node_derivatives, right_product_left_branch_derivatives, right_product_right_value, right_product_right_node_derivatives, right_product_right_branch_derivatives, right_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_products_right_left_ad(&mut self, index: usize, left_product_left: usize, left_product_right: usize, left_scale: f64, right_product_left: AdValue, right_product_right: usize, right_scale: f64) {
+        let left_product_left_value = self.values[left_product_left];
+        let left_product_right_value = self.values[left_product_right];
+        let right_product_right_value = self.values[right_product_right];
+        let left_product_left_node_derivatives = self.node_derivatives[left_product_left];
+        let left_product_right_node_derivatives = self.node_derivatives[left_product_right];
+        let right_product_right_node_derivatives = self.node_derivatives[right_product_right];
+        let left_product_left_branch_derivatives = self.branch_derivatives[left_product_left];
+        let left_product_right_branch_derivatives = self.branch_derivatives[left_product_right];
+        let right_product_right_branch_derivatives = self.branch_derivatives[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_node_derivatives, left_product_left_branch_derivatives, left_product_right_value, left_product_right_node_derivatives, left_product_right_branch_derivatives, left_scale, right_product_left.value, right_product_left.node_derivatives, right_product_left.branch_derivatives, right_product_right_value, right_product_right_node_derivatives, right_product_right_branch_derivatives, right_scale);
+    }
+
+    #[inline]
+    fn store_add_scaled_products_right_right_ad(&mut self, index: usize, left_product_left: usize, left_product_right: usize, left_scale: f64, right_product_left: usize, right_product_right: AdValue, right_scale: f64) {
+        let left_product_left_value = self.values[left_product_left];
+        let left_product_right_value = self.values[left_product_right];
+        let right_product_left_value = self.values[right_product_left];
+        let left_product_left_node_derivatives = self.node_derivatives[left_product_left];
+        let left_product_right_node_derivatives = self.node_derivatives[left_product_right];
+        let right_product_left_node_derivatives = self.node_derivatives[right_product_left];
+        let left_product_left_branch_derivatives = self.branch_derivatives[left_product_left];
+        let left_product_right_branch_derivatives = self.branch_derivatives[left_product_right];
+        let right_product_left_branch_derivatives = self.branch_derivatives[right_product_left];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_node_derivatives, left_product_left_branch_derivatives, left_product_right_value, left_product_right_node_derivatives, left_product_right_branch_derivatives, left_scale, right_product_left_value, right_product_left_node_derivatives, right_product_left_branch_derivatives, right_product_right.value, right_product_right.node_derivatives, right_product_right.branch_derivatives, right_scale);
+    }
+
+    #[inline]
+    fn store_div_scaled_product_components(&mut self, index: usize, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_scale: f64, denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_scale: f64) {
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_product_left_ad(&mut self, index: usize, product_left: AdValue, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64) {
+        let product_right_value = self.values[product_right];
+        let denominator_raw = self.values[denominator];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let denominator_node_derivatives = self.node_derivatives[denominator];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        let denominator_branch_derivatives = self.branch_derivatives[denominator];
+        self.store_div_scaled_product_components(index, product_left.value, product_left.node_derivatives, product_left.branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale, denominator_raw, denominator_node_derivatives, denominator_branch_derivatives, denominator_scale);
+    }
+
+    #[inline]
+    fn store_div_scaled_product_right_ad(&mut self, index: usize, product_left: usize, product_right: AdValue, product_scale: f64, denominator: usize, denominator_scale: f64) {
+        let product_left_value = self.values[product_left];
+        let denominator_raw = self.values[denominator];
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let denominator_node_derivatives = self.node_derivatives[denominator];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        let denominator_branch_derivatives = self.branch_derivatives[denominator];
+        self.store_div_scaled_product_components(index, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right.value, product_right.node_derivatives, product_right.branch_derivatives, product_scale, denominator_raw, denominator_node_derivatives, denominator_branch_derivatives, denominator_scale);
+    }
+
+    #[inline]
+    fn store_div_scaled_product_denominator_ad(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator: AdValue, denominator_scale: f64) {
+        let product_left_value = self.values[product_left];
+        let product_right_value = self.values[product_right];
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        self.store_div_scaled_product_components(index, product_left_value, product_left_node_derivatives, product_left_branch_derivatives, product_right_value, product_right_node_derivatives, product_right_branch_derivatives, product_scale, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, denominator_scale);
+    }
+"#
 }
 
 fn generate_ad_value_struct() -> String {
@@ -10385,15 +10612,35 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "add_scaled_product")
         && args.len() == 5
     {
-        if let (Some(value), Some(product_left), Some(product_right)) = (
-            compact_scratch_ad_value_index(args[0]),
-            compact_scratch_ad_value_index(args[2]),
-            compact_scratch_ad_value_index(args[3]),
-        ) {
-            return Some(format!(
-                "scratch.store_add_scaled_product_indices({target_index}, {value}, {}, {product_left}, {product_right}, {});",
-                args[1], args[4]
-            ));
+        let value_index = compact_scratch_ad_value_index(args[0]);
+        let product_left_index = compact_scratch_ad_value_index(args[2]);
+        let product_right_index = compact_scratch_ad_value_index(args[3]);
+        match (value_index, product_left_index, product_right_index) {
+            (Some(value), Some(product_left), Some(product_right)) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_product_indices({target_index}, {value}, {}, {product_left}, {product_right}, {});",
+                    args[1], args[4]
+                ));
+            }
+            (None, Some(product_left), Some(product_right)) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_product_value_ad({target_index}, {}, {}, {product_left}, {product_right}, {});",
+                    args[0], args[1], args[4]
+                ));
+            }
+            (Some(value), None, Some(product_right)) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_product_left_ad({target_index}, {value}, {}, {}, {product_right}, {});",
+                    args[1], args[2], args[4]
+                ));
+            }
+            (Some(value), Some(product_left), None) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_product_right_ad({target_index}, {value}, {}, {product_left}, {}, {});",
+                    args[1], args[3], args[4]
+                ));
+            }
+            _ => {}
         }
 
         return Some(format!(
@@ -10428,16 +10675,47 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs_product")
         && args.len() == 7
     {
-        if let (Some(first), Some(second), Some(product_left), Some(product_right)) = (
-            compact_scratch_ad_value_index(args[0]),
-            compact_scratch_ad_value_index(args[2]),
-            compact_scratch_ad_value_index(args[4]),
-            compact_scratch_ad_value_index(args[5]),
+        let first_index = compact_scratch_ad_value_index(args[0]);
+        let second_index = compact_scratch_ad_value_index(args[2]);
+        let product_left_index = compact_scratch_ad_value_index(args[4]);
+        let product_right_index = compact_scratch_ad_value_index(args[5]);
+        match (
+            first_index,
+            second_index,
+            product_left_index,
+            product_right_index,
         ) {
-            return Some(format!(
-                "scratch.store_add_scaled_inputs_product_indices({target_index}, {first}, {}, {second}, {}, {product_left}, {product_right}, {});",
-                args[1], args[3], args[6]
-            ));
+            (Some(first), Some(second), Some(product_left), Some(product_right)) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_inputs_product_indices({target_index}, {first}, {}, {second}, {}, {product_left}, {product_right}, {});",
+                    args[1], args[3], args[6]
+                ));
+            }
+            (None, Some(second), Some(product_left), Some(product_right)) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_inputs_product_first_ad({target_index}, {}, {}, {second}, {}, {product_left}, {product_right}, {});",
+                    args[0], args[1], args[3], args[6]
+                ));
+            }
+            (Some(first), None, Some(product_left), Some(product_right)) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_inputs_product_second_ad({target_index}, {first}, {}, {}, {}, {product_left}, {product_right}, {});",
+                    args[1], args[2], args[3], args[6]
+                ));
+            }
+            (Some(first), Some(second), None, Some(product_right)) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_inputs_product_left_ad({target_index}, {first}, {}, {second}, {}, {}, {product_right}, {});",
+                    args[1], args[3], args[4], args[6]
+                ));
+            }
+            (Some(first), Some(second), Some(product_left), None) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_inputs_product_right_ad({target_index}, {first}, {}, {second}, {}, {product_left}, {}, {});",
+                    args[1], args[3], args[5], args[6]
+                ));
+            }
+            _ => {}
         }
 
         return Some(format!(
@@ -10458,21 +10736,67 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "add_scaled_products")
         && args.len() == 6
     {
-        if let (
-            Some(left_product_left),
-            Some(left_product_right),
-            Some(right_product_left),
-            Some(right_product_right),
-        ) = (
-            compact_scratch_ad_value_index(args[0]),
-            compact_scratch_ad_value_index(args[1]),
-            compact_scratch_ad_value_index(args[3]),
-            compact_scratch_ad_value_index(args[4]),
+        let left_product_left_index = compact_scratch_ad_value_index(args[0]);
+        let left_product_right_index = compact_scratch_ad_value_index(args[1]);
+        let right_product_left_index = compact_scratch_ad_value_index(args[3]);
+        let right_product_right_index = compact_scratch_ad_value_index(args[4]);
+        match (
+            left_product_left_index,
+            left_product_right_index,
+            right_product_left_index,
+            right_product_right_index,
         ) {
-            return Some(format!(
-                "scratch.store_add_scaled_products_indices({target_index}, {left_product_left}, {left_product_right}, {}, {right_product_left}, {right_product_right}, {});",
-                args[2], args[5]
-            ));
+            (
+                Some(left_product_left),
+                Some(left_product_right),
+                Some(right_product_left),
+                Some(right_product_right),
+            ) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_products_indices({target_index}, {left_product_left}, {left_product_right}, {}, {right_product_left}, {right_product_right}, {});",
+                    args[2], args[5]
+                ));
+            }
+            (
+                None,
+                Some(left_product_right),
+                Some(right_product_left),
+                Some(right_product_right),
+            ) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_products_left_left_ad({target_index}, {}, {left_product_right}, {}, {right_product_left}, {right_product_right}, {});",
+                    args[0], args[2], args[5]
+                ));
+            }
+            (
+                Some(left_product_left),
+                None,
+                Some(right_product_left),
+                Some(right_product_right),
+            ) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_products_left_right_ad({target_index}, {left_product_left}, {}, {}, {right_product_left}, {right_product_right}, {});",
+                    args[1], args[2], args[5]
+                ));
+            }
+            (
+                Some(left_product_left),
+                Some(left_product_right),
+                None,
+                Some(right_product_right),
+            ) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_products_right_left_ad({target_index}, {left_product_left}, {left_product_right}, {}, {}, {right_product_right}, {});",
+                    args[2], args[3], args[5]
+                ));
+            }
+            (Some(left_product_left), Some(left_product_right), Some(right_product_left), None) => {
+                return Some(format!(
+                    "scratch.store_add_scaled_products_right_right_ad({target_index}, {left_product_left}, {left_product_right}, {}, {right_product_left}, {}, {});",
+                    args[2], args[4], args[5]
+                ));
+            }
+            _ => {}
         }
 
         return Some(format!(
@@ -10493,15 +10817,35 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_product")
         && args.len() == 5
     {
-        if let (Some(product_left), Some(product_right), Some(denominator)) = (
-            compact_scratch_ad_value_index(args[0]),
-            compact_scratch_ad_value_index(args[1]),
-            compact_scratch_ad_value_index(args[3]),
-        ) {
-            return Some(format!(
-                "scratch.store_div_scaled_product_indices({target_index}, {product_left}, {product_right}, {}, {denominator}, {});",
-                args[2], args[4]
-            ));
+        let product_left_index = compact_scratch_ad_value_index(args[0]);
+        let product_right_index = compact_scratch_ad_value_index(args[1]);
+        let denominator_index = compact_scratch_ad_value_index(args[3]);
+        match (product_left_index, product_right_index, denominator_index) {
+            (Some(product_left), Some(product_right), Some(denominator)) => {
+                return Some(format!(
+                    "scratch.store_div_scaled_product_indices({target_index}, {product_left}, {product_right}, {}, {denominator}, {});",
+                    args[2], args[4]
+                ));
+            }
+            (None, Some(product_right), Some(denominator)) => {
+                return Some(format!(
+                    "scratch.store_div_scaled_product_left_ad({target_index}, {}, {product_right}, {}, {denominator}, {});",
+                    args[0], args[2], args[4]
+                ));
+            }
+            (Some(product_left), None, Some(denominator)) => {
+                return Some(format!(
+                    "scratch.store_div_scaled_product_right_ad({target_index}, {product_left}, {}, {}, {denominator}, {});",
+                    args[1], args[2], args[4]
+                ));
+            }
+            (Some(product_left), Some(product_right), None) => {
+                return Some(format!(
+                    "scratch.store_div_scaled_product_denominator_ad({target_index}, {product_left}, {product_right}, {}, {}, {});",
+                    args[2], args[3], args[4]
+                ));
+            }
+            _ => {}
         }
 
         return Some(format!(
@@ -10668,7 +11012,16 @@ fn compact_common_fused_expression_store_helper_call(
     {
         return Some(format!(
             "scratch.store_div_scaled_inputs4({target_index}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});",
-            args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9]
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+            args[6],
+            args[7],
+            args[8],
+            args[9]
         ));
     }
 
