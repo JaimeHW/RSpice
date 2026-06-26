@@ -1600,7 +1600,7 @@ impl Instance {
 
         s.store_add_scaled_inputs3(750, s.ad_value(747), 0.5, s.ad_value(740), ((-1.0) * 0.5), A::sqrt(A::add_scaled_product(s.ad_value(748), 1.0, A::sub(s.ad_value(747), s.ad_value(740)), A::sub(s.ad_value(747), s.ad_value(740)), 1.0)), (-0.5));
 
-        s.store_offset_ad(700, A::add_scaled_product(s.ad_value(177), 1.0, s.ad_value(178), A::scale_offset(s.ad_value(179), s.v[358], 1.0), s.v[358]), s.v[21]);
+        s.store_offset_add_scaled_product(700, s.ad_value(177), 1.0, s.ad_value(178), A::scale_offset(s.ad_value(179), s.v[358], 1.0), s.v[358], s.v[21]);
 
         s.store_exp_scaled_input(751, 180, s.v[360]);
 
@@ -2724,7 +2724,7 @@ impl Instance {
 
         if (s.b[2279] && s.b[2283]) {
             s.store_mul_ad_lhs(2170, A::mul3(s.ad_value(757), s.ad_value(2168), s.ad_value(2169)), 2166);
-            s.store_mul_ad_rhs(2171, 774, A::add_scaled_product(s.ad_value(2167), 1.0, s.ad_value(775), s.ad_value(2166), 1.0));
+            s.store_mul_add_scaled_product_rhs(2171, 774, s.ad_value(2167), 1.0, s.ad_value(775), s.ad_value(2166), 1.0);
             s.store_ln_ad(2028, A::div_scaled_value_offset_denominator(s.ad_value(2161), 1.0, A::add(s.ad_value(2161), s.ad_value(2160)), 1e-14, 1.0));
             s.store_add_scaled_product_mixed_aia(2172, A::pow(A::mul(s.ad_value(2171), s.ad_value(704)), s.ad_value(705)), 1.0, 706, A::exp(A::mul_scaled_lhs(s.ad_value(707), 0.5, s.ad_value(2028))), 1.0);
             s.store_mul_add_ad_lhs(2173, A::offset(s.ad_value(2172), 1.0), s.ad_value(2170), 2164);
@@ -4251,7 +4251,7 @@ impl Instance {
 
         if (((s.b[2547] && s.b[2548]) && s.b[2565]) && s.b[2569]) {
             s.store_mul_ad_lhs(2454, A::mul3(s.ad_value(757), s.ad_value(2452), s.ad_value(2453)), 2450);
-            s.store_mul_ad_rhs(2455, 774, A::add_scaled_product(s.ad_value(2451), 1.0, s.ad_value(775), s.ad_value(2450), 1.0));
+            s.store_mul_add_scaled_product_rhs(2455, 774, s.ad_value(2451), 1.0, s.ad_value(775), s.ad_value(2450), 1.0);
             s.store_ln_ad(2028, A::div_scaled_value_offset_denominator(s.ad_value(2445), 1.0, A::add(s.ad_value(2445), s.ad_value(2444)), 1e-14, 1.0));
             s.store_add_scaled_product_mixed_aia(2456, A::pow(A::mul(s.ad_value(2455), s.ad_value(704)), s.ad_value(705)), 1.0, 706, A::exp(A::mul_scaled_lhs(s.ad_value(707), 0.5, s.ad_value(2028))), 1.0);
             s.store_mul_add_ad_lhs(2457, A::offset(s.ad_value(2456), 1.0), s.ad_value(2454), 2448);

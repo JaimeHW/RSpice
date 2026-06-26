@@ -248,7 +248,7 @@ impl Instance {
 
         s.store_div_scaled_value_by_product(169, s.ad_value(893), 2.0, s.ad_value(895), A::offset(s.ad_value(898), 2.0), 1.0);
 
-        s.store_mul_ad_rhs(164, 362, A::add_scaled_product(s.ad_value(662), 1.0, s.ad_value(664), s.ad_value(127), 1.0));
+        s.store_mul_add_scaled_product_rhs(164, 362, s.ad_value(662), 1.0, s.ad_value(664), s.ad_value(127), 1.0);
 
         s.b[1417] = (p.p175 == 0.0);
         s.v[1417] = if s.b[1417] { 1.0 } else { 0.0 };
@@ -624,7 +624,7 @@ impl Instance {
             s.store_mul(168, 224, 198);
             s.store_scale(225, 168, 2.0);
             s.store_add_scaled_inputs_product_indices(226, 175, 1.0, 217, 1.0, 175, 168, 3.0);
-            s.store_mul_ad_rhs(227, 175, A::add_scaled_product(s.ad_value(217), 1.0, s.ad_value(175), s.ad_value(168), 2.0));
+            s.store_mul_add_scaled_product_rhs(227, 175, s.ad_value(217), 1.0, s.ad_value(175), s.ad_value(168), 2.0);
             s.store_div_scaled_inputs2(210, A::square(s.ad_value(226)), 1.0, A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)), (-1.0), A::mul(A::add(s.ad_value(226), A::sqrt(A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)))), s.ad_value(225)), 1.0);
         }
 
@@ -1132,7 +1132,7 @@ impl Instance {
             s.store_mul_ad_lhs(168, A::mul3(s.ad_value(158), s.ad_value(336), s.ad_value(163)), 199);
             s.store_scale(225, 168, 2.0);
             s.store_add_scaled_inputs_product_indices(226, 175, 1.0, 223, 1.0, 175, 168, 3.0);
-            s.store_mul_ad_rhs(227, 175, A::add_scaled_product(s.ad_value(223), 1.0, s.ad_value(175), s.ad_value(168), 2.0));
+            s.store_mul_add_scaled_product_rhs(227, 175, s.ad_value(223), 1.0, s.ad_value(175), s.ad_value(168), 2.0);
             s.store_div_scaled_inputs2(211, A::square(s.ad_value(226)), 1.0, A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)), (-1.0), A::mul(A::add(s.ad_value(226), A::sqrt(A::add_scaled_square_product(s.ad_value(226), 1.0, s.ad_value(225), s.ad_value(227), (-2.0)))), s.ad_value(225)), 1.0);
         }
 

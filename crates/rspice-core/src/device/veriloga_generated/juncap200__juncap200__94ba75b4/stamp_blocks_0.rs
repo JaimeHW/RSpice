@@ -4440,7 +4440,7 @@ impl Instance {
         s.v[596] = if s.b[596] { 1.0 } else { 0.0 };
 
         if (s.b[595] && s.b[596]) {
-            s.store_mul_ad_rhs(142, 547, A::add_scaled_product(s.ad_value(165), 1.0, s.ad_value(547), s.ad_value(166), 1.0));
+            s.store_mul_add_scaled_product_rhs(142, 547, s.ad_value(165), 1.0, s.ad_value(547), s.ad_value(166), 1.0);
         }
 
         if (s.b[595] && (!s.b[596])) {

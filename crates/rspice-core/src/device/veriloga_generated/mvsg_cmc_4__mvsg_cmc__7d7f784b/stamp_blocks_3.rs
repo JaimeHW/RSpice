@@ -129,7 +129,7 @@ impl Instance {
         }
 
         if s.b[761] {
-            s.store_mul_ad_lhs(806, A::add_scaled_product(s.ad_value(788), 1.0, s.ad_value(809), s.ad_value(789), (-1.0)), 870);
+            s.store_mul_add_scaled_product_rhs(806, 870, s.ad_value(788), 1.0, s.ad_value(809), s.ad_value(789), (-1.0));
             s.store_sub(769, 808, 806);
             s.store_scaled_mul(811, 807, 779, 2.0);
             s.store_mul(812, 782, 811);
@@ -844,7 +844,7 @@ impl Instance {
         }
 
         if s.b[908] {
-            s.store_mul_ad_lhs(953, A::add_scaled_product(s.ad_value(935), 1.0, s.ad_value(956), s.ad_value(936), (-1.0)), 1017);
+            s.store_mul_add_scaled_product_rhs(953, 1017, s.ad_value(935), 1.0, s.ad_value(956), s.ad_value(936), (-1.0));
             s.store_sub(916, 955, 953);
             s.store_scaled_mul(958, 954, 926, 2.0);
             s.store_mul(959, 929, 958);
@@ -1559,7 +1559,7 @@ impl Instance {
         }
 
         if s.b[1055] {
-            s.store_mul_ad_lhs(1100, A::add_scaled_product(s.ad_value(1082), 1.0, s.ad_value(1103), s.ad_value(1083), (-1.0)), 1164);
+            s.store_mul_add_scaled_product_rhs(1100, 1164, s.ad_value(1082), 1.0, s.ad_value(1103), s.ad_value(1083), (-1.0));
             s.store_sub(1063, 1102, 1100);
             s.store_scaled_mul(1105, 1101, 1073, 2.0);
             s.store_mul(1106, 1076, 1105);
@@ -2271,7 +2271,7 @@ impl Instance {
         }
 
         if s.b[1202] {
-            s.store_mul_ad_lhs(1247, A::add_scaled_product(s.ad_value(1229), 1.0, s.ad_value(1250), s.ad_value(1230), (-1.0)), 1311);
+            s.store_mul_add_scaled_product_rhs(1247, 1311, s.ad_value(1229), 1.0, s.ad_value(1250), s.ad_value(1230), (-1.0));
             s.store_sub(1210, 1249, 1247);
             s.store_scaled_mul(1252, 1248, 1220, 2.0);
             s.store_mul(1253, 1223, 1252);
@@ -2986,7 +2986,7 @@ impl Instance {
         }
 
         if s.b[1349] {
-            s.store_mul_ad_lhs(1394, A::add_scaled_product(s.ad_value(1376), 1.0, s.ad_value(1397), s.ad_value(1377), (-1.0)), 1458);
+            s.store_mul_add_scaled_product_rhs(1394, 1458, s.ad_value(1376), 1.0, s.ad_value(1397), s.ad_value(1377), (-1.0));
             s.store_sub(1357, 1396, 1394);
             s.store_scaled_mul(1399, 1395, 1367, 2.0);
             s.store_mul(1400, 1370, 1399);

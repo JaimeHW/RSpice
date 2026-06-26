@@ -6477,7 +6477,7 @@ impl Instance {
 
         s.store_div_scaled_value_by_product(169, s.ad_value(893), 2.0, s.ad_value(895), A::offset(s.ad_value(898), 2.0), 1.0);
 
-        s.store_mul_ad_rhs(164, 362, A::add_scaled_product(s.ad_value(662), 1.0, s.ad_value(664), s.ad_value(127), 1.0));
+        s.store_mul_add_scaled_product_rhs(164, 362, s.ad_value(662), 1.0, s.ad_value(664), s.ad_value(127), 1.0);
 
         s.b[1417] = (p.p175 == 0.0);
         s.v[1417] = if s.b[1417] { 1.0 } else { 0.0 };

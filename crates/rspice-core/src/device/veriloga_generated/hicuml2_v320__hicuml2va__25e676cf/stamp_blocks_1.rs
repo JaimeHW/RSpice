@@ -93,7 +93,7 @@ impl Instance {
             s.store_ln_ad(139, A::sub_from_scalar(1.0, A::div(s.ad_value(138), s.ad_value(39))));
             s.store_mul_ad_lhs(145, A::exp_scaled_input(s.ad_value(139), (-p.p54)), 144);
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(140, 39, 1.0, A::exp_scaled_input(s.ad_value(139), (1.0 - p.p54)), 1.0 / ((1.0 - p.p54)));
-            s.store_mul_ad_rhs(41, 37, A::add_scaled_product(s.ad_value(140), 1.0, s.ad_value(40), A::sub(s.ad_value(207), s.ad_value(138)), 1.0));
+            s.store_mul_add_scaled_product_rhs(41, 37, s.ad_value(140), 1.0, s.ad_value(40), A::sub(s.ad_value(207), s.ad_value(138)), 1.0);
         }
 
         if ((!s.b[473]) && (!s.b[477])) {
@@ -180,7 +180,7 @@ impl Instance {
             s.store_ln_ad(139, A::sub_from_scalar(1.0, A::div(s.ad_value(138), s.ad_value(47))));
             s.store_mul_ad_lhs(145, A::exp_scaled_input(s.ad_value(139), (-p.p59)), 144);
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(140, 47, 1.0, A::exp_scaled_input(s.ad_value(139), (1.0 - p.p59)), 1.0 / ((1.0 - p.p59)));
-            s.store_mul_ad_rhs(196, 46, A::add_scaled_product(s.ad_value(140), 1.0, s.ad_value(48), A::sub(s.ad_value(208), s.ad_value(138)), 1.0));
+            s.store_mul_add_scaled_product_rhs(196, 46, s.ad_value(140), 1.0, s.ad_value(48), A::sub(s.ad_value(208), s.ad_value(138)), 1.0);
         }
 
         if ((!s.b[478]) && (!s.b[482])) {
@@ -278,7 +278,7 @@ impl Instance {
             s.store_ln_ad(139, A::sub_from_scalar(1.0, A::div(s.ad_value(138), s.ad_value(50))));
             s.store_mul_ad_lhs(145, A::exp_scaled_input(s.ad_value(139), (-p.p64)), 144);
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(140, 50, 1.0, A::exp_scaled_input(s.ad_value(139), (1.0 - p.p64)), 1.0 / ((1.0 - p.p64)));
-            s.store_mul_ad_rhs(197, 49, A::add_scaled_product(s.ad_value(140), 1.0, s.ad_value(51), A::sub(s.ad_value(209), s.ad_value(138)), 1.0));
+            s.store_mul_add_scaled_product_rhs(197, 49, s.ad_value(140), 1.0, s.ad_value(51), A::sub(s.ad_value(209), s.ad_value(138)), 1.0);
         }
 
         if ((s.b[483] && (!s.b[484])) && (!s.b[488])) {

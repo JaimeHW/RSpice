@@ -241,7 +241,7 @@ impl Instance {
 
         s.store_mul_ad_product_rhs(16, 302, s.ad_value(342), A::add_scaled_inputs3_offset(A::limited_exp(s.ad_value(12)), 1.0, s.ad_value(358), 1.0, s.ad_value(14), (-p.p734), (-1.0)));
 
-        s.store_mul_ad_rhs(17, 302, A::add_scaled_product(s.ad_value(356), 1.0, s.ad_value(355), A::sub(s.ad_value(307), s.ad_value(357)), 1.0));
+        s.store_mul_add_scaled_product_rhs(17, 302, s.ad_value(356), 1.0, s.ad_value(355), A::sub(s.ad_value(307), s.ad_value(357)), 1.0);
 
         s.b[1479] = (s.v[342] > 0.0);
         s.v[1479] = if s.b[1479] { 1.0 } else { 0.0 };

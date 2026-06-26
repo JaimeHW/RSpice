@@ -5801,7 +5801,7 @@ impl Instance {
             s.copy_ad(51, 71);
             s.store_add_scaled_product_value_ad(18, A::div_from_scalar(1.0, s.ad_value(17)), 1.0, 543, 51, 1.0);
             s.store_scaled_add_sqrt_square_offset_rhs(16, 18, 18, 0.01, 0.5);
-            s.store_mul_ad_rhs(241, 408, A::add_scaled_product(s.ad_value(239), 1.0, A::add_scaled_product(s.ad_value(529), 1.0, s.ad_value(531), s.ad_value(16), 1.0), s.ad_value(235), 1.0));
+            s.store_mul_add_scaled_product_rhs(241, 408, s.ad_value(239), 1.0, A::add_scaled_product(s.ad_value(529), 1.0, s.ad_value(531), s.ad_value(16), 1.0), s.ad_value(235), 1.0);
             s.store_mul_voltage_ad(67, s.ad_value(187), ctx, nodes, Some(6), Some(11));
             s.store_sub(55, 64, 67);
             s.store_sub(14, 55, 63);
@@ -5811,7 +5811,7 @@ impl Instance {
             s.copy_ad(49, 67);
             s.store_add_scaled_product_value_ad(18, A::div_from_scalar(1.0, s.ad_value(17)), 1.0, 543, 49, 1.0);
             s.store_scaled_add_sqrt_square_offset_rhs(16, 18, 18, 0.01, 0.5);
-            s.store_mul_ad_rhs(242, 408, A::add_scaled_product(s.ad_value(240), 1.0, A::add_scaled_product(s.ad_value(528), 1.0, s.ad_value(530), s.ad_value(16), 1.0), s.ad_value(235), 1.0));
+            s.store_mul_add_scaled_product_rhs(242, 408, s.ad_value(240), 1.0, A::add_scaled_product(s.ad_value(528), 1.0, s.ad_value(530), s.ad_value(16), 1.0), s.ad_value(235), 1.0);
         }
 
         if (!s.b[1398]) {
@@ -6555,7 +6555,7 @@ impl Instance {
         let nv0 = ctx.node_voltage(nodes[0]);
         let nv2 = ctx.node_voltage(nodes[2]);
         if ((!s.b[1443]) && s.b[1446]) {
-            s.store_mul_ad_rhs(14, 182, A::add_scaled_product(A::scale_offset(s.ad_value(61), p.p505, 1.0), 1.0, s.ad_value(61), s.ad_value(61), p.p506));
+            s.store_mul_add_scaled_product_rhs(14, 182, A::scale_offset(s.ad_value(61), p.p505, 1.0), 1.0, s.ad_value(61), s.ad_value(61), p.p506);
         }
 
         s.b[1448] = ((0.0 == 0.0) && (s.v[14] < ((-2500.0) * 1e-12)));
