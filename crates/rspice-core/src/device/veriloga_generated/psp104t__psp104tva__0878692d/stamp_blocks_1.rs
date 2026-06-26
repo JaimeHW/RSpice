@@ -4949,23 +4949,18 @@ impl Instance {
         }
 
         if s.b[2004] {
-            s.store_ad_value(720, {
-                if (s.v[186] > s.v[721]) {
-                    s.ad_value(186)
-                } else {
-                    s.ad_value(721)
-                }
-            });
+            if (s.v[186] > s.v[721]) {
+                s.copy_ad(720, 186);
+            } else {
+                s.copy_ad(720, 721);
+            }
         }
 
         if s.b[2004] {
-            s.store_ad_value(720, {
-                if (5e24 > s.v[720]) {
-                    A::constant(5e24)
-                } else {
-                    s.ad_value(720)
-                }
-            });
+            if (5e24 > s.v[720]) {
+                s.store_scalar(720, 5e24);
+            } else {
+            }
         }
 
         if s.b[2004] {
@@ -5102,13 +5097,10 @@ impl Instance {
         }
 
         if s.b[2007] {
-            s.store_ad_value(749, {
-                if (s.v[749] > 0.05) {
-                    s.ad_value(749)
-                } else {
-                    A::constant(0.05)
-                }
-            });
+            if (s.v[749] > 0.05) {
+            } else {
+                s.store_scalar(749, 0.05);
+            }
         }
 
         if s.b[2007] {

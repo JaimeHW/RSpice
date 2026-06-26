@@ -2520,13 +2520,10 @@ impl Instance {
         }
 
         if s.b[1289] {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if s.b[1289] {
@@ -2538,13 +2535,10 @@ impl Instance {
         }
 
         if s.b[1289] {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if s.b[1289] {
@@ -2617,13 +2611,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1314]) && s.b[1315]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1314]) && s.b[1315]) {
@@ -2639,13 +2630,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1314]) && (!s.b[1315])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1314]) && (!s.b[1315])) {
@@ -2684,13 +2672,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1316]) && s.b[1317]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1316]) && s.b[1317]) {
@@ -2706,13 +2691,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1316]) && (!s.b[1317])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1316]) && (!s.b[1317])) {
@@ -2752,13 +2734,10 @@ impl Instance {
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
@@ -2770,13 +2749,10 @@ impl Instance {
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
@@ -2788,13 +2764,10 @@ impl Instance {
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
@@ -2813,13 +2786,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && s.b[1320]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && s.b[1320]) {
@@ -2835,13 +2805,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && (!s.b[1320])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && (!s.b[1320])) {
@@ -2859,13 +2826,10 @@ impl Instance {
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
@@ -2877,13 +2841,10 @@ impl Instance {
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
@@ -2895,13 +2856,10 @@ impl Instance {
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
@@ -2920,13 +2878,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && s.b[1321]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && s.b[1321]) {
@@ -2942,13 +2897,10 @@ impl Instance {
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && (!s.b[1321])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1289] && s.b[1313]) && s.b[1318]) && (!s.b[1321])) {
@@ -2996,13 +2948,11 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
         if (s.b[1289] && s.b[1326]) {
-            s.store_ad_value(335, {
-                if (s.v[676] == 0.0) {
-                    A::constant(0.0)
-                } else {
-                    A::powf(s.ad_value(676), p.p416)
-                }
-            });
+            if (s.v[676] == 0.0) {
+                s.store_scalar(335, 0.0);
+            } else {
+                s.store_powf(335, 676, p.p416);
+            }
         }
 
         if (s.b[1289] && s.b[1326]) {
@@ -3013,13 +2963,11 @@ impl Instance {
         }
 
         if (s.b[1289] && s.b[1326]) {
-            s.store_ad_value(335, {
-                if (s.v[676] == 0.0) {
-                    A::constant(0.0)
-                } else {
-                    A::powf(s.ad_value(676), p.p415)
-                }
-            });
+            if (s.v[676] == 0.0) {
+                s.store_scalar(335, 0.0);
+            } else {
+                s.store_powf(335, 676, p.p415);
+            }
         }
 
         if (s.b[1289] && s.b[1326]) {
@@ -3377,13 +3325,10 @@ impl Instance {
         }
 
         if (s.b[1352] && s.b[1353]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (s.b[1352] && s.b[1353]) {
@@ -3549,13 +3494,10 @@ impl Instance {
         }
 
         if s.b[1352] {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if s.b[1352] {
@@ -3567,13 +3509,10 @@ impl Instance {
         }
 
         if s.b[1352] {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if s.b[1352] {
@@ -3652,13 +3591,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1379]) && s.b[1380]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1379]) && s.b[1380]) {
@@ -3674,13 +3610,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1379]) && (!s.b[1380])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1379]) && (!s.b[1380])) {
@@ -3710,13 +3643,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1381]) && s.b[1382]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1381]) && s.b[1382]) {
@@ -3732,13 +3662,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1381]) && (!s.b[1382])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1381]) && (!s.b[1382])) {
@@ -3778,13 +3705,10 @@ impl Instance {
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
@@ -3796,13 +3720,10 @@ impl Instance {
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
@@ -3814,13 +3735,10 @@ impl Instance {
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
@@ -3839,13 +3757,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && s.b[1385]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && s.b[1385]) {
@@ -3861,13 +3776,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && (!s.b[1385])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && (!s.b[1385])) {
@@ -3885,13 +3797,10 @@ impl Instance {
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
@@ -3903,13 +3812,10 @@ impl Instance {
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
@@ -3921,13 +3827,10 @@ impl Instance {
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1352] && s.b[1378]) && s.b[1383]) {
@@ -3958,13 +3861,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && s.b[1386]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && s.b[1386]) {
@@ -3980,13 +3880,10 @@ impl Instance {
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && (!s.b[1386])) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (((s.b[1352] && s.b[1378]) && s.b[1383]) && (!s.b[1386])) {
@@ -4223,13 +4120,10 @@ impl Instance {
         }
 
         if s.b[1405] {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if s.b[1405] {
@@ -4329,13 +4223,10 @@ impl Instance {
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1413]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1413]) {
@@ -4349,13 +4240,10 @@ impl Instance {
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1413]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1413]) {
@@ -4404,13 +4292,10 @@ impl Instance {
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1416]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1416]) {
@@ -4424,13 +4309,10 @@ impl Instance {
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1416]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1416]) {
@@ -4490,13 +4372,10 @@ impl Instance {
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1418]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if ((s.b[1409] && s.b[1411]) && s.b[1418]) {
@@ -4743,13 +4622,10 @@ impl Instance {
         }
 
         if (!s.b[1426]) {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if (!s.b[1426]) {
@@ -4829,13 +4705,10 @@ impl Instance {
         }
 
         if s.b[1430] {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if s.b[1430] {
@@ -4981,13 +4854,10 @@ impl Instance {
         }
 
         if s.b[1431] {
-            s.store_ad_value(782, {
-                if (s.v[782] > 0.0) {
-                    s.ad_value(782)
-                } else {
-                    A::neg(s.ad_value(782))
-                }
-            });
+            if (s.v[782] > 0.0) {
+            } else {
+                s.store_neg(782, 782);
+            }
         }
 
         if s.b[1431] {
@@ -5192,13 +5062,11 @@ impl Instance {
                 }
             }
             if ((((s.b[1443] && s.b[1444]) && s.b[1559]) && s.b[1560]) && (!s.b[1561])) {
-                s.store_ad_value(726, {
-                    if (s.v[726] == 0.0) {
-                        A::constant(0.0)
-                    } else {
-                        A::powf(s.ad_value(726), (1.0 / (2.0 * 2.0)))
-                    }
-                });
+                if (s.v[726] == 0.0) {
+                    s.store_scalar(726, 0.0);
+                } else {
+                    s.store_powf(726, 726, (1.0 / (2.0 * 2.0)));
+                }
             }
             if (((s.b[1443] && s.b[1444]) && s.b[1559]) && s.b[1560]) {
                 s.store_div_from_scalar(726, 1.0, 726);
@@ -5273,13 +5141,11 @@ impl Instance {
                 }
             }
             if ((((s.b[1443] && s.b[1444]) && s.b[1559]) && s.b[1566]) && (!s.b[1567])) {
-                s.store_ad_value(726, {
-                    if (s.v[726] == 0.0) {
-                        A::constant(0.0)
-                    } else {
-                        A::powf(s.ad_value(726), (1.0 / (2.0 * 2.0)))
-                    }
-                });
+                if (s.v[726] == 0.0) {
+                    s.store_scalar(726, 0.0);
+                } else {
+                    s.store_powf(726, 726, (1.0 / (2.0 * 2.0)));
+                }
             }
             if (((s.b[1443] && s.b[1444]) && s.b[1559]) && s.b[1566]) {
                 s.store_div_from_scalar(726, 1.0, 726);

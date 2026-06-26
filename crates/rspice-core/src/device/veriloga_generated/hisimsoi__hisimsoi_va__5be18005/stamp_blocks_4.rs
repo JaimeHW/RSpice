@@ -10,13 +10,11 @@ impl Instance {
         p: &Parameters,
     ) {
         if (s.b[1833] && (s.v[85] != 0.0)) {
-            s.store_ad_value(438, {
-                if (s.v[613] == 1.0) {
-                    s.ad_value(556)
-                } else {
-                    A::sub_from_scalar(1.0, s.ad_value(556))
-                }
-            });
+            if (s.v[613] == 1.0) {
+                s.copy_ad(438, 556);
+            } else {
+                s.store_sub_from_scalar(438, 1.0, 556);
+            }
         }
 
         if (s.b[1833] && (s.v[85] != 0.0)) {

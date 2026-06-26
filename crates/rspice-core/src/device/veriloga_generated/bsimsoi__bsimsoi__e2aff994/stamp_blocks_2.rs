@@ -2669,23 +2669,19 @@ impl Instance {
         }
 
         if ((!s.b[1620]) && s.b[1970]) {
-            s.store_ad_value(418, {
-                if (s.v[704] > 0.0) {
-                    A::div_from_scalar(1.0, s.ad_value(406))
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if (s.v[704] > 0.0) {
+                s.store_div_from_scalar(418, 1.0, 406);
+            } else {
+                s.store_scalar(418, 0.0);
+            }
         }
 
         if ((!s.b[1620]) && s.b[1970]) {
-            s.store_ad_value(403, {
-                if (s.v[704] > 0.0) {
-                    A::div(s.ad_value(794), s.ad_value(704))
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if (s.v[704] > 0.0) {
+                s.store_div(403, 794, 704);
+            } else {
+                s.store_scalar(403, 0.0);
+            }
         }
 
         if ((!s.b[1620]) && s.b[1970]) {

@@ -2126,23 +2126,19 @@ impl Instance {
         }
 
         if s.b[1693] {
-            s.store_ad_value(1190, {
-                if (s.v[36] == 1.0) {
-                    s.ad_value(788)
-                } else {
-                    s.ad_value(789)
-                }
-            });
+            if (s.v[36] == 1.0) {
+                s.copy_ad(1190, 788);
+            } else {
+                s.copy_ad(1190, 789);
+            }
         }
 
         if s.b[1693] {
-            s.store_ad_value(1191, {
-                if (s.v[36] == 1.0) {
-                    s.ad_value(790)
-                } else {
-                    s.ad_value(791)
-                }
-            });
+            if (s.v[36] == 1.0) {
+                s.copy_ad(1191, 790);
+            } else {
+                s.copy_ad(1191, 791);
+            }
         }
 
         if s.b[1693] {

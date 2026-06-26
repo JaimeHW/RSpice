@@ -152,13 +152,10 @@ impl Instance {
         s.v[126] = if s.b[126] { 1.0 } else { 0.0 };
 
         if s.b[126] {
-            s.store_ad_value(45, {
-                if (s.v[45] > 0.0) {
-                    s.ad_value(45)
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if (s.v[45] > 0.0) {
+            } else {
+                s.store_scalar(45, 0.0);
+            }
         }
 
         if s.b[126] {
@@ -202,13 +199,11 @@ impl Instance {
         }
 
         if s.b[129] {
-            s.store_ad_value(107, {
-                if (p.p63 > 2.0) {
-                    A::mul_scaled_lhs(s.ad_value(71), 0.55, A::offset(A::exp(A::div_scaled_inputs(s.ad_value(106), -1.0, s.ad_value(71), 1.0)), 1.0))
-                } else {
-                    A::scale(s.ad_value(71), 1.1)
-                }
-            });
+            if (p.p63 > 2.0) {
+                s.store_mul_scaled_ad_rhs(107, 71, 0.55, A::offset(A::exp(A::div_scaled_inputs(s.ad_value(106), -1.0, s.ad_value(71), 1.0)), 1.0));
+            } else {
+                s.store_scale(107, 71, 1.1);
+            }
         }
 
         s.b[130] = (p.p63 > 0.0);
@@ -413,13 +408,10 @@ impl Instance {
         }
 
         if s.b[146] {
-            s.store_ad_value(103, {
-                if (s.v[103] > 0.0) {
-                    s.ad_value(103)
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if (s.v[103] > 0.0) {
+            } else {
+                s.store_scalar(103, 0.0);
+            }
         }
 
         if s.b[146] {
@@ -1461,13 +1453,10 @@ impl Instance {
         s.v[126] = if s.b[126] { 1.0 } else { 0.0 };
 
         if s.b[126] {
-            s.store_ad_value(45, {
-                if (s.v[45] > 0.0) {
-                    s.ad_value(45)
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if (s.v[45] > 0.0) {
+            } else {
+                s.store_scalar(45, 0.0);
+            }
         }
 
         if s.b[126] {

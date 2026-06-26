@@ -104,13 +104,11 @@ impl Instance {
         if ((1026.85 + 273.15) < (if (s.v[12] > ((-100.0) + 273.15)) { s.v[12] } else { ((-100.0) + 273.15) })) {
             s.store_scalar(10, (1026.85 + 273.15));
         } else {
-            s.store_ad_value(10, {
-                if (s.v[12] > ((-100.0) + 273.15)) {
-                    s.ad_value(12)
-                } else {
-                    A::constant(((-100.0) + 273.15))
-                }
-            });
+            if (s.v[12] > ((-100.0) + 273.15)) {
+                s.copy_ad(10, 12);
+            } else {
+                s.store_scalar(10, ((-100.0) + 273.15));
+            }
         }
 
         s.v[3] = (p.p43 * p.p42);
@@ -350,26 +348,22 @@ impl Instance {
         s.v[73] = if s.b[73] { 1.0 } else { 0.0 };
 
         if s.b[73] {
-            s.store_ad_value(38, {
-                if ((s.v[29] / s.v[3]) >= p.p46) {
-                    A::div_scaled_inputs(s.ad_value(35), 1.0, s.ad_value(29), 1.0 / (s.v[3]))
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if ((s.v[29] / s.v[3]) >= p.p46) {
+                s.store_div_scaled_inputs(38, s.ad_value(35), 1.0, s.ad_value(29), 1.0 / (s.v[3]));
+            } else {
+                s.store_scalar(38, 0.0);
+            }
         }
 
         s.b[74] = ((s.v[27] > 0.0) && (s.v[27] >= p.p46));
         s.v[74] = if s.b[74] { 1.0 } else { 0.0 };
 
         if s.b[74] {
-            s.store_ad_value(39, {
-                if ((s.v[30] / s.v[3]) >= p.p46) {
-                    A::div_scaled_inputs(s.ad_value(35), 1.0, s.ad_value(30), 1.0 / (s.v[3]))
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if ((s.v[30] / s.v[3]) >= p.p46) {
+                s.store_div_scaled_inputs(39, s.ad_value(35), 1.0, s.ad_value(30), 1.0 / (s.v[3]));
+            } else {
+                s.store_scalar(39, 0.0);
+            }
         }
 
         if (if ((p.p28 > 0.0) && (p.p27 > 0.0)) { 1.0 } else { 0.0 } > 0.0) {
@@ -443,13 +437,11 @@ impl Instance {
         if ((1026.85 + 273.15) < (if (s.v[12] > ((-100.0) + 273.15)) { s.v[12] } else { ((-100.0) + 273.15) })) {
             s.store_scalar(10, (1026.85 + 273.15));
         } else {
-            s.store_ad_value(10, {
-                if (s.v[12] > ((-100.0) + 273.15)) {
-                    s.ad_value(12)
-                } else {
-                    A::constant(((-100.0) + 273.15))
-                }
-            });
+            if (s.v[12] > ((-100.0) + 273.15)) {
+                s.copy_ad(10, 12);
+            } else {
+                s.store_scalar(10, ((-100.0) + 273.15));
+            }
         }
 
         s.v[3] = (p.p43 * p.p42);

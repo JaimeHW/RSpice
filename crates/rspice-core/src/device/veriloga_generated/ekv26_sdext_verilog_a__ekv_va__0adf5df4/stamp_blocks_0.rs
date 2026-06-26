@@ -124,23 +124,19 @@ impl Instance {
         s.v[240] = if s.b[240] { 1.0 } else { 0.0 };
 
         if s.b[240] {
-            s.store_ad_value(57, {
-                if (p.p38 != 1e-6) {
-                    A::offset(s.ad_value(56), (s.v[48] * (p.p38 - 1e-6)))
-                } else {
-                    s.ad_value(56)
-                }
-            });
+            if (p.p38 != 1e-6) {
+                s.store_offset(57, 56, (s.v[48] * (p.p38 - 1e-6)));
+            } else {
+                s.copy_ad(57, 56);
+            }
         }
 
         if (!s.b[240]) {
-            s.store_ad_value(57, {
-                if (p.p38 != 1e-6) {
-                    A::sub_from_scalar((s.v[48] * (1e-6 - p.p38)), s.ad_value(56))
-                } else {
-                    A::neg(s.ad_value(56))
-                }
-            });
+            if (p.p38 != 1e-6) {
+                s.store_sub_from_scalar(57, (s.v[48] * (1e-6 - p.p38)), 56);
+            } else {
+                s.store_neg(57, 56);
+            }
         }
 
         s.store_scale_ad(50, {
@@ -951,23 +947,19 @@ impl Instance {
         s.v[240] = if s.b[240] { 1.0 } else { 0.0 };
 
         if s.b[240] {
-            s.store_ad_value(57, {
-                if (p.p38 != 1e-6) {
-                    A::offset(s.ad_value(56), (s.v[48] * (p.p38 - 1e-6)))
-                } else {
-                    s.ad_value(56)
-                }
-            });
+            if (p.p38 != 1e-6) {
+                s.store_offset(57, 56, (s.v[48] * (p.p38 - 1e-6)));
+            } else {
+                s.copy_ad(57, 56);
+            }
         }
 
         if (!s.b[240]) {
-            s.store_ad_value(57, {
-                if (p.p38 != 1e-6) {
-                    A::sub_from_scalar((s.v[48] * (1e-6 - p.p38)), s.ad_value(56))
-                } else {
-                    A::neg(s.ad_value(56))
-                }
-            });
+            if (p.p38 != 1e-6) {
+                s.store_sub_from_scalar(57, (s.v[48] * (1e-6 - p.p38)), 56);
+            } else {
+                s.store_neg(57, 56);
+            }
         }
 
         s.store_scale_ad(50, {

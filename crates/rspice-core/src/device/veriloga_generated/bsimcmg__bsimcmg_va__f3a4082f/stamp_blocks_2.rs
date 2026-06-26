@@ -6597,13 +6597,11 @@ impl Instance {
         if (!(((s.v[893] * s.v[181]) / (((1.60219e-19 * s.v[148]) * 2.0) * s.v[894])) > 1e-38)) {
             s.store_scalar(900, (-87.498233534));
         } else {
-            s.store_ad_value(900, {
-                if (((s.v[893] * s.v[181]) / (((1.60219e-19 * s.v[148]) * 2.0) * s.v[894])) > 1e-38) {
-                    A::ln(A::div_scaled_product_by_product(s.ad_value(893), s.ad_value(181), 1.0, s.ad_value(148), s.ad_value(894), (1.60219e-19 * 2.0)))
-                } else {
-                    A::constant(0.0)
-                }
-            });
+            if (((s.v[893] * s.v[181]) / (((1.60219e-19 * s.v[148]) * 2.0) * s.v[894])) > 1e-38) {
+                s.store_ln_ad(900, A::div_scaled_product_by_product(s.ad_value(893), s.ad_value(181), 1.0, s.ad_value(148), s.ad_value(894), (1.60219e-19 * 2.0)));
+            } else {
+                s.store_scalar(900, 0.0);
+            }
         }
 
         let assign20300_ad_e38153: A = {

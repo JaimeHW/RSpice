@@ -503,13 +503,11 @@ impl Instance {
         }
 
         if s.b[2340] {
-            s.store_ad_value(1883, {
-                if ((s.v[1880] - s.v[1882]) > 1e-40) {
-                    A::sub(s.ad_value(1880), s.ad_value(1882))
-                } else {
-                    A::constant(1e-40)
-                }
-            });
+            if ((s.v[1880] - s.v[1882]) > 1e-40) {
+                s.store_sub(1883, 1880, 1882);
+            } else {
+                s.store_scalar(1883, 1e-40);
+            }
         }
 
         if s.b[2340] {
