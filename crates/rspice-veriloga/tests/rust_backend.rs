@@ -2378,10 +2378,7 @@ fn rust_backend_fuses_expression_offset_product_add_chains() {
         stamp.contains("A::add_scaled_offset_product_rhs("),
         "{stamp}"
     );
-    assert!(
-        !stamp.contains("A::add_scaled_product("),
-        "{stamp}"
-    );
+    assert!(!stamp.contains("A::add_scaled_product("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2459,6 +2456,194 @@ fn rust_backend_fuses_expression_product_add_sub_chains() {
     assert!(!stamp.contains("A::sub(A::mul("), "{stamp}");
     assert!(!stamp.contains("A::add_scaled_inputs(A::mul("), "{stamp}");
     assert!(!stamp.contains("A::sub_scaled_inputs(A::mul("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_nested_product_add_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_nested_product_add_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression nested product add");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_value_products(value: Self, value_scale: f64, first_product_left: Self, first_product_right: Self, first_product_scale: f64, second_product_left: Self, second_product_right: Self, second_product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_value_products("), "{stamp}");
+    assert!(
+        !stamp.contains("A::add_scaled_product(A::add_scaled_product("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::scale(A::add_scaled_value_products("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_three_product_add_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_three_product_add_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression three product add");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_products3(first_product_left: Self, first_product_right: Self, first_scale: f64, second_product_left: Self, second_product_right: Self, second_scale: f64, third_product_left: Self, third_product_right: Self, third_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_products3("), "{stamp}");
+    assert!(
+        !stamp.contains("A::add_scaled_product(A::add_scaled_products("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::scale(A::add_scaled_products3("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_value_three_product_add_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_value_three_product_add_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression value three product add");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_value_products3(value: Self, value_scale: f64, first_product_left: Self, first_product_right: Self, first_product_scale: f64, second_product_left: Self, second_product_right: Self, second_product_scale: f64, third_product_left: Self, third_product_right: Self, third_product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_value_products3("), "{stamp}");
+    assert!(
+        !stamp.contains("A::add_scaled_product(A::add_scaled_value_products("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::scale(A::add_scaled_value_products3("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_inputs_two_product_add_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_inputs_two_product_add_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression inputs two product add");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_inputs_products(first: Self, first_scale: f64, second: Self, second_scale: f64, first_product_left: Self, first_product_right: Self, first_product_scale: f64, second_product_left: Self, second_product_right: Self, second_product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_inputs_products("), "{stamp}");
+    assert!(
+        !stamp.contains("A::add_scaled_product(A::add_scaled_inputs_product("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::scale(A::add_scaled_inputs_products("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_offset_product_two_product_add_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_offset_product_two_product_add_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression offset product two product add");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_offset_product_lhs_product(value: Self, value_scale: f64, offset_product_left: Self, offset_product_left_offset: f64, offset_product_right: Self, offset_product_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("A::add_scaled_offset_product_lhs_product("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_product(A::add_scaled_offset_product_lhs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::scale(A::add_scaled_offset_product_lhs_product("),
+        "{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2742,18 +2927,12 @@ fn rust_backend_fuses_expression_divided_product_division_chains() {
         stamp.contains("A::div_scaled_product3_by_product("),
         "{stamp}"
     );
-    assert!(
-        !stamp.contains("A::div_scaled_product(A::div("),
-        "{stamp}"
-    );
+    assert!(!stamp.contains("A::div_scaled_product(A::div("), "{stamp}");
     assert!(
         !stamp.contains("A::div_scaled_product(A::div_scaled_inputs("),
         "{stamp}"
     );
-    assert!(
-        !stamp.contains("A::div_scaled_product3(A::div("),
-        "{stamp}"
-    );
+    assert!(!stamp.contains("A::div_scaled_product3(A::div("), "{stamp}");
     assert!(
         !stamp.contains("A::div_scaled_product3(A::div_scaled_inputs("),
         "{stamp}"
@@ -2786,10 +2965,7 @@ fn rust_backend_fuses_expression_scalar_divided_product_division_chains() {
         ),
         "{support}"
     );
-    assert!(
-        stamp.contains("A::div_scaled_value_by_product("),
-        "{stamp}"
-    );
+    assert!(stamp.contains("A::div_scaled_value_by_product("), "{stamp}");
     assert!(
         stamp.contains("A::div_scaled_product_by_product("),
         "{stamp}"
@@ -2802,10 +2978,7 @@ fn rust_backend_fuses_expression_scalar_divided_product_division_chains() {
         !stamp.contains("A::div_scaled_product3(A::div_from_scalar("),
         "{stamp}"
     );
-    assert!(
-        !stamp.contains("A::div_from_scalar("),
-        "{stamp}"
-    );
+    assert!(!stamp.contains("A::div_from_scalar("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2858,10 +3031,7 @@ fn rust_backend_fuses_expression_offset_product_division_chains() {
         stamp.contains("A::div_scaled_product_offset_denominator("),
         "{stamp}"
     );
-    assert!(
-        !stamp.contains("A::div_scaled_product("),
-        "{stamp}"
-    );
+    assert!(!stamp.contains("A::div_scaled_product("), "{stamp}");
     assert!(
         !stamp.contains("A::scale(A::div_scaled_product_offset_"),
         "{stamp}"
@@ -10565,6 +10735,123 @@ module compact_expression_product_add_sub(p, n);
           + exp(r - (a * q))
           + ln(((a * q) + (r * q)) + offset)
           + tanh(((a * gain) * q) + r);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_nested_product_add_source() -> &'static str {
+    r#"
+module compact_expression_nested_product_add(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real c;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        c = V(p) + offset;
+        b = exp((a + (q * r)) + (c * q))
+          + sqrt(((a + ((q * gain) * r)) + (c * r)) * gain)
+          + ln(((a + (q * r)) + ((c * gain) * q)) * offset);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_three_product_add_source() -> &'static str {
+    r#"
+module compact_expression_three_product_add(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt(((a * q) + (r * q)) + (a * r))
+          + ln((((a * q) + (r * q)) + (a * r)) * gain);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_value_three_product_add_source() -> &'static str {
+    r#"
+module compact_expression_value_three_product_add(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real c;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        c = V(p) + gain;
+        b = sqrt(((a + (q * r)) + (c * q)) + (a * c))
+          + ln((((a + (q * r)) + (c * q)) + (a * c)) * gain);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_inputs_two_product_add_source() -> &'static str {
+    r#"
+module compact_expression_inputs_two_product_add(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt(((a + q) + (r * q)) + (a * r))
+          + ln((((a + q) + (r * q)) + (a * r)) * gain);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_offset_product_two_product_add_source() -> &'static str {
+    r#"
+module compact_expression_offset_product_two_product_add(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt((a + ((q + offset) * r)) + (a * q))
+          + ln(((a + ((q + offset) * r)) + (a * q)) * gain);
         I(p, n) <+ b;
     end
 endmodule
