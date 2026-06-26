@@ -587,7 +587,6 @@ impl PotentialBranchSlots {
     fn current_slots(&self) -> &HashMap<String, BranchCurrentSlot> {
         &self.current_slots
     }
-
 }
 
 fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), RustBackendError> {
@@ -780,7 +779,7 @@ fn collect_potential_branch_slots(
                         unknown.id, unknown.equation
                     ),
                 )
-        })?;
+            })?;
         slots.equation_slots.insert(unknown.equation, slot);
         if let Some(name) = unknown.declared_name.as_deref() {
             slots
@@ -1910,13 +1909,23 @@ fn generate_state_file(
     out.push_str("            nodes: mapped,\n");
     out.push_str("            branches: [0usize; Self::BRANCH_COUNT],\n");
     out.push_str("            params: Parameters::new_box(),\n");
-    out.push_str("            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),\n");
+    out.push_str(
+        "            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),\n",
+    );
     out.push_str("            multiplicity: 1.0,\n");
-    out.push_str("            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n");
-    out.push_str("            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n");
+    out.push_str(
+        "            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
+    );
+    out.push_str(
+        "            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
+    );
     out.push_str("            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),\n");
-    out.push_str("            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n");
-    out.push_str("            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n");
+    out.push_str(
+        "            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n",
+    );
+    out.push_str(
+        "            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n",
+    );
     out.push_str("            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),\n");
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
@@ -6332,7 +6341,7 @@ fn emit_stamp_body(
         ));
         out.push_str("        };\n");
     }
-        let mut variables = if uses_scratch {
+    let mut variables = if uses_scratch {
         emit_variable_initializers(
             artifact,
             variable_fields,
@@ -12530,9 +12539,8 @@ impl CompactAdEmitter<'_> {
         let HirExprKind::StringLiteral { value } = &expression.kind else {
             return Err(self.unsupported("analysis expects a string literal argument"));
         };
-        normalize_analysis_query(value).ok_or_else(|| {
-            self.unsupported(format!("analysis() unknown analysis name '{value}'"))
-        })
+        normalize_analysis_query(value)
+            .ok_or_else(|| self.unsupported(format!("analysis() unknown analysis name '{value}'")))
     }
 
     fn param_given_index(&self, args: &[ExprId]) -> Result<usize, RustBackendError> {
@@ -12578,19 +12586,15 @@ impl CompactAdEmitter<'_> {
                             ))
                         }))
                 } else {
-                    Ok(Some(self.branch_voltage_value(pos.as_str(), neg.as_deref())?))
+                    Ok(Some(
+                        self.branch_voltage_value(pos.as_str(), neg.as_deref())?,
+                    ))
                 }
             }
             HirExprKind::NamedBranchAccess { access, name } => match access.as_str() {
-                "I" => Ok(self
-                    .branch_current_unknowns
-                    .get(name.as_str())
-                    .map(|slot| {
-                        slot.signed_value(format!(
-                            "ctx.branch_current(self.branches[{}])",
-                            slot.slot
-                        ))
-                    })),
+                "I" => Ok(self.branch_current_unknowns.get(name.as_str()).map(|slot| {
+                    slot.signed_value(format!("ctx.branch_current(self.branches[{}])", slot.slot))
+                })),
                 _ => {
                     let branch = self
                         .artifact

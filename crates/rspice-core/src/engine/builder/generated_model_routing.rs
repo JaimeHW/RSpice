@@ -155,13 +155,8 @@ pub(super) fn try_route_generated_mos_model(
         return Ok(false);
     };
     let expected = expected_terminal_count(element, target)?;
-    let nodes = if compact_syntax && expected == 3 {
-        element.nodes[..3].to_vec()
-    } else if compact_syntax {
-        return Err(SimulationError::Circuit(format!(
-            "MOSFET '{}': generated Verilog-A model '{}' requires explicit MOS terminals; compact three-terminal syntax is not accepted for generated CMC model routing",
-            element.name, target.model_name
-        )));
+    let nodes = if compact_syntax {
+        compact_generated_mos_nodes(element, target, expected)?
     } else {
         let max_implicit_ground_nodes = expected.saturating_sub(4);
         exact_or_ground_padded_nodes(element, target, max_implicit_ground_nodes)?
@@ -178,6 +173,48 @@ pub(super) fn try_route_generated_mos_model(
         temperature,
     )?;
     Ok(true)
+}
+
+fn compact_generated_mos_nodes(
+    element: &Element,
+    target: GeneratedTarget,
+    expected: usize,
+) -> Result<Vec<String>, SimulationError> {
+    if expected == 3 {
+        return compact_generated_mos_prefix_nodes(element, target, 3, expected);
+    }
+
+    if match_normalized(target.model_name, &["ANGELOV_GAN"]) && expected == 5 {
+        return compact_generated_mos_prefix_nodes(element, target, 3, expected);
+    }
+
+    if match_normalized(target.model_name, &["EPFL_HEMT_10A"]) && expected == 5 {
+        return compact_generated_mos_prefix_nodes(element, target, 4, expected);
+    }
+
+    Err(SimulationError::Circuit(format!(
+        "MOSFET '{}': generated Verilog-A model '{}' requires explicit MOS terminals; compact three-terminal syntax is not accepted for this model",
+        element.name, target.model_name
+    )))
+}
+
+fn compact_generated_mos_prefix_nodes(
+    element: &Element,
+    target: GeneratedTarget,
+    prefix_len: usize,
+    expected: usize,
+) -> Result<Vec<String>, SimulationError> {
+    if element.nodes.len() < prefix_len {
+        return Err(generated_terminal_error(
+            element,
+            target,
+            element.nodes.len(),
+            prefix_len,
+        ));
+    }
+    let mut nodes = element.nodes[..prefix_len].to_vec();
+    nodes.resize(expected, "0".to_string());
+    Ok(nodes)
 }
 
 fn generated_resistor_target(
@@ -405,8 +442,7 @@ fn generated_mos_target_by_type(model_type: &str) -> Option<GeneratedTarget> {
             match_normalized(model_type, &["ASMHEMT"]).then_some(GeneratedTarget::new("asmhemt"))
         })
         .or_else(|| {
-            match_normalized(model_type, &["ANGELOV"])
-                .then_some(GeneratedTarget::new("angelov"))
+            match_normalized(model_type, &["ANGELOV"]).then_some(GeneratedTarget::new("angelov"))
         })
         .or_else(|| {
             match_normalized(model_type, &["ANGELOV_GAN", "ANGELOVGAN"])

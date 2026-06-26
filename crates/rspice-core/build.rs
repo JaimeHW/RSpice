@@ -260,7 +260,9 @@ fn generate_devices_with_stack(
     std::thread::Builder::new()
         .name("rspice-veriloga-builtin-generator".to_string())
         .stack_size(256 * 1024 * 1024)
-        .spawn(move || generate_devices(&model_root, &generated_root).map_err(|error| error.to_string()))?
+        .spawn(move || {
+            generate_devices(&model_root, &generated_root).map_err(|error| error.to_string())
+        })?
         .join()
         .map_err(|_| "Verilog-A built-in generator thread panicked")?
         .map_err(|error| error.into())

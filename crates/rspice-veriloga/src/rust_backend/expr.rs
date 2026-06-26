@@ -1069,10 +1069,9 @@ impl ExprEmitter<'_> {
     ) -> Result<String, RustBackendError> {
         if access == "I" {
             if let Some(slot) = self.branch_current_slot_for_nodes(pos, neg)? {
-                return Ok(slot.signed_value(format!(
-                    "ctx.branch_current(self.branches[{}])",
-                    slot.slot
-                )));
+                return Ok(
+                    slot.signed_value(format!("ctx.branch_current(self.branches[{}])", slot.slot))
+                );
             }
             return Err(self.unsupported(format!("branch access '{access}' in expression")));
         }
@@ -1095,10 +1094,9 @@ impl ExprEmitter<'_> {
                 return Ok(current.value.clone());
             }
             if let Some(slot) = self.branch_current_unknowns.get(name) {
-                return Ok(slot.signed_value(format!(
-                    "ctx.branch_current(self.branches[{}])",
-                    slot.slot
-                )));
+                return Ok(
+                    slot.signed_value(format!("ctx.branch_current(self.branches[{}])", slot.slot))
+                );
             }
             if matches!(self.mode, ExprMode::Reactive) {
                 return Ok("0.0".to_string());
@@ -1733,10 +1731,7 @@ impl ExprEmitter<'_> {
         base: &str,
     ) -> Result<String, RustBackendError> {
         let condition = self.analysis_condition(args)?;
-        Ok(self.emit_value(
-            base,
-            format!("if {condition} {{ 1.0 }} else {{ 0.0 }}"),
-        ))
+        Ok(self.emit_value(base, format!("if {condition} {{ 1.0 }} else {{ 0.0 }}")))
     }
 
     fn analysis_condition(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
@@ -1760,9 +1755,8 @@ impl ExprEmitter<'_> {
         let HirExprKind::StringLiteral { value } = &expression.kind else {
             return Err(self.unsupported("analysis expects a string literal argument"));
         };
-        normalize_analysis_query(value).ok_or_else(|| {
-            self.unsupported(format!("analysis() unknown analysis name '{value}'"))
-        })
+        normalize_analysis_query(value)
+            .ok_or_else(|| self.unsupported(format!("analysis() unknown analysis name '{value}'")))
     }
 
     fn simparam_default(&self, name: ExprId) -> Result<f64, RustBackendError> {

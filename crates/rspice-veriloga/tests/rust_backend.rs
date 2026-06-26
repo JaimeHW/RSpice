@@ -4478,7 +4478,10 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
     );
     assert!(stamp.contains("#[path = \"stamp_blocks_0.rs\"]"), "{stamp}");
     assert!(stamp.contains("mod stamp_blocks_0;"), "{stamp}");
-    assert!(stamp.contains("let p = Box::as_ref(&self.params);"), "{stamp}");
+    assert!(
+        stamp.contains("let p = Box::as_ref(&self.params);"),
+        "{stamp}"
+    );
     assert!(stamp.contains("let nodes = &(*self).nodes;"), "{stamp}");
     assert!(
         stamp.contains("let branches = &(*self).branches;"),
@@ -5486,7 +5489,10 @@ fn generated_ddt_followed_by_parameter_use_rust_compiles_with_runtime_stub() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("let p = Box::as_ref(&self.params);"), "{stamp}");
+    assert!(
+        stamp.contains("let p = Box::as_ref(&self.params);"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("let p = self.params;"), "{stamp}");
     assert!(!stamp.contains("let p = self.p.as_ref();"), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -6290,7 +6296,10 @@ fn rust_backend_uses_fixed_mixed_sparse_current_stamp() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamper.stamp_current_node2_branch1("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_branch1("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("GeneratedDerivative::"),
         "mixed sparse current stamps should avoid generic derivative slice construction:\n{stamp}"
@@ -6314,7 +6323,10 @@ fn rust_backend_uses_fixed_mixed_sparse_potential_stamp() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamper.stamp_potential_node2_branch1("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_potential_node2_branch1("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("GeneratedDerivative::"),
         "mixed sparse potential stamps should avoid generic derivative slice construction:\n{stamp}"
@@ -6631,7 +6643,10 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
 
     assert!(state.contains("pub p0: f64"), "{state}");
     assert!(state.contains("pub p1: f64"), "{state}");
-    assert!(stamp.contains("let p = Box::as_ref(&self.params);"), "{stamp}");
+    assert!(
+        stamp.contains("let p = Box::as_ref(&self.params);"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("let p = self.params;"), "{stamp}");
     assert!(!stamp.contains("let p = self.p.as_ref();"), "{stamp}");
     assert!(stamp.contains("let nodes = &(*self).nodes;"), "{stamp}");
@@ -6700,10 +6715,7 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         state.contains("pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<"),
         "{state}"
     );
-    assert!(
-        state.contains("params: Parameters::new_box()"),
-        "{state}"
-    );
+    assert!(state.contains("params: Parameters::new_box()"), "{state}");
     assert!(
         state.contains("fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]>"),
         "{state}"
@@ -8389,8 +8401,8 @@ endmodule
     let generated = RustTranspiler::new(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
-        .transpile(&artifact)
-        .expect("transpile binary power operator");
+    .transpile(&artifact)
+    .expect("transpile binary power operator");
     let stamp = generated
         .files
         .iter()
