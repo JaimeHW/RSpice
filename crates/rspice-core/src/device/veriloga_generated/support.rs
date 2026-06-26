@@ -6530,6 +6530,54 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn mul_offset_lhs(left: Self, offset: f64, right: Self) -> Self {
+        let mut value = left;
+        let left_value = value.value + offset;
+        let right_value = right.value;
+        value.value = left_value * right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * right_value + left_value * right.dn[index]; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * right_value + left_value * right.db[index]; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn mul_offset_rhs(left: Self, right: Self, offset: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value;
+        let right_value = right.value + offset;
+        value.value = left_value * right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * right_value + left_value * right.dn[index]; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * right_value + left_value * right.db[index]; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn mul_offset_lhs_scaled_output(left: Self, offset: f64, right: Self, scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value + offset;
+        let right_value = right.value;
+        let scaled_left_value = left_value * scale;
+        let scaled_right_value = right_value * scale;
+        value.value = scaled_left_value * right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * scaled_right_value + scaled_left_value * right.dn[index]; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * scaled_right_value + scaled_left_value * right.db[index]; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn mul_offset_rhs_scaled_output(left: Self, right: Self, offset: f64, scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value;
+        let right_value = right.value + offset;
+        let scaled_left_value = left_value * scale;
+        let scaled_right_value = right_value * scale;
+        value.value = left_value * scaled_right_value;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * scaled_right_value + scaled_left_value * right.dn[index]; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * scaled_right_value + scaled_left_value * right.db[index]; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn mul_sub_from_scalar_lhs(scalar: f64, value: Self, right: Self) -> Self {
         let mut result = value;
         let left_value = scalar - result.value;

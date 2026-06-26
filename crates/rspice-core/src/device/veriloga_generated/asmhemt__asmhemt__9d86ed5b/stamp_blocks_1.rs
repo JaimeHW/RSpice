@@ -3805,9 +3805,9 @@ impl Instance {
 
         s.store_sub_from_scalar_ad(195, p.p222, A::mul(A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p227)), (((((-1.0)) * (p.p227))) + (p.p220))), A::voltage(ctx, nodes, Some(0), Some(2))));
 
-        s.store_ad_value(195, A::add_scaled_inputs3_offset(s.ad_value(195), (p.p4 * p.p5), s.ad_value(195), ((-0.5) * (p.p4 * p.p5)), A::sqrt(A::offset(A::mul(A::offset(s.ad_value(195), (-1e-25)), A::offset(s.ad_value(195), (-1e-25))), p.p221)), ((-(-0.5)) * (p.p4 * p.p5)), ((1e-25 + ((-0.5) * 1e-25)) * (p.p4 * p.p5))));
+        s.store_ad_value(195, A::add_scaled_inputs3_offset(s.ad_value(195), (p.p4 * p.p5), s.ad_value(195), ((-0.5) * (p.p4 * p.p5)), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(195), (-1e-25), A::offset(s.ad_value(195), (-1e-25))), p.p221)), ((-(-0.5)) * (p.p4 * p.p5)), ((1e-25 + ((-0.5) * 1e-25)) * (p.p4 * p.p5))));
 
-        let assign32150_ad_e49745: A = A::add(A::offset(A::sub_from_scalar(p.p218, A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p226)), (((-1.0)) * (p.p226)))), 1e-18), A::sqrt(A::offset(A::mul(A::offset(A::sub_from_scalar(p.p218, A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p226)), (((-1.0)) * (p.p226)))), (-1e-18)), A::offset(A::sub_from_scalar(p.p218, A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p226)), (((-1.0)) * (p.p226)))), (-1e-18))), ((0.25 * 1e-19) * 1e-19))));
+        let assign32150_ad_e49745: A = A::add(A::offset(A::sub_from_scalar(p.p218, A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p226)), (((-1.0)) * (p.p226)))), 1e-18), A::sqrt(A::offset(A::mul_offset_lhs(A::sub_from_scalar(p.p218, A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p226)), (((-1.0)) * (p.p226)))), (-1e-18), A::offset(A::sub_from_scalar(p.p218, A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p226)), (((-1.0)) * (p.p226)))), (-1e-18))), ((0.25 * 1e-19) * 1e-19))));
         s.store_scale_ad(136, assign32150_ad_e49745, 0.5);
 
         s.store_ad_value(196, A::mul_scaled_lhs(s.ad_value(136), (p.p4 * p.p5), A::voltage(ctx, nodes, Some(9), Some(2))));
@@ -4232,7 +4232,7 @@ impl Instance {
 
         s.v[81] = (p.p9 / p.p2);
 
-        s.store_offset_mul_ad(146, A::offset(s.ad_value(211), p.p27), s.ad_value(140), (1.0 + p.p26));
+        s.store_offset_ad(146, A::mul_offset_lhs(s.ad_value(211), p.p27, s.ad_value(140)), (1.0 + p.p26));
 
         s.store_scaled_mul(83, 82, 146, 8.617087e-5);
 

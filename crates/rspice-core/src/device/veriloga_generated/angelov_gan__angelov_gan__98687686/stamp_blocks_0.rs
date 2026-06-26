@@ -353,7 +353,7 @@ impl Instance {
 
         if (s.b[115] && (!s.b[114])) {
             s.store_offset_ad(28, A::mul3(s.ad_value(44), s.ad_value(84), s.ad_value(85)), p.p25);
-            s.store_offset_mul_ad(29, s.ad_value(45), A::offset(A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
+            s.store_offset_ad(29, A::mul_offset_rhs(s.ad_value(45), A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
         }
 
         if (s.b[116] && (!(s.b[114] || s.b[115]))) {
@@ -377,13 +377,13 @@ impl Instance {
         if (s.b[117] && (!((s.b[114] || s.b[115]) || s.b[116]))) {
             s.store_offset_scaled(30, 96, 1.0 / (p.p40), (-1.0));
             s.store_scalar(31, 0.5);
-            s.store_mul_ad(32, A::pow(A::offset(A::square(s.ad_value(30)), p.p41), A::sub_from_scalar((-1.0), s.ad_value(31))), A::offset(A::mul_sub_from_scalar_lhs(1.0, A::scale(s.ad_value(31), 2.0), A::square(s.ad_value(30))), p.p41));
+            s.store_ad_value(32, A::mul_offset_rhs(A::pow(A::offset(A::square(s.ad_value(30)), p.p41), A::sub_from_scalar((-1.0), s.ad_value(31))), A::mul_sub_from_scalar_lhs(1.0, A::scale(s.ad_value(31), 2.0), A::square(s.ad_value(30))), p.p41));
             s.store_offset_tanh_ad(84, A::add_scaled_inputs3(s.ad_value(55), 1.0, s.ad_value(96), p.p31, s.ad_value(5), (p.p38 * p.p31)), 1.0);
             s.store_offset_tanh_ad(85, A::scale_offset(s.ad_value(5), p.p33, p.p32), 1.0);
             s.store_offset_tanh_ad(86, A::sub_from_scalar(p.p34, A::scale(s.ad_value(5), p.p35)), (1.0 - p.p38));
             s.store_offset_tanh_ad(87, A::add_scaled_inputs3(s.ad_value(56), 1.0, s.ad_value(97), p.p37, s.ad_value(5), ((1.0 - p.p38) * p.p37)), 1.0);
             s.store_offset_ad(28, A::mul3(s.ad_value(44), A::add_scaled_inputs(s.ad_value(84), 1.0, s.ad_value(32), p.p39), s.ad_value(85)), p.p25);
-            s.store_offset_mul_ad(29, s.ad_value(45), A::offset(A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
+            s.store_offset_ad(29, A::mul_offset_rhs(s.ad_value(45), A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
         }
 
         if (s.b[118] && (!(((s.b[114] || s.b[115]) || s.b[116]) || s.b[117]))) {
@@ -824,7 +824,7 @@ impl Instance {
 
         if (s.b[115] && (!s.b[114])) {
             s.store_offset_ad(28, A::mul3(s.ad_value(44), s.ad_value(84), s.ad_value(85)), p.p25);
-            s.store_offset_mul_ad(29, s.ad_value(45), A::offset(A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
+            s.store_offset_ad(29, A::mul_offset_rhs(s.ad_value(45), A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
         }
 
         if (s.b[116] && (!(s.b[114] || s.b[115]))) {
@@ -848,13 +848,13 @@ impl Instance {
         if (s.b[117] && (!((s.b[114] || s.b[115]) || s.b[116]))) {
             s.store_offset_scaled(30, 96, 1.0 / (p.p40), (-1.0));
             s.store_scalar(31, 0.5);
-            s.store_mul_ad(32, A::pow(A::offset(A::square(s.ad_value(30)), p.p41), A::sub_from_scalar((-1.0), s.ad_value(31))), A::offset(A::mul_sub_from_scalar_lhs(1.0, A::scale(s.ad_value(31), 2.0), A::square(s.ad_value(30))), p.p41));
+            s.store_ad_value(32, A::mul_offset_rhs(A::pow(A::offset(A::square(s.ad_value(30)), p.p41), A::sub_from_scalar((-1.0), s.ad_value(31))), A::mul_sub_from_scalar_lhs(1.0, A::scale(s.ad_value(31), 2.0), A::square(s.ad_value(30))), p.p41));
             s.store_offset_tanh_ad(84, A::add_scaled_inputs3(s.ad_value(55), 1.0, s.ad_value(96), p.p31, s.ad_value(5), (p.p38 * p.p31)), 1.0);
             s.store_offset_tanh_ad(85, A::scale_offset(s.ad_value(5), p.p33, p.p32), 1.0);
             s.store_offset_tanh_ad(86, A::sub_from_scalar(p.p34, A::scale(s.ad_value(5), p.p35)), (1.0 - p.p38));
             s.store_offset_tanh_ad(87, A::add_scaled_inputs3(s.ad_value(56), 1.0, s.ad_value(97), p.p37, s.ad_value(5), ((1.0 - p.p38) * p.p37)), 1.0);
             s.store_offset_ad(28, A::mul3(s.ad_value(44), A::add_scaled_inputs(s.ad_value(84), 1.0, s.ad_value(32), p.p39), s.ad_value(85)), p.p25);
-            s.store_offset_mul_ad(29, s.ad_value(45), A::offset(A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
+            s.store_offset_ad(29, A::mul_offset_rhs(s.ad_value(45), A::mul(s.ad_value(86), s.ad_value(87)), (2.0 * p.p38)), p.p27);
         }
 
         if (s.b[118] && (!(((s.b[114] || s.b[115]) || s.b[116]) || s.b[117]))) {
