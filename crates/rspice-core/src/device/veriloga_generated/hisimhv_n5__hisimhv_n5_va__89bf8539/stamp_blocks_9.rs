@@ -3691,7 +3691,7 @@ impl Instance {
 
         if ((((!s.b[1441]) && s.b[2428]) && s.b[2459]) && s.b[2485]) {
             s.copy_ad(335, 247);
-            s.store_ad_value(247, A::add_scaled_sub_value_product(1.0, s.ad_value(207), 0.5, s.ad_value(207), s.ad_value(247), 1.0));
+            s.store_ad_value(247, A::add_scaled_product(A::scale_offset(s.ad_value(207), (-0.5), 0.5), 1.0, s.ad_value(207), s.ad_value(247), 1.0));
             s.copy_ad(335, 169);
             s.store_mul(169, 207, 169);
         }

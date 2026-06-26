@@ -5627,11 +5627,11 @@ impl Instance {
         }
 
         if ((((s.b[2665] && (!s.b[2666])) && (!s.b[2690])) && (!s.b[2700])) && (!s.b[2701])) {
-            s.store_powf_ad(2636, A::scale(A::sub_from_scalar(p.p828, s.ad_value(2634)), s.v[429]), p.p831);
+            s.store_powf_ad(2636, A::scale_offset(s.ad_value(2634), (-s.v[429]), ((p.p828) * (s.v[429]))), p.p831);
         }
 
         if (((s.b[2665] && (!s.b[2666])) && (!s.b[2690])) && (!s.b[2700])) {
-            s.store_ad_value(2661, A::div_scaled_inputs(A::sub_from_scalar(p.p828, s.ad_value(2634)), (s.v[426] * s.v[411]), s.ad_value(2636), 1.0));
+            s.store_scaled_div_ad_lhs(2661, A::scale_offset(s.ad_value(2634), (-s.v[426]), ((p.p828) * (s.v[426]))), 2636, s.v[411]);
         }
 
         s.b[2702] = (((((-s.v[441]) / s.v[2661])) as f64).abs() < 230.25850929940458);

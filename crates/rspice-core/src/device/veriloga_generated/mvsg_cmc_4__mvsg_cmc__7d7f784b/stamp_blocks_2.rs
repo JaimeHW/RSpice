@@ -1561,7 +1561,7 @@ impl Instance {
         s.v[2540] = if s.b[2540] { 1.0 } else { 0.0 };
 
         if (s.b[2418] && s.b[2540]) {
-            s.store_scaled_sub_from_scalar_ad(242, 1.0, A::sqrt(A::sub_from_scalar(1.0, A::scale(s.ad_value(234), 1.0 / (p.p306)))), ((((((p.p6 * 2.0) * p.p307) * p.p0) * (1.0 - p.p311)) * p.p2) * p.p306));
+            s.store_offset_scaled_ad(242, A::sqrt(A::sub_from_scalar(1.0, A::scale(s.ad_value(234), 1.0 / (p.p306)))), (-((((((p.p6 * 2.0) * p.p307) * p.p0) * (1.0 - p.p311)) * p.p2) * p.p306)), ((((((p.p6 * 2.0) * p.p307) * p.p0) * (1.0 - p.p311)) * p.p2) * p.p306));
         }
 
         if (s.b[2418] && (!s.b[2540])) {
