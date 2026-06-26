@@ -2826,6 +2826,35 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_add_scaled_products(&mut self, index: usize, left_product_left: AdValue, left_product_right: AdValue, left_scale: f64, right_product_left: AdValue, right_product_right: AdValue, right_scale: f64) {",
+        "        let left_product_left_value = left_product_left.value;",
+        "        let left_product_right_value = left_product_right.value;",
+        "        let right_product_left_value = right_product_left.value;",
+        "        let right_product_right_value = right_product_right.value;",
+        "        let left_product_term = left_product_left_value * left_product_right_value * left_scale;",
+        "        let right_product_term = right_product_left_value * right_product_right_value * right_scale;",
+        "        self.values[index] = left_product_term + right_product_term;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_product_left.node_derivatives[axis] * left_product_right_value + left_product_left_value * left_product_right.node_derivatives[axis]) * left_scale + (right_product_left.node_derivatives[axis] * right_product_right_value + right_product_left_value * right_product_right.node_derivatives[axis]) * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_product_left.branch_derivatives[axis] * left_product_right_value + left_product_left_value * left_product_right.branch_derivatives[axis]) * left_scale + (right_product_left.branch_derivatives[axis] * right_product_right_value + right_product_left_value * right_product_right.branch_derivatives[axis]) * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_products3(&mut self, index: usize, first_product_left: AdValue, first_product_right: AdValue, first_scale: f64, second_product_left: AdValue, second_product_right: AdValue, second_scale: f64, third_product_left: AdValue, third_product_right: AdValue, third_scale: f64) {",
+        "        let first_product_left_value = first_product_left.value;",
+        "        let first_product_right_value = first_product_right.value;",
+        "        let second_product_left_value = second_product_left.value;",
+        "        let second_product_right_value = second_product_right.value;",
+        "        let third_product_left_value = third_product_left.value;",
+        "        let third_product_right_value = third_product_right.value;",
+        "        let first_product_term = first_product_left_value * first_product_right_value * first_scale;",
+        "        let second_product_term = second_product_left_value * second_product_right_value * second_scale;",
+        "        let third_product_term = third_product_left_value * third_product_right_value * third_scale;",
+        "        self.values[index] = first_product_term + second_product_term + third_product_term;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first_product_left.node_derivatives[axis] * first_product_right_value + first_product_left_value * first_product_right.node_derivatives[axis]) * first_scale + (second_product_left.node_derivatives[axis] * second_product_right_value + second_product_left_value * second_product_right.node_derivatives[axis]) * second_scale + (third_product_left.node_derivatives[axis] * third_product_right_value + third_product_left_value * third_product_right.node_derivatives[axis]) * third_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first_product_left.branch_derivatives[axis] * first_product_right_value + first_product_left_value * first_product_right.branch_derivatives[axis]) * first_scale + (second_product_left.branch_derivatives[axis] * second_product_right_value + second_product_left_value * second_product_right.branch_derivatives[axis]) * second_scale + (third_product_left.branch_derivatives[axis] * third_product_right_value + third_product_left_value * third_product_right.branch_derivatives[axis]) * third_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_div_scaled_product(&mut self, index: usize, product_left: AdValue, product_right: AdValue, product_scale: f64, denominator: AdValue, denominator_scale: f64) {",
         "        let product_left_value = product_left.value;",
         "        let product_right_value = product_right.value;",
@@ -9891,6 +9920,24 @@ fn compact_common_fused_expression_store_helper_call(
         return Some(format!(
             "scratch.store_add_scaled_product({target_index}, {}, {}, {}, {}, {});",
             args[0], args[1], args[2], args[3], args[4]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_products")
+        && args.len() == 6
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_products({target_index}, {}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4], args[5]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_products3")
+        && args.len() == 9
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_products3({target_index}, {}, {}, {}, {}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]
         ));
     }
 

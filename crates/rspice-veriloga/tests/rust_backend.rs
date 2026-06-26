@@ -3144,6 +3144,46 @@ fn rust_backend_directly_stores_affine_sum_expression_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_product_sum_expression_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_product_sum_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression direct product-sum stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_products(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_add_scaled_products3(&mut self, index: usize, first_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, second_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, third_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_add_scaled_products("), "{stamp}");
+    assert!(stamp.contains("s.store_add_scaled_products3("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct product-sum root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
@@ -11646,6 +11686,28 @@ module compact_expression_direct_store_affine_helpers(p, n);
         affine4 = ((a + q) + r) - t;
         affine4_offset = ((a + q) + r + t) + offset;
         I(p, n) <+ affine3 + affine3_offset + affine4 + affine4_offset;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_product_sum_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_product_sum_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real q;
+    real r;
+    real product2;
+    real product3;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        product2 = (a * q) - (r * q);
+        product3 = ((a * q) + (r * q)) - (a * r);
+        I(p, n) <+ product2 + product3;
     end
 endmodule
 "#
