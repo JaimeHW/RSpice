@@ -6109,6 +6109,21 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let left_derivative_scale = left_scale * reciprocal;",
+        "        let right_derivative_scale = -quotient * reciprocal * right_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * left_derivative_scale + right.branch_derivatives[index] * right_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn rem(left: Self, right: Self) -> Self {",
         "        let quotient = (left.value / right.value).trunc();",
         "        let mut value = left;",
@@ -10820,7 +10835,26 @@ fn compact_scaled_binary_operand_store_helper_call(
         ));
     }
 
+    if let Some((left, left_scale, right, right_scale)) =
+        compact_div_scaled_inputs_scratch_args(value)
+    {
+        let scale = compact_scale_ratio(&left_scale, &right_scale);
+        return Some(format!(
+            "scratch.store_scaled_div({target_index}, {left}, {right}, {scale});"
+        ));
+    }
+
     None
+}
+
+fn compact_div_scaled_inputs_scratch_args(value: &str) -> Option<(usize, String, usize, String)> {
+    let args = compact_ad_call_args(value, "div_scaled_inputs")?;
+    if args.len() != 4 {
+        return None;
+    }
+    let left = compact_scratch_ad_value_index(args[0])?;
+    let right = compact_scratch_ad_value_index(args[2])?;
+    Some((left, args[1].to_string(), right, args[3].to_string()))
 }
 
 fn compact_scaled_or_direct_scratch_arg(value: &str) -> Option<(usize, String, bool)> {
@@ -11364,6 +11398,16 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
             ));
         }
         return None;
+    }
+
+    if let Some((left, left_scale, right, right_scale)) =
+        compact_div_scaled_inputs_scratch_args(inner)
+    {
+        let input_scale = compact_scale_ratio(&left_scale, &right_scale);
+        let combined_scale = compact_scale_product(&input_scale, scale);
+        return Some(format!(
+            "scratch.store_scaled_div({target_index}, {left}, {right}, {combined_scale});"
+        ));
     }
 
     if let Some(inner_args) = compact_ad_call_args(inner, "neg") {
@@ -12253,6 +12297,19 @@ fn compact_multiply_scaled_ad_expressions(left: &str, right: &str) -> Option<Str
     }
 }
 
+fn compact_div_scaled_ad_expressions(left: &str, right: &str) -> Option<String> {
+    let left_scaled = compact_scaled_ad_expression(left);
+    let right_scaled = compact_scaled_ad_expression(right);
+    if left_scaled.is_none() && right_scaled.is_none() {
+        return None;
+    }
+    let (left, left_scale) = left_scaled.unwrap_or((left, "1.0".to_string()));
+    let (right, right_scale) = right_scaled.unwrap_or((right, "1.0".to_string()));
+    Some(format!(
+        "AdValue::div_scaled_inputs({left}, {left_scale}, {right}, {right_scale})"
+    ))
+}
+
 fn compact_add_sub_product_ad_expressions(helper: &str, left: &str, right: &str) -> Option<String> {
     let subtract = helper == "sub";
     let left_product = compact_product2_ad_expression(left);
@@ -12852,7 +12909,8 @@ impl CompactAdEmitter<'_> {
                             } else {
                                 let left = self.lower(*left)?;
                                 let right = self.lower(*right)?;
-                                format!("AdValue::div({left}, {right})")
+                                compact_div_scaled_ad_expressions(&left, &right)
+                                    .unwrap_or_else(|| format!("AdValue::div({left}, {right})"))
                             }
                         }
                         "Mod" => {

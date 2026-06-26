@@ -2256,6 +2256,37 @@ fn rust_backend_fuses_expression_affine3_add_sub_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_scaled_division_operands() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_scaled_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression scaled division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::div_scaled_inputs("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::div(s.ad_value(0), A::scale("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_result_scaled_mixed_mul_div_store_source())
@@ -9845,6 +9876,28 @@ module compact_expression_affine3_add_sub(p, n);
           + exp((a - q) + r)
           + ln(((gain * a) + (offset * q)) - r)
           + tanh((a + (gain * q)) - (offset * r));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_scaled_division_source() -> &'static str {
+    r#"
+module compact_expression_scaled_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = exp((a * gain) / q)
+          + sqrt(a / (q * gain))
+          + ln((a * gain) / (q * offset));
         I(p, n) <+ b;
     end
 endmodule
