@@ -2870,6 +2870,44 @@ fn rust_backend_fuses_expression_scaled_division_operands() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_affine_division_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_affine_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression affine division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_inputs3(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn div_scaled_inputs4(first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, fourth: Self, fourth_scale: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::div_scaled_inputs3("), "{stamp}");
+    assert!(stamp.contains("A::div_scaled_inputs4("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::add_scaled_inputs3("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::add_scaled_inputs4("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_product_division_source())
@@ -2907,6 +2945,69 @@ fn rust_backend_fuses_expression_product_division_chains() {
     assert!(!stamp.contains("A::div(A::mul3_scaled_output("), "{stamp}");
     assert!(!stamp.contains("A::div(A::mul_scaled_"), "{stamp}");
     assert!(!stamp.contains("A::div(A::square("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_add_product_division_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_add_product_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression add product division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_add_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::div_scaled_add_product("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::add_scaled_product("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_affine_product_division_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_affine_product_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression affine product division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::div_scaled_inputs_product("), "{stamp}");
+    assert!(
+        !stamp.contains("A::div(A::add_scaled_inputs_product("),
+        "{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -11093,6 +11194,35 @@ endmodule
 "#
 }
 
+fn compact_expression_affine_division_source() -> &'static str {
+    r#"
+module compact_expression_affine_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real c;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) - V(n);
+        c = V(p) + gain;
+        b = ((a + q + r) / c)
+          + (((gain * a) + (offset * q) - r) / (c + offset))
+          + ((((a + q) + r) - t) / (q + gain))
+          + (((gain * a) - q + r - t) / (r + offset));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
 fn compact_expression_product_division_source() -> &'static str {
     r#"
 module compact_expression_product_division(p, n);
@@ -11114,6 +11244,59 @@ module compact_expression_product_division(p, n);
           + sqrt(((a * gain) * q) / r)
           + exp(((a * q) * c) / r)
           + ln((a * a) / (r * gain));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_add_product_division_source() -> &'static str {
+    r#"
+module compact_expression_add_product_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real c;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n) + offset;
+        c = V(p) + gain;
+        b = ((a + (q * r)) / c)
+          + (((a * gain) + (q * r)) / (c + offset))
+          + (((a - offset) + (q * r)) / (r * gain));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_affine_product_division_source() -> &'static str {
+    r#"
+module compact_expression_affine_product_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real left_scale = 2.0;
+    parameter real right_scale = 3.0;
+    parameter real product_scale = 4.0;
+    parameter real offset = 5.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) - V(n);
+        b = (((a * left_scale) + (q * right_scale)) + ((q * r) * product_scale)) / (t + offset)
+          + (((a - q) + (r * t)) / (q + offset));
         I(p, n) <+ b;
     end
 endmodule
