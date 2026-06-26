@@ -3321,6 +3321,127 @@ fn rust_backend_directly_stores_product_division_expression_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_scaled_sub_from_scalar_multiply_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_sub_scaled_multiply_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact direct store sub-from-scalar multiply helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_mul_sub_from_scalar_scaled_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value: usize, value_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_sub_from_scalar_scaled_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct scaled sub-from-scalar multiply root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::mul_sub_from_scalar_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::scale("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_offset_product_add_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_offset_product_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact direct store offset-product helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_offset_product_rhs(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, product_right: usize, product_right_offset: f64, product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_offset_product_rhs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct offset-product root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_offset_product_rhs("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_value_products_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_value_products_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact direct store value-products helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_value_products(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, first_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_scale: f64, second_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, second_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, second_product_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_value_products("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct value-products root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_value_products("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
@@ -11925,6 +12046,73 @@ module compact_expression_direct_store_product_division_helpers(p, n);
         prod2 = (a * q) / den;
         prod3 = (a * q * r) / den;
         I(p, n) <+ prod2 + prod3;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_sub_scaled_multiply_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_sub_scaled_multiply_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    parameter real gain = 2.0;
+    parameter real output_gain = 0.5;
+    real a;
+    real q;
+    real shaped;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        shaped = a * (limit - (q * gain)) * output_gain;
+        I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_offset_product_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_offset_product_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real value_scale = 2.0;
+    parameter real product_scale = 3.0;
+    parameter real offset = 4.0;
+    real a;
+    real q;
+    real r;
+    real shaped;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        shaped = (a * value_scale) + ((q * (r + offset)) * product_scale);
+        I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_value_products_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_value_products_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real value_scale = 2.0;
+    parameter real first_scale = 3.0;
+    parameter real second_scale = 4.0;
+    real a;
+    real q;
+    real r;
+    real shaped;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        shaped = (a * value_scale) + ((a * q) * first_scale) + ((q * r) * second_scale);
+        I(p, n) <+ shaped;
     end
 endmodule
 "#
