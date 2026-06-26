@@ -2348,7 +2348,7 @@ impl Instance {
         s.v[1445] = if s.b[1445] { 1.0 } else { 0.0 };
 
         if (((!s.b[1402]) && s.b[1420]) && s.b[1445]) {
-            s.store_ad_value(846, A::add_scaled_inputs3(A::offset(s.ad_value(829), p.p1033), 4.0, s.ad_value(1126), ((-1.0) * 4.0), s.ad_value(942), (-4.0)));
+            s.store_ad_value(846, A::add_scaled_inputs3_offset(s.ad_value(829), 4.0, s.ad_value(1126), ((-1.0) * 4.0), s.ad_value(942), (-4.0), (p.p1033 * 4.0)));
             s.store_sqrt_square_offset(845, 846, 0.0001);
             s.store_scaled_add(847, 846, 845, 0.5);
             s.store_div_ad_lhs(843, A::add(s.ad_value(1118), s.ad_value(847)), 998);

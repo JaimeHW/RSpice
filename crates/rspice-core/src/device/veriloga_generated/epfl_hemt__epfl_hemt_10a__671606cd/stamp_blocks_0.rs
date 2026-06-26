@@ -122,7 +122,7 @@ impl Instance {
         if (!s.b[145]) {
             s.store_limited_exp_neg_input(4, 3);
             s.store_scale(2, 71, 0.5);
-            s.store_sub_ad_lhs(3, A::sqrt(A::add_scaled_inputs3(A::offset(s.ad_value(14), (-1.0)), 1.0, s.ad_value(4), 1.0, A::square(s.ad_value(2)), 1.0)), 2);
+            s.store_sub_ad_lhs(3, A::sqrt(A::add_scaled_inputs3_offset(s.ad_value(14), 1.0, s.ad_value(4), 1.0, A::square(s.ad_value(2)), 1.0, (-1.0))), 2);
             s.store_sub_ad_lhs(33, A::offset(A::square(s.ad_value(3)), 1.0), 4);
         }
 
@@ -253,7 +253,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e1342: A = A::div(A::add_scaled_product(A::add(assign780_ad_e1094, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e1178, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e1260)), 1.0, s.ad_value(44), A::powf(assign780_ad_e1334, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e1342: A = A::div(A::add_scaled_product(A::add(assign780_ad_e1094, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e1178, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e1260), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e1334, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e1342
                                                 } else {
                                                     let assign780_ad_e1484: A = {
@@ -265,13 +265,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e1448: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e1448: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e1482: A = A::div(A::add_scaled_product(assign780_ad_e1384, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -395,7 +395,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e2136: A = A::div(A::add_scaled_product(A::add(assign780_ad_e1888, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e1972, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e2054)), 1.0, s.ad_value(44), A::powf(assign780_ad_e2128, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e2136: A = A::div(A::add_scaled_product(A::add(assign780_ad_e1888, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e1972, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e2054), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e2128, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e2136
                                                 } else {
                                                     let assign780_ad_e2278: A = {
@@ -407,13 +407,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e2242: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e2242: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e2276: A = A::div(A::add_scaled_product(assign780_ad_e2178, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -497,7 +497,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e2643: A = A::div(A::add_scaled_product(A::add(assign780_ad_e2395, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e2479, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e2561)), 1.0, s.ad_value(44), A::powf(assign780_ad_e2635, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e2643: A = A::div(A::add_scaled_product(A::add(assign780_ad_e2395, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e2479, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e2561), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e2635, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e2643
                                                 } else {
                                                     let assign780_ad_e2785: A = {
@@ -509,13 +509,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e2749: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e2749: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e2783: A = A::div(A::add_scaled_product(assign780_ad_e2685, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -591,7 +591,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e3138: A = A::div(A::add_scaled_product(A::add(assign780_ad_e2890, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e2974, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e3056)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3130, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e3138: A = A::div(A::add_scaled_product(A::add(assign780_ad_e2890, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e2974, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e3056), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e3130, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e3138
                                                 } else {
                                                     let assign780_ad_e3280: A = {
@@ -603,13 +603,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e3244: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e3244: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e3278: A = A::div(A::add_scaled_product(assign780_ad_e3180, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -685,7 +685,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e3631: A = A::div(A::add_scaled_product(A::add(assign780_ad_e3383, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3467, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e3549)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3623, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e3631: A = A::div(A::add_scaled_product(A::add(assign780_ad_e3383, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3467, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e3549), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e3623, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e3631
                                                 } else {
                                                     let assign780_ad_e3773: A = {
@@ -697,13 +697,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e3737: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e3737: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e3771: A = A::div(A::add_scaled_product(assign780_ad_e3673, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -779,7 +779,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e4116: A = A::div(A::add_scaled_product(A::add(assign780_ad_e3868, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3952, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e4034)), 1.0, s.ad_value(44), A::powf(assign780_ad_e4108, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e4116: A = A::div(A::add_scaled_product(A::add(assign780_ad_e3868, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3952, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e4034), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e4108, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e4116
                                                 } else {
                                                     let assign780_ad_e4258: A = {
@@ -791,13 +791,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e4222: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e4222: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e4256: A = A::div(A::add_scaled_product(assign780_ad_e4158, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -819,7 +819,7 @@ impl Instance {
                                                     assign780_ad_e4258
                                                 }
                                             };
-                                            let assign780_ad_e4267: A = A::div(A::add_scaled_product(A::add(assign780_ad_e2786, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3281, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e3774)), 1.0, s.ad_value(44), A::powf(assign780_ad_e4259, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e4267: A = A::div(A::add_scaled_product(A::add(assign780_ad_e2786, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e3281, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e3774), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e4259, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e4267
                                         } else {
                                             let assign780_ad_e4893: A = {
@@ -833,13 +833,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e4382: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e4382: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e4416: A = A::div(A::add_scaled_product(assign780_ad_e4318, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -867,13 +867,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e4541: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e4541: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e4575: A = A::div(A::add_scaled_product(assign780_ad_e4477, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -901,13 +901,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e4698: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e4698: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e4732: A = A::div(A::add_scaled_product(assign780_ad_e4634, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -935,13 +935,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e4847: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e4847: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e4881: A = A::div(A::add_scaled_product(assign780_ad_e4783, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -960,7 +960,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign780_ad_e4891: A = A::div(A::add_scaled_product(A::add(assign780_ad_e4418, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e4577, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e4734)), 1.0, s.ad_value(44), A::powf(assign780_ad_e4883, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e4891: A = A::div(A::add_scaled_product(A::add(assign780_ad_e4418, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e4577, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e4734), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e4883, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e4891
                                                 } else {
                                                     A::constant(0.0)
@@ -1073,7 +1073,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e5584: A = A::div(A::add_scaled_product(A::add(assign780_ad_e5336, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e5420, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e5502)), 1.0, s.ad_value(44), A::powf(assign780_ad_e5576, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e5584: A = A::div(A::add_scaled_product(A::add(assign780_ad_e5336, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e5420, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e5502), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e5576, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e5584
                                                 } else {
                                                     let assign780_ad_e5726: A = {
@@ -1085,13 +1085,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e5690: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e5690: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e5724: A = A::div(A::add_scaled_product(assign780_ad_e5626, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1215,7 +1215,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e6378: A = A::div(A::add_scaled_product(A::add(assign780_ad_e6130, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e6214, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e6296)), 1.0, s.ad_value(44), A::powf(assign780_ad_e6370, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e6378: A = A::div(A::add_scaled_product(A::add(assign780_ad_e6130, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e6214, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e6296), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e6370, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e6378
                                                 } else {
                                                     let assign780_ad_e6520: A = {
@@ -1227,13 +1227,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e6484: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e6484: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e6518: A = A::div(A::add_scaled_product(assign780_ad_e6420, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1317,7 +1317,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e6885: A = A::div(A::add_scaled_product(A::add(assign780_ad_e6637, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e6721, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e6803)), 1.0, s.ad_value(44), A::powf(assign780_ad_e6877, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e6885: A = A::div(A::add_scaled_product(A::add(assign780_ad_e6637, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e6721, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e6803), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e6877, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e6885
                                                 } else {
                                                     let assign780_ad_e7027: A = {
@@ -1329,13 +1329,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e6991: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e6991: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e7025: A = A::div(A::add_scaled_product(assign780_ad_e6927, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1411,7 +1411,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e7380: A = A::div(A::add_scaled_product(A::add(assign780_ad_e7132, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7216, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e7298)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7372, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e7380: A = A::div(A::add_scaled_product(A::add(assign780_ad_e7132, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7216, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e7298), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e7372, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e7380
                                                 } else {
                                                     let assign780_ad_e7522: A = {
@@ -1423,13 +1423,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e7486: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e7486: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e7520: A = A::div(A::add_scaled_product(assign780_ad_e7422, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1505,7 +1505,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e7873: A = A::div(A::add_scaled_product(A::add(assign780_ad_e7625, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7709, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e7791)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7865, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e7873: A = A::div(A::add_scaled_product(A::add(assign780_ad_e7625, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7709, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e7791), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e7865, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e7873
                                                 } else {
                                                     let assign780_ad_e8015: A = {
@@ -1517,13 +1517,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e7979: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e7979: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e8013: A = A::div(A::add_scaled_product(assign780_ad_e7915, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1599,7 +1599,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e8358: A = A::div(A::add_scaled_product(A::add(assign780_ad_e8110, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e8194, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e8276)), 1.0, s.ad_value(44), A::powf(assign780_ad_e8350, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e8358: A = A::div(A::add_scaled_product(A::add(assign780_ad_e8110, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e8194, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e8276), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e8350, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e8358
                                                 } else {
                                                     let assign780_ad_e8500: A = {
@@ -1611,13 +1611,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e8464: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e8464: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e8498: A = A::div(A::add_scaled_product(assign780_ad_e8400, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1639,7 +1639,7 @@ impl Instance {
                                                     assign780_ad_e8500
                                                 }
                                             };
-                                            let assign780_ad_e8509: A = A::div(A::add_scaled_product(A::add(assign780_ad_e7028, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7523, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e8016)), 1.0, s.ad_value(44), A::powf(assign780_ad_e8501, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e8509: A = A::div(A::add_scaled_product(A::add(assign780_ad_e7028, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e7523, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e8016), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e8501, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e8509
                                         } else {
                                             let assign780_ad_e9135: A = {
@@ -1653,13 +1653,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e8624: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e8624: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e8658: A = A::div(A::add_scaled_product(assign780_ad_e8560, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1687,13 +1687,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e8783: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e8783: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e8817: A = A::div(A::add_scaled_product(assign780_ad_e8719, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1721,13 +1721,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e8940: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e8940: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e8974: A = A::div(A::add_scaled_product(assign780_ad_e8876, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1755,13 +1755,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e9089: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e9089: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e9123: A = A::div(A::add_scaled_product(assign780_ad_e9025, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -1780,7 +1780,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign780_ad_e9133: A = A::div(A::add_scaled_product(A::add(assign780_ad_e8660, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e8819, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e8976)), 1.0, s.ad_value(44), A::powf(assign780_ad_e9125, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e9133: A = A::div(A::add_scaled_product(A::add(assign780_ad_e8660, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e8819, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e8976), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e9125, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e9133
                                                 } else {
                                                     A::constant(0.0)
@@ -1901,7 +1901,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e9880: A = A::div(A::add_scaled_product(A::add(assign780_ad_e9632, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e9716, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e9798)), 1.0, s.ad_value(44), A::powf(assign780_ad_e9872, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e9880: A = A::div(A::add_scaled_product(A::add(assign780_ad_e9632, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e9716, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e9798), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e9872, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e9880
                                                 } else {
                                                     let assign780_ad_e10022: A = {
@@ -1913,13 +1913,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e9986: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e9986: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e10020: A = A::div(A::add_scaled_product(assign780_ad_e9922, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2043,7 +2043,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e10674: A = A::div(A::add_scaled_product(A::add(assign780_ad_e10426, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e10510, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e10592)), 1.0, s.ad_value(44), A::powf(assign780_ad_e10666, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e10674: A = A::div(A::add_scaled_product(A::add(assign780_ad_e10426, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e10510, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e10592), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e10666, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e10674
                                                 } else {
                                                     let assign780_ad_e10816: A = {
@@ -2055,13 +2055,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e10780: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e10780: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e10814: A = A::div(A::add_scaled_product(assign780_ad_e10716, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2145,7 +2145,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e11181: A = A::div(A::add_scaled_product(A::add(assign780_ad_e10933, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11017, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e11099)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11173, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e11181: A = A::div(A::add_scaled_product(A::add(assign780_ad_e10933, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11017, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e11099), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e11173, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e11181
                                                 } else {
                                                     let assign780_ad_e11323: A = {
@@ -2157,13 +2157,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e11287: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e11287: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e11321: A = A::div(A::add_scaled_product(assign780_ad_e11223, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2239,7 +2239,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e11676: A = A::div(A::add_scaled_product(A::add(assign780_ad_e11428, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11512, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e11594)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11668, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e11676: A = A::div(A::add_scaled_product(A::add(assign780_ad_e11428, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11512, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e11594), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e11668, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e11676
                                                 } else {
                                                     let assign780_ad_e11818: A = {
@@ -2251,13 +2251,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e11782: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e11782: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e11816: A = A::div(A::add_scaled_product(assign780_ad_e11718, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2333,7 +2333,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e12169: A = A::div(A::add_scaled_product(A::add(assign780_ad_e11921, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e12005, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e12087)), 1.0, s.ad_value(44), A::powf(assign780_ad_e12161, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e12169: A = A::div(A::add_scaled_product(A::add(assign780_ad_e11921, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e12005, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e12087), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e12161, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e12169
                                                 } else {
                                                     let assign780_ad_e12311: A = {
@@ -2345,13 +2345,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e12275: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e12275: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e12309: A = A::div(A::add_scaled_product(assign780_ad_e12211, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2427,7 +2427,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e12654: A = A::div(A::add_scaled_product(A::add(assign780_ad_e12406, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e12490, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e12572)), 1.0, s.ad_value(44), A::powf(assign780_ad_e12646, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e12654: A = A::div(A::add_scaled_product(A::add(assign780_ad_e12406, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e12490, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e12572), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e12646, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e12654
                                                 } else {
                                                     let assign780_ad_e12796: A = {
@@ -2439,13 +2439,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e12760: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e12760: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e12794: A = A::div(A::add_scaled_product(assign780_ad_e12696, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2467,7 +2467,7 @@ impl Instance {
                                                     assign780_ad_e12796
                                                 }
                                             };
-                                            let assign780_ad_e12805: A = A::div(A::add_scaled_product(A::add(assign780_ad_e11324, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11819, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e12312)), 1.0, s.ad_value(44), A::powf(assign780_ad_e12797, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e12805: A = A::div(A::add_scaled_product(A::add(assign780_ad_e11324, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e11819, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e12312), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e12797, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e12805
                                         } else {
                                             let assign780_ad_e13431: A = {
@@ -2481,13 +2481,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e12920: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e12920: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e12954: A = A::div(A::add_scaled_product(assign780_ad_e12856, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2515,13 +2515,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e13079: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e13079: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e13113: A = A::div(A::add_scaled_product(assign780_ad_e13015, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2549,13 +2549,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e13236: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e13236: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e13270: A = A::div(A::add_scaled_product(assign780_ad_e13172, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2583,13 +2583,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e13385: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e13385: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e13419: A = A::div(A::add_scaled_product(assign780_ad_e13321, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2608,7 +2608,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign780_ad_e13429: A = A::div(A::add_scaled_product(A::add(assign780_ad_e12956, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e13115, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e13272)), 1.0, s.ad_value(44), A::powf(assign780_ad_e13421, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e13429: A = A::div(A::add_scaled_product(A::add(assign780_ad_e12956, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e13115, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e13272), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e13421, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e13429
                                                 } else {
                                                     A::constant(0.0)
@@ -2721,7 +2721,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e14122: A = A::div(A::add_scaled_product(A::add(assign780_ad_e13874, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e13958, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e14040)), 1.0, s.ad_value(44), A::powf(assign780_ad_e14114, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e14122: A = A::div(A::add_scaled_product(A::add(assign780_ad_e13874, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e13958, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e14040), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e14114, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e14122
                                                 } else {
                                                     let assign780_ad_e14264: A = {
@@ -2733,13 +2733,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e14228: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e14228: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e14262: A = A::div(A::add_scaled_product(assign780_ad_e14164, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2863,7 +2863,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e14916: A = A::div(A::add_scaled_product(A::add(assign780_ad_e14668, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e14752, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e14834)), 1.0, s.ad_value(44), A::powf(assign780_ad_e14908, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e14916: A = A::div(A::add_scaled_product(A::add(assign780_ad_e14668, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e14752, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e14834), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e14908, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e14916
                                                 } else {
                                                     let assign780_ad_e15058: A = {
@@ -2875,13 +2875,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e15022: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e15022: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e15056: A = A::div(A::add_scaled_product(assign780_ad_e14958, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -2965,7 +2965,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e15423: A = A::div(A::add_scaled_product(A::add(assign780_ad_e15175, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e15259, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e15341)), 1.0, s.ad_value(44), A::powf(assign780_ad_e15415, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e15423: A = A::div(A::add_scaled_product(A::add(assign780_ad_e15175, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e15259, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e15341), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e15415, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e15423
                                                 } else {
                                                     let assign780_ad_e15565: A = {
@@ -2977,13 +2977,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e15529: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e15529: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e15563: A = A::div(A::add_scaled_product(assign780_ad_e15465, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3059,7 +3059,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e15918: A = A::div(A::add_scaled_product(A::add(assign780_ad_e15670, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e15754, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e15836)), 1.0, s.ad_value(44), A::powf(assign780_ad_e15910, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e15918: A = A::div(A::add_scaled_product(A::add(assign780_ad_e15670, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e15754, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e15836), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e15910, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e15918
                                                 } else {
                                                     let assign780_ad_e16060: A = {
@@ -3071,13 +3071,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e16024: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e16024: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e16058: A = A::div(A::add_scaled_product(assign780_ad_e15960, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3153,7 +3153,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e16411: A = A::div(A::add_scaled_product(A::add(assign780_ad_e16163, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16247, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e16329)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16403, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e16411: A = A::div(A::add_scaled_product(A::add(assign780_ad_e16163, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16247, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e16329), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e16403, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e16411
                                                 } else {
                                                     let assign780_ad_e16553: A = {
@@ -3165,13 +3165,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e16517: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e16517: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e16551: A = A::div(A::add_scaled_product(assign780_ad_e16453, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3247,7 +3247,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign780_ad_e16896: A = A::div(A::add_scaled_product(A::add(assign780_ad_e16648, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16732, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e16814)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16888, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e16896: A = A::div(A::add_scaled_product(A::add(assign780_ad_e16648, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16732, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e16814), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e16888, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e16896
                                                 } else {
                                                     let assign780_ad_e17038: A = {
@@ -3259,13 +3259,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e17002: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e17002: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e17036: A = A::div(A::add_scaled_product(assign780_ad_e16938, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3287,7 +3287,7 @@ impl Instance {
                                                     assign780_ad_e17038
                                                 }
                                             };
-                                            let assign780_ad_e17047: A = A::div(A::add_scaled_product(A::add(assign780_ad_e15566, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16061, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e16554)), 1.0, s.ad_value(44), A::powf(assign780_ad_e17039, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e17047: A = A::div(A::add_scaled_product(A::add(assign780_ad_e15566, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e16061, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e16554), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e17039, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e17047
                                         } else {
                                             let assign780_ad_e17673: A = {
@@ -3301,13 +3301,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e17162: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e17162: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e17196: A = A::div(A::add_scaled_product(assign780_ad_e17098, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3335,13 +3335,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e17321: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e17321: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e17355: A = A::div(A::add_scaled_product(assign780_ad_e17257, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3369,13 +3369,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e17478: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e17478: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e17512: A = A::div(A::add_scaled_product(assign780_ad_e17414, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3403,13 +3403,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign780_ad_e17627: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                            let assign780_ad_e17627: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign780_ad_e17661: A = A::div(A::add_scaled_product(assign780_ad_e17563, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3428,7 +3428,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign780_ad_e17671: A = A::div(A::add_scaled_product(A::add(assign780_ad_e17198, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e17357, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e17514)), 1.0, s.ad_value(44), A::powf(assign780_ad_e17663, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign780_ad_e17671: A = A::div(A::add_scaled_product(A::add(assign780_ad_e17198, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e17357, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e17514), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e17663, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign780_ad_e17671
                                                 } else {
                                                     A::constant(0.0)
@@ -3507,7 +3507,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e18076: A = A::div(A::add_scaled_product(A::add(assign780_ad_e17828, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e17912, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e17994)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18068, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e18076: A = A::div(A::add_scaled_product(A::add(assign780_ad_e17828, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e17912, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e17994), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e18068, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e18076
                                         } else {
                                             let assign780_ad_e18218: A = {
@@ -3519,13 +3519,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e18182: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e18182: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e18216: A = A::div(A::add_scaled_product(assign780_ad_e18118, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3601,7 +3601,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e18571: A = A::div(A::add_scaled_product(A::add(assign780_ad_e18323, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18407, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e18489)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18563, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e18571: A = A::div(A::add_scaled_product(A::add(assign780_ad_e18323, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18407, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e18489), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e18563, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e18571
                                         } else {
                                             let assign780_ad_e18713: A = {
@@ -3613,13 +3613,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e18677: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e18677: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e18711: A = A::div(A::add_scaled_product(assign780_ad_e18613, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3695,7 +3695,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e19064: A = A::div(A::add_scaled_product(A::add(assign780_ad_e18816, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18900, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e18982)), 1.0, s.ad_value(44), A::powf(assign780_ad_e19056, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e19064: A = A::div(A::add_scaled_product(A::add(assign780_ad_e18816, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18900, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e18982), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e19056, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e19064
                                         } else {
                                             let assign780_ad_e19206: A = {
@@ -3707,13 +3707,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e19170: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e19170: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e19204: A = A::div(A::add_scaled_product(assign780_ad_e19106, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3789,7 +3789,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e19549: A = A::div(A::add_scaled_product(A::add(assign780_ad_e19301, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e19385, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e19467)), 1.0, s.ad_value(44), A::powf(assign780_ad_e19541, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e19549: A = A::div(A::add_scaled_product(A::add(assign780_ad_e19301, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e19385, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e19467), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e19541, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e19549
                                         } else {
                                             let assign780_ad_e19691: A = {
@@ -3801,13 +3801,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e19655: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e19655: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e19689: A = A::div(A::add_scaled_product(assign780_ad_e19591, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3829,7 +3829,7 @@ impl Instance {
                                             assign780_ad_e19691
                                         }
                                     };
-                                    let assign780_ad_e19700: A = A::div(A::add_scaled_product(A::add(assign780_ad_e18219, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18714, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e19207)), 1.0, s.ad_value(44), A::powf(assign780_ad_e19692, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e19700: A = A::div(A::add_scaled_product(A::add(assign780_ad_e18219, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e18714, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e19207), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e19692, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e19700
                                 } else {
                                     let assign780_ad_e20326: A = {
@@ -3843,13 +3843,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e19815: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e19815: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e19849: A = A::div(A::add_scaled_product(assign780_ad_e19751, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3877,13 +3877,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e19974: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e19974: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e20008: A = A::div(A::add_scaled_product(assign780_ad_e19910, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3911,13 +3911,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e20131: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e20131: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e20165: A = A::div(A::add_scaled_product(assign780_ad_e20067, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3945,13 +3945,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e20280: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e20280: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e20314: A = A::div(A::add_scaled_product(assign780_ad_e20216, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -3970,7 +3970,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e20324: A = A::div(A::add_scaled_product(A::add(assign780_ad_e19851, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e20010, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e20167)), 1.0, s.ad_value(44), A::powf(assign780_ad_e20316, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e20324: A = A::div(A::add_scaled_product(A::add(assign780_ad_e19851, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e20010, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e20167), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e20316, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e20324
                                         } else {
                                             A::constant(0.0)
@@ -4035,7 +4035,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e20689: A = A::div(A::add_scaled_product(A::add(assign780_ad_e20441, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e20525, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e20607)), 1.0, s.ad_value(44), A::powf(assign780_ad_e20681, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e20689: A = A::div(A::add_scaled_product(A::add(assign780_ad_e20441, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e20525, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e20607), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e20681, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e20689
                                         } else {
                                             let assign780_ad_e20831: A = {
@@ -4047,13 +4047,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e20795: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e20795: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e20829: A = A::div(A::add_scaled_product(assign780_ad_e20731, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4129,7 +4129,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e21184: A = A::div(A::add_scaled_product(A::add(assign780_ad_e20936, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21020, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e21102)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21176, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e21184: A = A::div(A::add_scaled_product(A::add(assign780_ad_e20936, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21020, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e21102), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e21176, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e21184
                                         } else {
                                             let assign780_ad_e21326: A = {
@@ -4141,13 +4141,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e21290: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e21290: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e21324: A = A::div(A::add_scaled_product(assign780_ad_e21226, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4223,7 +4223,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e21677: A = A::div(A::add_scaled_product(A::add(assign780_ad_e21429, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21513, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e21595)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21669, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e21677: A = A::div(A::add_scaled_product(A::add(assign780_ad_e21429, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21513, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e21595), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e21669, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e21677
                                         } else {
                                             let assign780_ad_e21819: A = {
@@ -4235,13 +4235,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e21783: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e21783: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e21817: A = A::div(A::add_scaled_product(assign780_ad_e21719, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4317,7 +4317,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e22162: A = A::div(A::add_scaled_product(A::add(assign780_ad_e21914, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21998, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e22080)), 1.0, s.ad_value(44), A::powf(assign780_ad_e22154, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e22162: A = A::div(A::add_scaled_product(A::add(assign780_ad_e21914, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21998, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e22080), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e22154, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e22162
                                         } else {
                                             let assign780_ad_e22304: A = {
@@ -4329,13 +4329,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e22268: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e22268: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e22302: A = A::div(A::add_scaled_product(assign780_ad_e22204, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4357,7 +4357,7 @@ impl Instance {
                                             assign780_ad_e22304
                                         }
                                     };
-                                    let assign780_ad_e22313: A = A::div(A::add_scaled_product(A::add(assign780_ad_e20832, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21327, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e21820)), 1.0, s.ad_value(44), A::powf(assign780_ad_e22305, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e22313: A = A::div(A::add_scaled_product(A::add(assign780_ad_e20832, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e21327, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e21820), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e22305, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e22313
                                 } else {
                                     let assign780_ad_e22939: A = {
@@ -4371,13 +4371,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e22428: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e22428: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e22462: A = A::div(A::add_scaled_product(assign780_ad_e22364, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4405,13 +4405,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e22587: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e22587: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e22621: A = A::div(A::add_scaled_product(assign780_ad_e22523, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4439,13 +4439,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e22744: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e22744: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e22778: A = A::div(A::add_scaled_product(assign780_ad_e22680, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4473,13 +4473,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e22893: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e22893: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e22927: A = A::div(A::add_scaled_product(assign780_ad_e22829, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4498,7 +4498,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e22937: A = A::div(A::add_scaled_product(A::add(assign780_ad_e22464, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e22623, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e22780)), 1.0, s.ad_value(44), A::powf(assign780_ad_e22929, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e22937: A = A::div(A::add_scaled_product(A::add(assign780_ad_e22464, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e22623, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e22780), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e22929, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e22937
                                         } else {
                                             A::constant(0.0)
@@ -4563,7 +4563,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e23302: A = A::div(A::add_scaled_product(A::add(assign780_ad_e23054, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23138, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e23220)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23294, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e23302: A = A::div(A::add_scaled_product(A::add(assign780_ad_e23054, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23138, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e23220), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e23294, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e23302
                                         } else {
                                             let assign780_ad_e23444: A = {
@@ -4575,13 +4575,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e23408: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e23408: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e23442: A = A::div(A::add_scaled_product(assign780_ad_e23344, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4657,7 +4657,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e23797: A = A::div(A::add_scaled_product(A::add(assign780_ad_e23549, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23633, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e23715)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23789, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e23797: A = A::div(A::add_scaled_product(A::add(assign780_ad_e23549, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23633, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e23715), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e23789, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e23797
                                         } else {
                                             let assign780_ad_e23939: A = {
@@ -4669,13 +4669,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e23903: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e23903: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e23937: A = A::div(A::add_scaled_product(assign780_ad_e23839, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4751,7 +4751,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e24290: A = A::div(A::add_scaled_product(A::add(assign780_ad_e24042, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e24126, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e24208)), 1.0, s.ad_value(44), A::powf(assign780_ad_e24282, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e24290: A = A::div(A::add_scaled_product(A::add(assign780_ad_e24042, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e24126, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e24208), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e24282, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e24290
                                         } else {
                                             let assign780_ad_e24432: A = {
@@ -4763,13 +4763,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e24396: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e24396: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e24430: A = A::div(A::add_scaled_product(assign780_ad_e24332, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4845,7 +4845,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e24775: A = A::div(A::add_scaled_product(A::add(assign780_ad_e24527, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e24611, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e24693)), 1.0, s.ad_value(44), A::powf(assign780_ad_e24767, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e24775: A = A::div(A::add_scaled_product(A::add(assign780_ad_e24527, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e24611, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e24693), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e24767, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e24775
                                         } else {
                                             let assign780_ad_e24917: A = {
@@ -4857,13 +4857,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e24881: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e24881: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e24915: A = A::div(A::add_scaled_product(assign780_ad_e24817, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4885,7 +4885,7 @@ impl Instance {
                                             assign780_ad_e24917
                                         }
                                     };
-                                    let assign780_ad_e24926: A = A::div(A::add_scaled_product(A::add(assign780_ad_e23445, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23940, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e24433)), 1.0, s.ad_value(44), A::powf(assign780_ad_e24918, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e24926: A = A::div(A::add_scaled_product(A::add(assign780_ad_e23445, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e23940, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e24433), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e24918, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e24926
                                 } else {
                                     let assign780_ad_e25552: A = {
@@ -4899,13 +4899,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e25041: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e25041: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e25075: A = A::div(A::add_scaled_product(assign780_ad_e24977, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4933,13 +4933,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e25200: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e25200: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e25234: A = A::div(A::add_scaled_product(assign780_ad_e25136, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -4967,13 +4967,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e25357: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e25357: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e25391: A = A::div(A::add_scaled_product(assign780_ad_e25293, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5001,13 +5001,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e25506: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e25506: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e25540: A = A::div(A::add_scaled_product(assign780_ad_e25442, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5026,7 +5026,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e25550: A = A::div(A::add_scaled_product(A::add(assign780_ad_e25077, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e25236, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e25393)), 1.0, s.ad_value(44), A::powf(assign780_ad_e25542, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e25550: A = A::div(A::add_scaled_product(A::add(assign780_ad_e25077, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e25236, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e25393), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e25542, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e25550
                                         } else {
                                             A::constant(0.0)
@@ -5091,7 +5091,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e25925: A = A::div(A::add_scaled_product(A::add(assign780_ad_e25677, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e25761, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e25843)), 1.0, s.ad_value(44), A::powf(assign780_ad_e25917, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e25925: A = A::div(A::add_scaled_product(A::add(assign780_ad_e25677, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e25761, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e25843), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e25917, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e25925
                                         } else {
                                             let assign780_ad_e26067: A = {
@@ -5103,13 +5103,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e26031: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e26031: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e26065: A = A::div(A::add_scaled_product(assign780_ad_e25967, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5185,7 +5185,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e26420: A = A::div(A::add_scaled_product(A::add(assign780_ad_e26172, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26256, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e26338)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26412, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e26420: A = A::div(A::add_scaled_product(A::add(assign780_ad_e26172, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26256, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e26338), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e26412, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e26420
                                         } else {
                                             let assign780_ad_e26562: A = {
@@ -5197,13 +5197,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e26526: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e26526: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e26560: A = A::div(A::add_scaled_product(assign780_ad_e26462, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5279,7 +5279,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e26913: A = A::div(A::add_scaled_product(A::add(assign780_ad_e26665, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26749, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e26831)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26905, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e26913: A = A::div(A::add_scaled_product(A::add(assign780_ad_e26665, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26749, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e26831), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e26905, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e26913
                                         } else {
                                             let assign780_ad_e27055: A = {
@@ -5291,13 +5291,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e27019: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e27019: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e27053: A = A::div(A::add_scaled_product(assign780_ad_e26955, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5373,7 +5373,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign780_ad_e27398: A = A::div(A::add_scaled_product(A::add(assign780_ad_e27150, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e27234, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e27316)), 1.0, s.ad_value(44), A::powf(assign780_ad_e27390, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e27398: A = A::div(A::add_scaled_product(A::add(assign780_ad_e27150, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e27234, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e27316), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e27390, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e27398
                                         } else {
                                             let assign780_ad_e27540: A = {
@@ -5385,13 +5385,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e27504: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e27504: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e27538: A = A::div(A::add_scaled_product(assign780_ad_e27440, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5413,7 +5413,7 @@ impl Instance {
                                             assign780_ad_e27540
                                         }
                                     };
-                                    let assign780_ad_e27549: A = A::div(A::add_scaled_product(A::add(assign780_ad_e26068, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26563, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e27056)), 1.0, s.ad_value(44), A::powf(assign780_ad_e27541, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e27549: A = A::div(A::add_scaled_product(A::add(assign780_ad_e26068, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e26563, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e27056), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e27541, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e27549
                                 } else {
                                     let assign780_ad_e28175: A = {
@@ -5427,13 +5427,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e27664: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e27664: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e27698: A = A::div(A::add_scaled_product(assign780_ad_e27600, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5461,13 +5461,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e27823: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e27823: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e27857: A = A::div(A::add_scaled_product(assign780_ad_e27759, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5495,13 +5495,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e27980: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e27980: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e28014: A = A::div(A::add_scaled_product(assign780_ad_e27916, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5529,13 +5529,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e28129: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e28129: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e28163: A = A::div(A::add_scaled_product(assign780_ad_e28065, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5554,7 +5554,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e28173: A = A::div(A::add_scaled_product(A::add(assign780_ad_e27700, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e27859, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e28016)), 1.0, s.ad_value(44), A::powf(assign780_ad_e28165, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e28173: A = A::div(A::add_scaled_product(A::add(assign780_ad_e27700, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e27859, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e28016), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e28165, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e28173
                                         } else {
                                             A::constant(0.0)
@@ -5563,7 +5563,7 @@ impl Instance {
                                     assign780_ad_e28175
                                 }
                             };
-                            let assign780_ad_e28183: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e20327)), 1.0, s.ad_value(44), A::powf(assign780_ad_e22940, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e25553, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e28176, (1.0 / 3.0)), (2.0 / 3.0)));
+                            let assign780_ad_e28183: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e20327), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e22940, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e25553, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e28176, (1.0 / 3.0)), (2.0 / 3.0)));
                             assign780_ad_e28183
                         } else {
                             let assign780_ad_e30745: A = {
@@ -5579,13 +5579,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e28316: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e28316: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e28350: A = A::div(A::add_scaled_product(assign780_ad_e28252, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5613,13 +5613,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e28475: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e28475: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e28509: A = A::div(A::add_scaled_product(assign780_ad_e28411, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5647,13 +5647,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e28632: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e28632: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e28666: A = A::div(A::add_scaled_product(assign780_ad_e28568, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5681,13 +5681,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e28781: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e28781: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e28815: A = A::div(A::add_scaled_product(assign780_ad_e28717, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5706,7 +5706,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e28825: A = A::div(A::add_scaled_product(A::add(assign780_ad_e28352, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e28511, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e28668)), 1.0, s.ad_value(44), A::powf(assign780_ad_e28817, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e28825: A = A::div(A::add_scaled_product(A::add(assign780_ad_e28352, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e28511, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e28668), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e28817, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e28825
                                         } else {
                                             A::constant(0.0)
@@ -5723,13 +5723,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e28949: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e28949: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e28983: A = A::div(A::add_scaled_product(assign780_ad_e28885, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5757,13 +5757,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e29108: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e29108: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e29142: A = A::div(A::add_scaled_product(assign780_ad_e29044, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5791,13 +5791,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e29265: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e29265: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e29299: A = A::div(A::add_scaled_product(assign780_ad_e29201, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5825,13 +5825,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e29414: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e29414: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e29448: A = A::div(A::add_scaled_product(assign780_ad_e29350, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5850,7 +5850,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e29458: A = A::div(A::add_scaled_product(A::add(assign780_ad_e28985, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e29144, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e29301)), 1.0, s.ad_value(44), A::powf(assign780_ad_e29450, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e29458: A = A::div(A::add_scaled_product(A::add(assign780_ad_e28985, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e29144, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e29301), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e29450, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e29458
                                         } else {
                                             A::constant(0.0)
@@ -5867,13 +5867,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e29582: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e29582: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e29616: A = A::div(A::add_scaled_product(assign780_ad_e29518, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5901,13 +5901,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e29741: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e29741: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e29775: A = A::div(A::add_scaled_product(assign780_ad_e29677, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5935,13 +5935,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e29898: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e29898: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e29932: A = A::div(A::add_scaled_product(assign780_ad_e29834, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5969,13 +5969,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e30047: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e30047: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e30081: A = A::div(A::add_scaled_product(assign780_ad_e29983, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -5994,7 +5994,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e30091: A = A::div(A::add_scaled_product(A::add(assign780_ad_e29618, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e29777, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e29934)), 1.0, s.ad_value(44), A::powf(assign780_ad_e30083, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e30091: A = A::div(A::add_scaled_product(A::add(assign780_ad_e29618, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e29777, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e29934), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e30083, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e30091
                                         } else {
                                             A::constant(0.0)
@@ -6011,13 +6011,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e30225: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e30225: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e30259: A = A::div(A::add_scaled_product(assign780_ad_e30161, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6045,13 +6045,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e30384: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e30384: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e30418: A = A::div(A::add_scaled_product(assign780_ad_e30320, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6079,13 +6079,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e30541: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e30541: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e30575: A = A::div(A::add_scaled_product(assign780_ad_e30477, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6113,13 +6113,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign780_ad_e30690: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                    let assign780_ad_e30690: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign780_ad_e30724: A = A::div(A::add_scaled_product(assign780_ad_e30626, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6138,13 +6138,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign780_ad_e30734: A = A::div(A::add_scaled_product(A::add(assign780_ad_e30261, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e30420, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e30577)), 1.0, s.ad_value(44), A::powf(assign780_ad_e30726, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign780_ad_e30734: A = A::div(A::add_scaled_product(A::add(assign780_ad_e30261, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e30420, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e30577), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e30726, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign780_ad_e30734
                                         } else {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign780_ad_e30743: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e28827)), 1.0, s.ad_value(44), A::powf(assign780_ad_e29460, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e30093, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e30736, (1.0 / 3.0)), (2.0 / 3.0)));
+                                    let assign780_ad_e30743: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e28827), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e29460, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e30093, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e30736, (1.0 / 3.0)), (2.0 / 3.0)));
                                     assign780_ad_e30743
                                 } else {
                                     A::constant(0.0)
@@ -6217,7 +6217,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e31165: A = A::div(A::add_scaled_product(A::add(assign780_ad_e30917, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31001, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e31083)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31157, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e31165: A = A::div(A::add_scaled_product(A::add(assign780_ad_e30917, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31001, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e31083), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e31157, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e31165
                                     } else {
                                         let assign780_ad_e31307: A = {
@@ -6229,13 +6229,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e31271: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e31271: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e31305: A = A::div(A::add_scaled_product(assign780_ad_e31207, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6311,7 +6311,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e31660: A = A::div(A::add_scaled_product(A::add(assign780_ad_e31412, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31496, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e31578)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31652, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e31660: A = A::div(A::add_scaled_product(A::add(assign780_ad_e31412, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31496, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e31578), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e31652, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e31660
                                     } else {
                                         let assign780_ad_e31802: A = {
@@ -6323,13 +6323,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e31766: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e31766: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e31800: A = A::div(A::add_scaled_product(assign780_ad_e31702, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6405,7 +6405,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e32153: A = A::div(A::add_scaled_product(A::add(assign780_ad_e31905, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31989, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e32071)), 1.0, s.ad_value(44), A::powf(assign780_ad_e32145, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e32153: A = A::div(A::add_scaled_product(A::add(assign780_ad_e31905, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31989, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e32071), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e32145, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e32153
                                     } else {
                                         let assign780_ad_e32295: A = {
@@ -6417,13 +6417,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e32259: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e32259: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e32293: A = A::div(A::add_scaled_product(assign780_ad_e32195, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6499,7 +6499,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e32638: A = A::div(A::add_scaled_product(A::add(assign780_ad_e32390, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e32474, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e32556)), 1.0, s.ad_value(44), A::powf(assign780_ad_e32630, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e32638: A = A::div(A::add_scaled_product(A::add(assign780_ad_e32390, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e32474, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e32556), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e32630, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e32638
                                     } else {
                                         let assign780_ad_e32780: A = {
@@ -6511,13 +6511,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e32744: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e32744: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e32778: A = A::div(A::add_scaled_product(assign780_ad_e32680, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6539,7 +6539,7 @@ impl Instance {
                                         assign780_ad_e32780
                                     }
                                 };
-                                let assign780_ad_e32789: A = A::div(A::add_scaled_product(A::add(assign780_ad_e31308, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31803, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e32296)), 1.0, s.ad_value(44), A::powf(assign780_ad_e32781, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign780_ad_e32789: A = A::div(A::add_scaled_product(A::add(assign780_ad_e31308, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e31803, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e32296), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e32781, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign780_ad_e32789
                             } else {
                                 let assign780_ad_e33415: A = {
@@ -6553,13 +6553,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e32904: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e32904: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e32938: A = A::div(A::add_scaled_product(assign780_ad_e32840, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6587,13 +6587,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e33063: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e33063: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e33097: A = A::div(A::add_scaled_product(assign780_ad_e32999, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6621,13 +6621,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e33220: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e33220: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e33254: A = A::div(A::add_scaled_product(assign780_ad_e33156, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6655,13 +6655,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e33369: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e33369: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e33403: A = A::div(A::add_scaled_product(assign780_ad_e33305, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6680,7 +6680,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e33413: A = A::div(A::add_scaled_product(A::add(assign780_ad_e32940, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e33099, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e33256)), 1.0, s.ad_value(44), A::powf(assign780_ad_e33405, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e33413: A = A::div(A::add_scaled_product(A::add(assign780_ad_e32940, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e33099, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e33256), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e33405, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e33413
                                     } else {
                                         A::constant(0.0)
@@ -6745,7 +6745,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e33778: A = A::div(A::add_scaled_product(A::add(assign780_ad_e33530, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e33614, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e33696)), 1.0, s.ad_value(44), A::powf(assign780_ad_e33770, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e33778: A = A::div(A::add_scaled_product(A::add(assign780_ad_e33530, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e33614, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e33696), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e33770, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e33778
                                     } else {
                                         let assign780_ad_e33920: A = {
@@ -6757,13 +6757,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e33884: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e33884: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e33918: A = A::div(A::add_scaled_product(assign780_ad_e33820, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6839,7 +6839,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e34273: A = A::div(A::add_scaled_product(A::add(assign780_ad_e34025, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34109, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e34191)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34265, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e34273: A = A::div(A::add_scaled_product(A::add(assign780_ad_e34025, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34109, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e34191), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e34265, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e34273
                                     } else {
                                         let assign780_ad_e34415: A = {
@@ -6851,13 +6851,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e34379: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e34379: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e34413: A = A::div(A::add_scaled_product(assign780_ad_e34315, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -6933,7 +6933,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e34766: A = A::div(A::add_scaled_product(A::add(assign780_ad_e34518, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34602, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e34684)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34758, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e34766: A = A::div(A::add_scaled_product(A::add(assign780_ad_e34518, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34602, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e34684), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e34758, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e34766
                                     } else {
                                         let assign780_ad_e34908: A = {
@@ -6945,13 +6945,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e34872: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e34872: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e34906: A = A::div(A::add_scaled_product(assign780_ad_e34808, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7027,7 +7027,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e35251: A = A::div(A::add_scaled_product(A::add(assign780_ad_e35003, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e35087, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e35169)), 1.0, s.ad_value(44), A::powf(assign780_ad_e35243, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e35251: A = A::div(A::add_scaled_product(A::add(assign780_ad_e35003, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e35087, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e35169), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e35243, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e35251
                                     } else {
                                         let assign780_ad_e35393: A = {
@@ -7039,13 +7039,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e35357: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e35357: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e35391: A = A::div(A::add_scaled_product(assign780_ad_e35293, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7067,7 +7067,7 @@ impl Instance {
                                         assign780_ad_e35393
                                     }
                                 };
-                                let assign780_ad_e35402: A = A::div(A::add_scaled_product(A::add(assign780_ad_e33921, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34416, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e34909)), 1.0, s.ad_value(44), A::powf(assign780_ad_e35394, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign780_ad_e35402: A = A::div(A::add_scaled_product(A::add(assign780_ad_e33921, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e34416, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e34909), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e35394, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign780_ad_e35402
                             } else {
                                 let assign780_ad_e36028: A = {
@@ -7081,13 +7081,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e35517: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e35517: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e35551: A = A::div(A::add_scaled_product(assign780_ad_e35453, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7115,13 +7115,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e35676: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e35676: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e35710: A = A::div(A::add_scaled_product(assign780_ad_e35612, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7149,13 +7149,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e35833: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e35833: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e35867: A = A::div(A::add_scaled_product(assign780_ad_e35769, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7183,13 +7183,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e35982: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e35982: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e36016: A = A::div(A::add_scaled_product(assign780_ad_e35918, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7208,7 +7208,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e36026: A = A::div(A::add_scaled_product(A::add(assign780_ad_e35553, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e35712, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e35869)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36018, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e36026: A = A::div(A::add_scaled_product(A::add(assign780_ad_e35553, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e35712, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e35869), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e36018, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e36026
                                     } else {
                                         A::constant(0.0)
@@ -7273,7 +7273,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e36391: A = A::div(A::add_scaled_product(A::add(assign780_ad_e36143, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36227, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e36309)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36383, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e36391: A = A::div(A::add_scaled_product(A::add(assign780_ad_e36143, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36227, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e36309), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e36383, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e36391
                                     } else {
                                         let assign780_ad_e36533: A = {
@@ -7285,13 +7285,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e36497: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e36497: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e36531: A = A::div(A::add_scaled_product(assign780_ad_e36433, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7367,7 +7367,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e36886: A = A::div(A::add_scaled_product(A::add(assign780_ad_e36638, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36722, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e36804)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36878, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e36886: A = A::div(A::add_scaled_product(A::add(assign780_ad_e36638, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36722, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e36804), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e36878, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e36886
                                     } else {
                                         let assign780_ad_e37028: A = {
@@ -7379,13 +7379,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e36992: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e36992: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e37026: A = A::div(A::add_scaled_product(assign780_ad_e36928, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7461,7 +7461,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e37379: A = A::div(A::add_scaled_product(A::add(assign780_ad_e37131, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37215, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e37297)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37371, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e37379: A = A::div(A::add_scaled_product(A::add(assign780_ad_e37131, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37215, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e37297), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e37371, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e37379
                                     } else {
                                         let assign780_ad_e37521: A = {
@@ -7473,13 +7473,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e37485: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e37485: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e37519: A = A::div(A::add_scaled_product(assign780_ad_e37421, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7555,7 +7555,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e37864: A = A::div(A::add_scaled_product(A::add(assign780_ad_e37616, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37700, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e37782)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37856, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e37864: A = A::div(A::add_scaled_product(A::add(assign780_ad_e37616, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37700, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e37782), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e37856, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e37864
                                     } else {
                                         let assign780_ad_e38006: A = {
@@ -7567,13 +7567,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e37970: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e37970: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e38004: A = A::div(A::add_scaled_product(assign780_ad_e37906, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7595,7 +7595,7 @@ impl Instance {
                                         assign780_ad_e38006
                                     }
                                 };
-                                let assign780_ad_e38015: A = A::div(A::add_scaled_product(A::add(assign780_ad_e36534, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37029, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e37522)), 1.0, s.ad_value(44), A::powf(assign780_ad_e38007, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign780_ad_e38015: A = A::div(A::add_scaled_product(A::add(assign780_ad_e36534, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e37029, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e37522), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e38007, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign780_ad_e38015
                             } else {
                                 let assign780_ad_e38641: A = {
@@ -7609,13 +7609,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e38130: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e38130: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e38164: A = A::div(A::add_scaled_product(assign780_ad_e38066, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7643,13 +7643,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e38289: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e38289: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e38323: A = A::div(A::add_scaled_product(assign780_ad_e38225, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7677,13 +7677,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e38446: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e38446: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e38480: A = A::div(A::add_scaled_product(assign780_ad_e38382, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7711,13 +7711,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e38595: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e38595: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e38629: A = A::div(A::add_scaled_product(assign780_ad_e38531, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7736,7 +7736,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e38639: A = A::div(A::add_scaled_product(A::add(assign780_ad_e38166, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e38325, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e38482)), 1.0, s.ad_value(44), A::powf(assign780_ad_e38631, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e38639: A = A::div(A::add_scaled_product(A::add(assign780_ad_e38166, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e38325, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e38482), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e38631, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e38639
                                     } else {
                                         A::constant(0.0)
@@ -7801,7 +7801,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e39014: A = A::div(A::add_scaled_product(A::add(assign780_ad_e38766, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e38850, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e38932)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39006, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e39014: A = A::div(A::add_scaled_product(A::add(assign780_ad_e38766, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e38850, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e38932), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e39006, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e39014
                                     } else {
                                         let assign780_ad_e39156: A = {
@@ -7813,13 +7813,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e39120: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e39120: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e39154: A = A::div(A::add_scaled_product(assign780_ad_e39056, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7895,7 +7895,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e39509: A = A::div(A::add_scaled_product(A::add(assign780_ad_e39261, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39345, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e39427)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39501, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e39509: A = A::div(A::add_scaled_product(A::add(assign780_ad_e39261, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39345, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e39427), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e39501, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e39509
                                     } else {
                                         let assign780_ad_e39651: A = {
@@ -7907,13 +7907,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e39615: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e39615: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e39649: A = A::div(A::add_scaled_product(assign780_ad_e39551, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -7989,7 +7989,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e40002: A = A::div(A::add_scaled_product(A::add(assign780_ad_e39754, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39838, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e39920)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39994, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e40002: A = A::div(A::add_scaled_product(A::add(assign780_ad_e39754, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39838, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e39920), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e39994, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e40002
                                     } else {
                                         let assign780_ad_e40144: A = {
@@ -8001,13 +8001,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e40108: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e40108: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e40142: A = A::div(A::add_scaled_product(assign780_ad_e40044, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8083,7 +8083,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign780_ad_e40487: A = A::div(A::add_scaled_product(A::add(assign780_ad_e40239, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e40323, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e40405)), 1.0, s.ad_value(44), A::powf(assign780_ad_e40479, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e40487: A = A::div(A::add_scaled_product(A::add(assign780_ad_e40239, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e40323, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e40405), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e40479, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e40487
                                     } else {
                                         let assign780_ad_e40629: A = {
@@ -8095,13 +8095,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e40593: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e40593: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e40627: A = A::div(A::add_scaled_product(assign780_ad_e40529, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8123,7 +8123,7 @@ impl Instance {
                                         assign780_ad_e40629
                                     }
                                 };
-                                let assign780_ad_e40638: A = A::div(A::add_scaled_product(A::add(assign780_ad_e39157, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39652, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e40145)), 1.0, s.ad_value(44), A::powf(assign780_ad_e40630, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign780_ad_e40638: A = A::div(A::add_scaled_product(A::add(assign780_ad_e39157, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e39652, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e40145), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e40630, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign780_ad_e40638
                             } else {
                                 let assign780_ad_e41264: A = {
@@ -8137,13 +8137,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e40753: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e40753: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e40787: A = A::div(A::add_scaled_product(assign780_ad_e40689, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8171,13 +8171,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e40912: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e40912: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e40946: A = A::div(A::add_scaled_product(assign780_ad_e40848, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8205,13 +8205,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e41069: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e41069: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e41103: A = A::div(A::add_scaled_product(assign780_ad_e41005, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8239,13 +8239,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e41218: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e41218: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e41252: A = A::div(A::add_scaled_product(assign780_ad_e41154, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8264,7 +8264,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e41262: A = A::div(A::add_scaled_product(A::add(assign780_ad_e40789, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e40948, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e41105)), 1.0, s.ad_value(44), A::powf(assign780_ad_e41254, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e41262: A = A::div(A::add_scaled_product(A::add(assign780_ad_e40789, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e40948, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e41105), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e41254, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e41262
                                     } else {
                                         A::constant(0.0)
@@ -8273,7 +8273,7 @@ impl Instance {
                                 assign780_ad_e41264
                             }
                         };
-                        let assign780_ad_e41272: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e33416)), 1.0, s.ad_value(44), A::powf(assign780_ad_e36029, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e38642, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e41265, (1.0 / 3.0)), (2.0 / 3.0)));
+                        let assign780_ad_e41272: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e33416), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e36029, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e38642, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e41265, (1.0 / 3.0)), (2.0 / 3.0)));
                         assign780_ad_e41272
                     } else {
                         let assign780_ad_e43834: A = {
@@ -8289,13 +8289,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e41405: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e41405: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e41439: A = A::div(A::add_scaled_product(assign780_ad_e41341, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8323,13 +8323,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e41564: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e41564: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e41598: A = A::div(A::add_scaled_product(assign780_ad_e41500, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8357,13 +8357,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e41721: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e41721: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e41755: A = A::div(A::add_scaled_product(assign780_ad_e41657, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8391,13 +8391,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e41870: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e41870: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e41904: A = A::div(A::add_scaled_product(assign780_ad_e41806, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8416,7 +8416,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e41914: A = A::div(A::add_scaled_product(A::add(assign780_ad_e41441, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e41600, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e41757)), 1.0, s.ad_value(44), A::powf(assign780_ad_e41906, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e41914: A = A::div(A::add_scaled_product(A::add(assign780_ad_e41441, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e41600, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e41757), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e41906, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e41914
                                     } else {
                                         A::constant(0.0)
@@ -8433,13 +8433,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e42038: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e42038: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e42072: A = A::div(A::add_scaled_product(assign780_ad_e41974, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8467,13 +8467,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e42197: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e42197: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e42231: A = A::div(A::add_scaled_product(assign780_ad_e42133, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8501,13 +8501,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e42354: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e42354: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e42388: A = A::div(A::add_scaled_product(assign780_ad_e42290, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8535,13 +8535,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e42503: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e42503: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e42537: A = A::div(A::add_scaled_product(assign780_ad_e42439, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8560,7 +8560,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e42547: A = A::div(A::add_scaled_product(A::add(assign780_ad_e42074, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e42233, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e42390)), 1.0, s.ad_value(44), A::powf(assign780_ad_e42539, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e42547: A = A::div(A::add_scaled_product(A::add(assign780_ad_e42074, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e42233, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e42390), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e42539, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e42547
                                     } else {
                                         A::constant(0.0)
@@ -8577,13 +8577,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e42671: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e42671: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e42705: A = A::div(A::add_scaled_product(assign780_ad_e42607, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8611,13 +8611,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e42830: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e42830: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e42864: A = A::div(A::add_scaled_product(assign780_ad_e42766, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8645,13 +8645,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e42987: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e42987: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e43021: A = A::div(A::add_scaled_product(assign780_ad_e42923, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8679,13 +8679,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e43136: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e43136: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e43170: A = A::div(A::add_scaled_product(assign780_ad_e43072, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8704,7 +8704,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e43180: A = A::div(A::add_scaled_product(A::add(assign780_ad_e42707, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e42866, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e43023)), 1.0, s.ad_value(44), A::powf(assign780_ad_e43172, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e43180: A = A::div(A::add_scaled_product(A::add(assign780_ad_e42707, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e42866, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e43023), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e43172, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e43180
                                     } else {
                                         A::constant(0.0)
@@ -8721,13 +8721,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e43314: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e43314: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e43348: A = A::div(A::add_scaled_product(assign780_ad_e43250, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8755,13 +8755,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e43473: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e43473: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e43507: A = A::div(A::add_scaled_product(assign780_ad_e43409, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8789,13 +8789,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e43630: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e43630: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e43664: A = A::div(A::add_scaled_product(assign780_ad_e43566, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8823,13 +8823,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign780_ad_e43779: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                                let assign780_ad_e43779: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign780_ad_e43813: A = A::div(A::add_scaled_product(assign780_ad_e43715, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8848,13 +8848,13 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign780_ad_e43823: A = A::div(A::add_scaled_product(A::add(assign780_ad_e43350, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e43509, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e43666)), 1.0, s.ad_value(44), A::powf(assign780_ad_e43815, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign780_ad_e43823: A = A::div(A::add_scaled_product(A::add(assign780_ad_e43350, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e43509, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e43666), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e43815, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign780_ad_e43823
                                     } else {
                                         A::constant(0.0)
                                     }
                                 };
-                                let assign780_ad_e43832: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e41916)), 1.0, s.ad_value(44), A::powf(assign780_ad_e42549, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e43182, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e43825, (1.0 / 3.0)), (2.0 / 3.0)));
+                                let assign780_ad_e43832: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e41916), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e42549, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e43182, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e43825, (1.0 / 3.0)), (2.0 / 3.0)));
                                 assign780_ad_e43832
                             } else {
                                 A::constant(0.0)
@@ -8879,13 +8879,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e43991: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e43991: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e44025: A = A::div(A::add_scaled_product(assign780_ad_e43927, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8913,13 +8913,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e44150: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e44150: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e44184: A = A::div(A::add_scaled_product(assign780_ad_e44086, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8947,13 +8947,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e44307: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e44307: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e44341: A = A::div(A::add_scaled_product(assign780_ad_e44243, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -8981,13 +8981,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e44456: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e44456: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e44490: A = A::div(A::add_scaled_product(assign780_ad_e44392, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9006,7 +9006,7 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign780_ad_e44500: A = A::div(A::add_scaled_product(A::add(assign780_ad_e44027, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e44186, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e44343)), 1.0, s.ad_value(44), A::powf(assign780_ad_e44492, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e44500: A = A::div(A::add_scaled_product(A::add(assign780_ad_e44027, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e44186, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e44343), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e44492, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e44500
                                 } else {
                                     A::constant(0.0)
@@ -9023,13 +9023,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e44624: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e44624: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e44658: A = A::div(A::add_scaled_product(assign780_ad_e44560, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9057,13 +9057,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e44783: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e44783: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e44817: A = A::div(A::add_scaled_product(assign780_ad_e44719, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9091,13 +9091,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e44940: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e44940: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e44974: A = A::div(A::add_scaled_product(assign780_ad_e44876, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9125,13 +9125,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e45089: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e45089: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e45123: A = A::div(A::add_scaled_product(assign780_ad_e45025, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9150,7 +9150,7 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign780_ad_e45133: A = A::div(A::add_scaled_product(A::add(assign780_ad_e44660, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e44819, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e44976)), 1.0, s.ad_value(44), A::powf(assign780_ad_e45125, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e45133: A = A::div(A::add_scaled_product(A::add(assign780_ad_e44660, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e44819, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e44976), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e45125, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e45133
                                 } else {
                                     A::constant(0.0)
@@ -9167,13 +9167,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e45257: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e45257: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e45291: A = A::div(A::add_scaled_product(assign780_ad_e45193, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9201,13 +9201,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e45416: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e45416: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e45450: A = A::div(A::add_scaled_product(assign780_ad_e45352, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9235,13 +9235,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e45573: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e45573: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e45607: A = A::div(A::add_scaled_product(assign780_ad_e45509, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9269,13 +9269,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e45722: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e45722: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e45756: A = A::div(A::add_scaled_product(assign780_ad_e45658, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9294,7 +9294,7 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign780_ad_e45766: A = A::div(A::add_scaled_product(A::add(assign780_ad_e45293, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e45452, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e45609)), 1.0, s.ad_value(44), A::powf(assign780_ad_e45758, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e45766: A = A::div(A::add_scaled_product(A::add(assign780_ad_e45293, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e45452, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e45609), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e45758, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e45766
                                 } else {
                                     A::constant(0.0)
@@ -9311,13 +9311,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e45900: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e45900: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e45934: A = A::div(A::add_scaled_product(assign780_ad_e45836, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9345,13 +9345,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e46059: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e46059: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e46093: A = A::div(A::add_scaled_product(assign780_ad_e45995, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9379,13 +9379,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e46216: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e46216: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e46250: A = A::div(A::add_scaled_product(assign780_ad_e46152, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9413,13 +9413,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign780_ad_e46365: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln({
+                                            let assign780_ad_e46365: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign780_ad_e46399: A = A::div(A::add_scaled_product(assign780_ad_e46301, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20))))
@@ -9438,13 +9438,13 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign780_ad_e46409: A = A::div(A::add_scaled_product(A::add(assign780_ad_e45936, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e46095, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e46252)), 1.0, s.ad_value(44), A::powf(assign780_ad_e46401, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign780_ad_e46409: A = A::div(A::add_scaled_product(A::add(assign780_ad_e45936, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e46095, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e46252), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e46401, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign780_ad_e46409
                                 } else {
                                     A::constant(0.0)
                                 }
                             };
-                            let assign780_ad_e46418: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(20)), 1.0), A::ln(assign780_ad_e44502)), 1.0, s.ad_value(44), A::powf(assign780_ad_e45135, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e45768, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e46411, (1.0 / 3.0)), (2.0 / 3.0)));
+                            let assign780_ad_e46418: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(20), (-1.0), A::ln(assign780_ad_e44502), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign780_ad_e45135, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign780_ad_e45768, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(45), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign780_ad_e46411, (1.0 / 3.0)), (2.0 / 3.0)));
                             assign780_ad_e46418
                         } else {
                             A::constant(0.0)
@@ -9519,7 +9519,7 @@ impl Instance {
 
         s.store_sub_ad_rhs(88, 81, A::div(s.ad_value(101), s.ad_value(103)));
 
-        s.store_scaled_add_ad(89, A::offset(A::sub(s.ad_value(88), s.ad_value(20)), 3.0), A::sqrt(A::offset(A::mul(A::offset(A::sub(s.ad_value(88), s.ad_value(20)), (-3.0)), A::offset(A::sub(s.ad_value(88), s.ad_value(20)), (-3.0))), ((0.25 * 4.0) * 4.0))), 0.5);
+        s.store_ad_value(89, A::add_scaled_inputs3_offset(s.ad_value(88), 0.5, s.ad_value(20), ((-1.0) * 0.5), A::sqrt(A::offset(A::mul(A::offset(A::sub(s.ad_value(88), s.ad_value(20)), (-3.0)), A::offset(A::sub(s.ad_value(88), s.ad_value(20)), (-3.0))), ((0.25 * 4.0) * 4.0))), 0.5, (3.0 * 0.5)));
 
         s.store_div_ad(104, A::scale_offset(s.ad_value(87), ((4.0) * ((p.p16 / p.p17))), ((p.p17) * ((p.p16 / p.p17)))), A::offset(s.ad_value(80), 1.0));
 
@@ -9648,7 +9648,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e47568: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e47320, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e47404, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e47486)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e47560, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e47568: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e47320, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e47404, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e47486), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e47560, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e47568
                                                 } else {
                                                     let assign1170_ad_e47710: A = {
@@ -9660,13 +9660,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e47674: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e47674: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e47708: A = A::div(A::add_scaled_product(assign1170_ad_e47610, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -9790,7 +9790,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e48362: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e48114, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48198, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e48280)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48354, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e48362: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e48114, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48198, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e48280), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48354, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e48362
                                                 } else {
                                                     let assign1170_ad_e48504: A = {
@@ -9802,13 +9802,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e48468: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e48468: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e48502: A = A::div(A::add_scaled_product(assign1170_ad_e48404, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -9892,7 +9892,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e48869: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e48621, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48705, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e48787)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48861, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e48869: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e48621, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48705, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e48787), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e48861, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e48869
                                                 } else {
                                                     let assign1170_ad_e49011: A = {
@@ -9904,13 +9904,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e48975: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e48975: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e49009: A = A::div(A::add_scaled_product(assign1170_ad_e48911, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -9986,7 +9986,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e49364: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e49116, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49200, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e49282)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49356, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e49364: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e49116, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49200, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e49282), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49356, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e49364
                                                 } else {
                                                     let assign1170_ad_e49506: A = {
@@ -9998,13 +9998,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e49470: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e49470: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e49504: A = A::div(A::add_scaled_product(assign1170_ad_e49406, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10080,7 +10080,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e49857: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e49609, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49693, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e49775)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49849, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e49857: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e49609, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49693, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e49775), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49849, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e49857
                                                 } else {
                                                     let assign1170_ad_e49999: A = {
@@ -10092,13 +10092,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e49963: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e49963: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e49997: A = A::div(A::add_scaled_product(assign1170_ad_e49899, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10174,7 +10174,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e50342: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e50094, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50178, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e50260)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50334, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e50342: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e50094, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50178, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e50260), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50334, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e50342
                                                 } else {
                                                     let assign1170_ad_e50484: A = {
@@ -10186,13 +10186,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e50448: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e50448: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e50482: A = A::div(A::add_scaled_product(assign1170_ad_e50384, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10214,7 +10214,7 @@ impl Instance {
                                                     assign1170_ad_e50484
                                                 }
                                             };
-                                            let assign1170_ad_e50493: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e49012, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49507, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e50000)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50485, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e50493: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e49012, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e49507, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e50000), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50485, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e50493
                                         } else {
                                             let assign1170_ad_e51119: A = {
@@ -10228,13 +10228,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e50608: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e50608: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e50642: A = A::div(A::add_scaled_product(assign1170_ad_e50544, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10262,13 +10262,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e50767: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e50767: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e50801: A = A::div(A::add_scaled_product(assign1170_ad_e50703, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10296,13 +10296,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e50924: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e50924: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e50958: A = A::div(A::add_scaled_product(assign1170_ad_e50860, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10330,13 +10330,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e51073: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e51073: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e51107: A = A::div(A::add_scaled_product(assign1170_ad_e51009, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10355,7 +10355,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign1170_ad_e51117: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e50644, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50803, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e50960)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e51109, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e51117: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e50644, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e50803, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e50960), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e51109, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e51117
                                                 } else {
                                                     A::constant(0.0)
@@ -10468,7 +10468,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e51810: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e51562, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e51646, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e51728)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e51802, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e51810: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e51562, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e51646, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e51728), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e51802, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e51810
                                                 } else {
                                                     let assign1170_ad_e51952: A = {
@@ -10480,13 +10480,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e51916: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e51916: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e51950: A = A::div(A::add_scaled_product(assign1170_ad_e51852, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10610,7 +10610,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e52604: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e52356, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e52440, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e52522)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e52596, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e52604: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e52356, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e52440, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e52522), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e52596, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e52604
                                                 } else {
                                                     let assign1170_ad_e52746: A = {
@@ -10622,13 +10622,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e52710: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e52710: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e52744: A = A::div(A::add_scaled_product(assign1170_ad_e52646, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10712,7 +10712,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e53111: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e52863, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e52947, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e53029)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53103, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e53111: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e52863, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e52947, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e53029), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53103, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e53111
                                                 } else {
                                                     let assign1170_ad_e53253: A = {
@@ -10724,13 +10724,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e53217: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e53217: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e53251: A = A::div(A::add_scaled_product(assign1170_ad_e53153, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10806,7 +10806,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e53606: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e53358, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53442, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e53524)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53598, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e53606: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e53358, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53442, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e53524), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53598, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e53606
                                                 } else {
                                                     let assign1170_ad_e53748: A = {
@@ -10818,13 +10818,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e53712: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e53712: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e53746: A = A::div(A::add_scaled_product(assign1170_ad_e53648, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10900,7 +10900,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e54099: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e53851, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53935, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e54017)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54091, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e54099: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e53851, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53935, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e54017), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54091, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e54099
                                                 } else {
                                                     let assign1170_ad_e54241: A = {
@@ -10912,13 +10912,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e54205: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e54205: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e54239: A = A::div(A::add_scaled_product(assign1170_ad_e54141, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -10994,7 +10994,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e54584: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e54336, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54420, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e54502)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54576, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e54584: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e54336, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54420, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e54502), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54576, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e54584
                                                 } else {
                                                     let assign1170_ad_e54726: A = {
@@ -11006,13 +11006,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e54690: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e54690: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e54724: A = A::div(A::add_scaled_product(assign1170_ad_e54626, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11034,7 +11034,7 @@ impl Instance {
                                                     assign1170_ad_e54726
                                                 }
                                             };
-                                            let assign1170_ad_e54735: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e53254, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53749, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e54242)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54727, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e54735: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e53254, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e53749, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e54242), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e54727, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e54735
                                         } else {
                                             let assign1170_ad_e55361: A = {
@@ -11048,13 +11048,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e54850: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e54850: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e54884: A = A::div(A::add_scaled_product(assign1170_ad_e54786, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11082,13 +11082,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e55009: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e55009: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e55043: A = A::div(A::add_scaled_product(assign1170_ad_e54945, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11116,13 +11116,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e55166: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e55166: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e55200: A = A::div(A::add_scaled_product(assign1170_ad_e55102, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11150,13 +11150,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e55315: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e55315: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e55349: A = A::div(A::add_scaled_product(assign1170_ad_e55251, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11175,7 +11175,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign1170_ad_e55359: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e54886, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e55045, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e55202)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e55351, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e55359: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e54886, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e55045, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e55202), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e55351, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e55359
                                                 } else {
                                                     A::constant(0.0)
@@ -11296,7 +11296,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e56106: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e55858, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e55942, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e56024)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e56098, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e56106: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e55858, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e55942, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e56024), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e56098, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e56106
                                                 } else {
                                                     let assign1170_ad_e56248: A = {
@@ -11308,13 +11308,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e56212: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e56212: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e56246: A = A::div(A::add_scaled_product(assign1170_ad_e56148, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11438,7 +11438,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e56900: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e56652, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e56736, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e56818)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e56892, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e56900: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e56652, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e56736, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e56818), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e56892, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e56900
                                                 } else {
                                                     let assign1170_ad_e57042: A = {
@@ -11450,13 +11450,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e57006: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e57006: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e57040: A = A::div(A::add_scaled_product(assign1170_ad_e56942, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11540,7 +11540,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e57407: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e57159, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57243, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e57325)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57399, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e57407: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e57159, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57243, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e57325), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57399, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e57407
                                                 } else {
                                                     let assign1170_ad_e57549: A = {
@@ -11552,13 +11552,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e57513: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e57513: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e57547: A = A::div(A::add_scaled_product(assign1170_ad_e57449, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11634,7 +11634,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e57902: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e57654, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57738, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e57820)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57894, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e57902: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e57654, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57738, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e57820), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e57894, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e57902
                                                 } else {
                                                     let assign1170_ad_e58044: A = {
@@ -11646,13 +11646,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e58008: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e58008: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e58042: A = A::div(A::add_scaled_product(assign1170_ad_e57944, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11728,7 +11728,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e58395: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e58147, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58231, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e58313)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58387, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e58395: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e58147, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58231, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e58313), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58387, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e58395
                                                 } else {
                                                     let assign1170_ad_e58537: A = {
@@ -11740,13 +11740,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e58501: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e58501: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e58535: A = A::div(A::add_scaled_product(assign1170_ad_e58437, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11822,7 +11822,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e58880: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e58632, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58716, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e58798)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58872, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e58880: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e58632, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58716, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e58798), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58872, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e58880
                                                 } else {
                                                     let assign1170_ad_e59022: A = {
@@ -11834,13 +11834,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e58986: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e58986: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e59020: A = A::div(A::add_scaled_product(assign1170_ad_e58922, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11862,7 +11862,7 @@ impl Instance {
                                                     assign1170_ad_e59022
                                                 }
                                             };
-                                            let assign1170_ad_e59031: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e57550, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58045, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e58538)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e59023, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e59031: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e57550, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e58045, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e58538), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e59023, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e59031
                                         } else {
                                             let assign1170_ad_e59657: A = {
@@ -11876,13 +11876,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e59146: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e59146: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e59180: A = A::div(A::add_scaled_product(assign1170_ad_e59082, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11910,13 +11910,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e59305: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e59305: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e59339: A = A::div(A::add_scaled_product(assign1170_ad_e59241, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11944,13 +11944,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e59462: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e59462: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e59496: A = A::div(A::add_scaled_product(assign1170_ad_e59398, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -11978,13 +11978,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e59611: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e59611: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e59645: A = A::div(A::add_scaled_product(assign1170_ad_e59547, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12003,7 +12003,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign1170_ad_e59655: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e59182, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e59341, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e59498)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e59647, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e59655: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e59182, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e59341, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e59498), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e59647, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e59655
                                                 } else {
                                                     A::constant(0.0)
@@ -12116,7 +12116,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e60348: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e60100, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e60184, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e60266)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e60340, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e60348: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e60100, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e60184, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e60266), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e60340, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e60348
                                                 } else {
                                                     let assign1170_ad_e60490: A = {
@@ -12128,13 +12128,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e60454: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e60454: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e60488: A = A::div(A::add_scaled_product(assign1170_ad_e60390, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12258,7 +12258,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e61142: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e60894, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e60978, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e61060)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61134, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e61142: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e60894, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e60978, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e61060), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61134, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e61142
                                                 } else {
                                                     let assign1170_ad_e61284: A = {
@@ -12270,13 +12270,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e61248: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e61248: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e61282: A = A::div(A::add_scaled_product(assign1170_ad_e61184, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12360,7 +12360,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e61649: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e61401, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61485, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e61567)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61641, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e61649: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e61401, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61485, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e61567), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61641, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e61649
                                                 } else {
                                                     let assign1170_ad_e61791: A = {
@@ -12372,13 +12372,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e61755: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e61755: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e61789: A = A::div(A::add_scaled_product(assign1170_ad_e61691, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12454,7 +12454,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e62144: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e61896, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61980, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e62062)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62136, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e62144: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e61896, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e61980, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e62062), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62136, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e62144
                                                 } else {
                                                     let assign1170_ad_e62286: A = {
@@ -12466,13 +12466,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e62250: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e62250: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e62284: A = A::div(A::add_scaled_product(assign1170_ad_e62186, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12548,7 +12548,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e62637: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e62389, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62473, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e62555)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62629, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e62637: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e62389, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62473, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e62555), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62629, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e62637
                                                 } else {
                                                     let assign1170_ad_e62779: A = {
@@ -12560,13 +12560,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e62743: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e62743: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e62777: A = A::div(A::add_scaled_product(assign1170_ad_e62679, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12642,7 +12642,7 @@ impl Instance {
                                                             }
                                                         }
                                                     };
-                                                    let assign1170_ad_e63122: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e62874, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62958, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e63040)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63114, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e63122: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e62874, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62958, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e63040), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63114, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e63122
                                                 } else {
                                                     let assign1170_ad_e63264: A = {
@@ -12654,13 +12654,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e63228: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e63228: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e63262: A = A::div(A::add_scaled_product(assign1170_ad_e63164, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12682,7 +12682,7 @@ impl Instance {
                                                     assign1170_ad_e63264
                                                 }
                                             };
-                                            let assign1170_ad_e63273: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e61792, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62287, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e62780)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63265, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e63273: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e61792, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e62287, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e62780), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63265, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e63273
                                         } else {
                                             let assign1170_ad_e63899: A = {
@@ -12696,13 +12696,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e63388: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e63388: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e63422: A = A::div(A::add_scaled_product(assign1170_ad_e63324, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12730,13 +12730,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e63547: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e63547: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e63581: A = A::div(A::add_scaled_product(assign1170_ad_e63483, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12764,13 +12764,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e63704: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e63704: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e63738: A = A::div(A::add_scaled_product(assign1170_ad_e63640, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12798,13 +12798,13 @@ impl Instance {
                                                                     A::constant(0.0)
                                                                 }
                                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                            let assign1170_ad_e63853: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                            let assign1170_ad_e63853: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                                 } else {
                                                                     A::constant(0.0)
                                                                 }
-                                                            }));
+                                                            }), 1.0, 1.0);
                                                             let assign1170_ad_e63887: A = A::div(A::add_scaled_product(assign1170_ad_e63789, 1.0, s.ad_value(44), A::powf({
                                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12823,7 +12823,7 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     };
-                                                    let assign1170_ad_e63897: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e63424, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63583, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e63740)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63889, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                                    let assign1170_ad_e63897: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e63424, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63583, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e63740), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e63889, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                                     assign1170_ad_e63897
                                                 } else {
                                                     A::constant(0.0)
@@ -12902,7 +12902,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e64302: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e64054, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64138, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e64220)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64294, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e64302: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e64054, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64138, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e64220), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64294, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e64302
                                         } else {
                                             let assign1170_ad_e64444: A = {
@@ -12914,13 +12914,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e64408: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e64408: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e64442: A = A::div(A::add_scaled_product(assign1170_ad_e64344, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -12996,7 +12996,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e64797: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e64549, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64633, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e64715)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64789, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e64797: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e64549, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64633, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e64715), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64789, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e64797
                                         } else {
                                             let assign1170_ad_e64939: A = {
@@ -13008,13 +13008,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e64903: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e64903: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e64937: A = A::div(A::add_scaled_product(assign1170_ad_e64839, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13090,7 +13090,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e65290: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e65042, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65126, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e65208)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65282, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e65290: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e65042, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65126, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e65208), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65282, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e65290
                                         } else {
                                             let assign1170_ad_e65432: A = {
@@ -13102,13 +13102,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e65396: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e65396: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e65430: A = A::div(A::add_scaled_product(assign1170_ad_e65332, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13184,7 +13184,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e65775: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e65527, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65611, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e65693)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65767, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e65775: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e65527, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65611, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e65693), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65767, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e65775
                                         } else {
                                             let assign1170_ad_e65917: A = {
@@ -13196,13 +13196,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e65881: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e65881: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e65915: A = A::div(A::add_scaled_product(assign1170_ad_e65817, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13224,7 +13224,7 @@ impl Instance {
                                             assign1170_ad_e65917
                                         }
                                     };
-                                    let assign1170_ad_e65926: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e64445, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64940, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e65433)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65918, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e65926: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e64445, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e64940, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e65433), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e65918, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e65926
                                 } else {
                                     let assign1170_ad_e66552: A = {
@@ -13238,13 +13238,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e66041: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e66041: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e66075: A = A::div(A::add_scaled_product(assign1170_ad_e65977, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13272,13 +13272,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e66200: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e66200: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e66234: A = A::div(A::add_scaled_product(assign1170_ad_e66136, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13306,13 +13306,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e66357: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e66357: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e66391: A = A::div(A::add_scaled_product(assign1170_ad_e66293, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13340,13 +13340,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e66506: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e66506: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e66540: A = A::div(A::add_scaled_product(assign1170_ad_e66442, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13365,7 +13365,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e66550: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e66077, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66236, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e66393)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66542, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e66550: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e66077, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66236, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e66393), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66542, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e66550
                                         } else {
                                             A::constant(0.0)
@@ -13430,7 +13430,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e66915: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e66667, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66751, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e66833)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66907, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e66915: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e66667, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66751, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e66833), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e66907, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e66915
                                         } else {
                                             let assign1170_ad_e67057: A = {
@@ -13442,13 +13442,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e67021: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e67021: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e67055: A = A::div(A::add_scaled_product(assign1170_ad_e66957, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13524,7 +13524,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e67410: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e67162, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67246, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e67328)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67402, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e67410: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e67162, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67246, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e67328), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67402, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e67410
                                         } else {
                                             let assign1170_ad_e67552: A = {
@@ -13536,13 +13536,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e67516: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e67516: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e67550: A = A::div(A::add_scaled_product(assign1170_ad_e67452, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13618,7 +13618,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e67903: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e67655, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67739, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e67821)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67895, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e67903: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e67655, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67739, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e67821), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67895, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e67903
                                         } else {
                                             let assign1170_ad_e68045: A = {
@@ -13630,13 +13630,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e68009: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e68009: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e68043: A = A::div(A::add_scaled_product(assign1170_ad_e67945, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13712,7 +13712,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e68388: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e68140, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68224, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e68306)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68380, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e68388: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e68140, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68224, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e68306), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68380, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e68388
                                         } else {
                                             let assign1170_ad_e68530: A = {
@@ -13724,13 +13724,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e68494: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e68494: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e68528: A = A::div(A::add_scaled_product(assign1170_ad_e68430, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13752,7 +13752,7 @@ impl Instance {
                                             assign1170_ad_e68530
                                         }
                                     };
-                                    let assign1170_ad_e68539: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e67058, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67553, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e68046)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68531, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e68539: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e67058, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e67553, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e68046), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68531, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e68539
                                 } else {
                                     let assign1170_ad_e69165: A = {
@@ -13766,13 +13766,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e68654: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e68654: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e68688: A = A::div(A::add_scaled_product(assign1170_ad_e68590, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13800,13 +13800,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e68813: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e68813: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e68847: A = A::div(A::add_scaled_product(assign1170_ad_e68749, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13834,13 +13834,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e68970: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e68970: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e69004: A = A::div(A::add_scaled_product(assign1170_ad_e68906, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13868,13 +13868,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e69119: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e69119: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e69153: A = A::div(A::add_scaled_product(assign1170_ad_e69055, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -13893,7 +13893,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e69163: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e68690, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68849, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e69006)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69155, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e69163: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e68690, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e68849, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e69006), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69155, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e69163
                                         } else {
                                             A::constant(0.0)
@@ -13958,7 +13958,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e69528: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e69280, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69364, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e69446)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69520, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e69528: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e69280, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69364, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e69446), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69520, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e69528
                                         } else {
                                             let assign1170_ad_e69670: A = {
@@ -13970,13 +13970,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e69634: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e69634: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e69668: A = A::div(A::add_scaled_product(assign1170_ad_e69570, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14052,7 +14052,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e70023: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e69775, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69859, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e69941)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70015, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e70023: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e69775, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69859, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e69941), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70015, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e70023
                                         } else {
                                             let assign1170_ad_e70165: A = {
@@ -14064,13 +14064,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e70129: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e70129: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e70163: A = A::div(A::add_scaled_product(assign1170_ad_e70065, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14146,7 +14146,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e70516: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e70268, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70352, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e70434)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70508, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e70516: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e70268, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70352, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e70434), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70508, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e70516
                                         } else {
                                             let assign1170_ad_e70658: A = {
@@ -14158,13 +14158,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e70622: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e70622: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e70656: A = A::div(A::add_scaled_product(assign1170_ad_e70558, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14240,7 +14240,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e71001: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e70753, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70837, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e70919)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70993, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e71001: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e70753, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70837, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e70919), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70993, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e71001
                                         } else {
                                             let assign1170_ad_e71143: A = {
@@ -14252,13 +14252,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e71107: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e71107: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e71141: A = A::div(A::add_scaled_product(assign1170_ad_e71043, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14280,7 +14280,7 @@ impl Instance {
                                             assign1170_ad_e71143
                                         }
                                     };
-                                    let assign1170_ad_e71152: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e69671, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70166, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e70659)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71144, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e71152: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e69671, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e70166, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e70659), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71144, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e71152
                                 } else {
                                     let assign1170_ad_e71778: A = {
@@ -14294,13 +14294,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e71267: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e71267: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e71301: A = A::div(A::add_scaled_product(assign1170_ad_e71203, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14328,13 +14328,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e71426: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e71426: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e71460: A = A::div(A::add_scaled_product(assign1170_ad_e71362, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14362,13 +14362,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e71583: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e71583: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e71617: A = A::div(A::add_scaled_product(assign1170_ad_e71519, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14396,13 +14396,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e71732: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e71732: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e71766: A = A::div(A::add_scaled_product(assign1170_ad_e71668, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14421,7 +14421,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e71776: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e71303, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71462, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e71619)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71768, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e71776: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e71303, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71462, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e71619), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71768, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e71776
                                         } else {
                                             A::constant(0.0)
@@ -14486,7 +14486,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e72151: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e71903, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71987, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e72069)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72143, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e72151: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e71903, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e71987, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e72069), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72143, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e72151
                                         } else {
                                             let assign1170_ad_e72293: A = {
@@ -14498,13 +14498,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e72257: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e72257: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e72291: A = A::div(A::add_scaled_product(assign1170_ad_e72193, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14580,7 +14580,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e72646: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e72398, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72482, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e72564)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72638, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e72646: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e72398, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72482, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e72564), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72638, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e72646
                                         } else {
                                             let assign1170_ad_e72788: A = {
@@ -14592,13 +14592,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e72752: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e72752: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e72786: A = A::div(A::add_scaled_product(assign1170_ad_e72688, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14674,7 +14674,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e73139: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e72891, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72975, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e73057)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73131, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e73139: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e72891, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72975, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e73057), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73131, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e73139
                                         } else {
                                             let assign1170_ad_e73281: A = {
@@ -14686,13 +14686,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e73245: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e73245: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e73279: A = A::div(A::add_scaled_product(assign1170_ad_e73181, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14768,7 +14768,7 @@ impl Instance {
                                                     }
                                                 }
                                             };
-                                            let assign1170_ad_e73624: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e73376, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73460, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e73542)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73616, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e73624: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e73376, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73460, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e73542), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73616, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e73624
                                         } else {
                                             let assign1170_ad_e73766: A = {
@@ -14780,13 +14780,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e73730: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e73730: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e73764: A = A::div(A::add_scaled_product(assign1170_ad_e73666, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14808,7 +14808,7 @@ impl Instance {
                                             assign1170_ad_e73766
                                         }
                                     };
-                                    let assign1170_ad_e73775: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e72294, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72789, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e73282)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73767, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e73775: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e72294, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e72789, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e73282), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e73767, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e73775
                                 } else {
                                     let assign1170_ad_e74401: A = {
@@ -14822,13 +14822,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e73890: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e73890: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e73924: A = A::div(A::add_scaled_product(assign1170_ad_e73826, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14856,13 +14856,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e74049: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e74049: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e74083: A = A::div(A::add_scaled_product(assign1170_ad_e73985, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14890,13 +14890,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e74206: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e74206: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e74240: A = A::div(A::add_scaled_product(assign1170_ad_e74142, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14924,13 +14924,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e74355: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e74355: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e74389: A = A::div(A::add_scaled_product(assign1170_ad_e74291, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -14949,7 +14949,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e74399: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e73926, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74085, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e74242)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74391, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e74399: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e73926, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74085, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e74242), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74391, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e74399
                                         } else {
                                             A::constant(0.0)
@@ -14958,7 +14958,7 @@ impl Instance {
                                     assign1170_ad_e74401
                                 }
                             };
-                            let assign1170_ad_e74409: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e66553)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69166, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e71779, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74402, (1.0 / 3.0)), (2.0 / 3.0)));
+                            let assign1170_ad_e74409: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e66553), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e69166, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e71779, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74402, (1.0 / 3.0)), (2.0 / 3.0)));
                             assign1170_ad_e74409
                         } else {
                             let assign1170_ad_e76971: A = {
@@ -14974,13 +14974,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e74542: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e74542: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e74576: A = A::div(A::add_scaled_product(assign1170_ad_e74478, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15008,13 +15008,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e74701: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e74701: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e74735: A = A::div(A::add_scaled_product(assign1170_ad_e74637, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15042,13 +15042,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e74858: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e74858: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e74892: A = A::div(A::add_scaled_product(assign1170_ad_e74794, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15076,13 +15076,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e75007: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e75007: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e75041: A = A::div(A::add_scaled_product(assign1170_ad_e74943, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15101,7 +15101,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e75051: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e74578, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74737, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e74894)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75043, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e75051: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e74578, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e74737, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e74894), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75043, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e75051
                                         } else {
                                             A::constant(0.0)
@@ -15118,13 +15118,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e75175: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e75175: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e75209: A = A::div(A::add_scaled_product(assign1170_ad_e75111, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15152,13 +15152,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e75334: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e75334: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e75368: A = A::div(A::add_scaled_product(assign1170_ad_e75270, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15186,13 +15186,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e75491: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e75491: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e75525: A = A::div(A::add_scaled_product(assign1170_ad_e75427, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15220,13 +15220,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e75640: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e75640: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e75674: A = A::div(A::add_scaled_product(assign1170_ad_e75576, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15245,7 +15245,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e75684: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e75211, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75370, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e75527)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75676, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e75684: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e75211, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75370, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e75527), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75676, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e75684
                                         } else {
                                             A::constant(0.0)
@@ -15262,13 +15262,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e75808: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e75808: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e75842: A = A::div(A::add_scaled_product(assign1170_ad_e75744, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15296,13 +15296,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e75967: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e75967: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e76001: A = A::div(A::add_scaled_product(assign1170_ad_e75903, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15330,13 +15330,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e76124: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e76124: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e76158: A = A::div(A::add_scaled_product(assign1170_ad_e76060, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15364,13 +15364,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e76273: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e76273: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e76307: A = A::div(A::add_scaled_product(assign1170_ad_e76209, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15389,7 +15389,7 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e76317: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e75844, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76003, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e76160)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76309, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e76317: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e75844, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76003, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e76160), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76309, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e76317
                                         } else {
                                             A::constant(0.0)
@@ -15406,13 +15406,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e76451: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e76451: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e76485: A = A::div(A::add_scaled_product(assign1170_ad_e76387, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15440,13 +15440,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e76610: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e76610: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e76644: A = A::div(A::add_scaled_product(assign1170_ad_e76546, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15474,13 +15474,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e76767: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e76767: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e76801: A = A::div(A::add_scaled_product(assign1170_ad_e76703, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15508,13 +15508,13 @@ impl Instance {
                                                             A::constant(0.0)
                                                         }
                                                     }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                    let assign1170_ad_e76916: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                    let assign1170_ad_e76916: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                         } else {
                                                             A::constant(0.0)
                                                         }
-                                                    }));
+                                                    }), 1.0, 1.0);
                                                     let assign1170_ad_e76950: A = A::div(A::add_scaled_product(assign1170_ad_e76852, 1.0, s.ad_value(44), A::powf({
                                                         if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                             A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15533,13 +15533,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             };
-                                            let assign1170_ad_e76960: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e76487, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76646, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e76803)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76952, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                            let assign1170_ad_e76960: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e76487, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76646, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e76803), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76952, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                             assign1170_ad_e76960
                                         } else {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign1170_ad_e76969: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e75053)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75686, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e76319, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76962, (1.0 / 3.0)), (2.0 / 3.0)));
+                                    let assign1170_ad_e76969: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e75053), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e75686, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e76319, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e76962, (1.0 / 3.0)), (2.0 / 3.0)));
                                     assign1170_ad_e76969
                                 } else {
                                     A::constant(0.0)
@@ -15612,7 +15612,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e77391: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e77143, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77227, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e77309)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77383, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e77391: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e77143, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77227, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e77309), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77383, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e77391
                                     } else {
                                         let assign1170_ad_e77533: A = {
@@ -15624,13 +15624,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e77497: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e77497: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e77531: A = A::div(A::add_scaled_product(assign1170_ad_e77433, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15706,7 +15706,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e77886: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e77638, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77722, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e77804)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77878, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e77886: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e77638, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77722, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e77804), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e77878, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e77886
                                     } else {
                                         let assign1170_ad_e78028: A = {
@@ -15718,13 +15718,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e77992: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e77992: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e78026: A = A::div(A::add_scaled_product(assign1170_ad_e77928, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15800,7 +15800,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e78379: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e78131, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78215, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e78297)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78371, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e78379: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e78131, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78215, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e78297), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78371, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e78379
                                     } else {
                                         let assign1170_ad_e78521: A = {
@@ -15812,13 +15812,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e78485: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e78485: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e78519: A = A::div(A::add_scaled_product(assign1170_ad_e78421, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15894,7 +15894,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e78864: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e78616, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78700, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e78782)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78856, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e78864: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e78616, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78700, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e78782), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78856, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e78864
                                     } else {
                                         let assign1170_ad_e79006: A = {
@@ -15906,13 +15906,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e78970: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e78970: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e79004: A = A::div(A::add_scaled_product(assign1170_ad_e78906, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15934,7 +15934,7 @@ impl Instance {
                                         assign1170_ad_e79006
                                     }
                                 };
-                                let assign1170_ad_e79015: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e77534, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78029, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e78522)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79007, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign1170_ad_e79015: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e77534, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e78029, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e78522), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79007, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign1170_ad_e79015
                             } else {
                                 let assign1170_ad_e79641: A = {
@@ -15948,13 +15948,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e79130: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e79130: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e79164: A = A::div(A::add_scaled_product(assign1170_ad_e79066, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -15982,13 +15982,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e79289: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e79289: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e79323: A = A::div(A::add_scaled_product(assign1170_ad_e79225, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16016,13 +16016,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e79446: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e79446: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e79480: A = A::div(A::add_scaled_product(assign1170_ad_e79382, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16050,13 +16050,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e79595: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e79595: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e79629: A = A::div(A::add_scaled_product(assign1170_ad_e79531, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16075,7 +16075,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e79639: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e79166, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79325, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e79482)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79631, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e79639: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e79166, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79325, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e79482), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79631, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e79639
                                     } else {
                                         A::constant(0.0)
@@ -16140,7 +16140,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e80004: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e79756, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79840, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e79922)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79996, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e80004: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e79756, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79840, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e79922), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e79996, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e80004
                                     } else {
                                         let assign1170_ad_e80146: A = {
@@ -16152,13 +16152,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e80110: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e80110: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e80144: A = A::div(A::add_scaled_product(assign1170_ad_e80046, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16234,7 +16234,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e80499: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e80251, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80335, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e80417)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80491, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e80499: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e80251, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80335, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e80417), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80491, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e80499
                                     } else {
                                         let assign1170_ad_e80641: A = {
@@ -16246,13 +16246,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e80605: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e80605: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e80639: A = A::div(A::add_scaled_product(assign1170_ad_e80541, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16328,7 +16328,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e80992: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e80744, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80828, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e80910)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80984, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e80992: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e80744, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80828, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e80910), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80984, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e80992
                                     } else {
                                         let assign1170_ad_e81134: A = {
@@ -16340,13 +16340,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e81098: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e81098: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e81132: A = A::div(A::add_scaled_product(assign1170_ad_e81034, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16422,7 +16422,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e81477: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e81229, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81313, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e81395)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81469, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e81477: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e81229, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81313, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e81395), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81469, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e81477
                                     } else {
                                         let assign1170_ad_e81619: A = {
@@ -16434,13 +16434,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e81583: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e81583: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e81617: A = A::div(A::add_scaled_product(assign1170_ad_e81519, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16462,7 +16462,7 @@ impl Instance {
                                         assign1170_ad_e81619
                                     }
                                 };
-                                let assign1170_ad_e81628: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e80147, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80642, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e81135)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81620, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign1170_ad_e81628: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e80147, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e80642, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e81135), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81620, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign1170_ad_e81628
                             } else {
                                 let assign1170_ad_e82254: A = {
@@ -16476,13 +16476,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e81743: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e81743: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e81777: A = A::div(A::add_scaled_product(assign1170_ad_e81679, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16510,13 +16510,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e81902: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e81902: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e81936: A = A::div(A::add_scaled_product(assign1170_ad_e81838, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16544,13 +16544,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e82059: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e82059: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e82093: A = A::div(A::add_scaled_product(assign1170_ad_e81995, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16578,13 +16578,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e82208: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e82208: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e82242: A = A::div(A::add_scaled_product(assign1170_ad_e82144, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16603,7 +16603,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e82252: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e81779, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81938, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e82095)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82244, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e82252: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e81779, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e81938, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e82095), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82244, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e82252
                                     } else {
                                         A::constant(0.0)
@@ -16668,7 +16668,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e82617: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e82369, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82453, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e82535)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82609, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e82617: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e82369, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82453, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e82535), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82609, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e82617
                                     } else {
                                         let assign1170_ad_e82759: A = {
@@ -16680,13 +16680,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e82723: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e82723: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e82757: A = A::div(A::add_scaled_product(assign1170_ad_e82659, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16762,7 +16762,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e83112: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e82864, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82948, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e83030)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83104, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e83112: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e82864, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82948, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e83030), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83104, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e83112
                                     } else {
                                         let assign1170_ad_e83254: A = {
@@ -16774,13 +16774,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e83218: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e83218: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e83252: A = A::div(A::add_scaled_product(assign1170_ad_e83154, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16856,7 +16856,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e83605: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e83357, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83441, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e83523)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83597, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e83605: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e83357, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83441, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e83523), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83597, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e83605
                                     } else {
                                         let assign1170_ad_e83747: A = {
@@ -16868,13 +16868,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e83711: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e83711: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e83745: A = A::div(A::add_scaled_product(assign1170_ad_e83647, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16950,7 +16950,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e84090: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e83842, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83926, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e84008)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84082, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e84090: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e83842, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83926, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e84008), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84082, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e84090
                                     } else {
                                         let assign1170_ad_e84232: A = {
@@ -16962,13 +16962,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e84196: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e84196: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e84230: A = A::div(A::add_scaled_product(assign1170_ad_e84132, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -16990,7 +16990,7 @@ impl Instance {
                                         assign1170_ad_e84232
                                     }
                                 };
-                                let assign1170_ad_e84241: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e82760, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83255, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e83748)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84233, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign1170_ad_e84241: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e82760, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e83255, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e83748), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84233, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign1170_ad_e84241
                             } else {
                                 let assign1170_ad_e84867: A = {
@@ -17004,13 +17004,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e84356: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e84356: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e84390: A = A::div(A::add_scaled_product(assign1170_ad_e84292, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17038,13 +17038,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e84515: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e84515: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e84549: A = A::div(A::add_scaled_product(assign1170_ad_e84451, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17072,13 +17072,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e84672: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e84672: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e84706: A = A::div(A::add_scaled_product(assign1170_ad_e84608, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17106,13 +17106,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e84821: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e84821: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e84855: A = A::div(A::add_scaled_product(assign1170_ad_e84757, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17131,7 +17131,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e84865: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e84392, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84551, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e84708)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84857, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e84865: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e84392, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84551, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e84708), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e84857, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e84865
                                     } else {
                                         A::constant(0.0)
@@ -17196,7 +17196,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e85240: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e84992, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85076, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e85158)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85232, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e85240: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e84992, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85076, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e85158), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85232, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e85240
                                     } else {
                                         let assign1170_ad_e85382: A = {
@@ -17208,13 +17208,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e85346: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e85346: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e85380: A = A::div(A::add_scaled_product(assign1170_ad_e85282, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17290,7 +17290,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e85735: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e85487, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85571, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e85653)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85727, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e85735: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e85487, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85571, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e85653), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85727, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e85735
                                     } else {
                                         let assign1170_ad_e85877: A = {
@@ -17302,13 +17302,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e85841: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e85841: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e85875: A = A::div(A::add_scaled_product(assign1170_ad_e85777, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17384,7 +17384,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e86228: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e85980, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86064, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e86146)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86220, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e86228: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e85980, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86064, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e86146), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86220, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e86228
                                     } else {
                                         let assign1170_ad_e86370: A = {
@@ -17396,13 +17396,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e86334: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e86334: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e86368: A = A::div(A::add_scaled_product(assign1170_ad_e86270, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17478,7 +17478,7 @@ impl Instance {
                                                 }
                                             }
                                         };
-                                        let assign1170_ad_e86713: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e86465, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86549, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e86631)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86705, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e86713: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e86465, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86549, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e86631), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86705, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e86713
                                     } else {
                                         let assign1170_ad_e86855: A = {
@@ -17490,13 +17490,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e86819: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e86819: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e86853: A = A::div(A::add_scaled_product(assign1170_ad_e86755, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17518,7 +17518,7 @@ impl Instance {
                                         assign1170_ad_e86855
                                     }
                                 };
-                                let assign1170_ad_e86864: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e85383, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85878, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e86371)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86856, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                let assign1170_ad_e86864: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e85383, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e85878, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e86371), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e86856, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                 assign1170_ad_e86864
                             } else {
                                 let assign1170_ad_e87490: A = {
@@ -17532,13 +17532,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e86979: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e86979: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e87013: A = A::div(A::add_scaled_product(assign1170_ad_e86915, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17566,13 +17566,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e87138: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e87138: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e87172: A = A::div(A::add_scaled_product(assign1170_ad_e87074, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17600,13 +17600,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e87295: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e87295: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e87329: A = A::div(A::add_scaled_product(assign1170_ad_e87231, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17634,13 +17634,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e87444: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e87444: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e87478: A = A::div(A::add_scaled_product(assign1170_ad_e87380, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17659,7 +17659,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e87488: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e87015, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87174, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e87331)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87480, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e87488: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e87015, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87174, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e87331), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87480, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e87488
                                     } else {
                                         A::constant(0.0)
@@ -17668,7 +17668,7 @@ impl Instance {
                                 assign1170_ad_e87490
                             }
                         };
-                        let assign1170_ad_e87498: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e79642)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82255, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e84868, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87491, (1.0 / 3.0)), (2.0 / 3.0)));
+                        let assign1170_ad_e87498: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e79642), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e82255, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e84868, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87491, (1.0 / 3.0)), (2.0 / 3.0)));
                         assign1170_ad_e87498
                     } else {
                         let assign1170_ad_e90060: A = {
@@ -17684,13 +17684,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e87631: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e87631: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e87665: A = A::div(A::add_scaled_product(assign1170_ad_e87567, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17718,13 +17718,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e87790: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e87790: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e87824: A = A::div(A::add_scaled_product(assign1170_ad_e87726, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17752,13 +17752,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e87947: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e87947: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e87981: A = A::div(A::add_scaled_product(assign1170_ad_e87883, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17786,13 +17786,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e88096: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e88096: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e88130: A = A::div(A::add_scaled_product(assign1170_ad_e88032, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17811,7 +17811,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e88140: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e87667, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87826, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e87983)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88132, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e88140: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e87667, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e87826, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e87983), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88132, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e88140
                                     } else {
                                         A::constant(0.0)
@@ -17828,13 +17828,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e88264: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e88264: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e88298: A = A::div(A::add_scaled_product(assign1170_ad_e88200, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17862,13 +17862,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e88423: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e88423: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e88457: A = A::div(A::add_scaled_product(assign1170_ad_e88359, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17896,13 +17896,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e88580: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e88580: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e88614: A = A::div(A::add_scaled_product(assign1170_ad_e88516, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17930,13 +17930,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e88729: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e88729: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e88763: A = A::div(A::add_scaled_product(assign1170_ad_e88665, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -17955,7 +17955,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e88773: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e88300, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88459, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e88616)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88765, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e88773: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e88300, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88459, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e88616), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88765, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e88773
                                     } else {
                                         A::constant(0.0)
@@ -17972,13 +17972,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e88897: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e88897: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e88931: A = A::div(A::add_scaled_product(assign1170_ad_e88833, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18006,13 +18006,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e89056: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e89056: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e89090: A = A::div(A::add_scaled_product(assign1170_ad_e88992, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18040,13 +18040,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e89213: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e89213: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e89247: A = A::div(A::add_scaled_product(assign1170_ad_e89149, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18074,13 +18074,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e89362: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e89362: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e89396: A = A::div(A::add_scaled_product(assign1170_ad_e89298, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18099,7 +18099,7 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e89406: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e88933, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e89092, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e89249)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e89398, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e89406: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e88933, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e89092, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e89249), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e89398, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e89406
                                     } else {
                                         A::constant(0.0)
@@ -18116,13 +18116,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e89540: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e89540: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e89574: A = A::div(A::add_scaled_product(assign1170_ad_e89476, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18150,13 +18150,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e89699: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e89699: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e89733: A = A::div(A::add_scaled_product(assign1170_ad_e89635, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18184,13 +18184,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e89856: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e89856: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e89890: A = A::div(A::add_scaled_product(assign1170_ad_e89792, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18218,13 +18218,13 @@ impl Instance {
                                                         A::constant(0.0)
                                                     }
                                                 }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                                let assign1170_ad_e90005: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                                let assign1170_ad_e90005: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                     } else {
                                                         A::constant(0.0)
                                                     }
-                                                }));
+                                                }), 1.0, 1.0);
                                                 let assign1170_ad_e90039: A = A::div(A::add_scaled_product(assign1170_ad_e89941, 1.0, s.ad_value(44), A::powf({
                                                     if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                         A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18243,13 +18243,13 @@ impl Instance {
                                                 A::constant(0.0)
                                             }
                                         };
-                                        let assign1170_ad_e90049: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e89576, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e89735, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e89892)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90041, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                        let assign1170_ad_e90049: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e89576, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e89735, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e89892), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90041, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                         assign1170_ad_e90049
                                     } else {
                                         A::constant(0.0)
                                     }
                                 };
-                                let assign1170_ad_e90058: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e88142)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88775, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e89408, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90051, (1.0 / 3.0)), (2.0 / 3.0)));
+                                let assign1170_ad_e90058: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e88142), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e88775, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e89408, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90051, (1.0 / 3.0)), (2.0 / 3.0)));
                                 assign1170_ad_e90058
                             } else {
                                 A::constant(0.0)
@@ -18274,13 +18274,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e90217: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e90217: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e90251: A = A::div(A::add_scaled_product(assign1170_ad_e90153, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18308,13 +18308,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e90376: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e90376: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e90410: A = A::div(A::add_scaled_product(assign1170_ad_e90312, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18342,13 +18342,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e90533: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e90533: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e90567: A = A::div(A::add_scaled_product(assign1170_ad_e90469, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18376,13 +18376,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e90682: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e90682: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e90716: A = A::div(A::add_scaled_product(assign1170_ad_e90618, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18401,7 +18401,7 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign1170_ad_e90726: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e90253, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90412, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e90569)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90718, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e90726: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e90253, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90412, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e90569), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e90718, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e90726
                                 } else {
                                     A::constant(0.0)
@@ -18418,13 +18418,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e90850: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e90850: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e90884: A = A::div(A::add_scaled_product(assign1170_ad_e90786, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18452,13 +18452,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e91009: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e91009: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e91043: A = A::div(A::add_scaled_product(assign1170_ad_e90945, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18486,13 +18486,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e91166: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e91166: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e91200: A = A::div(A::add_scaled_product(assign1170_ad_e91102, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18520,13 +18520,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e91315: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e91315: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e91349: A = A::div(A::add_scaled_product(assign1170_ad_e91251, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18545,7 +18545,7 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign1170_ad_e91359: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e90886, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91045, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e91202)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91351, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e91359: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e90886, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91045, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e91202), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91351, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e91359
                                 } else {
                                     A::constant(0.0)
@@ -18562,13 +18562,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e91483: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e91483: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e91517: A = A::div(A::add_scaled_product(assign1170_ad_e91419, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18596,13 +18596,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e91642: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e91642: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e91676: A = A::div(A::add_scaled_product(assign1170_ad_e91578, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18630,13 +18630,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e91799: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e91799: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e91833: A = A::div(A::add_scaled_product(assign1170_ad_e91735, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18664,13 +18664,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e91948: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e91948: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e91982: A = A::div(A::add_scaled_product(assign1170_ad_e91884, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18689,7 +18689,7 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign1170_ad_e91992: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e91519, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91678, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e91835)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91984, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e91992: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e91519, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91678, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e91835), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91984, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e91992
                                 } else {
                                     A::constant(0.0)
@@ -18706,13 +18706,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e92126: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e92126: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e92160: A = A::div(A::add_scaled_product(assign1170_ad_e92062, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18740,13 +18740,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e92285: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e92285: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e92319: A = A::div(A::add_scaled_product(assign1170_ad_e92221, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18774,13 +18774,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e92442: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e92442: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e92476: A = A::div(A::add_scaled_product(assign1170_ad_e92378, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18808,13 +18808,13 @@ impl Instance {
                                                     A::constant(0.0)
                                                 }
                                             }, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0));
-                                            let assign1170_ad_e92591: A = A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln({
+                                            let assign1170_ad_e92591: A = A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
                                                 } else {
                                                     A::constant(0.0)
                                                 }
-                                            }));
+                                            }), 1.0, 1.0);
                                             let assign1170_ad_e92625: A = A::div(A::add_scaled_product(assign1170_ad_e92527, 1.0, s.ad_value(44), A::powf({
                                                 if ((((s.v[33] - s.v[41]) + s.v[30]) - s.v[108]) <= 0.0) {
                                                     A::div_from_scalar(6.0, A::exp(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108))))
@@ -18833,13 +18833,13 @@ impl Instance {
                                             A::constant(0.0)
                                         }
                                     };
-                                    let assign1170_ad_e92635: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e92162, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e92321, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e92478)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e92627, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
+                                    let assign1170_ad_e92635: A = A::div(A::add_scaled_product(A::add(assign1170_ad_e92162, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e92321, (1.0 / 3.0)), (2.0 / 3.0)), A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e92478), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e92627, ((-2.0) / 3.0)), (-(1.0 / 3.0))));
                                     assign1170_ad_e92635
                                 } else {
                                     A::constant(0.0)
                                 }
                             };
-                            let assign1170_ad_e92644: A = A::div(A::add_scaled_product(A::add(A::offset(A::sub(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), s.ad_value(108)), 1.0), A::ln(assign1170_ad_e90728)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91361, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e91994, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e92637, (1.0 / 3.0)), (2.0 / 3.0)));
+                            let assign1170_ad_e92644: A = A::div(A::add_scaled_product(A::add_scaled_inputs3_offset(A::add_scaled_inputs3(s.ad_value(33), 1.0, s.ad_value(41), (-1.0), s.ad_value(30), 1.0), 1.0, s.ad_value(108), (-1.0), A::ln(assign1170_ad_e90728), 1.0, 1.0), 1.0, s.ad_value(44), A::powf(assign1170_ad_e91361, ((-2.0) / 3.0)), (-(1.0 / 3.0))), A::add_scaled_product(A::add(assign1170_ad_e91994, A::div_scaled_product(A::div_from_scalar(s.v[39], A::scale(s.ad_value(32), s.v[47])), s.ad_value(63), s.v[54], s.ad_value(63), 1.0)), 1.0, s.ad_value(44), A::powf(assign1170_ad_e92637, (1.0 / 3.0)), (2.0 / 3.0)));
                             assign1170_ad_e92644
                         } else {
                             A::constant(0.0)

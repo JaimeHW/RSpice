@@ -1502,7 +1502,7 @@ impl Instance {
 
         if ((s.b[1441] && s.b[1442]) && s.b[1684]) {
             s.store_div_ad_rhs(336, 1500, A::square(s.ad_value(185)));
-            s.store_ad_value(334, A::add_scaled_inputs3(A::offset(s.ad_value(85), 2.0), 1.0, s.ad_value(155), (-1.0), s.ad_value(1436), -1.0));
+            s.store_ad_value(334, A::add_scaled_inputs3_offset(s.ad_value(85), 1.0, s.ad_value(155), (-1.0), s.ad_value(1436), -1.0, 2.0));
             s.store_offset_mul_ad(338, A::div_from_scalar(2.0, s.ad_value(336)), s.ad_value(334), 1.0);
         }
 

@@ -924,7 +924,7 @@ impl Instance {
 
         s.store_scaled_offset_ad(115, A::add_scaled_inputs(s.ad_value(131), 0.5, A::sqrt(A::offset(A::square(s.ad_value(131)), 1.921812)), 0.5), 1.0, 0.025);
 
-        s.store_ad_value(117, A::add_scaled_inputs3(s.ad_value(42), 1.0, A::scaled_offset(s.ad_value(114), (-1.0), p.p55), 1.0, A::scaled_offset(A::div_from_scalar(1.0, s.ad_value(114)), (-1.0), p.p56), 1.0));
+        s.store_ad_value(117, A::add_scaled_inputs3_offset(s.ad_value(42), 1.0, s.ad_value(114), p.p55, A::div_from_scalar(1.0, s.ad_value(114)), p.p56, (((-1.0) * p.p55) + ((-1.0) * p.p56))));
 
         s.b[306] = (p.p10 == 1.0);
         s.v[306] = if s.b[306] { 1.0 } else { 0.0 };
@@ -1391,7 +1391,7 @@ impl Instance {
         s.v[340] = if s.b[340] { 1.0 } else { 0.0 };
 
         if s.b[340] {
-            s.store_add_scaled_ad_lhs(160, A::add_scaled_inputs3(A::scale_offset(s.ad_value(102), 1.0 / (p.p24), 1.0), 1.0, s.ad_value(103), 1.0 / (p.p25), A::div(s.ad_value(126), s.ad_value(118)), 1.0), 127, 1.0 / (s.v[119]));
+            s.store_add_scaled_ad_lhs(160, A::add_scaled_inputs3_offset(s.ad_value(102), 1.0 / (p.p24), s.ad_value(103), 1.0 / (p.p25), A::div(s.ad_value(126), s.ad_value(118)), 1.0, 1.0), 127, 1.0 / (s.v[119]));
             s.store_scaled_add_ad_rhs(161, 160, A::sqrt(A::offset(A::square(s.ad_value(160)), 0.01)), 0.5);
             s.store_div(158, 37, 161);
         }
@@ -2447,7 +2447,7 @@ impl Instance {
 
         s.store_scaled_offset_ad(115, A::add_scaled_inputs(s.ad_value(131), 0.5, A::sqrt(A::offset(A::square(s.ad_value(131)), 1.921812)), 0.5), 1.0, 0.025);
 
-        s.store_ad_value(117, A::add_scaled_inputs3(s.ad_value(42), 1.0, A::scaled_offset(s.ad_value(114), (-1.0), p.p55), 1.0, A::scaled_offset(A::div_from_scalar(1.0, s.ad_value(114)), (-1.0), p.p56), 1.0));
+        s.store_ad_value(117, A::add_scaled_inputs3_offset(s.ad_value(42), 1.0, s.ad_value(114), p.p55, A::div_from_scalar(1.0, s.ad_value(114)), p.p56, (((-1.0) * p.p55) + ((-1.0) * p.p56))));
 
         s.b[306] = (p.p10 == 1.0);
         s.v[306] = if s.b[306] { 1.0 } else { 0.0 };

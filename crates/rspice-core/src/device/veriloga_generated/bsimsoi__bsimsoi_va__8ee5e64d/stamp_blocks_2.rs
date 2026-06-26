@@ -38,7 +38,7 @@ impl Instance {
         if ((!s.b[1540]) && (!s.b[1556])) {
             s.store_offset_sub_ad(1180, s.ad_value(1160), A::offset(s.ad_value(1365), 0.02), (-0.01));
             s.store_sqrt_square_offset(1181, 1180, 0.0001);
-            s.store_ad_value(1364, A::add_scaled_inputs3(A::offset(s.ad_value(1365), 0.02), 1.0, s.ad_value(1180), 0.5, s.ad_value(1181), 0.5));
+            s.store_ad_value(1364, A::add_scaled_inputs3_offset(s.ad_value(1365), 1.0, s.ad_value(1180), 0.5, s.ad_value(1181), 0.5, 0.02));
         }
 
         if (!s.b[1540]) {
@@ -156,7 +156,7 @@ impl Instance {
         if ((!s.b[1540]) && (!s.b[1562])) {
             s.store_offset_sub_ad(1180, s.ad_value(1160), A::offset(s.ad_value(1381), 0.02), (-0.01));
             s.store_sqrt_square_offset(1181, 1180, 0.0001);
-            s.store_ad_value(1380, A::add_scaled_inputs3(A::offset(s.ad_value(1381), 0.02), 1.0, s.ad_value(1180), 0.5, s.ad_value(1181), 0.5));
+            s.store_ad_value(1380, A::add_scaled_inputs3_offset(s.ad_value(1381), 1.0, s.ad_value(1180), 0.5, s.ad_value(1181), 0.5, 0.02));
         }
 
         if (!s.b[1540]) {
