@@ -3084,6 +3084,66 @@ fn rust_backend_directly_stores_common_fused_expression_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_affine_sum_expression_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_affine_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression direct affine stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs3(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs3_offset(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs4(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs4_offset(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_add_scaled_inputs3("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs3_offset("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("s.store_add_scaled_inputs4("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs4_offset("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct affine root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
@@ -3541,11 +3601,15 @@ fn rust_backend_fuses_expression_scaled_add_sub_chains() {
     assert!(stamp.contains("A::add_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("A::sub_scaled_inputs("), "{stamp}");
     assert!(
-        stamp.contains("A::scale_offset(") || stamp.contains("A::add_scaled_inputs3_offset("),
+        stamp.contains("A::scale_offset(")
+            || stamp.contains("A::add_scaled_inputs3_offset(")
+            || stamp.contains("s.store_add_scaled_inputs3_offset("),
         "{stamp}"
     );
     assert!(
-        stamp.contains("A::scaled_offset(") || stamp.contains("A::add_scaled_inputs3_offset("),
+        stamp.contains("A::scaled_offset(")
+            || stamp.contains("A::add_scaled_inputs3_offset(")
+            || stamp.contains("s.store_add_scaled_inputs3_offset("),
         "{stamp}"
     );
     assert!(!stamp.contains("A::scale(A::add("), "{stamp}");
@@ -4983,11 +5047,11 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_ad_value(3, A::add_scaled_inputs4(s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), 1.0, s.ad_value(1), (-1.0)));"),
+        stamp.contains("s.store_add_scaled_inputs4(3, s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), 1.0, s.ad_value(1), (-1.0));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_ad_value(4, A::add_scaled_inputs4(s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), -1.0, s.ad_value(1), 1.0));"),
+        stamp.contains("s.store_add_scaled_inputs4(4, s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), -1.0, s.ad_value(1), 1.0);"),
         "{stamp}"
     );
     assert!(
@@ -11552,6 +11616,36 @@ module compact_expression_direct_store_fused_helpers(p, n);
         sum_product = a + (q * r);
         product_ratio = (a * q) / c;
         I(p, n) <+ sum_product + product_ratio;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_affine_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_affine_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real affine3;
+    real affine3_offset;
+    real affine4;
+    real affine4_offset;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) + offset;
+        affine3 = a + (gain * q) - r;
+        affine3_offset = (a + offset) + (gain * q) - r;
+        affine4 = ((a + q) + r) - t;
+        affine4_offset = ((a + q) + r + t) + offset;
+        I(p, n) <+ affine3 + affine3_offset + affine4 + affine4_offset;
     end
 endmodule
 "#

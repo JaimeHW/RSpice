@@ -2842,6 +2842,48 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_add_scaled_inputs3(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64) {",
+        "        let first_value = first.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let third_value = third.value * third_scale;",
+        "        self.values[index] = (first_value + second_value) + third_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_inputs3_offset(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64, offset: f64) {",
+        "        let first_value = first.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let third_value = third.value * third_scale;",
+        "        self.values[index] = ((first_value + second_value) + third_value) + offset;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_inputs4(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64, fourth: AdValue, fourth_scale: f64) {",
+        "        let first_value = first.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let third_value = third.value * third_scale;",
+        "        let fourth_value = fourth.value * fourth_scale;",
+        "        self.values[index] = ((first_value + second_value) + third_value) + fourth_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale) + fourth.node_derivatives[axis] * fourth_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale) + fourth.branch_derivatives[axis] * fourth_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_inputs4_offset(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64, fourth: AdValue, fourth_scale: f64, offset: f64) {",
+        "        let first_value = first.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let third_value = third.value * third_scale;",
+        "        let fourth_value = fourth.value * fourth_scale;",
+        "        self.values[index] = (((first_value + second_value) + third_value) + fourth_value) + offset;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale) + fourth.node_derivatives[axis] * fourth_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale) + fourth.branch_derivatives[axis] * fourth_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
         "        self.store_scaled_voltage(index, ctx, nodes, pos, neg, 1.0);",
         "    }",
@@ -7140,6 +7182,22 @@ pub fn render_runtime_support_module() -> String {
             "denominator: AdValue<NODE_COUNT, BRANCH_COUNT>,",
         )
         .replace(
+            "first: AdValue,",
+            "first: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
+            "second: AdValue,",
+            "second: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
+            "third: AdValue,",
+            "third: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
+            "fourth: AdValue,",
+            "fourth: AdValue<NODE_COUNT, BRANCH_COUNT>,",
+        )
+        .replace(
             "value: AdValue)",
             "value: AdValue<NODE_COUNT, BRANCH_COUNT>)",
         )
@@ -9594,6 +9652,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_fused_scaled_add_sub_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_common_fused_expression_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_nested_scale_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -9622,9 +9683,6 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         return Some(line);
     }
     if let Some(line) = compact_fused_product3_store_helper_call(target_index, value) {
-        return Some(line);
-    }
-    if let Some(line) = compact_common_fused_expression_store_helper_call(target_index, value) {
         return Some(line);
     }
     if let Some(line) = compact_nested_mixed_multiply_store_helper_call(target_index, value) {
@@ -9791,6 +9849,42 @@ fn compact_common_fused_expression_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "offset")
+        && args.len() == 2
+    {
+        if let Some(inner_args) = compact_ad_call_args(args[0], "add_scaled_inputs3")
+            && inner_args.len() == 6
+        {
+            return Some(format!(
+                "scratch.store_add_scaled_inputs3_offset({target_index}, {}, {}, {}, {}, {}, {}, {});",
+                inner_args[0],
+                inner_args[1],
+                inner_args[2],
+                inner_args[3],
+                inner_args[4],
+                inner_args[5],
+                args[1]
+            ));
+        }
+
+        if let Some(inner_args) = compact_ad_call_args(args[0], "add_scaled_inputs4")
+            && inner_args.len() == 8
+        {
+            return Some(format!(
+                "scratch.store_add_scaled_inputs4_offset({target_index}, {}, {}, {}, {}, {}, {}, {}, {}, {});",
+                inner_args[0],
+                inner_args[1],
+                inner_args[2],
+                inner_args[3],
+                inner_args[4],
+                inner_args[5],
+                inner_args[6],
+                inner_args[7],
+                args[1]
+            ));
+        }
+    }
+
     if let Some(args) = compact_ad_call_args(value, "add_scaled_product")
         && args.len() == 5
     {
@@ -9806,6 +9900,42 @@ fn compact_common_fused_expression_store_helper_call(
         return Some(format!(
             "scratch.store_div_scaled_product({target_index}, {}, {}, {}, {}, {});",
             args[0], args[1], args[2], args[3], args[4]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs3")
+        && args.len() == 6
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_inputs3({target_index}, {}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4], args[5]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs3_offset")
+        && args.len() == 7
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_inputs3_offset({target_index}, {}, {}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4], args[5], args[6]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs4")
+        && args.len() == 8
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_inputs4({target_index}, {}, {}, {}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs4_offset")
+        && args.len() == 9
+    {
+        return Some(format!(
+            "scratch.store_add_scaled_inputs4_offset({target_index}, {}, {}, {}, {}, {}, {}, {}, {}, {});",
+            args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]
         ));
     }
 
