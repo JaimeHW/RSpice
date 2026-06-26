@@ -4070,8 +4070,8 @@ impl Instance {
             s.store_mul_div_from_scalar_lhs(921, p.p1105, 915, 920);
             s.store_add(922, 916, 917);
             s.store_mul_div_from_scalar_lhs(923, p.p1105, 915, 922);
-            s.store_div_ad(924, A::offset(s.ad_value(923), 1.0), A::offset(s.ad_value(921), 1.0));
-            s.store_div_ad(925, A::scale_offset(s.ad_value(923), p.p1106, 1.0), A::scale_offset(s.ad_value(921), p.p1106, 1.0));
+            s.store_ad_value(924, A::div_scaled_offset_numerator(s.ad_value(923), 1.0, 1.0, A::offset(s.ad_value(921), 1.0), 1.0));
+            s.store_ad_value(925, A::div_scaled_offset_numerator(s.ad_value(923), p.p1106, 1.0, A::scale_offset(s.ad_value(921), p.p1106, 1.0), 1.0));
             s.store_mul_ad(926, A::div_from_scalar(p.p1113, s.ad_value(914)), A::sub(s.ad_value(922), s.ad_value(920)));
             s.store_mul_ad(927, A::div_from_scalar(p.p1119, A::powf(s.ad_value(914), p.p1120)), A::sub(s.ad_value(922), s.ad_value(920)));
             s.store_mul_ad(928, A::div_from_scalar(p.p1121, A::powf(s.ad_value(914), p.p1122)), A::sub(s.ad_value(922), s.ad_value(920)));
@@ -5925,7 +5925,7 @@ impl Instance {
 
         if ((s.b[1620] && (!s.b[1634])) && s.b[1659]) {
             s.store_scalar(169, (1.0 + (p.p433 * s.v[184])));
-            s.store_div_ad_lhs(356, A::offset(A::mul(s.ad_value(169), s.ad_value(168)), 1.0), 767);
+            s.store_ad_value(356, A::div_scaled_offset_numerator(A::mul(s.ad_value(169), s.ad_value(168)), 1.0, 1.0, s.ad_value(767), 1.0));
             s.store_mul(356, 356, 268);
         }
 
@@ -5978,7 +5978,7 @@ impl Instance {
             s.store_mul(167, 80, 349);
             s.store_scaled_div_ad_rhs(350, 167, A::offset(s.ad_value(167), 100.0), 100.0);
             s.store_scalar(352, (1.0 / p.p503));
-            s.store_ln_ad(167, A::div(A::offset(A::mul(A::sub(s.ad_value(226), s.ad_value(250)), s.ad_value(352)), 1.0), A::offset(A::mul(A::sub(s.ad_value(315), s.ad_value(250)), s.ad_value(352)), 1.0)));
+            s.store_ln_ad(167, A::div_scaled_offset_numerator(A::mul(A::sub(s.ad_value(226), s.ad_value(250)), s.ad_value(352)), 1.0, 1.0, A::offset(A::mul(A::sub(s.ad_value(315), s.ad_value(250)), s.ad_value(352)), 1.0), 1.0));
             s.store_scale(353, 167, p.p504);
             s.store_div_from_scalar_add_ad(354, 1.0, A::offset(s.ad_value(353), 1.0), A::square(s.ad_value(353)));
             s.store_mul(341, 339, 354);

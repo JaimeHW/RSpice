@@ -1086,7 +1086,7 @@ impl Instance {
 
         if s.b[1610] {
             s.store_scalar(1181, (1.0 + (s.v[273] * s.v[1227])));
-            s.store_div_ad_lhs(1427, A::offset(A::mul(s.ad_value(1181), s.ad_value(1180)), 1.0), 747);
+            s.store_ad_value(1427, A::div_scaled_offset_numerator(A::mul(s.ad_value(1181), s.ad_value(1180)), 1.0, 1.0, s.ad_value(747), 1.0));
             s.store_mul(1427, 1427, 1426);
         }
 

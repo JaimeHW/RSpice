@@ -2949,7 +2949,7 @@ impl Instance {
         }
 
         if (s.b[1620] && (!s.b[1788])) {
-            s.store_div_ad_lhs(167, A::offset(A::div(s.ad_value(355), s.ad_value(300)), p.p1011), 607);
+            s.store_ad_value(167, A::div_scaled_offset_numerator(A::div(s.ad_value(355), s.ad_value(300)), 1.0, p.p1011, s.ad_value(607), 1.0));
             s.store_mul_ln_ad_rhs(610, 300, A::max_with_scalar(s.ad_value(167), 1e-38));
         }
 

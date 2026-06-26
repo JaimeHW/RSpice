@@ -961,7 +961,7 @@ impl Instance {
         s.v[282] = if s.b[282] { 1.0 } else { 0.0 };
 
         if ((!s.b[281]) && s.b[282]) {
-            s.store_div_ad_lhs(276, A::offset(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), (-1.0)), 60);
+            s.store_ad_value(276, A::div_scaled_offset_numerator(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), 1.0, (-1.0), s.ad_value(60), 1.0));
             s.store_ad_value(277, A::mul_offset_rhs(A::div(s.ad_value(94), s.ad_value(43)), A::mul(s.ad_value(276), s.ad_value(94)), 1.0));
         }
 
@@ -1218,7 +1218,7 @@ impl Instance {
         s.v[340] = if s.b[340] { 1.0 } else { 0.0 };
 
         if ((s.b[289] && (!s.b[339])) && s.b[340]) {
-            s.store_div_ad_lhs(334, A::offset(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), (-1.0)), 60);
+            s.store_ad_value(334, A::div_scaled_offset_numerator(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), 1.0, (-1.0), s.ad_value(60), 1.0));
             s.store_ad_value(335, A::mul_offset_rhs(A::div(s.ad_value(94), s.ad_value(43)), A::mul(s.ad_value(334), s.ad_value(94)), 1.0));
         }
 
@@ -2748,7 +2748,7 @@ impl Instance {
         s.v[282] = if s.b[282] { 1.0 } else { 0.0 };
 
         if ((!s.b[281]) && s.b[282]) {
-            s.store_div_ad_lhs(276, A::offset(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), (-1.0)), 60);
+            s.store_ad_value(276, A::div_scaled_offset_numerator(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), 1.0, (-1.0), s.ad_value(60), 1.0));
             s.store_ad_value(277, A::mul_offset_rhs(A::div(s.ad_value(94), s.ad_value(43)), A::mul(s.ad_value(276), s.ad_value(94)), 1.0));
         }
 
@@ -2994,7 +2994,7 @@ impl Instance {
         s.v[340] = if s.b[340] { 1.0 } else { 0.0 };
 
         if ((s.b[289] && (!s.b[339])) && s.b[340]) {
-            s.store_div_ad_lhs(334, A::offset(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), (-1.0)), 60);
+            s.store_ad_value(334, A::div_scaled_offset_numerator(A::div_scaled_inputs(s.ad_value(43), 1.25, s.ad_value(60), 1.0), 1.0, (-1.0), s.ad_value(60), 1.0));
             s.store_ad_value(335, A::mul_offset_rhs(A::div(s.ad_value(94), s.ad_value(43)), A::mul(s.ad_value(334), s.ad_value(94)), 1.0));
         }
 

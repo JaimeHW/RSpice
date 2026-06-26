@@ -1545,9 +1545,9 @@ impl Instance {
             s.store_add(490, 485, 486);
             s.copy_ad(51, 490);
             s.store_mul_div_from_scalar_lhs(487, p.p235, 233, 490);
-            s.store_div_ad(467, A::offset(s.ad_value(487), 1.0), A::offset(s.ad_value(234), 1.0));
+            s.store_ad_value(467, A::div_scaled_offset_numerator(s.ad_value(487), 1.0, 1.0, A::offset(s.ad_value(234), 1.0), 1.0));
             s.store_mul(404, 337, 467);
-            s.store_div_ad(468, A::offset(A::mul(s.ad_value(45), s.ad_value(487)), 1.0), A::offset(A::mul(s.ad_value(45), s.ad_value(234)), 1.0));
+            s.store_ad_value(468, A::div_scaled_offset_numerator(A::mul(s.ad_value(45), s.ad_value(487)), 1.0, 1.0, A::offset(A::mul(s.ad_value(45), s.ad_value(234)), 1.0), 1.0));
             s.store_mul(407, 338, 468);
             s.store_offset(491, 490, (-s.v[235]));
             s.store_mul_div_from_scalar_lhs(488, p.p237, 232, 491);
@@ -4546,7 +4546,7 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[1272] {
-            s.store_div_ad_lhs(1093, A::offset(A::mul(s.ad_value(845), s.ad_value(844)), 1.0), 386);
+            s.store_ad_value(1093, A::div_scaled_offset_numerator(A::mul(s.ad_value(845), s.ad_value(844)), 1.0, 1.0, s.ad_value(386), 1.0));
             s.store_mul(1093, 1093, 1092);
         }
 

@@ -123,7 +123,7 @@ impl Instance {
 
         s.store_ln(14, 13);
 
-        s.store_add_scaled_ad_rhs(34, 14, p.p22, A::div(A::scaled_offset(s.ad_value(13), (-1.0), p.p21), s.ad_value(15)));
+        s.store_add_scaled_ad_rhs(34, 14, p.p22, A::div_scaled_offset_numerator(s.ad_value(13), p.p21, ((-1.0) * p.p21), s.ad_value(15), 1.0));
 
         s.store_scale(54, 14, p.p23);
 
@@ -462,7 +462,7 @@ impl Instance {
 
         s.store_ln(14, 13);
 
-        s.store_add_scaled_ad_rhs(34, 14, p.p22, A::div(A::scaled_offset(s.ad_value(13), (-1.0), p.p21), s.ad_value(15)));
+        s.store_add_scaled_ad_rhs(34, 14, p.p22, A::div_scaled_offset_numerator(s.ad_value(13), p.p21, ((-1.0) * p.p21), s.ad_value(15), 1.0));
 
         s.store_scale(54, 14, p.p23);
 

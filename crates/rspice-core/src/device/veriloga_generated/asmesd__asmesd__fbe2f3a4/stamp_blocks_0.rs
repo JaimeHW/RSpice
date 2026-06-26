@@ -54,7 +54,7 @@ impl Instance {
 
         s.v[67] = (if (p.p63 > 0.0) { (1.0 / p.p63) } else { 0.0 });
 
-        s.store_add_scaled_ad_rhs(68, 14, p.p22, A::div(A::scaled_offset(s.ad_value(13), (-1.0), p.p21), s.ad_value(15)));
+        s.store_add_scaled_ad_rhs(68, 14, p.p22, A::div_scaled_offset_numerator(s.ad_value(13), p.p21, ((-1.0) * p.p21), s.ad_value(15), 1.0));
 
         s.store_scale(92, 14, p.p23);
 
@@ -751,7 +751,7 @@ impl Instance {
 
         s.v[67] = (if (p.p63 > 0.0) { (1.0 / p.p63) } else { 0.0 });
 
-        s.store_add_scaled_ad_rhs(68, 14, p.p22, A::div(A::scaled_offset(s.ad_value(13), (-1.0), p.p21), s.ad_value(15)));
+        s.store_add_scaled_ad_rhs(68, 14, p.p22, A::div_scaled_offset_numerator(s.ad_value(13), p.p21, ((-1.0) * p.p21), s.ad_value(15), 1.0));
 
         s.store_scale(92, 14, p.p23);
 
