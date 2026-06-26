@@ -6681,9 +6681,36 @@ fn emit_stamp_body(
                 &lowered,
             );
         }
+        let indexed_dense_stamp =
+            dense_stamp && should_emit_indexed_dense_stamp(&node_derivatives, &branch_derivatives);
         match equation.kind {
             MirEquationKind::Current => {
-                if dense_stamp {
+                if indexed_dense_stamp {
+                    emit_indexed_dense_derivative_arrays(
+                        out,
+                        &prefix,
+                        &node_derivatives,
+                        &branch_derivatives,
+                    );
+                    out.push_str("        stamper.stamp_current_indexed_dense_local(\n");
+                    out.push_str(&format!(
+                        "            {},\n",
+                        optional_node_local_expr(equation.branch.pos_node)
+                    ));
+                    out.push_str(&format!(
+                        "            {},\n",
+                        optional_node_local_expr(equation.branch.neg_node)
+                    ));
+                    out.push_str(&format!("            self.multiplicity * ({value}),\n"));
+                    out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
+                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
+                    out.push_str(&format!(
+                        "            &{prefix}_branch_derivative_indices,\n"
+                    ));
+                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                    out.push_str("            self.multiplicity,\n");
+                    out.push_str("        );\n");
+                } else if dense_stamp {
                     emit_dense_derivative_arrays(
                         out,
                         &prefix,
@@ -6761,7 +6788,24 @@ fn emit_stamp_body(
                             ),
                         )
                     })?;
-                if dense_stamp {
+                if indexed_dense_stamp {
+                    emit_indexed_dense_derivative_arrays(
+                        out,
+                        &prefix,
+                        &node_derivatives,
+                        &branch_derivatives,
+                    );
+                    out.push_str("        stamper.stamp_potential_indexed_dense_local(\n");
+                    out.push_str(&format!("            {slot},\n"));
+                    out.push_str(&format!("            {value},\n"));
+                    out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
+                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
+                    out.push_str(&format!(
+                        "            &{prefix}_branch_derivative_indices,\n"
+                    ));
+                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                    out.push_str("        );\n");
+                } else if dense_stamp {
                     emit_dense_derivative_arrays(
                         out,
                         &prefix,
@@ -6828,6 +6872,19 @@ fn should_emit_dense_stamp(node_derivatives: &[String], branch_derivatives: &[St
         .filter(|derivative| !is_zero_derivative(derivative))
         .count()
         > DENSE_STAMP_DERIVATIVE_THRESHOLD
+}
+
+fn should_emit_indexed_dense_stamp(
+    node_derivatives: &[String],
+    branch_derivatives: &[String],
+) -> bool {
+    let total = node_derivatives.len() + branch_derivatives.len();
+    let active = node_derivatives
+        .iter()
+        .chain(branch_derivatives.iter())
+        .filter(|derivative| !is_zero_derivative(derivative))
+        .count();
+    active < total
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -7289,6 +7346,67 @@ fn emit_dense_derivative_arrays(
         branch_derivatives.len(),
         branch_derivatives.join(", ")
     ));
+}
+
+fn emit_indexed_dense_derivative_arrays(
+    out: &mut String,
+    prefix: &str,
+    node_derivatives: &[String],
+    branch_derivatives: &[String],
+) {
+    let node_terms = indexed_derivative_terms(node_derivatives);
+    let branch_terms = indexed_derivative_terms(branch_derivatives);
+    let node_indices = node_terms
+        .iter()
+        .map(|(index, _)| index.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let node_values = node_terms
+        .iter()
+        .map(|(_, derivative)| derivative.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let branch_indices = branch_terms
+        .iter()
+        .map(|(index, _)| index.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let branch_values = branch_terms
+        .iter()
+        .map(|(_, derivative)| derivative.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    out.push_str(&format!(
+        "        let {prefix}_node_derivative_indices: [usize; {}] = [{}];\n",
+        node_terms.len(),
+        node_indices
+    ));
+    out.push_str(&format!(
+        "        let {prefix}_node_derivatives: [f64; {}] = [{}];\n",
+        node_terms.len(),
+        node_values
+    ));
+    out.push_str(&format!(
+        "        let {prefix}_branch_derivative_indices: [usize; {}] = [{}];\n",
+        branch_terms.len(),
+        branch_indices
+    ));
+    out.push_str(&format!(
+        "        let {prefix}_branch_derivatives: [f64; {}] = [{}];\n",
+        branch_terms.len(),
+        branch_values
+    ));
+}
+
+fn indexed_derivative_terms(derivatives: &[String]) -> Vec<(usize, String)> {
+    derivatives
+        .iter()
+        .enumerate()
+        .filter_map(|(index, derivative)| {
+            (!is_zero_derivative(derivative)).then(|| (index, derivative.clone()))
+        })
+        .collect()
 }
 
 fn cache_named_branch_current(

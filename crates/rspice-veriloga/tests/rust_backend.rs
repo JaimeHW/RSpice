@@ -6268,12 +6268,52 @@ fn rust_backend_uses_dense_stamp_calls_for_wide_derivative_equations() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamp_current_dense"), "{stamp}");
+    assert!(stamp.contains("stamp_current_dense_local"), "{stamp}");
     assert!(stamp.contains("node_derivatives"), "{stamp}");
+    assert!(
+        !stamp.contains("stamp_current_indexed_dense_local"),
+        "fully dense derivative equations should not allocate index arrays:\n{stamp}"
+    );
     assert!(
         !stamp.contains("GeneratedDerivative::node(nodes[4]"),
         "wide derivative equations should not emit one sparse derivative constructor per node:\n{stamp}"
     );
+}
+
+#[test]
+fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(wide_static_zero_derivative_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile indexed dense derivative device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("stamp_current_indexed_dense_local"), "{stamp}");
+    assert!(
+        stamp.contains("eq0_node_derivative_indices"),
+        "wide derivative equations should carry static derivative lane indices:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("GeneratedDerivative::node(nodes[4]"),
+        "wide derivative equations should not emit one sparse derivative constructor per node:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let eq0_node_derivatives: [f64; 8]"),
+        "wide derivative equations should not materialize full node derivative arrays:\n{stamp}"
+    );
+
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -6994,6 +7034,25 @@ pub mod runtime {{
                         + branch_derivatives.iter().copied().sum::<f64>());
         }}
 
+        pub fn stamp_current_indexed_dense_local(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node_derivative_indices: &[usize],
+            node_derivatives: &[f64],
+            branch_derivative_indices: &[usize],
+            branch_derivatives: &[f64],
+            derivative_scale: f64,
+        ) {{
+            *self.touched += value
+                + derivative_scale
+                    * (node_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
+                        + node_derivatives.iter().copied().sum::<f64>()
+                        + branch_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
+                        + branch_derivatives.iter().copied().sum::<f64>());
+        }}
+
         pub fn stamp_potential_branch_local(
             &mut self,
             _pos: Option<usize>,
@@ -7096,6 +7155,22 @@ pub mod runtime {{
         ) {{
             *self.touched += value
                 + node_derivatives.iter().copied().sum::<f64>()
+                + branch_derivatives.iter().copied().sum::<f64>();
+        }}
+
+        pub fn stamp_potential_indexed_dense_local(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            node_derivative_indices: &[usize],
+            node_derivatives: &[f64],
+            branch_derivative_indices: &[usize],
+            branch_derivatives: &[f64],
+        ) {{
+            *self.touched += value
+                + node_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
+                + node_derivatives.iter().copied().sum::<f64>()
+                + branch_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
                 + branch_derivatives.iter().copied().sum::<f64>();
         }}
     }}
@@ -10965,6 +11040,16 @@ fn dense_derivative_source() -> &'static str {
 module dense_derivative(p0, p1, p2, p3, p4, p5);
     inout p0, p1, p2, p3, p4, p5;
     electrical p0, p1, p2, p3, p4, p5;
+    analog I(p0, p1) <+ V(p0, p1) + V(p2, p3) + V(p4, p5);
+endmodule
+"#
+}
+
+fn wide_static_zero_derivative_source() -> &'static str {
+    r#"
+module wide_static_zero_derivative(p0, p1, p2, p3, p4, p5, p6, p7);
+    inout p0, p1, p2, p3, p4, p5, p6, p7;
+    electrical p0, p1, p2, p3, p4, p5, p6, p7;
     analog I(p0, p1) <+ V(p0, p1) + V(p2, p3) + V(p4, p5);
 endmodule
 "#

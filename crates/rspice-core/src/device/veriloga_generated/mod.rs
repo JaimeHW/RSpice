@@ -1374,6 +1374,61 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
+    pub fn stamp_current_indexed_dense_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        value: Value,
+        node_derivative_indices: &[usize],
+        node_derivatives: &[Value],
+        branch_derivative_indices: &[usize],
+        branch_derivatives: &[Value],
+        derivative_scale: Value,
+    ) {
+        debug_assert_eq!(node_derivative_indices.len(), node_derivatives.len());
+        debug_assert_eq!(branch_derivative_indices.len(), branch_derivatives.len());
+
+        let pos_axis = pos.and_then(|node| self.node_axis_local(node));
+        let neg_axis = neg.and_then(|node| self.node_axis_local(node));
+        if pos_axis.is_none() && neg_axis.is_none() {
+            return;
+        }
+
+        let needs_rhs = self.rhs.is_some();
+        let mut equivalent = value;
+        for (node, derivative) in node_derivative_indices
+            .iter()
+            .copied()
+            .zip(node_derivatives.iter().copied())
+        {
+            let derivative = derivative_scale * derivative;
+            if needs_rhs {
+                equivalent -= derivative * self.node_value_local(node);
+            }
+            if let Some(col_axis) = self.node_axis_local(node) {
+                self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, derivative);
+            }
+        }
+        for (branch, derivative) in branch_derivative_indices
+            .iter()
+            .copied()
+            .zip(branch_derivatives.iter().copied())
+        {
+            let derivative = derivative_scale * derivative;
+            if needs_rhs {
+                equivalent -= derivative * self.branch_value_local(branch);
+            }
+            if let Some(col_axis) = self.branch_axis_local(branch) {
+                self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, derivative);
+            }
+        }
+
+        if needs_rhs {
+            self.add_current_rhs_axis_pair(pos_axis, neg_axis, equivalent);
+        }
+    }
+
+    #[inline]
     fn add_current_derivative_pair(
         &mut self,
         pos_row: Option<usize>,
@@ -1867,6 +1922,46 @@ impl<'a> GeneratedStamper<'a> {
             if derivative == 0.0 {
                 continue;
             }
+            equivalent -= derivative * self.branch_value_local(branch);
+            if let Some(col_axis) = self.branch_axis_local(branch) {
+                self.add_real_axis(row_axis, col_axis, -derivative);
+            }
+        }
+        self.add_potential_rhs_axis(row_axis, equivalent);
+    }
+
+    #[inline]
+    pub fn stamp_potential_indexed_dense_local(
+        &mut self,
+        branch_index: usize,
+        value: Value,
+        node_derivative_indices: &[usize],
+        node_derivatives: &[Value],
+        branch_derivative_indices: &[usize],
+        branch_derivatives: &[Value],
+    ) {
+        debug_assert_eq!(node_derivative_indices.len(), node_derivatives.len());
+        debug_assert_eq!(branch_derivative_indices.len(), branch_derivatives.len());
+
+        let Some(row_axis) = self.branch_axis_local(branch_index) else {
+            return;
+        };
+        let mut equivalent = value;
+        for (node, derivative) in node_derivative_indices
+            .iter()
+            .copied()
+            .zip(node_derivatives.iter().copied())
+        {
+            equivalent -= derivative * self.node_value_local(node);
+            if let Some(col_axis) = self.node_axis_local(node) {
+                self.add_real_axis(row_axis, col_axis, -derivative);
+            }
+        }
+        for (branch, derivative) in branch_derivative_indices
+            .iter()
+            .copied()
+            .zip(branch_derivatives.iter().copied())
+        {
             equivalent -= derivative * self.branch_value_local(branch);
             if let Some(col_axis) = self.branch_axis_local(branch) {
                 self.add_real_axis(row_axis, col_axis, -derivative);

@@ -2,7 +2,7 @@
 
 use rspice_core::device::veriloga_generated::{
     GeneratedAnalysisKind, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper,
-    GeneratedStamper, builtins, instantiate_builtin,
+    GeneratedStamper, GeneratedStaticStampCache, builtins, instantiate_builtin,
 };
 use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 use rspice_core::{CircuitData, netlist::ParamContext};
@@ -287,6 +287,50 @@ fn generated_dense_current_stamper_linearizes_in_one_dense_path() {
 }
 
 #[test]
+fn generated_indexed_dense_current_stamper_skips_static_zero_lanes() {
+    let nodes = [1, 2, 3, 4];
+    let branches: [usize; 0] = [];
+    let voltages = [1.0, 2.0, 3.0, 4.0];
+    let mut rhs = vec![0.0; 4];
+    let mut matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[(0, 0, 0.0), (0, 2, 0.0), (1, 0, 0.0), (1, 2, 0.0)],
+    )
+    .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 4);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 4, &cache)
+        .stamp_current_indexed_dense_local(
+            Some(0),
+            Some(1),
+            5.0,
+            &[0, 2],
+            &[1.0, 3.0],
+            &[],
+            &[],
+            2.0,
+        );
+
+    let p0 = matrix.get_index(0, 0).expect("p0 entry").0;
+    let p2 = matrix.get_index(0, 2).expect("p2 entry").0;
+    let n0 = matrix.get_index(1, 0).expect("n0 entry").0;
+    let n2 = matrix.get_index(1, 2).expect("n2 entry").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[p0], 2.0);
+    assert_eq!(values[p2], 6.0);
+    assert_eq!(values[n0], -2.0);
+    assert_eq!(values[n2], -6.0);
+
+    let equivalent = 5.0 - 2.0 * voltages[0] - 6.0 * voltages[2];
+    assert_eq!(rhs[0], -equivalent);
+    assert_eq!(rhs[1], equivalent);
+    assert_eq!(rhs[2], 0.0);
+    assert_eq!(rhs[3], 0.0);
+}
+
+#[test]
 fn generated_dense_reactive_current_stamper_stamps_both_rows() {
     let real_matrix = StaticMatrix::from_triplets(
         4,
@@ -379,6 +423,32 @@ fn generated_stamper_linearizes_potential_contribution_on_branch_row() {
 
     let equivalent = 0.7 - (0.2 * 1.0 + -0.1 * 0.5);
     assert_eq!(rhs[2], equivalent);
+}
+
+#[test]
+fn generated_indexed_dense_potential_stamper_skips_static_zero_lanes() {
+    let nodes = [1, 2];
+    let branches = [1];
+    let voltages = [1.0, 2.0, 3.0];
+    let mut rhs = vec![0.0; 3];
+    let mut matrix =
+        StaticMatrix::from_triplets(3, 3, &[(2, 0, 0.0), (2, 2, 0.0)]).expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 2);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache)
+        .stamp_potential_indexed_dense_local(0, 7.0, &[0], &[1.5], &[0], &[2.0]);
+
+    let n0 = matrix.get_index(2, 0).expect("n0 entry").0;
+    let b0 = matrix.get_index(2, 2).expect("b0 entry").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[n0], -1.5);
+    assert_eq!(values[b0], -2.0);
+
+    let equivalent = 7.0 - 1.5 * voltages[0] - 2.0 * voltages[2];
+    assert_eq!(rhs[2], equivalent);
+    assert_eq!(rhs[0], 0.0);
+    assert_eq!(rhs[1], 0.0);
 }
 
 #[test]
