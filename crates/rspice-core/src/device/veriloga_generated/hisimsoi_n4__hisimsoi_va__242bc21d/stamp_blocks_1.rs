@@ -718,7 +718,7 @@ impl Instance {
             s.store_div_scaled_product_denominator_ad(1221, 1222, 1222, (-0.25), A::add(s.ad_value(157), s.ad_value(1222)), 1.0);
             s.copy_ad(1247, 1221);
             s.copy_ad(1248, 1233);
-            s.store_offset_ad(336, A::div_scaled_offset_numerator(A::mul(s.ad_value(225), A::sub(s.ad_value(1232), s.ad_value(1247))), 4.0, ((-1.0) * 4.0), A::mul(s.ad_value(241), s.ad_value(226)), 1.0), 1.0);
+            s.store_offset_div_scaled_offset_numerator(336, A::mul(s.ad_value(225), A::sub(s.ad_value(1232), s.ad_value(1247))), 4.0, ((-1.0) * 4.0), A::mul(s.ad_value(241), s.ad_value(226)), 1.0, 1.0);
         }
 
         if s.b[1220] {

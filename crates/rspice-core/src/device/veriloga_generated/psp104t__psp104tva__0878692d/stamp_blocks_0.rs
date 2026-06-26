@@ -1482,7 +1482,7 @@ impl Instance {
             s.store_scale(169, 1, p.p447);
             s.store_scale(170, 1, p.p449);
             s.store_scale(171, 1, p.p450);
-            s.store_offset_ad(350, A::div_scaled_offset_numerator(A::div_from_scalar(p.p454, s.ad_value(314)), 1.0, 1.0, s.ad_value(316), 1.0), p.p453);
+            s.store_offset_div_scaled_offset_numerator(350, A::div_from_scalar(p.p454, s.ad_value(314)), 1.0, 1.0, s.ad_value(316), 1.0, p.p453);
         }
 
         if s.b[1016] {
@@ -1494,7 +1494,7 @@ impl Instance {
 
         if s.b[1016] {
             s.store_offset_div_from_scalar_ad(172, p.p452, s.ad_value(350), p.p451);
-            s.store_offset_ad(173, A::div_scaled_offset_numerator(A::div_from_scalar(p.p458, s.ad_value(314)), p.p456, (((1.0) + (p.p457)) * p.p456), s.ad_value(316), 1.0), p.p455);
+            s.store_offset_div_scaled_offset_numerator(173, A::div_from_scalar(p.p458, s.ad_value(314)), p.p456, (((1.0) + (p.p457)) * p.p456), s.ad_value(316), 1.0, p.p455);
             s.store_scalar(174, p.p459);
         }
 

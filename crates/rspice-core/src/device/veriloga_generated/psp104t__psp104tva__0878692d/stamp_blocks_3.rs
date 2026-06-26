@@ -232,7 +232,7 @@ impl Instance {
             s.store_scalar(157, p.p433);
             s.store_add_scaled_inputs3_offset(348, s.ad_value(314), p.p832, s.ad_value(316), p.p833, s.ad_value(318), p.p834, p.p831);
             s.store_add_scaled_inputs3_offset(349, s.ad_value(314), p.p836, s.ad_value(316), p.p837, s.ad_value(318), p.p838, p.p835);
-            s.store_offset_ad(173, A::div_scaled_offset_numerator(A::div_from_scalar(p.p458, s.ad_value(314)), p.p456, (((1.0) + (p.p457)) * p.p456), s.ad_value(316), 1.0), p.p455);
+            s.store_offset_div_scaled_offset_numerator(173, A::div_from_scalar(p.p458, s.ad_value(314)), p.p456, (((1.0) + (p.p457)) * p.p456), s.ad_value(316), 1.0, p.p455);
         }
 
         s.b[1031] = (((param_given[460] || param_given[461]) || param_given[462]) || param_given[463]);
@@ -4001,7 +4001,7 @@ impl Instance {
         s.v[2256] = if s.b[2256] { 1.0 } else { 0.0 };
 
         if (s.b[2255] && s.b[2256]) {
-            s.store_mul_ad_rhs(1931, 713, A::div_scaled_offset_numerator(A::mul(s.ad_value(231), A::sub(A::sqrt(A::add(s.ad_value(717), s.ad_value(1932))), s.ad_value(725))), 1.0, 1.0, A::offset(s.ad_value(1988), 1e-30), 1.0));
+            s.store_mul_div_scaled_offset_numerator_rhs(1931, 713, A::mul(s.ad_value(231), A::sub(A::sqrt(A::add(s.ad_value(717), s.ad_value(1932))), s.ad_value(725))), 1.0, 1.0, A::offset(s.ad_value(1988), 1e-30), 1.0);
         }
 
         s.b[2257] = ((((-s.v[1931])) as f64).abs() < 230.25850929940458);
