@@ -2066,6 +2066,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_sub_from_scalar_ad_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output_scale: f64) {
+        let left_value = self.v[left];
+        let right_value = scalar - value.value;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let scaled_left_value = left_value * output_scale;
+        let scaled_right_value = right_value * output_scale;
+        self.v[index] = left_value * scaled_right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * scaled_right_value - scaled_left_value * value.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * scaled_right_value - scaled_left_value * value.db[axis]; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_sub_from_scalar_ad_lhs(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, source: usize) {
         let left_value = scalar - value.value;
         let source_value = self.v[source];
@@ -2768,6 +2781,60 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value * left_scale - right_value * right_scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale - right_dn[axis] * right_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale - right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.v[index] = left.value * left_scale + right_value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale + right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.v[index] = left_value * left_scale + right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale + right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale + right.db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        self.v[index] = left.value * left_scale + right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale + right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale + right.db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.v[index] = left.value * left_scale - right_value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale - right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale - right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.v[index] = left_value * left_scale - right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale - right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale - right.db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_inputs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        self.v[index] = left.value * left_scale - right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale - right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale - right.db[axis] * right_scale; }
     }
 
     #[inline]
@@ -6539,6 +6606,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_sub_from_scalar_ad_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output_scale: f64) {
+        let left_value = self.v[left];
+        let right_value = scalar - value.value;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let scaled_left_value = left_value * output_scale;
+        let scaled_right_value = right_value * output_scale;
+        self.v[index] = left_value * scaled_right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * scaled_right_value - scaled_left_value * value.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * scaled_right_value - scaled_left_value * value.db[axis]; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_sub_from_scalar_ad_lhs(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, source: usize) {
         let left_value = scalar - value.value;
         let source_value = self.v[source];
@@ -7241,6 +7321,60 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value * left_scale - right_value * right_scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale - right_dn[axis] * right_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale - right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.v[index] = left.value * left_scale + right_value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale + right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.v[index] = left_value * left_scale + right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale + right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale + right.db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        self.v[index] = left.value * left_scale + right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale + right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale + right.db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.v[index] = left.value * left_scale - right_value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale - right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale - right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.v[index] = left_value * left_scale - right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale - right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale - right.db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_scaled_inputs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        self.v[index] = left.value * left_scale - right.value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale - right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale - right.db[axis] * right_scale; }
     }
 
     #[inline]

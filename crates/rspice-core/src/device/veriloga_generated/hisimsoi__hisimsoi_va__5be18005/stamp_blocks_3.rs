@@ -4082,7 +4082,7 @@ impl Instance {
         }
 
         if (((s.b[1656] && s.b[1688]) && s.b[1689]) && s.b[1690]) {
-            s.store_ad_value(283, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1667), 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(283, 1667, 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
         if (((s.b[1656] && s.b[1688]) && s.b[1689]) && (!s.b[1690])) {
@@ -4165,7 +4165,7 @@ impl Instance {
         }
 
         if (((s.b[1656] && (!s.b[1688])) && s.b[1696]) && s.b[1697]) {
-            s.store_ad_value(283, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1667), 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(283, 1667, 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
         if (((s.b[1656] && (!s.b[1688])) && s.b[1696]) && (!s.b[1697])) {
@@ -4230,7 +4230,7 @@ impl Instance {
         }
 
         if (((s.b[1656] && s.b[1701]) && s.b[1702]) && s.b[1703]) {
-            s.store_ad_value(284, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1666), 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(284, 1666, 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
     }
@@ -4319,7 +4319,7 @@ impl Instance {
         }
 
         if (((s.b[1656] && (!s.b[1701])) && s.b[1709]) && s.b[1710]) {
-            s.store_ad_value(284, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1666), 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(284, 1666, 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
         if (((s.b[1656] && (!s.b[1701])) && s.b[1709]) && (!s.b[1710])) {

@@ -496,7 +496,7 @@ impl Instance {
                     assign920_ad_e3394
                 }
             };
-            s.store_ad_value(222, A::add_scaled_inputs(A::abs(A::voltage(ctx, nodes, Some(0), Some(1))), p.p333, assign920_ad_e3395, 1.0));
+            s.store_add_scaled_inputs_ad(222, A::abs(A::voltage(ctx, nodes, Some(0), Some(1))), p.p333, assign920_ad_e3395, 1.0);
         }
 
         if s.b[308] {

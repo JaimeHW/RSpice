@@ -3848,7 +3848,7 @@ impl Instance {
         }
 
         if (((s.b[1652] && s.b[1684]) && s.b[1685]) && s.b[1686]) {
-            s.store_ad_value(283, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1663), 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(283, 1663, 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
         if (((s.b[1652] && s.b[1684]) && s.b[1685]) && (!s.b[1686])) {
@@ -3937,7 +3937,7 @@ impl Instance {
         }
 
         if (((s.b[1652] && (!s.b[1684])) && s.b[1692]) && s.b[1693]) {
-            s.store_ad_value(283, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1663), 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(283, 1663, 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
         if (((s.b[1652] && (!s.b[1684])) && s.b[1692]) && (!s.b[1693])) {
@@ -4002,7 +4002,7 @@ impl Instance {
         }
 
         if (((s.b[1652] && s.b[1697]) && s.b[1698]) && s.b[1699]) {
-            s.store_ad_value(284, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1662), 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(284, 1662, 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
         if (((s.b[1652] && s.b[1697]) && s.b[1698]) && (!s.b[1699])) {
@@ -4085,7 +4085,7 @@ impl Instance {
         }
 
         if (((s.b[1652] && (!s.b[1697])) && s.b[1705]) && s.b[1706]) {
-            s.store_ad_value(284, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(1662), 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182)))));
+            s.store_mul_sub_from_scalar_ad_rhs_scaled_output(284, 1662, 1.0, A::mul(s.ad_value(1679), s.ad_value(1680)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
         if (((s.b[1652] && (!s.b[1697])) && s.b[1705]) && (!s.b[1706])) {

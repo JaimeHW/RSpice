@@ -4517,7 +4517,7 @@ impl Instance {
         }
 
         if ((!s.b[2591]) && (!s.b[2592])) {
-            s.store_ad_value(426, A::add_scaled_inputs(A::powf(A::offset(s.ad_value(796), (-p.p446)), 2.0), p.p445, s.ad_value(427), 1.0));
+            s.store_add_scaled_inputs_ad_lhs(426, A::powf(A::offset(s.ad_value(796), (-p.p446)), 2.0), p.p445, 427, 1.0);
         }
 
         if (!s.b[2591]) {

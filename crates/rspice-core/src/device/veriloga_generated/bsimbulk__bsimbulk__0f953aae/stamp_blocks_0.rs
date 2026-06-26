@@ -6667,7 +6667,7 @@ impl Instance {
             s.store_scale(15, 779, ((2.0 * 1.60219e-19) / (p.p110 * 8.85418e-12)));
             s.store_powf_ad(15, A::mul(s.ad_value(15), s.ad_value(14)), 0.5);
             s.store_add_scaled_product_indices(16, 61, p.p507, 61, 61, p.p508);
-            s.store_ad_value(17, A::add_scaled_inputs(s.ad_value(14), p.p509, A::powf(s.ad_value(14), p.p511), p.p510));
+            s.store_add_scaled_inputs_ad_rhs(17, 14, p.p509, A::powf(s.ad_value(14), p.p511), p.p510);
             s.store_scaled_add_ad_lhs(18, A::offset(s.ad_value(16), 1.0), 17, p.p500);
         }
 
