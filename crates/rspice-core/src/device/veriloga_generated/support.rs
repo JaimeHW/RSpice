@@ -822,9 +822,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_offset_ad_value(&mut self, index: usize, mut value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        value.value += offset;
-        self.store_ad_value(index, value);
+    pub(crate) fn store_offset_ad_value(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
+        self.v[index] = value.value + offset;
+        self.dn[index] = value.dn;
+        self.db[index] = value.db;
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_unary_ad_scaled(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output: f64, derivative_scale: f64, offset: f64) {
+        self.v[index] = output + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
     }
 
     #[inline]
@@ -1007,82 +1015,103 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_abs_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::abs(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 }, offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_square_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::square(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw * raw, 2.0 * raw, offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_limexp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::limexp(value), offset);
+        let raw = value.value;
+        if raw < 80.0 {
+            let output = raw.exp();
+            self.store_offset_unary_ad_scaled(index, value, output, output, offset);
+        } else {
+            self.store_offset_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX, offset);
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_log10_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::log10(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_sin_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::sin(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.sin(), raw.cos(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_cos_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::cos(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.cos(), -raw.sin(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_tan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::tan(value), offset);
+        let raw = value.value;
+        let cos = raw.cos();
+        self.store_offset_unary_ad_scaled(index, value, raw.tan(), 1.0 / (cos * cos), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_atan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::atan(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.atan(), 1.0 / (1.0 + raw * raw), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_sinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::sinh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.sinh(), raw.cosh(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_cosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::cosh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.cosh(), raw.sinh(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_tanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::tanh(value), offset);
+        let raw = value.value;
+        let cosh = raw.cosh();
+        self.store_offset_unary_ad_scaled(index, value, raw.tanh(), 1.0 / (cosh * cosh), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_asinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::asinh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_acosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::acosh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.acosh(), 1.0 / ((raw - 1.0).sqrt() * (raw + 1.0).sqrt()), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_atanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::atanh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.atanh(), 1.0 / (1.0 - raw * raw), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_floor_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::floor(value), offset);
+        self.store_scalar(index, value.value.floor() + offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_ceil_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::ceil(value), offset);
+        self.store_scalar(index, value.value.ceil() + offset);
     }
 
     #[inline]
@@ -1420,77 +1449,104 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_limexp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::limexp(value));
+        let raw = value.value;
+        if raw < 80.0 {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output);
+        } else {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX);
+        }
     }
 
     #[inline]
     pub(crate) fn store_limited_exp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::limited_exp(value));
+        let raw = value.value;
+        if raw > 80.0 {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX);
+        } else if raw < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output);
+        }
     }
 
     #[inline]
     pub(crate) fn store_log10_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::log10(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10));
     }
 
     #[inline]
     pub(crate) fn store_sin_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::sin(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.sin(), raw.cos());
     }
 
     #[inline]
     pub(crate) fn store_cos_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::cos(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.cos(), -raw.sin());
     }
 
     #[inline]
     pub(crate) fn store_tan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::tan(value));
+        let raw = value.value;
+        let cos = raw.cos();
+        self.store_unary_ad_scaled(index, value, raw.tan(), 1.0 / (cos * cos));
     }
 
     #[inline]
     pub(crate) fn store_atan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::atan(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.atan(), 1.0 / (1.0 + raw * raw));
     }
 
     #[inline]
     pub(crate) fn store_sinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::sinh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.sinh(), raw.cosh());
     }
 
     #[inline]
     pub(crate) fn store_cosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::cosh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.cosh(), raw.sinh());
     }
 
     #[inline]
     pub(crate) fn store_tanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::tanh(value));
+        let raw = value.value;
+        let cosh = raw.cosh();
+        self.store_unary_ad_scaled(index, value, raw.tanh(), 1.0 / (cosh * cosh));
     }
 
     #[inline]
     pub(crate) fn store_asinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::asinh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt());
     }
 
     #[inline]
     pub(crate) fn store_acosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::acosh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.acosh(), 1.0 / ((raw - 1.0).sqrt() * (raw + 1.0).sqrt()));
     }
 
     #[inline]
     pub(crate) fn store_atanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::atanh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.atanh(), 1.0 / (1.0 - raw * raw));
     }
 
     #[inline]
     pub(crate) fn store_floor_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::floor(value));
+        self.store_scalar(index, value.value.floor());
     }
 
     #[inline]
     pub(crate) fn store_ceil_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::ceil(value));
+        self.store_scalar(index, value.value.ceil());
     }
 
     #[inline]
@@ -4168,9 +4224,34 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_log10(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10));
+    }
+
+    #[inline]
     pub(crate) fn store_sin(&mut self, index: usize, source: usize) {
         let raw = self.v[source];
         self.store_unary_scaled(index, source, raw.sin(), raw.cos());
+    }
+
+    #[inline]
+    pub(crate) fn store_cos(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.cos(), -raw.sin());
+    }
+
+    #[inline]
+    pub(crate) fn store_tan(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        let cos = raw.cos();
+        self.store_unary_scaled(index, source, raw.tan(), 1.0 / (cos * cos));
+    }
+
+    #[inline]
+    pub(crate) fn store_atan(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.atan(), 1.0 / (1.0 + raw * raw));
     }
 
     #[inline]
@@ -4180,9 +4261,44 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_cosh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.cosh(), raw.sinh());
+    }
+
+    #[inline]
+    pub(crate) fn store_tanh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        let cosh = raw.cosh();
+        self.store_unary_scaled(index, source, raw.tanh(), 1.0 / (cosh * cosh));
+    }
+
+    #[inline]
     pub(crate) fn store_asinh(&mut self, index: usize, source: usize) {
         let raw = self.v[source];
         self.store_unary_scaled(index, source, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt());
+    }
+
+    #[inline]
+    pub(crate) fn store_acosh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.acosh(), 1.0 / ((raw - 1.0).sqrt() * (raw + 1.0).sqrt()));
+    }
+
+    #[inline]
+    pub(crate) fn store_atanh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.atanh(), 1.0 / (1.0 - raw * raw));
+    }
+
+    #[inline]
+    pub(crate) fn store_floor(&mut self, index: usize, source: usize) {
+        self.store_scalar(index, self.v[source].floor());
+    }
+
+    #[inline]
+    pub(crate) fn store_ceil(&mut self, index: usize, source: usize) {
+        self.store_scalar(index, self.v[source].ceil());
     }
 
     #[inline]
@@ -9053,9 +9169,17 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_offset_ad_value(&mut self, index: usize, mut value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        value.value += offset;
-        self.store_ad_value(index, value);
+    pub(crate) fn store_offset_ad_value(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
+        self.v[index] = value.value + offset;
+        self.dn[index] = value.dn;
+        self.db[index] = value.db;
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_unary_ad_scaled(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output: f64, derivative_scale: f64, offset: f64) {
+        self.v[index] = output + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
     }
 
     #[inline]
@@ -9238,82 +9362,103 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_abs_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::abs(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 }, offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_square_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::square(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw * raw, 2.0 * raw, offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_limexp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::limexp(value), offset);
+        let raw = value.value;
+        if raw < 80.0 {
+            let output = raw.exp();
+            self.store_offset_unary_ad_scaled(index, value, output, output, offset);
+        } else {
+            self.store_offset_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX, offset);
+        }
     }
 
     #[inline]
     pub(crate) fn store_offset_log10_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::log10(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_sin_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::sin(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.sin(), raw.cos(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_cos_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::cos(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.cos(), -raw.sin(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_tan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::tan(value), offset);
+        let raw = value.value;
+        let cos = raw.cos();
+        self.store_offset_unary_ad_scaled(index, value, raw.tan(), 1.0 / (cos * cos), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_atan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::atan(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.atan(), 1.0 / (1.0 + raw * raw), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_sinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::sinh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.sinh(), raw.cosh(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_cosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::cosh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.cosh(), raw.sinh(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_tanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::tanh(value), offset);
+        let raw = value.value;
+        let cosh = raw.cosh();
+        self.store_offset_unary_ad_scaled(index, value, raw.tanh(), 1.0 / (cosh * cosh), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_asinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::asinh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt(), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_acosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::acosh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.acosh(), 1.0 / ((raw - 1.0).sqrt() * (raw + 1.0).sqrt()), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_atanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::atanh(value), offset);
+        let raw = value.value;
+        self.store_offset_unary_ad_scaled(index, value, raw.atanh(), 1.0 / (1.0 - raw * raw), offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_floor_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::floor(value), offset);
+        self.store_scalar(index, value.value.floor() + offset);
     }
 
     #[inline]
     pub(crate) fn store_offset_ceil_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.store_offset_ad_value(index, AdValue::ceil(value), offset);
+        self.store_scalar(index, value.value.ceil() + offset);
     }
 
     #[inline]
@@ -9651,77 +9796,104 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_limexp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::limexp(value));
+        let raw = value.value;
+        if raw < 80.0 {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output);
+        } else {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX);
+        }
     }
 
     #[inline]
     pub(crate) fn store_limited_exp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::limited_exp(value));
+        let raw = value.value;
+        if raw > 80.0 {
+            self.store_unary_ad_scaled(index, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX);
+        } else if raw < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = raw.exp();
+            self.store_unary_ad_scaled(index, value, output, output);
+        }
     }
 
     #[inline]
     pub(crate) fn store_log10_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::log10(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10));
     }
 
     #[inline]
     pub(crate) fn store_sin_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::sin(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.sin(), raw.cos());
     }
 
     #[inline]
     pub(crate) fn store_cos_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::cos(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.cos(), -raw.sin());
     }
 
     #[inline]
     pub(crate) fn store_tan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::tan(value));
+        let raw = value.value;
+        let cos = raw.cos();
+        self.store_unary_ad_scaled(index, value, raw.tan(), 1.0 / (cos * cos));
     }
 
     #[inline]
     pub(crate) fn store_atan_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::atan(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.atan(), 1.0 / (1.0 + raw * raw));
     }
 
     #[inline]
     pub(crate) fn store_sinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::sinh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.sinh(), raw.cosh());
     }
 
     #[inline]
     pub(crate) fn store_cosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::cosh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.cosh(), raw.sinh());
     }
 
     #[inline]
     pub(crate) fn store_tanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::tanh(value));
+        let raw = value.value;
+        let cosh = raw.cosh();
+        self.store_unary_ad_scaled(index, value, raw.tanh(), 1.0 / (cosh * cosh));
     }
 
     #[inline]
     pub(crate) fn store_asinh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::asinh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt());
     }
 
     #[inline]
     pub(crate) fn store_acosh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::acosh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.acosh(), 1.0 / ((raw - 1.0).sqrt() * (raw + 1.0).sqrt()));
     }
 
     #[inline]
     pub(crate) fn store_atanh_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::atanh(value));
+        let raw = value.value;
+        self.store_unary_ad_scaled(index, value, raw.atanh(), 1.0 / (1.0 - raw * raw));
     }
 
     #[inline]
     pub(crate) fn store_floor_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::floor(value));
+        self.store_scalar(index, value.value.floor());
     }
 
     #[inline]
     pub(crate) fn store_ceil_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.store_ad_value(index, AdValue::ceil(value));
+        self.store_scalar(index, value.value.ceil());
     }
 
     #[inline]
@@ -12399,9 +12571,34 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_log10(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10));
+    }
+
+    #[inline]
     pub(crate) fn store_sin(&mut self, index: usize, source: usize) {
         let raw = self.v[source];
         self.store_unary_scaled(index, source, raw.sin(), raw.cos());
+    }
+
+    #[inline]
+    pub(crate) fn store_cos(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.cos(), -raw.sin());
+    }
+
+    #[inline]
+    pub(crate) fn store_tan(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        let cos = raw.cos();
+        self.store_unary_scaled(index, source, raw.tan(), 1.0 / (cos * cos));
+    }
+
+    #[inline]
+    pub(crate) fn store_atan(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.atan(), 1.0 / (1.0 + raw * raw));
     }
 
     #[inline]
@@ -12411,9 +12608,44 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_cosh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.cosh(), raw.sinh());
+    }
+
+    #[inline]
+    pub(crate) fn store_tanh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        let cosh = raw.cosh();
+        self.store_unary_scaled(index, source, raw.tanh(), 1.0 / (cosh * cosh));
+    }
+
+    #[inline]
     pub(crate) fn store_asinh(&mut self, index: usize, source: usize) {
         let raw = self.v[source];
         self.store_unary_scaled(index, source, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt());
+    }
+
+    #[inline]
+    pub(crate) fn store_acosh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.acosh(), 1.0 / ((raw - 1.0).sqrt() * (raw + 1.0).sqrt()));
+    }
+
+    #[inline]
+    pub(crate) fn store_atanh(&mut self, index: usize, source: usize) {
+        let raw = self.v[source];
+        self.store_unary_scaled(index, source, raw.atanh(), 1.0 / (1.0 - raw * raw));
+    }
+
+    #[inline]
+    pub(crate) fn store_floor(&mut self, index: usize, source: usize) {
+        self.store_scalar(index, self.v[source].floor());
+    }
+
+    #[inline]
+    pub(crate) fn store_ceil(&mut self, index: usize, source: usize) {
+        self.store_scalar(index, self.v[source].ceil());
     }
 
     #[inline]
