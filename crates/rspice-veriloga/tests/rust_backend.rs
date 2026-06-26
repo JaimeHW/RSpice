@@ -1033,8 +1033,16 @@ fn rust_backend_moves_same_branch_generated_ad_locals_into_scratch() {
         .contents
         .as_str();
 
-    assert!(stamp.contains(": A = "), "{stamp}");
-    assert!(stamp.contains("s.store_ad_value(0, assign"), "{stamp}");
+    assert!(
+        stamp.contains("s.store_ddt_scaled_voltage(0, Some(0), Some(1), 1.0, ddt_scale"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_voltage(0, ctx, nodes, Some(0), Some(1));"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains(": A = A::ddt"), "{stamp}");
+    assert!(!stamp.contains("s.store_ad_value(0, assign"), "{stamp}");
     assert!(!stamp.contains("s.store_ad(0, &assign"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }

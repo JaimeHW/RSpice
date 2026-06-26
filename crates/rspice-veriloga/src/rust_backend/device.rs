@@ -410,18 +410,33 @@ fn compact_immediate_generated_ad_local_store_replacement(
 
     let store_start = skip_compact_whitespace(source, value_end + 1);
     const STORE_NEEDLE: &str = "scratch.store_ad_value(";
-    if !source[store_start..].starts_with(STORE_NEEDLE) {
-        return None;
+    if source[store_start..].starts_with(STORE_NEEDLE) {
+        let open_paren = store_start + "scratch.store_ad_value".len();
+        let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+        let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+        if args.len() != 2 || args[1].trim() != name {
+            return None;
+        }
+        let target_index = args[0].trim().parse().ok()?;
+        let replacement = compact_direct_ad_value_store_replacement(target_index, value, indent)?;
+
+        let statement_end = compact_statement_end_after_call(source, close_paren)?;
+        return Some((statement_end, replacement));
     }
 
-    let open_paren = store_start + "scratch.store_ad_value".len();
+    const SCALE_STORE_NEEDLE: &str = "scratch.store_scale_ad(";
+    if !source[store_start..].starts_with(SCALE_STORE_NEEDLE) {
+        return None;
+    }
+    let open_paren = store_start + "scratch.store_scale_ad".len();
     let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
     let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
-    if args.len() != 2 || args[1].trim() != name {
+    if args.len() != 3 || args[1].trim() != name {
         return None;
     }
     let target_index = args[0].trim().parse().ok()?;
-    let replacement = compact_direct_ad_value_store_replacement(target_index, value, indent)?;
+    let replacement =
+        compact_scaled_direct_ad_value_store_replacement(target_index, value, args[2], indent)?;
 
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
     Some((statement_end, replacement))
@@ -446,8 +461,10 @@ fn compact_direct_ad_value_store_replacement(
     }
 
     if let Some(conditional) = parse_compact_if_block(value) {
-        let then_store = compact_conditional_ad_branch_store(target_index, conditional.then_expr)?;
-        let else_store = compact_conditional_ad_branch_store(target_index, conditional.else_expr)?;
+        let then_store =
+            compact_conditional_ad_branch_store(target_index, conditional.then_expr.as_ref())?;
+        let else_store =
+            compact_conditional_ad_branch_store(target_index, conditional.else_expr.as_ref())?;
         return Some(compact_conditional_store_replacement(
             indent,
             conditional.condition,
@@ -457,6 +474,18 @@ fn compact_direct_ad_value_store_replacement(
     }
 
     let line = compact_scratch_store_helper_call(target_index, value)?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    Some(replacement)
+}
+
+fn compact_scaled_direct_ad_value_store_replacement(
+    target_index: usize,
+    value: &str,
+    output_scale: &str,
+    indent: &str,
+) -> Option<String> {
+    let line = compact_ddt_store_helper_call_scaled(target_index, value, output_scale.trim())?;
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     Some(replacement)
@@ -556,8 +585,8 @@ fn push_indented_compact_fragment(out: &mut String, indent: &str, fragment: &str
 #[derive(Debug)]
 struct CompactIfBlock<'a> {
     condition: &'a str,
-    then_expr: &'a str,
-    else_expr: &'a str,
+    then_expr: Cow<'a, str>,
+    else_expr: Cow<'a, str>,
 }
 
 fn parse_compact_if_block(value: &str) -> Option<CompactIfBlock<'_>> {
@@ -593,18 +622,58 @@ fn parse_compact_if_block(value: &str) -> Option<CompactIfBlock<'_>> {
     })
 }
 
-fn compact_single_expression_branch(value: &str) -> Option<&str> {
+fn compact_single_expression_branch(value: &str) -> Option<Cow<'_, str>> {
     let value = value.trim();
-    if value.is_empty() || value.contains(';') {
+    if value.is_empty() {
         return None;
     }
-    Some(value)
+    if !value.contains(';') {
+        return Some(Cow::Borrowed(value));
+    }
+    compact_generated_branch_local_expression(value).map(Cow::Owned)
+}
+
+fn compact_generated_branch_local_expression(value: &str) -> Option<String> {
+    let value = value.trim();
+    let let_start = value.strip_prefix("let ")?;
+    let name_end = let_start.find(|ch: char| !is_compact_ident_char(ch))?;
+    let name = &let_start[..name_end];
+    if !compact_generated_ad_local(name) {
+        return None;
+    }
+    let mut cursor = skip_compact_horizontal_whitespace(let_start, name_end);
+    if let_start.as_bytes().get(cursor) != Some(&b':') {
+        return None;
+    }
+    cursor = skip_compact_horizontal_whitespace(let_start, cursor + 1);
+    if !let_start[cursor..].starts_with("AdValue") {
+        return None;
+    }
+    cursor = skip_compact_horizontal_whitespace(let_start, cursor + "AdValue".len());
+    if let_start.as_bytes().get(cursor) != Some(&b'=') {
+        return None;
+    }
+    let expr_start = cursor + 1;
+    let expr_end = expr_start + find_top_level_ascii_byte(&let_start[expr_start..], b';')?;
+    let expr = let_start[expr_start..expr_end].trim();
+    let tail = let_start[(expr_end + 1)..].trim();
+    if tail == name {
+        return Some(expr.to_string());
+    }
+
+    let args = compact_ad_call_args(tail, "scale")?;
+    if args.len() == 2 && args[0].trim() == name {
+        return Some(format!("AdValue::scale({expr}, {})", args[1]));
+    }
+    None
 }
 
 fn compact_conditional_ad_branch_store(target_index: usize, value: &str) -> Option<Option<String>> {
     if let Some(conditional) = parse_compact_if_block(value) {
-        let then_store = compact_conditional_ad_branch_store(target_index, conditional.then_expr)?;
-        let else_store = compact_conditional_ad_branch_store(target_index, conditional.else_expr)?;
+        let then_store =
+            compact_conditional_ad_branch_store(target_index, conditional.then_expr.as_ref())?;
+        let else_store =
+            compact_conditional_ad_branch_store(target_index, conditional.else_expr.as_ref())?;
         let replacement = compact_conditional_store_replacement(
             "",
             conditional.condition,
@@ -892,6 +961,43 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_conditional_branches_with_generated_ad_locals() {
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(7, {
+        if (scratch.values[2] > params.limit) {
+            let assign10_ad_e20: AdValue = AdValue::add(scratch.ad_value(3), scratch.ad_value(4));
+            AdValue::scale(assign10_ad_e20, 0.5)
+        } else {
+            let assign11_ad_e21: AdValue = {
+                if (scratch.values[5] < params.floor) {
+                    AdValue::sub(scratch.ad_value(6), scratch.ad_value(7))
+                } else {
+                    AdValue::constant(0.0)
+                }
+            };
+            assign11_ad_e21
+        }
+    });
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(compact.contains("if (s.v[2] > p.limit) {"), "{compact}");
+        assert!(
+            compact.contains("s.store_scaled_add(7, 3, 4, 0.5);"),
+            "{compact}"
+        );
+        assert!(compact.contains("if (s.v[5] < p.floor) {"), "{compact}");
+        assert!(compact.contains("s.store_sub(7, 6, 7);"), "{compact}");
+        assert!(compact.contains("s.store_scalar(7, 0.0);"), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+        assert!(!compact.contains("assign10_ad_e20"), "{compact}");
+        assert!(!compact.contains("assign11_ad_e21"), "{compact}");
+    }
+
+    #[test]
     fn rewrites_generated_limited_exp_branch_local_as_direct_branch_stores() {
         let source = r#"
 fn stamp() {
@@ -1053,6 +1159,50 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_ddt_ad_rvalue_stores_as_direct_stores() {
+        let source = r#"
+fn stamp() {
+    let assign10_ad_e20: AdValue = AdValue::ddt(scratch.ad_value(102), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, scratch.ad_value(102).value));
+    scratch.store_ad_value(200, assign10_ad_e20);
+    let assign11_ad_e21: AdValue = AdValue::ddt(AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(4), None), params.scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(4), None), params.scale).value));
+    scratch.store_ad_value(201, assign11_ad_e21);
+    let assign12_ad_e22: AdValue = AdValue::ddt(AdValue::scale(AdValue::branch_current(ctx, &self.branches, 1), params.branch_scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, AdValue::scale(AdValue::branch_current(ctx, &self.branches, 1), params.branch_scale).value));
+    scratch.store_ad_value(202, assign12_ad_e22);
+    let assign13_ad_e23: AdValue = AdValue::ddt(AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(5), None), params.input_scale), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, AdValue::scale(AdValue::voltage(ctx, &self.nodes, Some(5), None), params.input_scale).value));
+    scratch.store_scale_ad(203, assign13_ad_e23, params.output_scale);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+        let support = generate_scratch_operation_helpers();
+
+        assert!(support.contains("fn store_ddt_source"), "{support}");
+        assert!(support.contains("fn store_ddt_scaled_voltage"), "{support}");
+        assert!(
+            support.contains("fn store_ddt_scaled_branch_current"),
+            "{support}"
+        );
+        assert!(
+            compact.contains("s.store_ddt_source(200, 102, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[102]));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_ddt_scaled_voltage(201, Some(4), None, p.scale, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, ((ctx.node_voltage(nodes[4])) * (p.scale))));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_ddt_scaled_branch_current(202, 1, p.branch_scale, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, ((ctx.branch_current(branches[1])) * (p.branch_scale))));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_ddt_scaled_voltage(203, Some(5), None, ((p.input_scale) * (p.output_scale)), ddt_scale, ((eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, ((ctx.node_voltage(nodes[5])) * (p.input_scale)))) * (p.output_scale)));"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+        assert!(!compact.contains("A::ddt("), "{compact}");
     }
 
     #[test]
@@ -3948,6 +4098,43 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = value.value;",
         "        self.node_derivatives[index] = value.node_derivatives;",
         "        self.branch_derivatives[index] = value.branch_derivatives;",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ddt_source(&mut self, index: usize, source: usize, derivative_scale: f64, value: f64) {",
+        "        self.values[index] = value;",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ddt_scaled_source(&mut self, index: usize, source: usize, input_scale: f64, derivative_scale: f64, value: f64) {",
+        "        let scale = input_scale * derivative_scale;",
+        "        self.values[index] = value;",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ddt_scaled_voltage(&mut self, index: usize, pos: Option<usize>, neg: Option<usize>, input_scale: f64, derivative_scale: f64, value: f64) {",
+        "        let scale = input_scale * derivative_scale;",
+        "        self.values[index] = value;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] += scale; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] -= scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ddt_scaled_branch_current(&mut self, index: usize, slot: usize, input_scale: f64, derivative_scale: f64, value: f64) {",
+        "        self.values[index] = value;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        self.branch_derivatives[index][slot] = input_scale * derivative_scale;",
         "    }",
         "",
         "    #[inline]",
@@ -12796,6 +12983,10 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         return Some(line);
     }
 
+    if let Some(line) = compact_ddt_store_helper_call(target_index, value) {
+        return Some(line);
+    }
+
     if let Some(line) = compact_voltage_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -14080,6 +14271,129 @@ fn compact_scratch_choice_store_helper_call(target_index: usize, value: &str) ->
     }
 
     None
+}
+
+fn compact_ddt_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    compact_ddt_store_helper_call_scaled(target_index, value, "1.0")
+}
+
+fn compact_ddt_store_helper_call_scaled(
+    target_index: usize,
+    value: &str,
+    output_scale: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "ddt")?;
+    if args.len() != 3 {
+        return None;
+    }
+
+    let operand = args[0].trim();
+    let derivative_scale = args[1].trim();
+    let eval_args = compact_function_call_args(args[2], "eval_ddt")?;
+    if eval_args.len() != 7 {
+        return None;
+    }
+    let eval_operand = eval_args[6].trim().strip_suffix(".value")?.trim();
+    if eval_operand != operand {
+        return None;
+    }
+
+    let (input, input_scale) = compact_scaled_ad_expression(operand)
+        .map(|(input, scale)| (input, scale))
+        .unwrap_or((operand, "1.0".to_string()));
+    let derivative_input_scale = compact_scale_product(&input_scale, output_scale);
+
+    if let Some(source) = compact_scratch_ad_value_index(input) {
+        let input_value = compact_scale_product(&format!("scratch.values[{source}]"), &input_scale);
+        let eval = compact_scale_product(
+            &compact_eval_ddt_call(&eval_args, &input_value),
+            output_scale,
+        );
+        if derivative_input_scale == "1.0" {
+            return Some(format!(
+                "scratch.store_ddt_source({target_index}, {source}, {derivative_scale}, {eval});"
+            ));
+        }
+        return Some(format!(
+            "scratch.store_ddt_scaled_source({target_index}, {source}, {derivative_input_scale}, {derivative_scale}, {eval});"
+        ));
+    }
+
+    if let Some(voltage_args) = compact_ad_call_args(input, "voltage") {
+        if voltage_args.len() != 4 || voltage_args[0] != "ctx" {
+            return None;
+        }
+        let nodes = compact_runtime_nodes_arg(voltage_args[1])?;
+        let input_value = compact_scale_product(
+            &compact_runtime_voltage_value(&nodes, voltage_args[2], voltage_args[3])?,
+            &input_scale,
+        );
+        let eval = compact_scale_product(
+            &compact_eval_ddt_call(&eval_args, &input_value),
+            output_scale,
+        );
+        return Some(format!(
+            "scratch.store_ddt_scaled_voltage({target_index}, {}, {}, {derivative_input_scale}, {derivative_scale}, {eval});",
+            voltage_args[2], voltage_args[3]
+        ));
+    }
+
+    let branch_args = compact_ad_call_args(input, "branch_current")?;
+    if branch_args.len() != 3 || branch_args[0] != "ctx" {
+        return None;
+    }
+    let branches = compact_runtime_branches_arg(branch_args[1])?;
+    let input_value = compact_scale_product(
+        &format!("ctx.branch_current({branches}[{}])", branch_args[2]),
+        &input_scale,
+    );
+    let eval = compact_scale_product(
+        &compact_eval_ddt_call(&eval_args, &input_value),
+        output_scale,
+    );
+    Some(format!(
+        "scratch.store_ddt_scaled_branch_current({target_index}, {}, {derivative_input_scale}, {derivative_scale}, {eval});",
+        branch_args[2]
+    ))
+}
+
+fn compact_eval_ddt_call(eval_args: &[&str], value: &str) -> String {
+    let mut args = eval_args[..6].join(", ");
+    args.push_str(", ");
+    args.push_str(value);
+    format!("eval_ddt({args})")
+}
+
+fn compact_runtime_voltage_value(nodes: &str, pos: &str, neg: &str) -> Option<String> {
+    let pos = compact_runtime_voltage_node_value(nodes, pos)?;
+    let neg = compact_runtime_voltage_node_value(nodes, neg)?;
+    Some(compact_scalar_sub(&pos, &neg))
+}
+
+fn compact_runtime_voltage_node_value(nodes: &str, node: &str) -> Option<String> {
+    let node = node.trim();
+    if node == "None" {
+        return Some("0.0".to_string());
+    }
+    let index = node.strip_prefix("Some(")?.strip_suffix(')')?.trim();
+    index.parse::<usize>().ok()?;
+    Some(format!("ctx.node_voltage({nodes}[{index}])"))
+}
+
+fn compact_runtime_nodes_arg(value: &str) -> Option<String> {
+    match value.trim() {
+        "nodes" | "&nodes" => Some("nodes".to_string()),
+        "self.nodes" | "&self.nodes" => Some("self.nodes".to_string()),
+        _ => None,
+    }
+}
+
+fn compact_runtime_branches_arg(value: &str) -> Option<String> {
+    match value.trim() {
+        "branches" | "&branches" => Some("branches".to_string()),
+        "self.branches" | "&self.branches" => Some("self.branches".to_string()),
+        _ => None,
+    }
 }
 
 fn compact_voltage_store_helper_call(target_index: usize, value: &str) -> Option<String> {
@@ -17641,6 +17955,13 @@ fn compact_unary_binary_store_helper_call(target_index: usize, value: &str) -> O
 fn compact_ad_call_args<'a>(value: &'a str, name: &str) -> Option<Vec<&'a str>> {
     let value = value.trim();
     let prefix = format!("AdValue::{name}(");
+    let inner = value.strip_prefix(prefix.as_str())?.strip_suffix(')')?;
+    split_top_level_args(inner)
+}
+
+fn compact_function_call_args<'a>(value: &'a str, name: &str) -> Option<Vec<&'a str>> {
+    let value = value.trim();
+    let prefix = format!("{name}(");
     let inner = value.strip_prefix(prefix.as_str())?.strip_suffix(')')?;
     split_top_level_args(inner)
 }
