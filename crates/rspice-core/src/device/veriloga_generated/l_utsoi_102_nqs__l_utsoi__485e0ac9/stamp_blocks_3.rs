@@ -893,7 +893,7 @@ impl Instance {
         s.v[1311] = if s.b[1311] { 1.0 } else { 0.0 };
 
         if (s.b[1310] && s.b[1311]) {
-            s.store_ad_value(2, A::add_scaled_sub_value_product(1.0, A::mul(s.ad_value(776), s.ad_value(774)), 1.0, s.ad_value(776), s.ad_value(775), (-1.0)));
+            s.store_add_scaled_sub_value_product_mixed_aii(2, 1.0, A::mul(s.ad_value(776), s.ad_value(774)), 1.0, 776, 775, (-1.0));
             s.store_mul_ad_lhs(3, A::add_scaled_inputs4(s.ad_value(775), 1.0, A::mul3_scaled_output(s.ad_value(774), s.ad_value(776), s.ad_value(774), 0.5), 1.0, A::mul3_scaled_output(s.ad_value(775), s.ad_value(776), s.ad_value(775), 0.5), -1.0, A::div_from_scalar(0.5, s.ad_value(776)), -1.0), 778);
             s.store_div_scaled_product_left_ad(4, A::sub(s.ad_value(2), s.ad_value(3)), 777, 0.5, 776, 1.0);
         }

@@ -1454,7 +1454,7 @@ impl Instance {
         s.v[2593] = if s.b[2593] { 1.0 } else { 0.0 };
 
         if (((s.b[2547] && s.b[2575]) && (!s.b[2591])) && s.b[2593]) {
-            s.store_ad_value(2504, A::add_scaled_sub_value_product(1.0, s.ad_value(2496), 1.0, s.ad_value(2500), s.ad_value(2415), 2.0));
+            s.store_add_scaled_sub_value_product_indices(2504, 1.0, 2496, 1.0, 2500, 2415, 2.0);
             s.store_div_from_scalar_sqrt_ad(2501, 1.0, A::offset(A::mul(s.ad_value(730), s.ad_value(2500)), 1.0));
             s.store_div_scaled_value_offset_denominator(2027, s.ad_value(2501), 1.0, s.ad_value(2501), 1.0, 1.0);
             s.store_mul_ad_rhs(2505, 730, A::mul3(A::square(s.ad_value(2027)), s.ad_value(2399), s.ad_value(2498)));
