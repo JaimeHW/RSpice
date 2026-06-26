@@ -543,7 +543,7 @@ impl Instance {
         s.v[115] = if s.b[115] { 1.0 } else { 0.0 };
 
         if s.b[115] {
-            s.store_ad_value(51, A::div_scaled_value_offset_denominator(s.ad_value(51), 1.0, A::powf(A::scale(A::abs(A::voltage(ctx, nodes, Some(8), None)), 1.0 / (p.p20)), p.p44), 1.0, 1.0));
+            s.store_div_scaled_value_offset_denominator(51, s.ad_value(51), 1.0, A::powf(A::scale(A::abs(A::voltage(ctx, nodes, Some(8), None)), 1.0 / (p.p20)), p.p44), 1.0, 1.0);
         }
 
         if (!s.b[115]) {

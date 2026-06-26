@@ -734,7 +734,7 @@ impl Instance {
             s.store_scalar(190, p.p64);
         }
 
-        s.store_ad_value(63, A::div_scaled_product_offset_denominator(s.ad_value(29), s.ad_value(190), 1.0, s.ad_value(189), 1.0, 1.0));
+        s.store_div_scaled_product_offset_denominator(63, s.ad_value(29), s.ad_value(190), 1.0, s.ad_value(189), 1.0, 1.0);
 
         s.store_mul3_lhs(81, 149, 63, 184);
 
@@ -1282,7 +1282,7 @@ impl Instance {
 
         if (p.p13 != 0.0) {
             s.store_scaled_mul(99, 24, 63, (4.0 * 1.3806505e-23));
-            s.store_ad_value(100, A::div_scaled_product3(s.ad_value(80), A::powf(A::abs(A::div(s.ad_value(81), s.ad_value(38))), p.p87), s.ad_value(38), 1.0, s.ad_value(37), 1.0));
+            s.store_div_scaled_product3(100, s.ad_value(80), A::powf(A::abs(A::div(s.ad_value(81), s.ad_value(38))), p.p87), s.ad_value(38), 1.0, s.ad_value(37), 1.0);
         }
 
         s.b[323] = (s.v[81] < 0.0);

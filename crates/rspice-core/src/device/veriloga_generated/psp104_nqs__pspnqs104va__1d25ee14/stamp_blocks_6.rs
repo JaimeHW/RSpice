@@ -518,7 +518,7 @@ impl Instance {
         s.v[3273] = if s.b[3273] { 1.0 } else { 0.0 };
 
         if (s.b[3268] && s.b[3273]) {
-            s.store_ad_value(860, A::div_scaled_product3(A::square(s.ad_value(1908)), s.ad_value(1904), s.ad_value(1895), 1.0, A::square(s.ad_value(1906)), 1.0));
+            s.store_div_scaled_product3(860, A::square(s.ad_value(1908)), s.ad_value(1904), s.ad_value(1895), 1.0, A::square(s.ad_value(1906)), 1.0);
         }
 
         s.b[3277] = (((p.p46 != 0.0) && (s.v[287] > 0.0)) && (s.v[1880] > 0.0));
