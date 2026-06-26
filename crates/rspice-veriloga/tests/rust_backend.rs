@@ -2125,6 +2125,43 @@ fn rust_backend_fuses_expression_scaled_multiply_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_nested_multiply_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_nested_multiply_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression nested multiply");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn mul3(left: Self, middle: Self, right: Self) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn mul3_scaled_output(left: Self, middle: Self, right: Self, scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::mul3("), "{stamp}");
+    assert!(stamp.contains("A::mul3_scaled_output("), "{stamp}");
+    assert!(!stamp.contains("A::mul(A::mul("), "{stamp}");
+    assert!(!stamp.contains("A::mul_scaled_lhs(A::mul("), "{stamp}");
+    assert!(!stamp.contains("A::mul(A::mul_scaled_"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_result_scaled_mixed_mul_div_store_source())
@@ -3054,10 +3091,15 @@ fn rust_backend_fuses_nested_mixed_multiply_store_helpers() {
         support.contains("pub(crate) fn store_mul_ad_product_rhs("),
         "{support}"
     );
-    assert!(stamp.contains("s.store_mul3_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul3_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_ad_product_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_ad_product_rhs("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_mul3_lhs(") || stamp.contains("s.store_mul3_rhs("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_ad_product_lhs(")
+            || stamp.contains("s.store_mul_ad_product_rhs("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -3098,14 +3140,13 @@ fn rust_backend_fuses_affine_nested_mixed_multiply_store_helpers() {
         support.contains("pub(crate) fn store_mul_ad_affine_product_rhs("),
         "{support}"
     );
-    assert!(stamp.contains("s.store_mul3_affine_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul3_affine_rhs("), "{stamp}");
     assert!(
-        stamp.contains("s.store_mul_ad_affine_product_lhs("),
+        stamp.contains("s.store_mul3_affine_lhs(") || stamp.contains("s.store_mul3_affine_rhs("),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_mul_ad_affine_product_rhs("),
+        stamp.contains("s.store_mul_ad_affine_product_lhs(")
+            || stamp.contains("s.store_mul_ad_affine_product_rhs("),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
@@ -9637,6 +9678,29 @@ module compact_expression_scaled_multiply(p, n);
           + (exp(q) * (gain * a))
           + ((sqrt(a + q) * ln(q + offset)) * gain)
           + (((sqrt(a + q) * ln(q + offset)) * gain) * offset);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_nested_multiply_source() -> &'static str {
+    r#"
+module compact_expression_nested_multiply(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt((a * q) * r)
+          + exp(((a * gain) * q) * r)
+          + ln(((a * q) * (r * gain)) + 3.0);
         I(p, n) <+ b;
     end
 endmodule
