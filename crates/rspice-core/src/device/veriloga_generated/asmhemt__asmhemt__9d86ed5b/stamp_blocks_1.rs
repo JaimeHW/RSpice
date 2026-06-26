@@ -3817,7 +3817,7 @@ impl Instance {
         let assign32180_ad_e49778: A = A::scale_offset(A::scale_offset(s.ad_value(82), ((1.0 / (s.v[35])) * (p.p225)), (((-1.0)) * (p.p225))), (-(1.0 - { let limited_exp_arg = ((-((p.p229) as f64).ln()) / p.p228); if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } })), ((p.p224) * ((1.0 - { let limited_exp_arg = ((-((p.p229) as f64).ln()) / p.p228); if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } }))));
         s.store_ad_value(136, assign32180_ad_e49778);
 
-        s.store_div_ad_lhs(90, A::sub(s.ad_value(136), A::voltage(ctx, nodes, Some(2), Some(0))), 36);
+        s.store_ad_value(90, A::div_scaled_inputs2(s.ad_value(136), 1.0, A::voltage(ctx, nodes, Some(2), Some(0)), (-1.0), s.ad_value(36), 1.0));
 
         s.store_sqrt_offset_ad(91, A::mul_scaled_lhs(s.ad_value(90), p.p230, s.ad_value(90)), 1.92);
 

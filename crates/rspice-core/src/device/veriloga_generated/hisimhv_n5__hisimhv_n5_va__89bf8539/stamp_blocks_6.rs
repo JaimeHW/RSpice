@@ -431,8 +431,8 @@ impl Instance {
         }
 
         if (s.v[81] != 0.0) {
-            s.store_div_ad_lhs(749, A::sub(s.ad_value(747), s.ad_value(132)), 306);
-            s.store_div_ad_lhs(750, A::sub(s.ad_value(748), s.ad_value(754)), 307);
+            s.store_ad_value(749, A::div_scaled_inputs2(s.ad_value(747), 1.0, s.ad_value(132), (-1.0), s.ad_value(306), 1.0));
+            s.store_ad_value(750, A::div_scaled_inputs2(s.ad_value(748), 1.0, s.ad_value(754), (-1.0), s.ad_value(307), 1.0));
             s.store_mul(751, 747, 247);
             s.store_sub_scaled_inputs(753, 747, -1.0, 748, 1.0);
             s.store_mul_sub_from_scalar_rhs(752, 747, 1.0, 247);

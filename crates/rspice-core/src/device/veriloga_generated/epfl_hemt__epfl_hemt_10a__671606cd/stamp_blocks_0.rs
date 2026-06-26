@@ -115,7 +115,7 @@ impl Instance {
         s.v[145] = if s.b[145] { 1.0 } else { 0.0 };
 
         if s.b[145] {
-            s.store_div_ad_lhs(4, A::sub(s.ad_value(14), s.ad_value(3)), 71);
+            s.store_ad_value(4, A::div_scaled_inputs2(s.ad_value(14), 1.0, s.ad_value(3), (-1.0), s.ad_value(71), 1.0));
             s.store_neg_ad(33, A::ln(A::max_with_scalar(A::add(A::sub_from_scalar(1.0, s.ad_value(3)), A::square(s.ad_value(4))), 1e-38)));
         }
 

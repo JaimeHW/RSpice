@@ -2828,7 +2828,7 @@ impl Instance {
             s.copy_ad(396, 393);
             s.store_scaled_voltage(596, ctx, nodes, Some(17), None, (1e-9 / 0.0001));
             s.copy_ad(393, 596);
-            s.store_div_ad_lhs(592, A::sub(s.ad_value(596), s.ad_value(396)), 397);
+            s.store_ad_value(592, A::div_scaled_inputs2(s.ad_value(596), 1.0, s.ad_value(396), (-1.0), s.ad_value(397), 1.0));
         }
 
         if (((s.b[737] && s.b[804]) && s.b[805]) && (!s.b[865])) {
@@ -2897,7 +2897,7 @@ impl Instance {
                 s.store_ad_value(900, A::div_scaled_product3(s.ad_value(225), s.ad_value(379), A::offset(s.ad_value(871), 1.0), 2.0, s.ad_value(870), 2.0));
                 s.store_ad_value(355, A::add_scaled_product(s.ad_value(361), (-1.0), s.ad_value(238), s.ad_value(870), -1.0));
                 s.store_mul_neg_lhs(872, 238, 900);
-                s.store_div_ad_lhs(867, A::sub(s.ad_value(350), s.ad_value(349)), 742);
+                s.store_ad_value(867, A::div_scaled_inputs2(s.ad_value(350), 1.0, s.ad_value(349), (-1.0), s.ad_value(742), 1.0));
                 s.store_mul(866, 225, 867);
             }
             s.b[903] = ((-s.v[866]) >= 500.0);
@@ -3827,7 +3827,7 @@ impl Instance {
                 s.store_ad_value(1010, A::div_scaled_product3(s.ad_value(225), s.ad_value(379), A::offset(s.ad_value(981), 1.0), 2.0, s.ad_value(980), 2.0));
                 s.store_ad_value(358, A::add_scaled_product(s.ad_value(362), (-1.0), s.ad_value(238), s.ad_value(980), -1.0));
                 s.store_mul_neg_lhs(982, 238, 1010);
-                s.store_div_ad_lhs(977, A::sub(s.ad_value(353), s.ad_value(352)), 742);
+                s.store_ad_value(977, A::div_scaled_inputs2(s.ad_value(353), 1.0, s.ad_value(352), (-1.0), s.ad_value(742), 1.0));
                 s.store_mul(976, 225, 977);
             }
             s.b[1015] = ((-s.v[976]) >= 500.0);
@@ -4180,7 +4180,7 @@ impl Instance {
             s.store_sub(411, 352, 349);
             s.store_offset(411, 411, 5e-12);
             s.store_div_from_scalar_offset_scaled_input(410, s.v[93], 400, s.v[93], 1.0);
-            s.store_div_ad_lhs(409, A::sub(A::square(s.ad_value(360)), A::square(s.ad_value(357))), 410);
+            s.store_ad_value(409, A::div_scaled_inputs2(A::square(s.ad_value(360)), 1.0, A::square(s.ad_value(357)), (-1.0), s.ad_value(410), 1.0));
         }
 
         s.b[1042] = (((-s.v[409]) < (s.v[341] * 1e-5)) && ((s.v[341] * 1e-5) >= 0.0));

@@ -2080,7 +2080,7 @@ impl Instance {
         }
 
         if (((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) && (!s.b[2046])) {
-            s.store_sqrt_div_ad(981, A::sub_scaled_inputs(s.ad_value(983), (2.0 * 1.034943e-10), s.ad_value(2021), (2.0 * 1.034943e-10)), s.ad_value(1901));
+            s.store_sqrt_ad(981, A::div_scaled_inputs2(s.ad_value(983), (2.0 * 1.034943e-10), s.ad_value(2021), (-(2.0 * 1.034943e-10)), s.ad_value(1901), 1.0));
         }
 
         if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) {

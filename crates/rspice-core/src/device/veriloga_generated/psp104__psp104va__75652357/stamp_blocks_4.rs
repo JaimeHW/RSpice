@@ -1181,7 +1181,7 @@ impl Instance {
                         if (((s.v[827] - s.v[544]) / s.v[545]) < (-37.0)) {
                             s.ad_value(544)
                         } else {
-                            A::add_scaled_product(s.ad_value(544), 1.0, A::ln_one_plus_exp(A::div(A::sub(s.ad_value(827), s.ad_value(544)), s.ad_value(545))), s.ad_value(545), 1.0)
+                            A::add_scaled_product(s.ad_value(544), 1.0, A::ln_one_plus_exp(A::div_scaled_inputs2(s.ad_value(827), 1.0, s.ad_value(544), (-1.0), s.ad_value(545), 1.0)), s.ad_value(545), 1.0)
                         }
                     }
                 } else {
@@ -1189,7 +1189,7 @@ impl Instance {
                         if (((s.v[827] - s.v[544]) / s.v[545]) > 37.0) {
                             s.ad_value(827)
                         } else {
-                            A::add_scaled_product(s.ad_value(827), 1.0, A::ln_one_plus_exp(A::div(A::sub(s.ad_value(544), s.ad_value(827)), s.ad_value(545))), s.ad_value(545), 1.0)
+                            A::add_scaled_product(s.ad_value(827), 1.0, A::ln_one_plus_exp(A::div_scaled_inputs2(s.ad_value(544), 1.0, s.ad_value(827), (-1.0), s.ad_value(545), 1.0)), s.ad_value(545), 1.0)
                         }
                     }
                 }
