@@ -3224,9 +3224,9 @@ impl Instance {
                 s.store_mul(896, 882, 886);
                 s.store_mul_neg_lhs(897, 878, 886);
                 s.store_ad_value(898, A::add_scaled_products(s.ad_value(878), s.ad_value(883), 1.0, s.ad_value(879), s.ad_value(882), (-1.0)));
-                s.store_mul_scaled_ad_rhs(874, 889, -1.0, A::add_scaled_product(A::add_scaled_products(s.ad_value(890), s.ad_value(877), 1.0, s.ad_value(891), s.ad_value(881), 1.0), 1.0, s.ad_value(892), s.ad_value(885), 1.0));
-                s.store_mul_scaled_ad_rhs(875, 889, -1.0, A::add_scaled_product(A::add_scaled_products(s.ad_value(893), s.ad_value(877), 1.0, s.ad_value(894), s.ad_value(881), 1.0), 1.0, s.ad_value(895), s.ad_value(885), 1.0));
-                s.store_mul_scaled_ad_rhs(876, 889, -1.0, A::add_scaled_product(A::add_scaled_products(s.ad_value(896), s.ad_value(877), 1.0, s.ad_value(897), s.ad_value(881), 1.0), 1.0, s.ad_value(898), s.ad_value(885), 1.0));
+                s.store_mul_scaled_ad_rhs(874, 889, -1.0, A::add_scaled_products3(s.ad_value(890), s.ad_value(877), 1.0, s.ad_value(891), s.ad_value(881), 1.0, s.ad_value(892), s.ad_value(885), 1.0));
+                s.store_mul_scaled_ad_rhs(875, 889, -1.0, A::add_scaled_products3(s.ad_value(893), s.ad_value(877), 1.0, s.ad_value(894), s.ad_value(881), 1.0, s.ad_value(895), s.ad_value(885), 1.0));
+                s.store_mul_scaled_ad_rhs(876, 889, -1.0, A::add_scaled_products3(s.ad_value(896), s.ad_value(877), 1.0, s.ad_value(897), s.ad_value(881), 1.0, s.ad_value(898), s.ad_value(885), 1.0));
                 s.store_abs(867, 874);
             }
             s.b[919] = (s.v[867] < ((s.v[875]) as f64).abs());
@@ -4153,9 +4153,9 @@ impl Instance {
                 s.store_mul(1006, 992, 996);
                 s.store_mul_neg_lhs(1007, 988, 996);
                 s.store_ad_value(1008, A::add_scaled_products(s.ad_value(988), s.ad_value(993), 1.0, s.ad_value(989), s.ad_value(992), (-1.0)));
-                s.store_mul_scaled_ad_rhs(984, 999, -1.0, A::add_scaled_product(A::add_scaled_products(s.ad_value(1000), s.ad_value(987), 1.0, s.ad_value(1001), s.ad_value(991), 1.0), 1.0, s.ad_value(1002), s.ad_value(995), 1.0));
-                s.store_mul_scaled_ad_rhs(985, 999, -1.0, A::add_scaled_product(A::add_scaled_products(s.ad_value(1003), s.ad_value(987), 1.0, s.ad_value(1004), s.ad_value(991), 1.0), 1.0, s.ad_value(1005), s.ad_value(995), 1.0));
-                s.store_mul_scaled_ad_rhs(986, 999, -1.0, A::add_scaled_product(A::add_scaled_products(s.ad_value(1006), s.ad_value(987), 1.0, s.ad_value(1007), s.ad_value(991), 1.0), 1.0, s.ad_value(1008), s.ad_value(995), 1.0));
+                s.store_mul_scaled_ad_rhs(984, 999, -1.0, A::add_scaled_products3(s.ad_value(1000), s.ad_value(987), 1.0, s.ad_value(1001), s.ad_value(991), 1.0, s.ad_value(1002), s.ad_value(995), 1.0));
+                s.store_mul_scaled_ad_rhs(985, 999, -1.0, A::add_scaled_products3(s.ad_value(1003), s.ad_value(987), 1.0, s.ad_value(1004), s.ad_value(991), 1.0, s.ad_value(1005), s.ad_value(995), 1.0));
+                s.store_mul_scaled_ad_rhs(986, 999, -1.0, A::add_scaled_products3(s.ad_value(1006), s.ad_value(987), 1.0, s.ad_value(1007), s.ad_value(991), 1.0, s.ad_value(1008), s.ad_value(995), 1.0));
                 s.store_abs(977, 984);
             }
             s.b[1031] = (s.v[977] < ((s.v[985]) as f64).abs());
@@ -4863,7 +4863,7 @@ impl Instance {
                 s.store_div_ad_lhs(491, A::add_scaled_product(s.ad_value(489), 0.5, s.ad_value(443), s.ad_value(242), (2.0 * 0.5)), 490);
             }
             if (!s.b[737]) {
-                s.store_ad_value(492, A::add_scaled_product(A::add_scaled_inputs_product(s.ad_value(349), 1.0, s.ad_value(159), (-1.0), s.ad_value(240), s.ad_value(490), 1.0), 1.0, s.ad_value(324), s.ad_value(393), (-1.0)));
+                s.store_ad_value(492, A::add_scaled_inputs_products(s.ad_value(349), 1.0, s.ad_value(159), (-1.0), s.ad_value(240), s.ad_value(490), 1.0, s.ad_value(324), s.ad_value(393), (-1.0)));
                 s.store_offset_mul(493, 240, 491, 1.0);
             }
             s.b[1085] = (s.v[430] == 1.0);

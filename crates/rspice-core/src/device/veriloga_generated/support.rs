@@ -6404,6 +6404,41 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn add_scaled_value_products(value: Self, value_scale: f64, first_product_left: Self, first_product_right: Self, first_product_scale: f64, second_product_left: Self, second_product_right: Self, second_product_scale: f64) -> Self {
+        let mut result = value;
+        let value_term = result.value * value_scale;
+        let first_product_left_value = first_product_left.value;
+        let first_product_right_value = first_product_right.value;
+        let second_product_left_value = second_product_left.value;
+        let second_product_right_value = second_product_right.value;
+        let first_product_term = first_product_left_value * first_product_right_value * first_product_scale;
+        let second_product_term = second_product_left_value * second_product_right_value * second_product_scale;
+        result.value = value_term + first_product_term + second_product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * value_scale + (first_product_left.dn[index] * first_product_right_value + first_product_left_value * first_product_right.dn[index]) * first_product_scale + (second_product_left.dn[index] * second_product_right_value + second_product_left_value * second_product_right.dn[index]) * second_product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * value_scale + (first_product_left.db[index] * first_product_right_value + first_product_left_value * first_product_right.db[index]) * first_product_scale + (second_product_left.db[index] * second_product_right_value + second_product_left_value * second_product_right.db[index]) * second_product_scale; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn add_scaled_value_products3(value: Self, value_scale: f64, first_product_left: Self, first_product_right: Self, first_product_scale: f64, second_product_left: Self, second_product_right: Self, second_product_scale: f64, third_product_left: Self, third_product_right: Self, third_product_scale: f64) -> Self {
+        let mut result = value;
+        let value_term = result.value * value_scale;
+        let first_product_left_value = first_product_left.value;
+        let first_product_right_value = first_product_right.value;
+        let second_product_left_value = second_product_left.value;
+        let second_product_right_value = second_product_right.value;
+        let third_product_left_value = third_product_left.value;
+        let third_product_right_value = third_product_right.value;
+        let first_product_term = first_product_left_value * first_product_right_value * first_product_scale;
+        let second_product_term = second_product_left_value * second_product_right_value * second_product_scale;
+        let third_product_term = third_product_left_value * third_product_right_value * third_product_scale;
+        result.value = value_term + first_product_term + second_product_term + third_product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * value_scale + (first_product_left.dn[index] * first_product_right_value + first_product_left_value * first_product_right.dn[index]) * first_product_scale + (second_product_left.dn[index] * second_product_right_value + second_product_left_value * second_product_right.dn[index]) * second_product_scale + (third_product_left.dn[index] * third_product_right_value + third_product_left_value * third_product_right.dn[index]) * third_product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * value_scale + (first_product_left.db[index] * first_product_right_value + first_product_left_value * first_product_right.db[index]) * first_product_scale + (second_product_left.db[index] * second_product_right_value + second_product_left_value * second_product_right.db[index]) * second_product_scale + (third_product_left.db[index] * third_product_right_value + third_product_left_value * third_product_right.db[index]) * third_product_scale; }
+        result
+    }
+
+    #[inline]
     pub(crate) fn add_scaled_offset_product_lhs(value: Self, value_scale: f64, product_left: Self, product_left_offset: f64, product_right: Self, product_scale: f64) -> Self {
         let mut result = value;
         let value_term = result.value * value_scale;
@@ -6413,6 +6448,22 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         result.value = value_term + product_term;
         for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * value_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
         for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * value_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn add_scaled_offset_product_lhs_product(value: Self, value_scale: f64, offset_product_left: Self, offset_product_left_offset: f64, offset_product_right: Self, offset_product_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
+        let mut result = value;
+        let value_term = result.value * value_scale;
+        let offset_product_left_value = offset_product_left.value + offset_product_left_offset;
+        let offset_product_right_value = offset_product_right.value;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let offset_product_term = offset_product_left_value * offset_product_right_value * offset_product_scale;
+        let product_term = product_left_value * product_right_value * product_scale;
+        result.value = value_term + offset_product_term + product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * value_scale + (offset_product_left.dn[index] * offset_product_right_value + offset_product_left_value * offset_product_right.dn[index]) * offset_product_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * value_scale + (offset_product_left.db[index] * offset_product_right_value + offset_product_left_value * offset_product_right.db[index]) * offset_product_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
         result
     }
 
@@ -6440,6 +6491,23 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         result.value = first_value + second_value + product_term;
         for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * first_scale + second.dn[index] * second_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
         for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * first_scale + second.db[index] * second_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn add_scaled_inputs_products(first: Self, first_scale: f64, second: Self, second_scale: f64, first_product_left: Self, first_product_right: Self, first_product_scale: f64, second_product_left: Self, second_product_right: Self, second_product_scale: f64) -> Self {
+        let mut result = first;
+        let first_value = result.value * first_scale;
+        let second_value = second.value * second_scale;
+        let first_product_left_value = first_product_left.value;
+        let first_product_right_value = first_product_right.value;
+        let second_product_left_value = second_product_left.value;
+        let second_product_right_value = second_product_right.value;
+        let first_product_term = first_product_left_value * first_product_right_value * first_product_scale;
+        let second_product_term = second_product_left_value * second_product_right_value * second_product_scale;
+        result.value = first_value + second_value + first_product_term + second_product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * first_scale + second.dn[index] * second_scale + (first_product_left.dn[index] * first_product_right_value + first_product_left_value * first_product_right.dn[index]) * first_product_scale + (second_product_left.dn[index] * second_product_right_value + second_product_left_value * second_product_right.dn[index]) * second_product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * first_scale + second.db[index] * second_scale + (first_product_left.db[index] * first_product_right_value + first_product_left_value * first_product_right.db[index]) * first_product_scale + (second_product_left.db[index] * second_product_right_value + second_product_left_value * second_product_right.db[index]) * second_product_scale; }
         result
     }
 
@@ -6509,6 +6577,24 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         result.value = left_product_term + right_product_term;
         for index in 0..NODE_COUNT { result.dn[index] = (result.dn[index] * left_product_right_value + left_product_left_value * left_product_right.dn[index]) * left_scale + (right_product_left.dn[index] * right_product_right_value + right_product_left_value * right_product_right.dn[index]) * right_scale; }
         for index in 0..BRANCH_COUNT { result.db[index] = (result.db[index] * left_product_right_value + left_product_left_value * left_product_right.db[index]) * left_scale + (right_product_left.db[index] * right_product_right_value + right_product_left_value * right_product_right.db[index]) * right_scale; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn add_scaled_products3(first_product_left: Self, first_product_right: Self, first_scale: f64, second_product_left: Self, second_product_right: Self, second_scale: f64, third_product_left: Self, third_product_right: Self, third_scale: f64) -> Self {
+        let mut result = first_product_left;
+        let first_product_left_value = result.value;
+        let first_product_right_value = first_product_right.value;
+        let second_product_left_value = second_product_left.value;
+        let second_product_right_value = second_product_right.value;
+        let third_product_left_value = third_product_left.value;
+        let third_product_right_value = third_product_right.value;
+        let first_product_term = first_product_left_value * first_product_right_value * first_scale;
+        let second_product_term = second_product_left_value * second_product_right_value * second_scale;
+        let third_product_term = third_product_left_value * third_product_right_value * third_scale;
+        result.value = first_product_term + second_product_term + third_product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = (result.dn[index] * first_product_right_value + first_product_left_value * first_product_right.dn[index]) * first_scale + (second_product_left.dn[index] * second_product_right_value + second_product_left_value * second_product_right.dn[index]) * second_scale + (third_product_left.dn[index] * third_product_right_value + third_product_left_value * third_product_right.dn[index]) * third_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = (result.db[index] * first_product_right_value + first_product_left_value * first_product_right.db[index]) * first_scale + (second_product_left.db[index] * second_product_right_value + second_product_left_value * second_product_right.db[index]) * second_scale + (third_product_left.db[index] * third_product_right_value + third_product_left_value * third_product_right.db[index]) * third_scale; }
         result
     }
 

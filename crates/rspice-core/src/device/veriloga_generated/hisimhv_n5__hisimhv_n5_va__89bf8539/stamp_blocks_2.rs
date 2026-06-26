@@ -853,7 +853,7 @@ impl Instance {
             if (((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && (!s.b[1973])) && (s.v[79] == 0.0)) {
                 s.store_ad_value(1868, A::add_scaled_inputs3(A::add_scaled_product(s.ad_value(1861), 1.0, s.ad_value(185), A::sub(s.ad_value(85), s.ad_value(1852)), 1.0), 1.0, s.ad_value(1866), 1.0, s.ad_value(1867), 1.0));
                 s.store_sub(1869, 1896, 185);
-                s.store_add_ad_rhs(1870, 1898, A::add_scaled_product(A::add_scaled_product(s.ad_value(1843), 1.0, s.ad_value(1845), s.ad_value(1841), 1.0), 1.0, s.ad_value(1847), s.ad_value(1841), 1.0));
+                s.store_add_ad_rhs(1870, 1898, A::add_scaled_value_products(s.ad_value(1843), 1.0, s.ad_value(1845), s.ad_value(1841), 1.0, s.ad_value(1847), s.ad_value(1841), 1.0));
                 s.store_sub(1871, 1855, 1837);
                 s.store_neg(1872, 1838);
                 s.store_sub_from_scalar(1873, 1.0, 1839);

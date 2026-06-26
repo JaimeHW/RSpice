@@ -1946,7 +1946,7 @@ impl Instance {
             s.store_sqrt(111, 110);
             s.store_mul(112, 114, 111);
             s.store_div_from_scalar(97, s.v[26], 112);
-            s.store_ad_value(113, A::add_scaled_product(A::add_scaled_inputs_product(s.ad_value(613), 1.0, s.ad_value(674), 1.0, s.ad_value(614), s.ad_value(76), 1.0), 1.0, s.ad_value(615), s.ad_value(61), (-1.0)));
+            s.store_ad_value(113, A::add_scaled_inputs_products(s.ad_value(613), 1.0, s.ad_value(674), 1.0, s.ad_value(614), s.ad_value(76), 1.0, s.ad_value(615), s.ad_value(61), (-1.0)));
             s.store_offset_scaled(13, 113, 1.0 / (s.v[46]), 1.0);
         }
 
@@ -2335,7 +2335,7 @@ impl Instance {
         s.v[1623] = if s.b[1623] { 1.0 } else { 0.0 };
 
         if ((s.b[1621] && s.b[1622]) && s.b[1623]) {
-            s.store_ad_value(749, A::add_scaled_product(A::add_scaled_product(s.ad_value(749), 1.0, A::square(A::voltage(ctx, nodes, Some(0), Some(6))), s.ad_value(372), 1.0), 1.0, A::square(A::voltage(ctx, nodes, Some(6), Some(5))), s.ad_value(374), 1.0));
+            s.store_ad_value(749, A::add_scaled_value_products(s.ad_value(749), 1.0, A::square(A::voltage(ctx, nodes, Some(0), Some(6))), s.ad_value(372), 1.0, A::square(A::voltage(ctx, nodes, Some(6), Some(5))), s.ad_value(374), 1.0));
         }
 
         if ((s.b[1621] && s.b[1622]) && (!s.b[1623])) {
@@ -2349,7 +2349,7 @@ impl Instance {
         s.v[1625] = if s.b[1625] { 1.0 } else { 0.0 };
 
         if ((s.b[1621] && s.b[1624]) && s.b[1625]) {
-            s.store_ad_value(749, A::add_scaled_product(A::add_scaled_product(s.ad_value(749), 1.0, A::square(A::voltage(ctx, nodes, Some(2), Some(8))), s.ad_value(371), 1.0), 1.0, A::square(A::voltage(ctx, nodes, Some(8), Some(7))), s.ad_value(373), 1.0));
+            s.store_ad_value(749, A::add_scaled_value_products(s.ad_value(749), 1.0, A::square(A::voltage(ctx, nodes, Some(2), Some(8))), s.ad_value(371), 1.0, A::square(A::voltage(ctx, nodes, Some(8), Some(7))), s.ad_value(373), 1.0));
         }
 
         if ((s.b[1621] && s.b[1624]) && (!s.b[1625])) {

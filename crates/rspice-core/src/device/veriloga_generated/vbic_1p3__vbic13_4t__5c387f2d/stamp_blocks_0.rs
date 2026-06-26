@@ -1335,9 +1335,8 @@ impl Instance {
             s.store_scalar(92, 0.0);
         }
 
-        let assign4450_ad_e4869: A = A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_products(s.ad_value(87), s.ad_value(143), 1.0, s.ad_value(90), s.ad_value(144), 1.0), 1.0, A::sub(s.ad_value(137), s.ad_value(77)), s.ad_value(160), 1.0), 1.0, s.ad_value(88), s.ad_value(145), 1.0), 1.0, s.ad_value(91), s.ad_value(146), 1.0), 1.0, s.ad_value(102), s.ad_value(159), 1.0), 1.0, s.ad_value(92), s.ad_value(147), 1.0);
-        let assign4450_ad_e4893: A = A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(assign4450_ad_e4869, 1.0, s.ad_value(84), s.ad_value(161), 1.0), 1.0, s.ad_value(96), s.ad_value(153), 1.0), 1.0, s.ad_value(97), s.ad_value(154), 1.0), 1.0, s.ad_value(98), s.ad_value(155), 1.0), 1.0, s.ad_value(99), s.ad_value(156), 1.0), 1.0, s.ad_value(100), s.ad_value(157), 1.0);
-        s.store_ad_value(140, A::add_scaled_product(assign4450_ad_e4893, 1.0, s.ad_value(101), s.ad_value(158), 1.0));
+        let assign4450_ad_e4873: A = A::add_scaled_value_products(A::add_scaled_value_products3(A::add_scaled_products3(s.ad_value(87), s.ad_value(143), 1.0, s.ad_value(90), s.ad_value(144), 1.0, A::sub(s.ad_value(137), s.ad_value(77)), s.ad_value(160), 1.0), 1.0, s.ad_value(88), s.ad_value(145), 1.0, s.ad_value(91), s.ad_value(146), 1.0, s.ad_value(102), s.ad_value(159), 1.0), 1.0, s.ad_value(92), s.ad_value(147), 1.0, s.ad_value(84), s.ad_value(161), 1.0);
+        s.store_ad_value(140, A::add_scaled_value_products3(A::add_scaled_value_products3(assign4450_ad_e4873, 1.0, s.ad_value(96), s.ad_value(153), 1.0, s.ad_value(97), s.ad_value(154), 1.0, s.ad_value(98), s.ad_value(155), 1.0), 1.0, s.ad_value(99), s.ad_value(156), 1.0, s.ad_value(100), s.ad_value(157), 1.0, s.ad_value(101), s.ad_value(158), 1.0));
 
         s.store_scale(139, 140, (-p.p2));
 

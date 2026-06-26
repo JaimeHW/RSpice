@@ -182,7 +182,7 @@ impl Instance {
             s.store_sub(63, 4, 58);
             s.store_square(64, 63);
             s.store_mul(65, 64, 63);
-            s.store_ad_value(71, A::add_scaled_product(A::add_scaled_product(s.ad_value(64), p.p12, s.ad_value(60), s.ad_value(63), 1.0), 1.0, s.ad_value(61), s.ad_value(65), 1.0));
+            s.store_ad_value(71, A::add_scaled_value_products(s.ad_value(64), p.p12, s.ad_value(60), s.ad_value(63), 1.0, s.ad_value(61), s.ad_value(65), 1.0));
             s.store_offset_tanh_ad(77, s.ad_value(71), 1.0);
             s.store_offset_scaled(72, 77, p.p15, p.p14);
             s.store_offset_scaled(69, 75, p.p17, p.p16);
@@ -659,7 +659,7 @@ impl Instance {
             s.store_sub(63, 4, 58);
             s.store_square(64, 63);
             s.store_mul(65, 64, 63);
-            s.store_ad_value(71, A::add_scaled_product(A::add_scaled_product(s.ad_value(64), p.p12, s.ad_value(60), s.ad_value(63), 1.0), 1.0, s.ad_value(61), s.ad_value(65), 1.0));
+            s.store_ad_value(71, A::add_scaled_value_products(s.ad_value(64), p.p12, s.ad_value(60), s.ad_value(63), 1.0, s.ad_value(61), s.ad_value(65), 1.0));
             s.store_offset_tanh_ad(77, s.ad_value(71), 1.0);
             s.store_offset_scaled(72, 77, p.p15, p.p14);
             s.store_offset_scaled(69, 75, p.p17, p.p16);

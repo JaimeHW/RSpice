@@ -3033,7 +3033,7 @@ impl Instance {
         );
         let eq221_ad: A = {
     if s.b[610] {
-        A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_products(s.ad_value(94), s.ad_value(38), (-1.0), s.ad_value(233), s.ad_value(231), (-1.0)), 1.0, s.ad_value(257), s.ad_value(255), (-1.0)), 1.0, s.ad_value(281), s.ad_value(279), (-1.0)), 1.0, s.ad_value(305), s.ad_value(303), (-1.0))
+        A::add_scaled_value_products(A::add_scaled_products3(s.ad_value(94), s.ad_value(38), (-1.0), s.ad_value(233), s.ad_value(231), (-1.0), s.ad_value(257), s.ad_value(255), (-1.0)), 1.0, s.ad_value(281), s.ad_value(279), (-1.0), s.ad_value(305), s.ad_value(303), (-1.0))
     } else {
         A::constant(0.0)
     }

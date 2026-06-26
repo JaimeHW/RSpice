@@ -208,7 +208,7 @@ impl Instance {
                 s.store_div_ad_lhs(500, A::add_scaled_product(s.ad_value(498), 0.5, s.ad_value(443), s.ad_value(242), (2.0 * 0.5)), 499);
             }
             if ((!s.b[733]) && s.b[1085]) {
-                s.store_ad_value(503, A::add_scaled_product(A::add_scaled_inputs_product(s.ad_value(352), 1.0, s.ad_value(159), (-1.0), s.ad_value(240), s.ad_value(499), 1.0), 1.0, s.ad_value(324), s.ad_value(393), (-1.0)));
+                s.store_ad_value(503, A::add_scaled_inputs_products(s.ad_value(352), 1.0, s.ad_value(159), (-1.0), s.ad_value(240), s.ad_value(499), 1.0, s.ad_value(324), s.ad_value(393), (-1.0)));
                 s.store_offset_mul(504, 240, 500, 1.0);
             }
             s.b[1112] = ((s.v[430] == 1.0) && (s.v[168] > 3.0));

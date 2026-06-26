@@ -3669,9 +3669,9 @@ impl Instance {
 
         s.store_add(855, 855, 1911);
 
-        s.store_ad_value(857, A::add_scaled_product(A::add_scaled_products(s.ad_value(646), s.ad_value(1918), 1.0, s.ad_value(647), s.ad_value(1919), 1.0), 1.0, s.ad_value(648), s.ad_value(1920), 1.0));
+        s.store_ad_value(857, A::add_scaled_products3(s.ad_value(646), s.ad_value(1918), 1.0, s.ad_value(647), s.ad_value(1919), 1.0, s.ad_value(648), s.ad_value(1920), 1.0));
 
-        s.store_ad_value(858, A::add_scaled_product(A::add_scaled_products(s.ad_value(673), s.ad_value(1921), 1.0, s.ad_value(674), s.ad_value(1922), 1.0), 1.0, s.ad_value(675), s.ad_value(1923), 1.0));
+        s.store_ad_value(858, A::add_scaled_products3(s.ad_value(673), s.ad_value(1921), 1.0, s.ad_value(674), s.ad_value(1922), 1.0, s.ad_value(675), s.ad_value(1923), 1.0));
 
         s.b[3235] = (s.v[831] < 0.0);
         s.v[3235] = if s.b[3235] { 1.0 } else { 0.0 };
@@ -3722,7 +3722,7 @@ impl Instance {
             s.store_scaled_mul(3236, 771, 1864, s.v[715]);
             s.store_mul(3237, 771, 1866);
             s.store_mul3_lhs(3238, 771, 1864, 1860);
-            s.store_mul_ad(864, A::add_scaled_product(A::add_scaled_product(s.ad_value(278), 1.0, s.ad_value(279), s.ad_value(3236), (-1.0)), 1.0, s.ad_value(280), A::square(s.ad_value(3236)), 1.0), A::ln(A::div(A::add_scaled_inputs(s.ad_value(3237), 1.0, s.ad_value(3238), 0.5), A::sub_scaled_inputs(s.ad_value(3237), 1.0, s.ad_value(3238), 0.5))));
+            s.store_mul_ad(864, A::add_scaled_value_products(s.ad_value(278), 1.0, s.ad_value(279), s.ad_value(3236), (-1.0), s.ad_value(280), A::square(s.ad_value(3236)), 1.0), A::ln(A::div(A::add_scaled_inputs(s.ad_value(3237), 1.0, s.ad_value(3238), 0.5), A::sub_scaled_inputs(s.ad_value(3237), 1.0, s.ad_value(3238), 0.5))));
             s.store_ad_value(864, A::add_scaled_product(s.ad_value(864), 1.0, A::add_scaled_product(s.ad_value(279), 1.0, s.ad_value(280), A::sub_scaled_inputs(s.ad_value(3237), 1.0, s.ad_value(3236), 2.0), 1.0), s.ad_value(3238), 1.0));
             s.store_ad_value(864, A::div_scaled_product(A::mul3(s.ad_value(722), s.ad_value(838), s.ad_value(1876)), s.ad_value(864), 1.0, s.ad_value(3236), 1.0));
         }

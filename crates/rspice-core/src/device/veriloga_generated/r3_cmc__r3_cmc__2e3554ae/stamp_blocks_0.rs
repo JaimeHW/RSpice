@@ -613,7 +613,7 @@ impl Instance {
             s.store_ad_value(177, A::add_scaled_inputs3(s.ad_value(175), 1.0, s.ad_value(176), 1.0, s.ad_value(165), (-0.3333333333333333)));
             s.store_sqrt_ad(167, A::add_scaled_inputs3(s.ad_value(164), 0.25, s.ad_value(162), (-1.0), s.ad_value(177), 1.0));
             s.store_ad_value(178, A::add_scaled_inputs3(s.ad_value(164), 0.75, A::square(s.ad_value(167)), (-1.0), s.ad_value(162), (-2.0)));
-            s.store_div_ad_lhs(179, A::add_scaled_product(A::add_scaled_product(s.ad_value(161), (-2.0), s.ad_value(163), s.ad_value(162), 1.0), 1.0, s.ad_value(164), s.ad_value(163), (-0.25)), 167);
+            s.store_div_ad_lhs(179, A::add_scaled_value_products(s.ad_value(161), (-2.0), s.ad_value(163), s.ad_value(162), 1.0, s.ad_value(164), s.ad_value(163), (-0.25)), 167);
             s.store_add(180, 178, 179);
         }
 
@@ -950,7 +950,7 @@ impl Instance {
             s.store_scalar(83, 0.0);
         }
 
-        s.store_ad_value(2, A::add_scaled_product(A::add_scaled_product(A::add_scaled_product(A::add_scaled_products(s.ad_value(81), s.ad_value(64), 1.0, s.ad_value(82), s.ad_value(65), 1.0), 1.0, s.ad_value(83), s.ad_value(66), 1.0), 1.0, A::branch_current(ctx, branches, 0), A::voltage(ctx, nodes, Some(0), Some(4)), 1.0), 1.0, A::branch_current(ctx, branches, 1), A::voltage(ctx, nodes, Some(2), Some(5)), 1.0));
+        s.store_ad_value(2, A::add_scaled_value_products(A::add_scaled_products3(s.ad_value(81), s.ad_value(64), 1.0, s.ad_value(82), s.ad_value(65), 1.0, s.ad_value(83), s.ad_value(66), 1.0), 1.0, A::branch_current(ctx, branches, 0), A::voltage(ctx, nodes, Some(0), Some(4)), 1.0, A::branch_current(ctx, branches, 1), A::voltage(ctx, nodes, Some(2), Some(5)), 1.0));
 
         s.b[249] = (((s.v[47] > 0.0) && (p.p14 != 0.0)) && (p.p15 == 0.0));
         s.v[249] = if s.b[249] { 1.0 } else { 0.0 };

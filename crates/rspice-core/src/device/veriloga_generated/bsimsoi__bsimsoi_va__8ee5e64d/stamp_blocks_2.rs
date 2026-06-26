@@ -268,7 +268,7 @@ impl Instance {
 
         s.store_ad_value(1181, A::div_scaled_product(s.ad_value(470), s.ad_value(778), 1.0, s.ad_value(1199), 1.0));
 
-        s.store_ad_value(1182, A::add_scaled_product(A::add_scaled_product(s.ad_value(466), 1.0, s.ad_value(467), s.ad_value(1177), 1.0), 1.0, s.ad_value(468), s.ad_value(1158), 1.0));
+        s.store_ad_value(1182, A::add_scaled_value_products(s.ad_value(466), 1.0, s.ad_value(467), s.ad_value(1177), 1.0, s.ad_value(468), s.ad_value(1158), 1.0));
 
         s.store_div_ad_lhs(1183, A::add(A::add_scaled_product(s.ad_value(1181), 1.0, s.ad_value(1182), s.ad_value(1203), 1.0), s.ad_value(469)), 757);
 
@@ -383,7 +383,7 @@ impl Instance {
 
         s.store_ad_value(1425, A::div_scaled_product_offset_denominator(s.ad_value(752), A::offset(s.ad_value(1179), (-1.0)), 1.0, s.ad_value(1179), 1.0, 1.0));
 
-        let assign20350_ad_e14939: A = A::add_scaled_product(A::add_scaled_inputs3(A::add_scaled_product(A::add_scaled_product(s.ad_value(768), s.v[36], A::add_scaled_products(s.ad_value(737), s.ad_value(1298), 1.0, s.ad_value(707), s.ad_value(1278), (-1.0)), s.ad_value(1423), 1.0), 1.0, s.ad_value(764), s.ad_value(1177), (-1.0)), 1.0, s.ad_value(1202), (-1.0), s.ad_value(1239), -1.0), 1.0, A::add_scaled_product(s.ad_value(495), 1.0, s.ad_value(496), s.ad_value(1177), 1.0), s.ad_value(1205), 1.0);
+        let assign20350_ad_e14939: A = A::add_scaled_product(A::add_scaled_inputs3(A::add_scaled_value_products(s.ad_value(768), s.v[36], A::add_scaled_products(s.ad_value(737), s.ad_value(1298), 1.0, s.ad_value(707), s.ad_value(1278), (-1.0)), s.ad_value(1423), 1.0, s.ad_value(764), s.ad_value(1177), (-1.0)), 1.0, s.ad_value(1202), (-1.0), s.ad_value(1239), -1.0), 1.0, A::add_scaled_product(s.ad_value(495), 1.0, s.ad_value(496), s.ad_value(1177), 1.0), s.ad_value(1205), 1.0);
         s.store_ad_value(1165, A::add_scaled_inputs3(A::add_scaled_inputs3(assign20350_ad_e14939, 1.0, s.ad_value(1238), 1.0, s.ad_value(1208), -1.0), 1.0, s.ad_value(1424), (-1.0), s.ad_value(1425), -1.0));
 
         s.store_sub(1387, 1277, 1378);
@@ -443,7 +443,7 @@ impl Instance {
 
         s.store_ad_value(1181, A::div_scaled_product(s.ad_value(470), s.ad_value(778), 1.0, s.ad_value(1389), 1.0));
 
-        s.store_ad_value(1182, A::add_scaled_product(A::add_scaled_product(s.ad_value(466), 1.0, s.ad_value(467), s.ad_value(1378), 1.0), 1.0, s.ad_value(468), s.ad_value(1158), 1.0));
+        s.store_ad_value(1182, A::add_scaled_value_products(s.ad_value(466), 1.0, s.ad_value(467), s.ad_value(1378), 1.0, s.ad_value(468), s.ad_value(1158), 1.0));
 
         s.store_div_ad_lhs(1183, A::add(A::add_scaled_product(s.ad_value(1181), 1.0, s.ad_value(1182), s.ad_value(1392), 1.0), s.ad_value(469)), 757);
 
@@ -552,7 +552,7 @@ impl Instance {
 
         s.store_ad_value(1425, A::div_scaled_product_offset_denominator(s.ad_value(752), A::offset(s.ad_value(1179), (-1.0)), 1.0, s.ad_value(1179), 1.0, 1.0));
 
-        let assign21000_ad_e15396: A = A::add_scaled_product(A::add_scaled_inputs3(A::add_scaled_product(A::add_scaled_product(s.ad_value(768), s.v[36], A::add_scaled_products(s.ad_value(737), s.ad_value(1406), 1.0, s.ad_value(707), s.ad_value(1278), (-1.0)), s.ad_value(1423), 1.0), 1.0, s.ad_value(764), s.ad_value(1378), (-1.0)), 1.0, s.ad_value(1401), (-1.0), s.ad_value(1402), -1.0), 1.0, A::add_scaled_product(s.ad_value(495), 1.0, s.ad_value(496), s.ad_value(1378), 1.0), s.ad_value(1400), 1.0);
+        let assign21000_ad_e15396: A = A::add_scaled_product(A::add_scaled_inputs3(A::add_scaled_value_products(s.ad_value(768), s.v[36], A::add_scaled_products(s.ad_value(737), s.ad_value(1406), 1.0, s.ad_value(707), s.ad_value(1278), (-1.0)), s.ad_value(1423), 1.0, s.ad_value(764), s.ad_value(1378), (-1.0)), 1.0, s.ad_value(1401), (-1.0), s.ad_value(1402), -1.0), 1.0, A::add_scaled_product(s.ad_value(495), 1.0, s.ad_value(496), s.ad_value(1378), 1.0), s.ad_value(1400), 1.0);
         s.store_ad_value(1407, A::add_scaled_inputs3(A::add_scaled_inputs3(assign21000_ad_e15396, 1.0, s.ad_value(1403), 1.0, s.ad_value(1404), -1.0), 1.0, s.ad_value(1405), (-1.0), s.ad_value(1425), -1.0));
 
         s.b[1579] = (((s.v[88] == 3.0) && (p.p33 == 1.0)) && (p.p16 != 0.0));

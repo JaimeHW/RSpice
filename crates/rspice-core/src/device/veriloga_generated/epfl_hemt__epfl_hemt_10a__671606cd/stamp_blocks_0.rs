@@ -19004,7 +19004,7 @@ impl Instance {
         s.v[148] = if s.b[148] { 1.0 } else { 0.0 };
 
         if s.b[148] {
-            s.store_neg_ad(133, A::add_scaled_product(A::add_scaled_products(s.ad_value(128), A::voltage(ctx, nodes, Some(5), Some(6)), 1.0, A::square(s.ad_value(128)), s.ad_value(119), 1.0), 1.0, A::square(s.ad_value(128)), s.ad_value(120), 1.0));
+            s.store_neg_ad(133, A::add_scaled_products3(s.ad_value(128), A::voltage(ctx, nodes, Some(5), Some(6)), 1.0, A::square(s.ad_value(128)), s.ad_value(119), 1.0, A::square(s.ad_value(128)), s.ad_value(120), 1.0));
         }
 
     }
