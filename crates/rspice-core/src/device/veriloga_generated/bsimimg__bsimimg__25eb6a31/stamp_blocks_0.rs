@@ -887,8 +887,7 @@ impl Instance {
 
         s.store_mul_sub_rhs(240, 212, 288, 99);
 
-        let assign3720_ad_e4372: A = A::mul3(s.ad_value(331), A::pow(s.ad_value(96), s.ad_value(338)), A::offset(A::add_scaled_inputs(A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9), 0.5, A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(337), s.ad_value(97)), 0.9, A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9)), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt())))))));
-        s.store_ad_value(126, assign3720_ad_e4372);
+        s.store_mul_ad_product_rhs(126, 331, A::pow(s.ad_value(96), s.ad_value(338)), A::offset(A::add_scaled_inputs(A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9), 0.5, A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(337), s.ad_value(97)), 0.9, A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9)), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt())))))));
 
         s.store_mul_scale_ad_rhs(123, 333, A::add(A::scale_offset(s.ad_value(97), p.p159, ((1.0) + ((-1e-6)))), A::sqrt(A::offset(A::mul(A::scale_offset(s.ad_value(97), p.p159, ((1.0) + ((-1e-6)))), A::scale_offset(s.ad_value(97), p.p159, ((1.0) + ((-1e-6))))), ((4.0 * 0.001) * 0.001)))), 0.5);
 
@@ -3676,8 +3675,7 @@ impl Instance {
 
         s.store_mul_sub_rhs(240, 212, 288, 99);
 
-        let assign3720_ad_e4372: A = A::mul3(s.ad_value(331), A::pow(s.ad_value(96), s.ad_value(338)), A::offset(A::add_scaled_inputs(A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9), 0.5, A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(337), s.ad_value(97)), 0.9, A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9)), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt())))))));
-        s.store_ad_value(126, assign3720_ad_e4372);
+        s.store_mul_ad_product_rhs(126, 331, A::pow(s.ad_value(96), s.ad_value(338)), A::offset(A::add_scaled_inputs(A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9), 0.5, A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(337), s.ad_value(97)), 0.9, A::offset(A::mul(s.ad_value(337), s.ad_value(97)), 0.9)), ((4.0 * 0.001) * 0.001))), 0.5), ((1.0) + ((-(0.5 * (0.9 + ((((0.9 * 0.9) + ((4.0 * 0.001) * 0.001))) as f64).sqrt())))))));
 
         s.store_mul_scale_ad_rhs(123, 333, A::add(A::scale_offset(s.ad_value(97), p.p159, ((1.0) + ((-1e-6)))), A::sqrt(A::offset(A::mul(A::scale_offset(s.ad_value(97), p.p159, ((1.0) + ((-1e-6)))), A::scale_offset(s.ad_value(97), p.p159, ((1.0) + ((-1e-6))))), ((4.0 * 0.001) * 0.001)))), 0.5);
 
