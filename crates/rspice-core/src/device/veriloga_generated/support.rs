@@ -709,6 +709,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_scaled_voltage(&mut self, index: usize, source: usize, scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {
+        let source_value = self.v[source] * scale;
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let voltage = pos_value - neg_value;
+        self.v[index] = source_value * voltage;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * scale * voltage; }
+        if let Some(node) = pos { self.dn[index][node] += source_value; }
+        if let Some(node) = neg { self.dn[index][node] -= source_value; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * scale * voltage; }
+    }
+
+    #[inline]
     pub(crate) fn store_div_voltage_by_ad(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
@@ -8922,6 +8937,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         if let Some(node) = pos { self.dn[index][node] += value.value; }
         if let Some(node) = neg { self.dn[index][node] -= value.value; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * voltage; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_voltage(&mut self, index: usize, source: usize, scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {
+        let source_value = self.v[source] * scale;
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
+        let voltage = pos_value - neg_value;
+        self.v[index] = source_value * voltage;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * scale * voltage; }
+        if let Some(node) = pos { self.dn[index][node] += source_value; }
+        if let Some(node) = neg { self.dn[index][node] -= source_value; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * scale * voltage; }
     }
 
     #[inline]

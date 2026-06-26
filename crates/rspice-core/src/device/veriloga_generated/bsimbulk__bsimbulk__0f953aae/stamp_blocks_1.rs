@@ -1868,7 +1868,7 @@ impl Instance {
             s.store_add_scaled_products_right_right_ad(224, 226, 232, ((-s.v[33]) * p.p2), 546, A::add_scaled_offset_product_rhs(A::add_scaled_inputs3(s.ad_value(232), 1.0, s.ad_value(63), (-1.0), s.ad_value(220), -1.0), 1.0, s.ad_value(548), s.ad_value(14), (-1.0), (-0.5)), ((-s.v[33]) * p.p2));
         }
 
-        s.store_ad_value(221, A::mul_scaled_lhs(s.ad_value(187), (((-p.p2) * s.v[34]) * p.p673), A::voltage(ctx, nodes, Some(10), Some(11))));
+        s.store_mul_scaled_voltage(221, 187, (((-p.p2) * s.v[34]) * p.p673), ctx, nodes, Some(10), Some(11));
 
         s.b[1588] = (p.p37 == 1.0);
         s.v[1588] = if s.b[1588] { 1.0 } else { 0.0 };

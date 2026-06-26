@@ -4178,7 +4178,7 @@ impl Instance {
 
         s.store_sub(237, 234, 223);
 
-        s.store_ad_value(1033, A::mul_scaled_lhs(s.ad_value(379), -1.0, A::voltage(ctx, nodes, Some(7), Some(10))));
+        s.store_mul_scaled_voltage(1033, 379, -1.0, ctx, nodes, Some(7), Some(10));
 
         s.v[211] = 1.0;
 
@@ -4191,7 +4191,7 @@ impl Instance {
             s.store_mul_voltage_ad(224, s.ad_value(379), ctx, nodes, Some(6), Some(10));
             s.store_mul_voltage_ad(232, s.ad_value(379), ctx, nodes, Some(6), Some(11));
             s.store_sub(235, 234, 224);
-            s.store_ad_value(1033, A::mul_scaled_lhs(s.ad_value(379), -1.0, A::voltage(ctx, nodes, Some(6), Some(10))));
+            s.store_mul_scaled_voltage(1033, 379, -1.0, ctx, nodes, Some(6), Some(10));
         }
 
         s.store_sub(226, 223, 224);
