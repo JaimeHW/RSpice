@@ -4011,7 +4011,7 @@ impl Instance {
                 s.store_scalar(97, (150.0 + 1.0));
             }
             if (((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && s.b[2232]) && (s.v[79] == 0.0)) {
-                s.store_ad_value(2098, A::add_scaled_offset_product_rhs(s.ad_value(2155), 1.0, s.ad_value(185), A::sub(s.ad_value(2157), s.ad_value(2154)), p.p397, -1.0));
+                s.store_add_scaled_offset_product_rhs_mixed_iia(2098, 2155, 1.0, 185, A::sub(s.ad_value(2157), s.ad_value(2154)), p.p397, -1.0);
                 s.store_add(2099, 185, 2156);
                 s.store_div_scaled_inputs(2110, s.ad_value(2098), -1.0, s.ad_value(2099), 1.0);
             }
