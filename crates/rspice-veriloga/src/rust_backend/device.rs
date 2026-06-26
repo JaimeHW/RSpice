@@ -5994,6 +5994,21 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn add_scaled_square_product(square_value: Self, square_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
+        "        let mut result = square_value;",
+        "        let square_raw = result.value;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let square_term = square_raw * square_raw * square_scale;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        let square_derivative_scale = 2.0 * square_raw * square_scale;",
+        "        result.value = square_term + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * square_derivative_scale + (product_left.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * square_derivative_scale + (product_left.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn add_scaled_products(left_product_left: Self, left_product_right: Self, left_scale: f64, right_product_left: Self, right_product_right: Self, right_scale: f64) -> Self {",
         "        let mut result = left_product_left;",
         "        let left_product_left_value = result.value;",
@@ -12193,18 +12208,31 @@ fn compact_product3_ad_expression(value: &str) -> Option<CompactProduct3<'_>> {
     })
 }
 
+fn compact_square_ad_expression(value: &str) -> Option<&str> {
+    let args = compact_ad_call_args(value, "square")?;
+    if args.len() != 1 {
+        return None;
+    }
+    Some(args[0])
+}
+
+fn compact_scaled_square_ad_expression(value: &str) -> Option<(&str, String)> {
+    if let Some((inner, scale)) = compact_scaled_ad_expression(value) {
+        return compact_square_ad_expression(inner).map(|inner| (inner, scale));
+    }
+
+    compact_square_ad_expression(value).map(|inner| (inner, "1.0".to_string()))
+}
+
 fn compact_div_product2_ad_expression(value: &str) -> Option<CompactProduct2<'_>> {
     if let Some(product) = compact_product2_ad_expression(value) {
         return Some(product);
     }
 
-    let args = compact_ad_call_args(value, "square")?;
-    if args.len() != 1 {
-        return None;
-    }
+    let square = compact_square_ad_expression(value)?;
     Some(CompactProduct2 {
-        left: args[0],
-        right: args[0],
+        left: square,
+        right: square,
         scale: "1.0".to_string(),
     })
 }
@@ -12413,7 +12441,50 @@ fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> 
     ))
 }
 
+fn compact_add_sub_square_product_ad_expressions(
+    helper: &str,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    let subtract = helper == "sub";
+    if let (Some((square, square_scale)), Some(product)) = (
+        compact_scaled_square_ad_expression(left),
+        compact_product2_ad_expression(right),
+    ) {
+        let product_scale = if subtract {
+            compact_scalar_negate(&product.scale)
+        } else {
+            product.scale
+        };
+        return Some(format!(
+            "AdValue::add_scaled_square_product({square}, {square_scale}, {}, {}, {product_scale})",
+            product.left, product.right
+        ));
+    }
+
+    if let (Some(product), Some((square, square_scale))) = (
+        compact_product2_ad_expression(left),
+        compact_scaled_square_ad_expression(right),
+    ) {
+        let square_scale = if subtract {
+            compact_scalar_negate(&square_scale)
+        } else {
+            square_scale
+        };
+        return Some(format!(
+            "AdValue::add_scaled_square_product({square}, {square_scale}, {}, {}, {})",
+            product.left, product.right, product.scale
+        ));
+    }
+
+    None
+}
+
 fn compact_add_sub_product_ad_expressions(helper: &str, left: &str, right: &str) -> Option<String> {
+    if let Some(fused) = compact_add_sub_square_product_ad_expressions(helper, left, right) {
+        return Some(fused);
+    }
+
     let subtract = helper == "sub";
     let left_product = compact_product2_ad_expression(left);
     let right_product = compact_product2_ad_expression(right);
@@ -12637,6 +12708,20 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         }
         return Some(format!(
             "AdValue::add_scaled_product({}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            compact_scalar_mul(args[4], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_square_product") {
+        if args.len() != 5 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_square_product({}, {}, {}, {}, {})",
             args[0],
             compact_scalar_mul(args[1], scale),
             args[2],
