@@ -4291,7 +4291,7 @@ impl Instance {
             s.store_offset(2526, 118, p.p455);
             s.store_sqrt_offset_ad(781, A::mul(A::sub(s.ad_value(960), s.ad_value(1435)), A::sub(s.ad_value(960), s.ad_value(1435))), ((4.0 * 0.01) * 0.01));
             s.store_ad_value(2536, A::add_scaled_inputs3(s.ad_value(960), 0.5, s.ad_value(1435), ((-1.0) * 0.5), s.ad_value(781), 0.5));
-            s.store_sqrt_ad(2520, A::div_scaled_product(s.ad_value(2536), s.ad_value(586), (((2.0 * 1.6021918e-19) * 1.0 / (1.034943e-10)) * s.v[489]), A::offset(s.ad_value(586), s.v[489]), 1.0));
+            s.store_sqrt_ad(2520, A::div_scaled_product_offset_denominator(s.ad_value(2536), s.ad_value(586), (((2.0 * 1.6021918e-19) * 1.0 / (1.034943e-10)) * s.v[489]), s.ad_value(586), s.v[489], 1.0));
             s.store_mul(2522, 2520, 162);
             s.store_ad_value(993, A::div_scaled_product(s.ad_value(2522), s.ad_value(2522), (-0.25), A::add(s.ad_value(790), s.ad_value(2522)), 1.0));
         }

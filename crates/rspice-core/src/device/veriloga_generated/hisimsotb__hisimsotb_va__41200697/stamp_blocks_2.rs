@@ -1265,7 +1265,7 @@ impl Instance {
         if s.b[915] {
             s.store_div_from_scalar_offset_input(646, 1.0, 646, 1e-50);
             s.store_scaled_mul(291, 290, 646, 1.0);
-            s.store_ad_value(280, A::div_scaled_product(s.ad_value(645), s.ad_value(646), 1.0, A::offset(s.ad_value(220), 1e-50), 1.0));
+            s.store_ad_value(280, A::div_scaled_product_offset_denominator(s.ad_value(645), s.ad_value(646), 1.0, s.ad_value(220), 1e-50, 1.0));
             s.store_scale(106, 122, ((2.0 * s.v[453]) * p.p5));
             s.copy_ad(279, 386);
             s.store_ad_value(116, A::div_scaled_product(A::mul3(s.ad_value(106), s.ad_value(158), s.ad_value(115)), s.ad_value(291), 1.0, s.ad_value(279), 1.0));
