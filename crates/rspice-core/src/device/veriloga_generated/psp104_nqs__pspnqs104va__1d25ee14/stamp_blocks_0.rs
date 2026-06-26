@@ -1236,10 +1236,10 @@ impl Instance {
             s.store_scalar(56, p.p246);
             s.store_scalar(57, p.p245);
             s.store_scalar(58, p.p247);
-            s.store_scaled_mul_ad(66, A::powf(s.ad_value(314), p.p249), A::scale_offset(s.ad_value(316), p.p250, 1.0), p.p248);
+            s.store_scaled_mul_scale_offset_rhs_ad(66, A::powf(s.ad_value(314), p.p249), 316, p.p250, 1.0, p.p248);
             s.store_scalar(67, p.p252);
             s.store_scalar(68, p.p251);
-            s.store_scaled_mul_ad(63, A::powf(s.ad_value(314), p.p254), A::scale_offset(s.ad_value(316), p.p255, 1.0), p.p253);
+            s.store_scaled_mul_scale_offset_rhs_ad(63, A::powf(s.ad_value(314), p.p254), 316, p.p255, 1.0, p.p253);
             s.store_scalar(64, p.p257);
             s.store_scalar(65, p.p256);
             s.store_offset_scaled(337, 316, ((p.p260) * (p.p259)), p.p259);
@@ -1291,17 +1291,17 @@ impl Instance {
             s.store_scalar(89, p.p306);
             s.store_scalar(90, p.p307);
             s.store_div_from_scalar_offset_scaled_input(91, p.p308, 314, p.p309, 1.0);
-            s.store_scaled_mul_ad(92, A::powf(s.ad_value(314), p.p311), A::scale_offset(s.ad_value(316), p.p312, 1.0), p.p310);
+            s.store_scaled_mul_scale_offset_rhs_ad(92, A::powf(s.ad_value(314), p.p311), 316, p.p312, 1.0, p.p310);
             s.store_powf(341, 314, p.p314);
             s.store_div_scaled_product_offset_denominator(93, s.ad_value(341), A::scale_offset(s.ad_value(316), p.p316, 1.0), p.p313, A::mul_scaled_lhs(s.ad_value(314), p.p315, s.ad_value(341)), 1.0, 1.0);
             s.store_powf(341, 314, p.p318);
             s.store_div_scaled_product_offset_denominator(94, s.ad_value(341), A::scale_offset(s.ad_value(316), p.p320, 1.0), p.p317, A::mul_scaled_lhs(s.ad_value(314), p.p319, s.ad_value(341)), 1.0, 1.0);
             s.store_scalar(95, p.p321);
-            s.store_scaled_mul_ad(96, A::scale_offset(s.ad_value(314), p.p323, 1.0), A::scale_offset(s.ad_value(316), p.p324, 1.0), p.p322);
+            s.store_scaled_mul_scale_offset_inputs(96, 314, p.p323, 1.0, 316, p.p324, 1.0, p.p322);
             s.store_scalar(97, p.p325);
             s.store_scalar(98, p.p326);
-            s.store_scaled_mul_ad(99, A::scale_offset(s.ad_value(314), p.p328, 1.0), A::scale_offset(s.ad_value(316), p.p329, 1.0), p.p327);
-            s.store_scaled_mul_ad(100, A::scale_offset(s.ad_value(314), p.p331, 1.0), A::scale_offset(s.ad_value(316), p.p332, 1.0), p.p330);
+            s.store_scaled_mul_scale_offset_inputs(99, 314, p.p328, 1.0, 316, p.p329, 1.0, p.p327);
+            s.store_scaled_mul_scale_offset_inputs(100, 314, p.p331, 1.0, 316, p.p332, 1.0, p.p330);
             s.store_scalar(101, p.p333);
             s.store_scalar(102, p.p334);
             s.store_div_from_scalar(103, p.p335, 318);
@@ -1454,7 +1454,7 @@ impl Instance {
 
         if s.b[1030] {
             s.store_div_scaled_value_offset_denominator(126, s.ad_value(41), 1.0, A::mul(s.ad_value(42), s.ad_value(314)), 1.0, 1.0);
-            s.store_scaled_mul_ad(127, A::powf(s.ad_value(314), p.p371), A::scale_offset(s.ad_value(316), p.p372, 1.0), p.p370);
+            s.store_scaled_mul_scale_offset_rhs_ad(127, A::powf(s.ad_value(314), p.p371), 316, p.p372, 1.0, p.p370);
             s.store_powf(341, 314, p.p374);
             s.store_div_scaled_product_offset_denominator(128, s.ad_value(341), A::scale_offset(s.ad_value(316), p.p376, 1.0), p.p373, A::mul_scaled_lhs(s.ad_value(314), p.p375, s.ad_value(341)), 1.0, 1.0);
             s.store_scalar(131, p.p377);
@@ -1509,10 +1509,10 @@ impl Instance {
         if s.b[1030] {
             s.store_mul_ad(154, A::div_scaled_inputs(s.ad_value(344), p.p258, A::mul(s.ad_value(347), s.ad_value(312)), 1.0), A::scale_offset(s.ad_value(316), p.p419, 1.0));
             s.store_add_scaled_inputs3_offset(155, s.ad_value(314), p.p421, s.ad_value(316), p.p422, s.ad_value(318), p.p423, p.p420);
-            s.store_scaled_mul_ad(156, A::powf(s.ad_value(314), p.p425), A::scale_offset(s.ad_value(316), p.p426, 1.0), p.p424);
+            s.store_scaled_mul_scale_offset_rhs_ad(156, A::powf(s.ad_value(314), p.p425), 316, p.p426, 1.0, p.p424);
             s.store_scalar(157, p.p427);
             s.store_scalar(158, p.p428);
-            s.store_scaled_mul_ad(159, A::powf(s.ad_value(314), p.p430), A::scale_offset(s.ad_value(316), p.p431, 1.0), p.p429);
+            s.store_scaled_mul_scale_offset_rhs_ad(159, A::powf(s.ad_value(314), p.p430), 316, p.p431, 1.0, p.p429);
             s.store_scalar(160, p.p433);
             s.store_scalar(161, p.p432);
             s.store_scalar(162, p.p434);

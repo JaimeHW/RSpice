@@ -1976,7 +1976,7 @@ impl Instance {
 
         s.store_mul(313, 308, 113);
 
-        s.store_scaled_mul_ad(314, A::div(s.ad_value(308), s.ad_value(189)), A::scale_offset(s.ad_value(273), 4.0, 5.0), 0.3333333333333333);
+        s.store_scaled_mul_scale_offset_rhs_ad(314, A::div(s.ad_value(308), s.ad_value(189)), 273, 4.0, 5.0, 0.3333333333333333);
 
         s.store_div_scaled_inputs2(333, s.ad_value(158), 1.0, s.ad_value(157), 1.0, s.ad_value(156), 1.0);
 

@@ -1852,7 +1852,7 @@ impl Instance {
 
         s.store_mul(292, 287, 106);
 
-        s.store_scaled_mul_ad(293, A::div(s.ad_value(287), s.ad_value(178)), A::scale_offset(s.ad_value(253), 4.0, 5.0), 0.3333333333333333);
+        s.store_scaled_mul_scale_offset_rhs_ad(293, A::div(s.ad_value(287), s.ad_value(178)), 253, 4.0, 5.0, 0.3333333333333333);
 
         s.store_div_scaled_inputs2(309, s.ad_value(151), 1.0, s.ad_value(150), 1.0, s.ad_value(149), 1.0);
 

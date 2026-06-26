@@ -243,7 +243,7 @@ impl Instance {
 
         s.store_scaled_exp_scaled_input(41, 6, p.p94, p.p28);
 
-        s.store_scaled_mul_ad(166, A::exp_scaled_input(s.ad_value(6), p.p105), A::scale_offset(s.ad_value(7), p.p106, 1.0), p.p104);
+        s.store_scaled_mul_scale_offset_rhs_ad(166, A::exp_scaled_input(s.ad_value(6), p.p105), 7, p.p106, 1.0, p.p104);
 
         s.b[253] = ((p.p103 != 0.0) && (p.p104 >= p.p111));
         s.v[253] = if s.b[253] { 1.0 } else { 0.0 };
@@ -388,7 +388,7 @@ impl Instance {
             s.store_scaled_exp_scaled_input(40, 6, p.p93, p.p29);
             s.store_scaled_exp_scaled_input(39, 6, p.p92, p.p26);
             s.store_scaled_exp_scaled_input(41, 6, p.p94, p.p28);
-            s.store_scaled_mul_ad(166, A::exp_scaled_input(s.ad_value(6), p.p105), A::scale_offset(s.ad_value(7), p.p106, 1.0), p.p104);
+            s.store_scaled_mul_scale_offset_rhs_ad(166, A::exp_scaled_input(s.ad_value(6), p.p105), 7, p.p106, 1.0, p.p104);
         }
 
         s.b[260] = (s.v[25] <= 1e-30);

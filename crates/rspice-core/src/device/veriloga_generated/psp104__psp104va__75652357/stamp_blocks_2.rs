@@ -5399,10 +5399,10 @@ impl Instance {
             s.store_scalar(52, p.p244);
             s.store_scalar(53, p.p243);
             s.store_scalar(54, p.p245);
-            s.store_scaled_mul_ad(62, A::powf(s.ad_value(308), p.p247), A::scale_offset(s.ad_value(310), p.p248, 1.0), p.p246);
+            s.store_scaled_mul_scale_offset_rhs_ad(62, A::powf(s.ad_value(308), p.p247), 310, p.p248, 1.0, p.p246);
             s.store_scalar(63, p.p250);
             s.store_scalar(64, p.p249);
-            s.store_scaled_mul_ad(59, A::powf(s.ad_value(308), p.p252), A::scale_offset(s.ad_value(310), p.p253, 1.0), p.p251);
+            s.store_scaled_mul_scale_offset_rhs_ad(59, A::powf(s.ad_value(308), p.p252), 310, p.p253, 1.0, p.p251);
             s.store_scalar(60, p.p255);
             s.store_scalar(61, p.p254);
             s.store_offset_scaled(331, 310, ((p.p258) * (p.p257)), p.p257);

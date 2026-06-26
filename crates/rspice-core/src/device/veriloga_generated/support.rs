@@ -1312,6 +1312,60 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_scaled_mul_scale_offset_rhs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, input_scale: f64, offset: f64, output_scale: f64) {
+        let right_raw = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let right_value = right_raw * input_scale + offset;
+        let left_derivative_scale = right_value * output_scale;
+        let right_derivative_scale = left.value * input_scale * output_scale;
+        self.v[index] = left.value * right_value * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_mul_scale_offset_inputs(&mut self, index: usize, left: usize, left_scale: f64, left_offset: f64, right: usize, right_scale: f64, right_offset: f64, output_scale: f64) {
+        let left_raw = self.v[left];
+        let right_raw = self.v[right];
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let left_value = left_raw * left_scale + left_offset;
+        let right_value = right_raw * right_scale + right_offset;
+        let left_derivative_scale = left_scale * right_value * output_scale;
+        let right_derivative_scale = right_scale * left_value * output_scale;
+        self.v[index] = left_value * right_value * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_mul_limited_exp_scale_offset_rhs(&mut self, index: usize, exp_source: usize, affine_source: usize, affine_scale: f64, affine_offset: f64, output_scale: f64) {
+        let exp_raw = self.v[exp_source];
+        let affine_raw = self.v[affine_source];
+        let exp_dn = self.dn[exp_source];
+        let affine_dn = self.dn[affine_source];
+        let exp_db = self.db[exp_source];
+        let affine_db = self.db[affine_source];
+        let (exp_value, exp_derivative_scale) = if exp_raw > 80.0 {
+            (LIMEXP_MAX * (1.0 + exp_raw - 80.0), LIMEXP_MAX)
+        } else if exp_raw < -80.0 {
+            (1.804851387e-35, 0.0)
+        } else {
+            let value = exp_raw.exp();
+            (value, value)
+        };
+        let affine_value = affine_raw * affine_scale + affine_offset;
+        let exp_output_scale = exp_derivative_scale * affine_value * output_scale;
+        let affine_output_scale = exp_value * affine_scale * output_scale;
+        self.v[index] = exp_value * affine_value * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = exp_dn[axis] * exp_output_scale + affine_dn[axis] * affine_output_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = exp_db[axis] * exp_output_scale + affine_db[axis] * affine_output_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_div_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
         let reciprocal = 1.0 / right.value;
         let quotient = left.value * reciprocal;
@@ -10436,6 +10490,60 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left.value * right.value * scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = (left.dn[axis] * right.value + left.value * right.dn[axis]) * scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left.db[axis] * right.value + left.value * right.db[axis]) * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_mul_scale_offset_rhs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, input_scale: f64, offset: f64, output_scale: f64) {
+        let right_raw = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let right_value = right_raw * input_scale + offset;
+        let left_derivative_scale = right_value * output_scale;
+        let right_derivative_scale = left.value * input_scale * output_scale;
+        self.v[index] = left.value * right_value * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_mul_scale_offset_inputs(&mut self, index: usize, left: usize, left_scale: f64, left_offset: f64, right: usize, right_scale: f64, right_offset: f64, output_scale: f64) {
+        let left_raw = self.v[left];
+        let right_raw = self.v[right];
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let left_value = left_raw * left_scale + left_offset;
+        let right_value = right_raw * right_scale + right_offset;
+        let left_derivative_scale = left_scale * right_value * output_scale;
+        let right_derivative_scale = right_scale * left_value * output_scale;
+        self.v[index] = left_value * right_value * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_mul_limited_exp_scale_offset_rhs(&mut self, index: usize, exp_source: usize, affine_source: usize, affine_scale: f64, affine_offset: f64, output_scale: f64) {
+        let exp_raw = self.v[exp_source];
+        let affine_raw = self.v[affine_source];
+        let exp_dn = self.dn[exp_source];
+        let affine_dn = self.dn[affine_source];
+        let exp_db = self.db[exp_source];
+        let affine_db = self.db[affine_source];
+        let (exp_value, exp_derivative_scale) = if exp_raw > 80.0 {
+            (LIMEXP_MAX * (1.0 + exp_raw - 80.0), LIMEXP_MAX)
+        } else if exp_raw < -80.0 {
+            (1.804851387e-35, 0.0)
+        } else {
+            let value = exp_raw.exp();
+            (value, value)
+        };
+        let affine_value = affine_raw * affine_scale + affine_offset;
+        let exp_output_scale = exp_derivative_scale * affine_value * output_scale;
+        let affine_output_scale = exp_value * affine_scale * output_scale;
+        self.v[index] = exp_value * affine_value * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = exp_dn[axis] * exp_output_scale + affine_dn[axis] * affine_output_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = exp_db[axis] * exp_output_scale + affine_db[axis] * affine_output_scale; }
     }
 
     #[inline]
