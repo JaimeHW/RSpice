@@ -1461,6 +1461,37 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_sub_div_same_denominator_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sub_div_same_denominator"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(40, AdValue::sub(AdValue::div(scratch.ad_value(2), scratch.ad_value(5)), AdValue::div(scratch.ad_value(3), scratch.ad_value(5))));
+    let assign41_ad_e42: AdValue = AdValue::sub(AdValue::div(scratch.ad_value(6), scratch.ad_value(8)), AdValue::div(scratch.ad_value(7), scratch.ad_value(8)));
+    scratch.store_ad_value(41, assign41_ad_e42);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_sub_div_same_denominator(40, 2, 3, 5);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_div_same_denominator(41, 6, 7, 8);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_sub_ad("), "{compact}");
+        assert!(!compact.contains("A::div(s.ad_value("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_scaled_add_sub_sqrt_square_offset_rhs_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -5260,6 +5291,25 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left.value - right.value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - right.node_derivatives[axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - right.branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_div_same_denominator(&mut self, index: usize, left: usize, right: usize, denominator: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let denominator_value = self.values[denominator];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let delta = left_value - right_value;",
+        "        let denominator_scale = -delta * reciprocal * reciprocal;",
+        "        self.values[index] = delta * reciprocal;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] - right_node_derivatives[axis]) * reciprocal + denominator_node_derivatives[axis] * denominator_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] - right_branch_derivatives[axis]) * reciprocal + denominator_branch_derivatives[axis] * denominator_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -13484,6 +13534,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_fused_scaled_multiply_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_sub_div_same_denominator_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_scale_mixed_multiply_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -15140,6 +15193,34 @@ fn compact_mul_voltage_store_helper_call(target_index: usize, value: &str) -> Op
     }
 
     None
+}
+
+fn compact_sub_div_same_denominator_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "sub")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    let left_args = compact_ad_call_args(args[0], "div")?;
+    let right_args = compact_ad_call_args(args[1], "div")?;
+    if left_args.len() != 2 || right_args.len() != 2 {
+        return None;
+    }
+
+    let left = compact_scratch_ad_value_index(left_args[0])?;
+    let left_denominator = compact_scratch_ad_value_index(left_args[1])?;
+    let right = compact_scratch_ad_value_index(right_args[0])?;
+    let right_denominator = compact_scratch_ad_value_index(right_args[1])?;
+    if left_denominator != right_denominator {
+        return None;
+    }
+
+    Some(format!(
+        "scratch.store_sub_div_same_denominator({target_index}, {left}, {right}, {left_denominator});"
+    ))
 }
 
 fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Option<String> {
