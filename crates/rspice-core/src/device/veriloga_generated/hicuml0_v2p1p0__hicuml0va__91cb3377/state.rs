@@ -124,127 +124,138 @@ impl Clone for Parameters {
     fn clone(&self) -> Self { *self }
 }
 
+impl Parameters {
+    fn new_box() -> Box<Self> {
+        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
+        let mut boxed = Box::<Self>::new_uninit();
+        unsafe {
+            let ptr = boxed.as_mut_ptr();
+            std::ptr::write_bytes(ptr, 0, 1);
+            let params = &mut *ptr;
+            params.p0 = 210.0;
+            params.p1 = 1e-16;
+            params.p2 = 0.0;
+            params.p3 = 1.0;
+            params.p4 = 1.0;
+            params.p5 = 1000000.0;
+            params.p6 = 1000000.0;
+            params.p7 = 0.0;
+            params.p8 = 2.0;
+            params.p9 = 1000000.0;
+            params.p10 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
+            validate_parameter("fiqf", params.p10, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p11 = 1000000.0;
+            params.p12 = 1000000.0;
+            params.p13 = 0.0;
+            params.p14 = 0.0;
+            params.p15 = 1e-18;
+            params.p16 = 1.0;
+            params.p17 = 0.0;
+            params.p18 = 2.0;
+            params.p19 = if (params.p0 <= 200.0) { 0.0 } else { 1e-16 };
+            validate_parameter("ibcs", params.p19, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p20 = 1.0;
+            params.p21 = 0.0;
+            params.p22 = 0.0;
+            params.p23 = 0.0;
+            params.p24 = 2.5;
+            params.p25 = 1000000.0;
+            params.p26 = 0.0;
+            params.p27 = 0.656;
+            params.p28 = 0.0;
+            params.p29 = 0.0;
+            params.p30 = 0.0;
+            params.p31 = 1.0;
+            params.p32 = 0.0;
+            params.p33 = 1.0;
+            params.p34 = 1e-20;
+            params.p35 = 0.9;
+            params.p36 = 0.5;
+            params.p37 = 2.5;
+            params.p38 = 0.9;
+            params.p39 = 0.5;
+            params.p40 = 2.5;
+            params.p41 = 1e-20;
+            params.p42 = 0.7;
+            params.p43 = 0.333;
+            params.p44 = 100.0;
+            params.p45 = 1e-20;
+            params.p46 = 0.7;
+            params.p47 = 0.333;
+            params.p48 = 100.0;
+            params.p49 = 1.0;
+            params.p50 = 1e-20;
+            params.p51 = 0.3;
+            params.p52 = 0.3;
+            params.p53 = 100.0;
+            params.p54 = 0.0;
+            params.p55 = 0.0;
+            params.p56 = 0.0;
+            params.p57 = 0.0;
+            params.p58 = 1.0;
+            params.p59 = 0.0;
+            params.p60 = 0.1;
+            params.p61 = 150.0;
+            params.p62 = 0.5;
+            params.p63 = 100.0;
+            params.p64 = 0.1;
+            params.p65 = 0.0;
+            params.p66 = 0.001;
+            params.p67 = 2.0;
+            params.p68 = 0.0;
+            params.p69 = 0.0;
+            params.p70 = 0.0;
+            params.p71 = 0.167;
+            params.p72 = 0.333;
+            params.p73 = 0.0;
+            params.p74 = 0.0;
+            params.p75 = 2.0;
+            params.p76 = 1.2;
+            params.p77 = 1.17;
+            params.p78 = 1.17;
+            params.p79 = 1.17;
+            params.p80 = -0.000102377;
+            params.p81 = 3.0;
+            params.p82 = 3.5;
+            params.p83 = 0.0;
+            params.p84 = 1.0;
+            params.p85 = 0.0;
+            params.p86 = 0.0;
+            params.p87 = 0.0;
+            params.p88 = 0.0;
+            params.p89 = 0.0;
+            params.p90 = 0.0;
+            params.p91 = 0.0;
+            params.p92 = 0.0;
+            params.p93 = 0.0;
+            params.p94 = 0.0;
+            params.p95 = 0.0;
+            params.p96 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
+            validate_parameter("flteft", params.p96, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p97 = -1.0;
+            params.p98 = 0.0;
+            params.p99 = 0.0;
+            params.p100 = 0.0;
+            params.p101 = 0.0;
+            params.p102 = 0.0;
+            params.p103 = 0.0;
+            params.p104 = 0.0;
+            params.p105 = 0.0;
+            params.p106 = 0.0;
+            params.p107 = 0.0;
+            params.p108 = 27.0;
+            params.p109 = 0.0;
+            params.p110 = 1.0;
+            params.p111 = 0.001;
+            validate_parameter("minr", params.p111, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            boxed.assume_init()
+        }
+    }
+}
+
 impl Default for Parameters {
     fn default() -> Self {
-        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
-        let mut params: Self = unsafe { std::mem::zeroed::<Self>() };
-        params.p0 = 210.0;
-        params.p1 = 1e-16;
-        params.p2 = 0.0;
-        params.p3 = 1.0;
-        params.p4 = 1.0;
-        params.p5 = 1000000.0;
-        params.p6 = 1000000.0;
-        params.p7 = 0.0;
-        params.p8 = 2.0;
-        params.p9 = 1000000.0;
-        params.p10 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
-        validate_parameter("fiqf", params.p10, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p11 = 1000000.0;
-        params.p12 = 1000000.0;
-        params.p13 = 0.0;
-        params.p14 = 0.0;
-        params.p15 = 1e-18;
-        params.p16 = 1.0;
-        params.p17 = 0.0;
-        params.p18 = 2.0;
-        params.p19 = if (params.p0 <= 200.0) { 0.0 } else { 1e-16 };
-        validate_parameter("ibcs", params.p19, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p20 = 1.0;
-        params.p21 = 0.0;
-        params.p22 = 0.0;
-        params.p23 = 0.0;
-        params.p24 = 2.5;
-        params.p25 = 1000000.0;
-        params.p26 = 0.0;
-        params.p27 = 0.656;
-        params.p28 = 0.0;
-        params.p29 = 0.0;
-        params.p30 = 0.0;
-        params.p31 = 1.0;
-        params.p32 = 0.0;
-        params.p33 = 1.0;
-        params.p34 = 1e-20;
-        params.p35 = 0.9;
-        params.p36 = 0.5;
-        params.p37 = 2.5;
-        params.p38 = 0.9;
-        params.p39 = 0.5;
-        params.p40 = 2.5;
-        params.p41 = 1e-20;
-        params.p42 = 0.7;
-        params.p43 = 0.333;
-        params.p44 = 100.0;
-        params.p45 = 1e-20;
-        params.p46 = 0.7;
-        params.p47 = 0.333;
-        params.p48 = 100.0;
-        params.p49 = 1.0;
-        params.p50 = 1e-20;
-        params.p51 = 0.3;
-        params.p52 = 0.3;
-        params.p53 = 100.0;
-        params.p54 = 0.0;
-        params.p55 = 0.0;
-        params.p56 = 0.0;
-        params.p57 = 0.0;
-        params.p58 = 1.0;
-        params.p59 = 0.0;
-        params.p60 = 0.1;
-        params.p61 = 150.0;
-        params.p62 = 0.5;
-        params.p63 = 100.0;
-        params.p64 = 0.1;
-        params.p65 = 0.0;
-        params.p66 = 0.001;
-        params.p67 = 2.0;
-        params.p68 = 0.0;
-        params.p69 = 0.0;
-        params.p70 = 0.0;
-        params.p71 = 0.167;
-        params.p72 = 0.333;
-        params.p73 = 0.0;
-        params.p74 = 0.0;
-        params.p75 = 2.0;
-        params.p76 = 1.2;
-        params.p77 = 1.17;
-        params.p78 = 1.17;
-        params.p79 = 1.17;
-        params.p80 = -0.000102377;
-        params.p81 = 3.0;
-        params.p82 = 3.5;
-        params.p83 = 0.0;
-        params.p84 = 1.0;
-        params.p85 = 0.0;
-        params.p86 = 0.0;
-        params.p87 = 0.0;
-        params.p88 = 0.0;
-        params.p89 = 0.0;
-        params.p90 = 0.0;
-        params.p91 = 0.0;
-        params.p92 = 0.0;
-        params.p93 = 0.0;
-        params.p94 = 0.0;
-        params.p95 = 0.0;
-        params.p96 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
-        validate_parameter("flteft", params.p96, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p97 = -1.0;
-        params.p98 = 0.0;
-        params.p99 = 0.0;
-        params.p100 = 0.0;
-        params.p101 = 0.0;
-        params.p102 = 0.0;
-        params.p103 = 0.0;
-        params.p104 = 0.0;
-        params.p105 = 0.0;
-        params.p106 = 0.0;
-        params.p107 = 0.0;
-        params.p108 = 27.0;
-        params.p109 = 0.0;
-        params.p110 = 1.0;
-        params.p111 = 0.001;
-        validate_parameter("minr", params.p111, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params
+        *Self::new_box()
     }
 }
 
@@ -290,18 +301,34 @@ fn validate_parameter(
     }
     Ok(())
 }
+fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
+fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
+    let mut boxed = Box::<[bool; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 10],
     pub branches: [usize; 4],
-    pub params: Parameters,
-    pub(crate) param_given: [bool; 112],
+    pub params: Box<Parameters>,
+    pub(crate) param_given: Box<[bool; 112]>,
     pub(crate) multiplicity: f64,
-    pub(crate) ddt_state_current: [f64; 9],
-    pub(crate) ddt_state_previous: [f64; 9],
-    pub(crate) ddt_state_initialized: [bool; 9],
-    pub(crate) idt_state_current: [f64; 0],
-    pub(crate) idt_state_previous: [f64; 0],
-    pub(crate) idt_state_initialized: [bool; 0],
+    pub(crate) ddt_state_current: Box<[f64; 9]>,
+    pub(crate) ddt_state_previous: Box<[f64; 9]>,
+    pub(crate) ddt_state_initialized: Box<[bool; 9]>,
+    pub(crate) idt_state_current: Box<[f64; 0]>,
+    pub(crate) idt_state_previous: Box<[f64; 0]>,
+    pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) scratch: Option<Box<GenericScratch<386, 10, 4>>>,
@@ -314,15 +341,15 @@ impl Clone for Instance {
         Self {
             nodes: self.nodes,
             branches: self.branches,
-            params: self.params,
-            param_given: self.param_given,
+            params: self.params.clone(),
+            param_given: self.param_given.clone(),
             multiplicity: self.multiplicity,
-            ddt_state_current: self.ddt_state_current,
-            ddt_state_previous: self.ddt_state_previous,
-            ddt_state_initialized: self.ddt_state_initialized,
-            idt_state_current: self.idt_state_current,
-            idt_state_previous: self.idt_state_previous,
-            idt_state_initialized: self.idt_state_initialized,
+            ddt_state_current: self.ddt_state_current.clone(),
+            ddt_state_previous: self.ddt_state_previous.clone(),
+            ddt_state_initialized: self.ddt_state_initialized.clone(),
+            idt_state_current: self.idt_state_current.clone(),
+            idt_state_previous: self.idt_state_previous.clone(),
+            idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
             scratch: None,
@@ -352,19 +379,19 @@ impl Instance {
         Self {
             nodes: mapped,
             branches: [0usize; Self::BRANCH_COUNT],
-            params: Parameters::default(),
-            param_given: [false; Self::PARAMETER_COUNT],
+            params: Parameters::new_box(),
+            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
             multiplicity: 1.0,
-            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],
-            idt_state_current: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_previous: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_initialized: [false; Self::IDT_STATE_COUNT],
+            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),
+            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scratch: Some(Box::new(GenericScratch::new())),
-            reactive_scratch: Some(Box::new(GenericReactiveScratch::new())),
+            scratch: Some(GenericScratch::new_box()),
+            reactive_scratch: Some(GenericReactiveScratch::new_box()),
         }
     }
 

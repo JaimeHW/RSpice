@@ -4,6 +4,9 @@
 #[path = "diode_cmc__diode_cmc__cdfab304/mod.rs"]
 pub mod diode_cmc__diode_cmc__cdfab304;
 #[allow(non_snake_case)]
+#[path = "epfl_hemt__epfl_hemt_10a__671606cd/mod.rs"]
+pub mod epfl_hemt__epfl_hemt_10a__671606cd;
+#[allow(non_snake_case)]
 #[path = "juncap200__juncap200__94ba75b4/mod.rs"]
 pub mod juncap200__juncap200__94ba75b4;
 #[allow(non_snake_case)]
@@ -15,6 +18,12 @@ pub mod psp104__psp104va__75652357;
 #[allow(non_snake_case)]
 #[path = "psp104_nqs__pspnqs104va__1d25ee14/mod.rs"]
 pub mod psp104_nqs__pspnqs104va__1d25ee14;
+#[allow(non_snake_case)]
+#[path = "angelov__angelov__98b92059/mod.rs"]
+pub mod angelov__angelov__98b92059;
+#[allow(non_snake_case)]
+#[path = "angelov_gan__angelov_gan__98687686/mod.rs"]
+pub mod angelov_gan__angelov_gan__98687686;
 #[allow(non_snake_case)]
 #[path = "asmesd__asmesd__fbe2f3a4/mod.rs"]
 pub mod asmesd__asmesd__fbe2f3a4;
@@ -51,6 +60,12 @@ pub mod bsimsoi__bsimsoi__18c250bc;
 #[allow(non_snake_case)]
 #[path = "bsimsoi__bsimsoi__e2aff994/mod.rs"]
 pub mod bsimsoi__bsimsoi__e2aff994;
+#[allow(non_snake_case)]
+#[path = "bsimsoi__bsimsoi_va__8ee5e64d/mod.rs"]
+pub mod bsimsoi__bsimsoi_va__8ee5e64d;
+#[allow(non_snake_case)]
+#[path = "ekv26_sdext_verilog_a__ekv_va__0adf5df4/mod.rs"]
+pub mod ekv26_sdext_verilog_a__ekv_va__0adf5df4;
 #[allow(non_snake_case)]
 #[path = "hicuml0_v2p1p0__hicuml0va__91cb3377/mod.rs"]
 pub mod hicuml0_v2p1p0__hicuml0va__91cb3377;
@@ -99,80 +114,100 @@ pub mod r2_et_cmc__r2_et_cmc__a8425039;
 #[allow(non_snake_case)]
 #[path = "r3_cmc__r3_cmc__2e3554ae/mod.rs"]
 pub mod r3_cmc__r3_cmc__2e3554ae;
+#[allow(non_snake_case)]
+#[path = "vbic_1p3__vbic13_4t__5c387f2d/mod.rs"]
+pub mod vbic_1p3__vbic13_4t__5c387f2d;
+#[allow(non_snake_case)]
+#[path = "vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1/mod.rs"]
+pub mod vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1;
 
 #[derive(Clone)]
 pub enum GeneratedBuiltinKind {
-    Device0(diode_cmc__diode_cmc__cdfab304::Instance),
-    Device1(juncap200__juncap200__94ba75b4::Instance),
-    Device2(psp104t__psp104tva__0878692d::Instance),
-    Device3(psp104__psp104va__75652357::Instance),
-    Device4(psp104_nqs__pspnqs104va__1d25ee14::Instance),
-    Device5(asmesd__asmesd__fbe2f3a4::Instance),
-    Device6(asmesd_dio__asmesd_dio__b913dc15::Instance),
-    Device7(asmhemt__asmhemt__9d86ed5b::Instance),
-    Device8(bjt505__bjt505_va__6ac090e2::Instance),
-    Device9(bjt505t__bjt505t_va__48d754e7::Instance),
-    Device10(bjtd505__bjtd505_va__3cb9ae22::Instance),
-    Device11(bjtd505t__bjtd505t_va__06e24760::Instance),
-    Device12(bsimbulk__bsimbulk__0f953aae::Instance),
-    Device13(bsimcmg__bsimcmg_va__f3a4082f::Instance),
-    Device14(bsimimg__bsimimg__25eb6a31::Instance),
-    Device15(bsimsoi__bsimsoi__18c250bc::Instance),
-    Device16(bsimsoi__bsimsoi__e2aff994::Instance),
-    Device17(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance),
-    Device18(hicuml2_v320__hicuml2va__25e676cf::Instance),
-    Device19(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance),
-    Device20(hisimhv_n5__hisimhv_n5_va__89bf8539::Instance),
-    Device21(hisimhv__hisimhv_va__57d0ff0e::Instance),
-    Device22(hisimsoi__hisimsoi_va__5be18005::Instance),
-    Device23(hisimsoi_n4__hisimsoi_va__242bc21d::Instance),
-    Device24(hisimsoi_n5__hisimsoi_va__38074d06::Instance),
-    Device25(hisimsotb__hisimsotb_va__41200697::Instance),
-    Device26(l_utsoi_102__l_utsoi__832ce87d::Instance),
-    Device27(l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance),
-    Device28(mosvar__mosvar__0a88ed4a::Instance),
-    Device29(mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance),
-    Device30(r2_cmc__r2_cmc__bc71a915::Instance),
-    Device31(r2_et_cmc__r2_et_cmc__a8425039::Instance),
-    Device32(r3_cmc__r3_cmc__2e3554ae::Instance),
+    Device0(Box<diode_cmc__diode_cmc__cdfab304::Instance>),
+    Device1(Box<epfl_hemt__epfl_hemt_10a__671606cd::Instance>),
+    Device2(Box<juncap200__juncap200__94ba75b4::Instance>),
+    Device3(Box<psp104t__psp104tva__0878692d::Instance>),
+    Device4(Box<psp104__psp104va__75652357::Instance>),
+    Device5(Box<psp104_nqs__pspnqs104va__1d25ee14::Instance>),
+    Device6(Box<angelov__angelov__98b92059::Instance>),
+    Device7(Box<angelov_gan__angelov_gan__98687686::Instance>),
+    Device8(Box<asmesd__asmesd__fbe2f3a4::Instance>),
+    Device9(Box<asmesd_dio__asmesd_dio__b913dc15::Instance>),
+    Device10(Box<asmhemt__asmhemt__9d86ed5b::Instance>),
+    Device11(Box<bjt505__bjt505_va__6ac090e2::Instance>),
+    Device12(Box<bjt505t__bjt505t_va__48d754e7::Instance>),
+    Device13(Box<bjtd505__bjtd505_va__3cb9ae22::Instance>),
+    Device14(Box<bjtd505t__bjtd505t_va__06e24760::Instance>),
+    Device15(Box<bsimbulk__bsimbulk__0f953aae::Instance>),
+    Device16(Box<bsimcmg__bsimcmg_va__f3a4082f::Instance>),
+    Device17(Box<bsimimg__bsimimg__25eb6a31::Instance>),
+    Device18(Box<bsimsoi__bsimsoi__18c250bc::Instance>),
+    Device19(Box<bsimsoi__bsimsoi__e2aff994::Instance>),
+    Device20(Box<bsimsoi__bsimsoi_va__8ee5e64d::Instance>),
+    Device21(Box<ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance>),
+    Device22(Box<hicuml0_v2p1p0__hicuml0va__91cb3377::Instance>),
+    Device23(Box<hicuml2_v320__hicuml2va__25e676cf::Instance>),
+    Device24(Box<hisimhv_n4__hisimhv_n4_va__69344dcf::Instance>),
+    Device25(Box<hisimhv_n5__hisimhv_n5_va__89bf8539::Instance>),
+    Device26(Box<hisimhv__hisimhv_va__57d0ff0e::Instance>),
+    Device27(Box<hisimsoi__hisimsoi_va__5be18005::Instance>),
+    Device28(Box<hisimsoi_n4__hisimsoi_va__242bc21d::Instance>),
+    Device29(Box<hisimsoi_n5__hisimsoi_va__38074d06::Instance>),
+    Device30(Box<hisimsotb__hisimsotb_va__41200697::Instance>),
+    Device31(Box<l_utsoi_102__l_utsoi__832ce87d::Instance>),
+    Device32(Box<l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance>),
+    Device33(Box<mosvar__mosvar__0a88ed4a::Instance>),
+    Device34(Box<mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance>),
+    Device35(Box<r2_cmc__r2_cmc__bc71a915::Instance>),
+    Device36(Box<r2_et_cmc__r2_et_cmc__a8425039::Instance>),
+    Device37(Box<r3_cmc__r3_cmc__2e3554ae::Instance>),
+    Device38(Box<vbic_1p3__vbic13_4t__5c387f2d::Instance>),
+    Device39(Box<vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance>),
 }
 
 impl GeneratedBuiltinKind {
     pub fn restore_from_snapshot(&mut self, snapshot: Self) {
         match (self, snapshot) {
-            (Self::Device0(active), Self::Device0(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device1(active), Self::Device1(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device2(active), Self::Device2(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device3(active), Self::Device3(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device4(active), Self::Device4(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device5(active), Self::Device5(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device6(active), Self::Device6(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device7(active), Self::Device7(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device8(active), Self::Device8(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device9(active), Self::Device9(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device10(active), Self::Device10(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device11(active), Self::Device11(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device12(active), Self::Device12(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device13(active), Self::Device13(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device14(active), Self::Device14(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device15(active), Self::Device15(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device16(active), Self::Device16(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device17(active), Self::Device17(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device18(active), Self::Device18(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device19(active), Self::Device19(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device20(active), Self::Device20(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device21(active), Self::Device21(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device22(active), Self::Device22(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device23(active), Self::Device23(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device24(active), Self::Device24(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device25(active), Self::Device25(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device26(active), Self::Device26(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device27(active), Self::Device27(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device28(active), Self::Device28(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device29(active), Self::Device29(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device30(active), Self::Device30(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device31(active), Self::Device31(snapshot)) => active.restore_from_snapshot(snapshot),
-            (Self::Device32(active), Self::Device32(snapshot)) => active.restore_from_snapshot(snapshot),
+            (Self::Device0(active), Self::Device0(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device1(active), Self::Device1(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device2(active), Self::Device2(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device3(active), Self::Device3(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device4(active), Self::Device4(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device5(active), Self::Device5(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device6(active), Self::Device6(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device7(active), Self::Device7(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device8(active), Self::Device8(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device9(active), Self::Device9(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device10(active), Self::Device10(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device11(active), Self::Device11(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device12(active), Self::Device12(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device13(active), Self::Device13(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device14(active), Self::Device14(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device15(active), Self::Device15(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device16(active), Self::Device16(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device17(active), Self::Device17(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device18(active), Self::Device18(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device19(active), Self::Device19(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device20(active), Self::Device20(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device21(active), Self::Device21(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device22(active), Self::Device22(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device23(active), Self::Device23(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device24(active), Self::Device24(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device25(active), Self::Device25(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device26(active), Self::Device26(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device27(active), Self::Device27(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device28(active), Self::Device28(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device29(active), Self::Device29(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device30(active), Self::Device30(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device31(active), Self::Device31(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device32(active), Self::Device32(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device33(active), Self::Device33(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device34(active), Self::Device34(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device35(active), Self::Device35(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device36(active), Self::Device36(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device37(active), Self::Device37(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device38(active), Self::Device38(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device39(active), Self::Device39(snapshot)) => active.restore_from_snapshot(*snapshot),
             (active, snapshot) => *active = snapshot,
         }
     }
@@ -212,6 +247,13 @@ impl GeneratedBuiltinKind {
             Self::Device30(device) => device.stamp(ctx, stamper),
             Self::Device31(device) => device.stamp(ctx, stamper),
             Self::Device32(device) => device.stamp(ctx, stamper),
+            Self::Device33(device) => device.stamp(ctx, stamper),
+            Self::Device34(device) => device.stamp(ctx, stamper),
+            Self::Device35(device) => device.stamp(ctx, stamper),
+            Self::Device36(device) => device.stamp(ctx, stamper),
+            Self::Device37(device) => device.stamp(ctx, stamper),
+            Self::Device38(device) => device.stamp(ctx, stamper),
+            Self::Device39(device) => device.stamp(ctx, stamper),
         }
     }
 
@@ -250,6 +292,13 @@ impl GeneratedBuiltinKind {
             Self::Device30(device) => device.set_timepoint(time, timestep),
             Self::Device31(device) => device.set_timepoint(time, timestep),
             Self::Device32(device) => device.set_timepoint(time, timestep),
+            Self::Device33(device) => device.set_timepoint(time, timestep),
+            Self::Device34(device) => device.set_timepoint(time, timestep),
+            Self::Device35(device) => device.set_timepoint(time, timestep),
+            Self::Device36(device) => device.set_timepoint(time, timestep),
+            Self::Device37(device) => device.set_timepoint(time, timestep),
+            Self::Device38(device) => device.set_timepoint(time, timestep),
+            Self::Device39(device) => device.set_timepoint(time, timestep),
         }
     }
 
@@ -288,6 +337,13 @@ impl GeneratedBuiltinKind {
             Self::Device30(device) => device.accept_timestep(),
             Self::Device31(device) => device.accept_timestep(),
             Self::Device32(device) => device.accept_timestep(),
+            Self::Device33(device) => device.accept_timestep(),
+            Self::Device34(device) => device.accept_timestep(),
+            Self::Device35(device) => device.accept_timestep(),
+            Self::Device36(device) => device.accept_timestep(),
+            Self::Device37(device) => device.accept_timestep(),
+            Self::Device38(device) => device.accept_timestep(),
+            Self::Device39(device) => device.accept_timestep(),
         }
     }
 
@@ -326,16 +382,26 @@ impl GeneratedBuiltinKind {
             Self::Device30(device) => device.stamp_reactive(ctx, stamper),
             Self::Device31(device) => device.stamp_reactive(ctx, stamper),
             Self::Device32(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device33(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device34(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device35(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device36(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device37(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device38(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device39(device) => device.stamp_reactive(ctx, stamper),
         }
     }
 }
 
 pub const BUILTIN_NAMES: &[&str] = &[
     "DIODE_CMC",
+    "EPFL_HEMT_10a",
     "JUNCAP200",
     "PSP104TVA",
     "PSP104VA",
     "PSPNQS104VA",
+    "angelov",
+    "angelov_gan",
     "asmesd",
     "asmesd_dio",
     "asmhemt",
@@ -348,6 +414,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "bsimimg",
     "bsimsoi__18c250bc",
     "bsimsoi__e2aff994",
+    "bsimsoi_va",
+    "ekv_va",
     "hicumL0va",
     "hicumL2va",
     "hisimhv_n4_va",
@@ -364,6 +432,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "r2_cmc",
     "r2_et_cmc",
     "r3_cmc",
+    "vbic13_4t",
+    "vbic_4T_et_cf",
 ];
 
 pub fn builtin_names() -> &'static [&'static str] {
@@ -373,10 +443,13 @@ pub fn builtin_names() -> &'static [&'static str] {
 pub fn node_count(model_name: &str) -> Option<usize> {
     match model_name.to_ascii_uppercase().as_str() {
         "DIODE_CMC" => Some(diode_cmc__diode_cmc__cdfab304::Instance::TERMINAL_COUNT),
+        "EPFL_HEMT_10A" => Some(epfl_hemt__epfl_hemt_10a__671606cd::Instance::TERMINAL_COUNT),
         "JUNCAP200" => Some(juncap200__juncap200__94ba75b4::Instance::TERMINAL_COUNT),
         "PSP104TVA" => Some(psp104t__psp104tva__0878692d::Instance::TERMINAL_COUNT),
         "PSP104VA" => Some(psp104__psp104va__75652357::Instance::TERMINAL_COUNT),
         "PSPNQS104VA" => Some(psp104_nqs__pspnqs104va__1d25ee14::Instance::TERMINAL_COUNT),
+        "ANGELOV" => Some(angelov__angelov__98b92059::Instance::TERMINAL_COUNT),
+        "ANGELOV_GAN" => Some(angelov_gan__angelov_gan__98687686::Instance::TERMINAL_COUNT),
         "ASMESD" => Some(asmesd__asmesd__fbe2f3a4::Instance::TERMINAL_COUNT),
         "ASMESD_DIO" => Some(asmesd_dio__asmesd_dio__b913dc15::Instance::TERMINAL_COUNT),
         "ASMHEMT" => Some(asmhemt__asmhemt__9d86ed5b::Instance::TERMINAL_COUNT),
@@ -389,6 +462,8 @@ pub fn node_count(model_name: &str) -> Option<usize> {
         "BSIMIMG" => Some(bsimimg__bsimimg__25eb6a31::Instance::TERMINAL_COUNT),
         "BSIMSOI__18C250BC" => Some(bsimsoi__bsimsoi__18c250bc::Instance::TERMINAL_COUNT),
         "BSIMSOI__E2AFF994" => Some(bsimsoi__bsimsoi__e2aff994::Instance::TERMINAL_COUNT),
+        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__8ee5e64d::Instance::TERMINAL_COUNT),
+        "EKV_VA" => Some(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::TERMINAL_COUNT),
         "HICUML0VA" => Some(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::TERMINAL_COUNT),
         "HICUML2VA" => Some(hicuml2_v320__hicuml2va__25e676cf::Instance::TERMINAL_COUNT),
         "HISIMHV_N4_VA" => Some(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::TERMINAL_COUNT),
@@ -405,6 +480,8 @@ pub fn node_count(model_name: &str) -> Option<usize> {
         "R2_CMC" => Some(r2_cmc__r2_cmc__bc71a915::Instance::TERMINAL_COUNT),
         "R2_ET_CMC" => Some(r2_et_cmc__r2_et_cmc__a8425039::Instance::TERMINAL_COUNT),
         "R3_CMC" => Some(r3_cmc__r3_cmc__2e3554ae::Instance::TERMINAL_COUNT),
+        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__5c387f2d::Instance::TERMINAL_COUNT),
+        "VBIC_4T_ET_CF" => Some(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::TERMINAL_COUNT),
         _ => None,
     }
 }
@@ -412,10 +489,13 @@ pub fn node_count(model_name: &str) -> Option<usize> {
 pub fn total_node_count(model_name: &str) -> Option<usize> {
     match model_name.to_ascii_uppercase().as_str() {
         "DIODE_CMC" => Some(diode_cmc__diode_cmc__cdfab304::Instance::NODE_COUNT),
+        "EPFL_HEMT_10A" => Some(epfl_hemt__epfl_hemt_10a__671606cd::Instance::NODE_COUNT),
         "JUNCAP200" => Some(juncap200__juncap200__94ba75b4::Instance::NODE_COUNT),
         "PSP104TVA" => Some(psp104t__psp104tva__0878692d::Instance::NODE_COUNT),
         "PSP104VA" => Some(psp104__psp104va__75652357::Instance::NODE_COUNT),
         "PSPNQS104VA" => Some(psp104_nqs__pspnqs104va__1d25ee14::Instance::NODE_COUNT),
+        "ANGELOV" => Some(angelov__angelov__98b92059::Instance::NODE_COUNT),
+        "ANGELOV_GAN" => Some(angelov_gan__angelov_gan__98687686::Instance::NODE_COUNT),
         "ASMESD" => Some(asmesd__asmesd__fbe2f3a4::Instance::NODE_COUNT),
         "ASMESD_DIO" => Some(asmesd_dio__asmesd_dio__b913dc15::Instance::NODE_COUNT),
         "ASMHEMT" => Some(asmhemt__asmhemt__9d86ed5b::Instance::NODE_COUNT),
@@ -428,6 +508,8 @@ pub fn total_node_count(model_name: &str) -> Option<usize> {
         "BSIMIMG" => Some(bsimimg__bsimimg__25eb6a31::Instance::NODE_COUNT),
         "BSIMSOI__18C250BC" => Some(bsimsoi__bsimsoi__18c250bc::Instance::NODE_COUNT),
         "BSIMSOI__E2AFF994" => Some(bsimsoi__bsimsoi__e2aff994::Instance::NODE_COUNT),
+        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__8ee5e64d::Instance::NODE_COUNT),
+        "EKV_VA" => Some(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::NODE_COUNT),
         "HICUML0VA" => Some(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::NODE_COUNT),
         "HICUML2VA" => Some(hicuml2_v320__hicuml2va__25e676cf::Instance::NODE_COUNT),
         "HISIMHV_N4_VA" => Some(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::NODE_COUNT),
@@ -444,6 +526,8 @@ pub fn total_node_count(model_name: &str) -> Option<usize> {
         "R2_CMC" => Some(r2_cmc__r2_cmc__bc71a915::Instance::NODE_COUNT),
         "R2_ET_CMC" => Some(r2_et_cmc__r2_et_cmc__a8425039::Instance::NODE_COUNT),
         "R3_CMC" => Some(r3_cmc__r3_cmc__2e3554ae::Instance::NODE_COUNT),
+        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__5c387f2d::Instance::NODE_COUNT),
+        "VBIC_4T_ET_CF" => Some(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::NODE_COUNT),
         _ => None,
     }
 }
@@ -451,10 +535,13 @@ pub fn total_node_count(model_name: &str) -> Option<usize> {
 pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> {
     match model_name.to_ascii_uppercase().as_str() {
         "DIODE_CMC" => Some(&diode_cmc__diode_cmc__cdfab304::Instance::INTERNAL_NODE_NAMES),
+        "EPFL_HEMT_10A" => Some(&epfl_hemt__epfl_hemt_10a__671606cd::Instance::INTERNAL_NODE_NAMES),
         "JUNCAP200" => Some(&juncap200__juncap200__94ba75b4::Instance::INTERNAL_NODE_NAMES),
         "PSP104TVA" => Some(&psp104t__psp104tva__0878692d::Instance::INTERNAL_NODE_NAMES),
         "PSP104VA" => Some(&psp104__psp104va__75652357::Instance::INTERNAL_NODE_NAMES),
         "PSPNQS104VA" => Some(&psp104_nqs__pspnqs104va__1d25ee14::Instance::INTERNAL_NODE_NAMES),
+        "ANGELOV" => Some(&angelov__angelov__98b92059::Instance::INTERNAL_NODE_NAMES),
+        "ANGELOV_GAN" => Some(&angelov_gan__angelov_gan__98687686::Instance::INTERNAL_NODE_NAMES),
         "ASMESD" => Some(&asmesd__asmesd__fbe2f3a4::Instance::INTERNAL_NODE_NAMES),
         "ASMESD_DIO" => Some(&asmesd_dio__asmesd_dio__b913dc15::Instance::INTERNAL_NODE_NAMES),
         "ASMHEMT" => Some(&asmhemt__asmhemt__9d86ed5b::Instance::INTERNAL_NODE_NAMES),
@@ -467,6 +554,8 @@ pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> 
         "BSIMIMG" => Some(&bsimimg__bsimimg__25eb6a31::Instance::INTERNAL_NODE_NAMES),
         "BSIMSOI__18C250BC" => Some(&bsimsoi__bsimsoi__18c250bc::Instance::INTERNAL_NODE_NAMES),
         "BSIMSOI__E2AFF994" => Some(&bsimsoi__bsimsoi__e2aff994::Instance::INTERNAL_NODE_NAMES),
+        "BSIMSOI_VA" => Some(&bsimsoi__bsimsoi_va__8ee5e64d::Instance::INTERNAL_NODE_NAMES),
+        "EKV_VA" => Some(&ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::INTERNAL_NODE_NAMES),
         "HICUML0VA" => Some(&hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::INTERNAL_NODE_NAMES),
         "HICUML2VA" => Some(&hicuml2_v320__hicuml2va__25e676cf::Instance::INTERNAL_NODE_NAMES),
         "HISIMHV_N4_VA" => Some(&hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::INTERNAL_NODE_NAMES),
@@ -483,6 +572,8 @@ pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> 
         "R2_CMC" => Some(&r2_cmc__r2_cmc__bc71a915::Instance::INTERNAL_NODE_NAMES),
         "R2_ET_CMC" => Some(&r2_et_cmc__r2_et_cmc__a8425039::Instance::INTERNAL_NODE_NAMES),
         "R3_CMC" => Some(&r3_cmc__r3_cmc__2e3554ae::Instance::INTERNAL_NODE_NAMES),
+        "VBIC13_4T" => Some(&vbic_1p3__vbic13_4t__5c387f2d::Instance::INTERNAL_NODE_NAMES),
+        "VBIC_4T_ET_CF" => Some(&vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::INTERNAL_NODE_NAMES),
         _ => None,
     }
 }
@@ -490,10 +581,13 @@ pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> 
 pub fn branch_count(model_name: &str) -> Option<usize> {
     match model_name.to_ascii_uppercase().as_str() {
         "DIODE_CMC" => Some(diode_cmc__diode_cmc__cdfab304::Instance::BRANCH_COUNT),
+        "EPFL_HEMT_10A" => Some(epfl_hemt__epfl_hemt_10a__671606cd::Instance::BRANCH_COUNT),
         "JUNCAP200" => Some(juncap200__juncap200__94ba75b4::Instance::BRANCH_COUNT),
         "PSP104TVA" => Some(psp104t__psp104tva__0878692d::Instance::BRANCH_COUNT),
         "PSP104VA" => Some(psp104__psp104va__75652357::Instance::BRANCH_COUNT),
         "PSPNQS104VA" => Some(psp104_nqs__pspnqs104va__1d25ee14::Instance::BRANCH_COUNT),
+        "ANGELOV" => Some(angelov__angelov__98b92059::Instance::BRANCH_COUNT),
+        "ANGELOV_GAN" => Some(angelov_gan__angelov_gan__98687686::Instance::BRANCH_COUNT),
         "ASMESD" => Some(asmesd__asmesd__fbe2f3a4::Instance::BRANCH_COUNT),
         "ASMESD_DIO" => Some(asmesd_dio__asmesd_dio__b913dc15::Instance::BRANCH_COUNT),
         "ASMHEMT" => Some(asmhemt__asmhemt__9d86ed5b::Instance::BRANCH_COUNT),
@@ -506,6 +600,8 @@ pub fn branch_count(model_name: &str) -> Option<usize> {
         "BSIMIMG" => Some(bsimimg__bsimimg__25eb6a31::Instance::BRANCH_COUNT),
         "BSIMSOI__18C250BC" => Some(bsimsoi__bsimsoi__18c250bc::Instance::BRANCH_COUNT),
         "BSIMSOI__E2AFF994" => Some(bsimsoi__bsimsoi__e2aff994::Instance::BRANCH_COUNT),
+        "BSIMSOI_VA" => Some(bsimsoi__bsimsoi_va__8ee5e64d::Instance::BRANCH_COUNT),
+        "EKV_VA" => Some(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::BRANCH_COUNT),
         "HICUML0VA" => Some(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::BRANCH_COUNT),
         "HICUML2VA" => Some(hicuml2_v320__hicuml2va__25e676cf::Instance::BRANCH_COUNT),
         "HISIMHV_N4_VA" => Some(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::BRANCH_COUNT),
@@ -522,6 +618,8 @@ pub fn branch_count(model_name: &str) -> Option<usize> {
         "R2_CMC" => Some(r2_cmc__r2_cmc__bc71a915::Instance::BRANCH_COUNT),
         "R2_ET_CMC" => Some(r2_et_cmc__r2_et_cmc__a8425039::Instance::BRANCH_COUNT),
         "R3_CMC" => Some(r3_cmc__r3_cmc__2e3554ae::Instance::BRANCH_COUNT),
+        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__5c387f2d::Instance::BRANCH_COUNT),
+        "VBIC_4T_ET_CF" => Some(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::BRANCH_COUNT),
         _ => None,
     }
 }
@@ -529,7 +627,7 @@ pub fn branch_count(model_name: &str) -> Option<usize> {
 pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params: &[(String, crate::Value)]) -> Result<Option<GeneratedBuiltinKind>, String> {
     match model_name.to_ascii_uppercase().as_str() {
         "DIODE_CMC" => {
-            let mut instance = diode_cmc__diode_cmc__cdfab304::Instance::new(nodes);
+            let mut instance = Box::new(diode_cmc__diode_cmc__cdfab304::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -542,8 +640,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device0(instance)))
         }
-        "JUNCAP200" => {
-            let mut instance = juncap200__juncap200__94ba75b4::Instance::new(nodes);
+        "EPFL_HEMT_10A" => {
+            let mut instance = Box::new(epfl_hemt__epfl_hemt_10a__671606cd::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -556,8 +654,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device1(instance)))
         }
-        "PSP104TVA" => {
-            let mut instance = psp104t__psp104tva__0878692d::Instance::new(nodes);
+        "JUNCAP200" => {
+            let mut instance = Box::new(juncap200__juncap200__94ba75b4::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -570,8 +668,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device2(instance)))
         }
-        "PSP104VA" => {
-            let mut instance = psp104__psp104va__75652357::Instance::new(nodes);
+        "PSP104TVA" => {
+            let mut instance = Box::new(psp104t__psp104tva__0878692d::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -584,8 +682,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device3(instance)))
         }
-        "PSPNQS104VA" => {
-            let mut instance = psp104_nqs__pspnqs104va__1d25ee14::Instance::new(nodes);
+        "PSP104VA" => {
+            let mut instance = Box::new(psp104__psp104va__75652357::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -598,8 +696,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device4(instance)))
         }
-        "ASMESD" => {
-            let mut instance = asmesd__asmesd__fbe2f3a4::Instance::new(nodes);
+        "PSPNQS104VA" => {
+            let mut instance = Box::new(psp104_nqs__pspnqs104va__1d25ee14::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -612,8 +710,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device5(instance)))
         }
-        "ASMESD_DIO" => {
-            let mut instance = asmesd_dio__asmesd_dio__b913dc15::Instance::new(nodes);
+        "ANGELOV" => {
+            let mut instance = Box::new(angelov__angelov__98b92059::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -626,8 +724,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device6(instance)))
         }
-        "ASMHEMT" => {
-            let mut instance = asmhemt__asmhemt__9d86ed5b::Instance::new(nodes);
+        "ANGELOV_GAN" => {
+            let mut instance = Box::new(angelov_gan__angelov_gan__98687686::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -640,8 +738,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device7(instance)))
         }
-        "BJT505_VA" => {
-            let mut instance = bjt505__bjt505_va__6ac090e2::Instance::new(nodes);
+        "ASMESD" => {
+            let mut instance = Box::new(asmesd__asmesd__fbe2f3a4::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -654,8 +752,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device8(instance)))
         }
-        "BJT505T_VA" => {
-            let mut instance = bjt505t__bjt505t_va__48d754e7::Instance::new(nodes);
+        "ASMESD_DIO" => {
+            let mut instance = Box::new(asmesd_dio__asmesd_dio__b913dc15::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -668,8 +766,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device9(instance)))
         }
-        "BJTD505_VA" => {
-            let mut instance = bjtd505__bjtd505_va__3cb9ae22::Instance::new(nodes);
+        "ASMHEMT" => {
+            let mut instance = Box::new(asmhemt__asmhemt__9d86ed5b::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -682,8 +780,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device10(instance)))
         }
-        "BJTD505T_VA" => {
-            let mut instance = bjtd505t__bjtd505t_va__06e24760::Instance::new(nodes);
+        "BJT505_VA" => {
+            let mut instance = Box::new(bjt505__bjt505_va__6ac090e2::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -696,8 +794,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device11(instance)))
         }
-        "BSIMBULK" => {
-            let mut instance = bsimbulk__bsimbulk__0f953aae::Instance::new(nodes);
+        "BJT505T_VA" => {
+            let mut instance = Box::new(bjt505t__bjt505t_va__48d754e7::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -710,8 +808,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device12(instance)))
         }
-        "BSIMCMG_VA" => {
-            let mut instance = bsimcmg__bsimcmg_va__f3a4082f::Instance::new(nodes);
+        "BJTD505_VA" => {
+            let mut instance = Box::new(bjtd505__bjtd505_va__3cb9ae22::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -724,8 +822,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device13(instance)))
         }
-        "BSIMIMG" => {
-            let mut instance = bsimimg__bsimimg__25eb6a31::Instance::new(nodes);
+        "BJTD505T_VA" => {
+            let mut instance = Box::new(bjtd505t__bjtd505t_va__06e24760::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -738,8 +836,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device14(instance)))
         }
-        "BSIMSOI__18C250BC" => {
-            let mut instance = bsimsoi__bsimsoi__18c250bc::Instance::new(nodes);
+        "BSIMBULK" => {
+            let mut instance = Box::new(bsimbulk__bsimbulk__0f953aae::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -752,8 +850,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device15(instance)))
         }
-        "BSIMSOI__E2AFF994" => {
-            let mut instance = bsimsoi__bsimsoi__e2aff994::Instance::new(nodes);
+        "BSIMCMG_VA" => {
+            let mut instance = Box::new(bsimcmg__bsimcmg_va__f3a4082f::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -766,8 +864,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device16(instance)))
         }
-        "HICUML0VA" => {
-            let mut instance = hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::new(nodes);
+        "BSIMIMG" => {
+            let mut instance = Box::new(bsimimg__bsimimg__25eb6a31::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -780,8 +878,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device17(instance)))
         }
-        "HICUML2VA" => {
-            let mut instance = hicuml2_v320__hicuml2va__25e676cf::Instance::new(nodes);
+        "BSIMSOI__18C250BC" => {
+            let mut instance = Box::new(bsimsoi__bsimsoi__18c250bc::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -794,8 +892,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device18(instance)))
         }
-        "HISIMHV_N4_VA" => {
-            let mut instance = hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::new(nodes);
+        "BSIMSOI__E2AFF994" => {
+            let mut instance = Box::new(bsimsoi__bsimsoi__e2aff994::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -808,8 +906,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device19(instance)))
         }
-        "HISIMHV_N5_VA" => {
-            let mut instance = hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::new(nodes);
+        "BSIMSOI_VA" => {
+            let mut instance = Box::new(bsimsoi__bsimsoi_va__8ee5e64d::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -822,8 +920,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device20(instance)))
         }
-        "HISIMHV_VA" => {
-            let mut instance = hisimhv__hisimhv_va__57d0ff0e::Instance::new(nodes);
+        "EKV_VA" => {
+            let mut instance = Box::new(ekv26_sdext_verilog_a__ekv_va__0adf5df4::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -836,8 +934,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device21(instance)))
         }
-        "HISIMSOI_VA__5BE18005" => {
-            let mut instance = hisimsoi__hisimsoi_va__5be18005::Instance::new(nodes);
+        "HICUML0VA" => {
+            let mut instance = Box::new(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -850,8 +948,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device22(instance)))
         }
-        "HISIMSOI_VA__242BC21D" => {
-            let mut instance = hisimsoi_n4__hisimsoi_va__242bc21d::Instance::new(nodes);
+        "HICUML2VA" => {
+            let mut instance = Box::new(hicuml2_v320__hicuml2va__25e676cf::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -864,8 +962,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device23(instance)))
         }
-        "HISIMSOI_VA__38074D06" => {
-            let mut instance = hisimsoi_n5__hisimsoi_va__38074d06::Instance::new(nodes);
+        "HISIMHV_N4_VA" => {
+            let mut instance = Box::new(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -878,8 +976,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device24(instance)))
         }
-        "HISIMSOTB_VA" => {
-            let mut instance = hisimsotb__hisimsotb_va__41200697::Instance::new(nodes);
+        "HISIMHV_N5_VA" => {
+            let mut instance = Box::new(hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -892,8 +990,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device25(instance)))
         }
-        "L_UTSOI__832CE87D" => {
-            let mut instance = l_utsoi_102__l_utsoi__832ce87d::Instance::new(nodes);
+        "HISIMHV_VA" => {
+            let mut instance = Box::new(hisimhv__hisimhv_va__57d0ff0e::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -906,8 +1004,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device26(instance)))
         }
-        "L_UTSOI__485E0AC9" => {
-            let mut instance = l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::new(nodes);
+        "HISIMSOI_VA__5BE18005" => {
+            let mut instance = Box::new(hisimsoi__hisimsoi_va__5be18005::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -920,8 +1018,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device27(instance)))
         }
-        "MOSVAR" => {
-            let mut instance = mosvar__mosvar__0a88ed4a::Instance::new(nodes);
+        "HISIMSOI_VA__242BC21D" => {
+            let mut instance = Box::new(hisimsoi_n4__hisimsoi_va__242bc21d::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -934,8 +1032,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device28(instance)))
         }
-        "MVSG_CMC" => {
-            let mut instance = mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::new(nodes);
+        "HISIMSOI_VA__38074D06" => {
+            let mut instance = Box::new(hisimsoi_n5__hisimsoi_va__38074d06::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -948,8 +1046,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device29(instance)))
         }
-        "R2_CMC" => {
-            let mut instance = r2_cmc__r2_cmc__bc71a915::Instance::new(nodes);
+        "HISIMSOTB_VA" => {
+            let mut instance = Box::new(hisimsotb__hisimsotb_va__41200697::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -962,8 +1060,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device30(instance)))
         }
-        "R2_ET_CMC" => {
-            let mut instance = r2_et_cmc__r2_et_cmc__a8425039::Instance::new(nodes);
+        "L_UTSOI__832CE87D" => {
+            let mut instance = Box::new(l_utsoi_102__l_utsoi__832ce87d::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -976,8 +1074,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             Ok(Some(GeneratedBuiltinKind::Device31(instance)))
         }
-        "R3_CMC" => {
-            let mut instance = r3_cmc__r3_cmc__2e3554ae::Instance::new(nodes);
+        "L_UTSOI__485E0AC9" => {
+            let mut instance = Box::new(l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -989,6 +1087,104 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                 }
             }
             Ok(Some(GeneratedBuiltinKind::Device32(instance)))
+        }
+        "MOSVAR" => {
+            let mut instance = Box::new(mosvar__mosvar__0a88ed4a::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Some(GeneratedBuiltinKind::Device33(instance)))
+        }
+        "MVSG_CMC" => {
+            let mut instance = Box::new(mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Some(GeneratedBuiltinKind::Device34(instance)))
+        }
+        "R2_CMC" => {
+            let mut instance = Box::new(r2_cmc__r2_cmc__bc71a915::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Some(GeneratedBuiltinKind::Device35(instance)))
+        }
+        "R2_ET_CMC" => {
+            let mut instance = Box::new(r2_et_cmc__r2_et_cmc__a8425039::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Some(GeneratedBuiltinKind::Device36(instance)))
+        }
+        "R3_CMC" => {
+            let mut instance = Box::new(r3_cmc__r3_cmc__2e3554ae::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Some(GeneratedBuiltinKind::Device37(instance)))
+        }
+        "VBIC13_4T" => {
+            let mut instance = Box::new(vbic_1p3__vbic13_4t__5c387f2d::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Some(GeneratedBuiltinKind::Device38(instance)))
+        }
+        "VBIC_4T_ET_CF" => {
+            let mut instance = Box::new(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Some(GeneratedBuiltinKind::Device39(instance)))
         }
         _ => Ok(None),
     }

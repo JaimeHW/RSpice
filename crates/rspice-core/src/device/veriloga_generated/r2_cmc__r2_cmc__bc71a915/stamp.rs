@@ -80,15 +80,15 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
 
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
         let ctx_temp = ctx.temperature();
-        let param_given = &self.param_given;
+        let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(Scratch::new())).as_mut(),
+            slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
         s.b[39] = param_given[9];

@@ -77,76 +77,87 @@ impl Clone for Parameters {
     fn clone(&self) -> Self { *self }
 }
 
+impl Parameters {
+    fn new_box() -> Box<Self> {
+        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
+        let mut boxed = Box::<Self>::new_uninit();
+        unsafe {
+            let ptr = boxed.as_mut_ptr();
+            std::ptr::write_bytes(ptr, 0, 1);
+            let params = &mut *ptr;
+            params.p0 = 200.0;
+            params.p1 = 1.0;
+            params.p2 = 0.0;
+            params.p3 = 1e-12;
+            params.p4 = 1e-6;
+            params.p5 = 1e-6;
+            params.p6 = 1.0;
+            params.p7 = 1.0;
+            params.p8 = 1.0;
+            params.p9 = 0.0;
+            params.p10 = 1.0;
+            params.p11 = 1.0;
+            params.p12 = 1000.0;
+            params.p13 = 21.0;
+            params.p14 = 1000.0;
+            params.p15 = 0.001;
+            params.p16 = 1e-9;
+            params.p17 = 1e-9;
+            params.p18 = 1.0;
+            params.p19 = 1.0;
+            params.p20 = 1.0;
+            params.p21 = 0.5;
+            params.p22 = 0.5;
+            params.p23 = 0.5;
+            params.p24 = 1.16;
+            params.p25 = 1.16;
+            params.p26 = 1.16;
+            params.p27 = 1e-12;
+            params.p28 = 1e-18;
+            params.p29 = 1e-18;
+            params.p30 = 100.0;
+            params.p31 = 0.0001;
+            params.p32 = 0.0001;
+            params.p33 = 1e-7;
+            params.p34 = 1e-7;
+            params.p35 = 100.0;
+            params.p36 = 0.0001;
+            params.p37 = 0.0001;
+            params.p38 = 0.25;
+            params.p39 = 0.25;
+            params.p40 = 0.25;
+            params.p41 = 1e-12;
+            params.p42 = 1e-18;
+            params.p43 = 1e-18;
+            params.p44 = 1000000000.0;
+            params.p45 = 1000000000.0;
+            params.p46 = 1000000000.0;
+            params.p47 = -0.001;
+            params.p48 = -0.001;
+            params.p49 = -0.001;
+            params.p50 = 10.0;
+            params.p51 = 10.0;
+            params.p52 = 10.0;
+            params.p53 = 4.0;
+            params.p54 = 4.0;
+            params.p55 = 4.0;
+            params.p56 = 1.0;
+            params.p57 = 1.0;
+            params.p58 = 1.0;
+            params.p59 = 1.0;
+            params.p60 = -1.0;
+            params.p61 = 0.1;
+            params.p62 = 0.0;
+            params.p63 = 2.5;
+            params.p64 = 0.03;
+            boxed.assume_init()
+        }
+    }
+}
+
 impl Default for Parameters {
     fn default() -> Self {
-        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
-        let mut params: Self = unsafe { std::mem::zeroed::<Self>() };
-        params.p0 = 200.0;
-        params.p1 = 1.0;
-        params.p2 = 0.0;
-        params.p3 = 1e-12;
-        params.p4 = 1e-6;
-        params.p5 = 1e-6;
-        params.p6 = 1.0;
-        params.p7 = 1.0;
-        params.p8 = 1.0;
-        params.p9 = 0.0;
-        params.p10 = 1.0;
-        params.p11 = 1.0;
-        params.p12 = 1000.0;
-        params.p13 = 21.0;
-        params.p14 = 1000.0;
-        params.p15 = 0.001;
-        params.p16 = 1e-9;
-        params.p17 = 1e-9;
-        params.p18 = 1.0;
-        params.p19 = 1.0;
-        params.p20 = 1.0;
-        params.p21 = 0.5;
-        params.p22 = 0.5;
-        params.p23 = 0.5;
-        params.p24 = 1.16;
-        params.p25 = 1.16;
-        params.p26 = 1.16;
-        params.p27 = 1e-12;
-        params.p28 = 1e-18;
-        params.p29 = 1e-18;
-        params.p30 = 100.0;
-        params.p31 = 0.0001;
-        params.p32 = 0.0001;
-        params.p33 = 1e-7;
-        params.p34 = 1e-7;
-        params.p35 = 100.0;
-        params.p36 = 0.0001;
-        params.p37 = 0.0001;
-        params.p38 = 0.25;
-        params.p39 = 0.25;
-        params.p40 = 0.25;
-        params.p41 = 1e-12;
-        params.p42 = 1e-18;
-        params.p43 = 1e-18;
-        params.p44 = 1000000000.0;
-        params.p45 = 1000000000.0;
-        params.p46 = 1000000000.0;
-        params.p47 = -0.001;
-        params.p48 = -0.001;
-        params.p49 = -0.001;
-        params.p50 = 10.0;
-        params.p51 = 10.0;
-        params.p52 = 10.0;
-        params.p53 = 4.0;
-        params.p54 = 4.0;
-        params.p55 = 4.0;
-        params.p56 = 1.0;
-        params.p57 = 1.0;
-        params.p58 = 1.0;
-        params.p59 = 1.0;
-        params.p60 = -1.0;
-        params.p61 = 0.1;
-        params.p62 = 0.0;
-        params.p63 = 2.5;
-        params.p64 = 0.03;
-        params
+        *Self::new_box()
     }
 }
 
@@ -192,18 +203,34 @@ fn validate_parameter(
     }
     Ok(())
 }
+fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
+fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
+    let mut boxed = Box::<[bool; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 2],
     pub branches: [usize; 0],
-    pub params: Parameters,
-    pub(crate) param_given: [bool; 65],
+    pub params: Box<Parameters>,
+    pub(crate) param_given: Box<[bool; 65]>,
     pub(crate) multiplicity: f64,
-    pub(crate) ddt_state_current: [f64; 1],
-    pub(crate) ddt_state_previous: [f64; 1],
-    pub(crate) ddt_state_initialized: [bool; 1],
-    pub(crate) idt_state_current: [f64; 0],
-    pub(crate) idt_state_previous: [f64; 0],
-    pub(crate) idt_state_initialized: [bool; 0],
+    pub(crate) ddt_state_current: Box<[f64; 1]>,
+    pub(crate) ddt_state_previous: Box<[f64; 1]>,
+    pub(crate) ddt_state_initialized: Box<[bool; 1]>,
+    pub(crate) idt_state_current: Box<[f64; 0]>,
+    pub(crate) idt_state_previous: Box<[f64; 0]>,
+    pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) scratch: Option<Box<GenericScratch<668, 2, 0>>>,
@@ -216,15 +243,15 @@ impl Clone for Instance {
         Self {
             nodes: self.nodes,
             branches: self.branches,
-            params: self.params,
-            param_given: self.param_given,
+            params: self.params.clone(),
+            param_given: self.param_given.clone(),
             multiplicity: self.multiplicity,
-            ddt_state_current: self.ddt_state_current,
-            ddt_state_previous: self.ddt_state_previous,
-            ddt_state_initialized: self.ddt_state_initialized,
-            idt_state_current: self.idt_state_current,
-            idt_state_previous: self.idt_state_previous,
-            idt_state_initialized: self.idt_state_initialized,
+            ddt_state_current: self.ddt_state_current.clone(),
+            ddt_state_previous: self.ddt_state_previous.clone(),
+            ddt_state_initialized: self.ddt_state_initialized.clone(),
+            idt_state_current: self.idt_state_current.clone(),
+            idt_state_previous: self.idt_state_previous.clone(),
+            idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
             scratch: None,
@@ -254,19 +281,19 @@ impl Instance {
         Self {
             nodes: mapped,
             branches: [0usize; Self::BRANCH_COUNT],
-            params: Parameters::default(),
-            param_given: [false; Self::PARAMETER_COUNT],
+            params: Parameters::new_box(),
+            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
             multiplicity: 1.0,
-            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],
-            idt_state_current: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_previous: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_initialized: [false; Self::IDT_STATE_COUNT],
+            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),
+            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scratch: Some(Box::new(GenericScratch::new())),
-            reactive_scratch: Some(Box::new(GenericReactiveScratch::new())),
+            scratch: Some(GenericScratch::new_box()),
+            reactive_scratch: Some(GenericReactiveScratch::new_box()),
         }
     }
 

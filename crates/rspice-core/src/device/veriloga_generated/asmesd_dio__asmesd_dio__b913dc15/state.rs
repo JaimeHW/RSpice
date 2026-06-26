@@ -64,64 +64,75 @@ impl Clone for Parameters {
     fn clone(&self) -> Self { *self }
 }
 
+impl Parameters {
+    fn new_box() -> Box<Self> {
+        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
+        let mut boxed = Box::<Self>::new_uninit();
+        unsafe {
+            let ptr = boxed.as_mut_ptr();
+            std::ptr::write_bytes(ptr, 0, 1);
+            let params = &mut *ptr;
+            params.p0 = 1e-17;
+            params.p1 = 1.0;
+            params.p2 = 0.0;
+            params.p3 = 5.0;
+            params.p4 = 10.0;
+            params.p5 = 10.0;
+            params.p6 = 0.0;
+            params.p7 = 0.0;
+            params.p8 = 0.01;
+            params.p9 = 1.11;
+            params.p10 = 0.0;
+            params.p11 = 10.0;
+            params.p12 = 1e-5;
+            params.p13 = 0.0;
+            params.p14 = 1e-6;
+            params.p15 = 0.0;
+            params.p16 = 0.0;
+            params.p17 = 0.75;
+            params.p18 = 0.33;
+            params.p19 = 0.0;
+            params.p20 = 0.001;
+            params.p21 = 1.11;
+            params.p22 = 3.0;
+            params.p23 = 0.5;
+            params.p24 = 0.5;
+            params.p25 = 25.0;
+            params.p26 = 1000.0;
+            params.p27 = 0.0;
+            params.p28 = 1.0;
+            params.p29 = 1.0;
+            params.p30 = 2.0;
+            params.p31 = 0.0;
+            params.p32 = 1.0;
+            params.p33 = 0.0005;
+            params.p34 = 0.0005;
+            params.p35 = 5e-6;
+            params.p36 = 1e-7;
+            params.p37 = 0.0;
+            params.p38 = 0.0;
+            params.p39 = 2.0;
+            params.p40 = 100.0;
+            params.p41 = 0.0;
+            params.p42 = 1e-5;
+            params.p43 = 1.0;
+            params.p44 = 1.0;
+            params.p45 = 0.0;
+            params.p46 = 0.001;
+            validate_parameter("minr", params.p46, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p47 = 5.0;
+            params.p48 = 100.0;
+            params.p49 = 2.0;
+            params.p50 = 100.0;
+            params.p51 = 2.0;
+            boxed.assume_init()
+        }
+    }
+}
+
 impl Default for Parameters {
     fn default() -> Self {
-        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
-        let mut params: Self = unsafe { std::mem::zeroed::<Self>() };
-        params.p0 = 1e-17;
-        params.p1 = 1.0;
-        params.p2 = 0.0;
-        params.p3 = 5.0;
-        params.p4 = 10.0;
-        params.p5 = 10.0;
-        params.p6 = 0.0;
-        params.p7 = 0.0;
-        params.p8 = 0.01;
-        params.p9 = 1.11;
-        params.p10 = 0.0;
-        params.p11 = 10.0;
-        params.p12 = 1e-5;
-        params.p13 = 0.0;
-        params.p14 = 1e-6;
-        params.p15 = 0.0;
-        params.p16 = 0.0;
-        params.p17 = 0.75;
-        params.p18 = 0.33;
-        params.p19 = 0.0;
-        params.p20 = 0.001;
-        params.p21 = 1.11;
-        params.p22 = 3.0;
-        params.p23 = 0.5;
-        params.p24 = 0.5;
-        params.p25 = 25.0;
-        params.p26 = 1000.0;
-        params.p27 = 0.0;
-        params.p28 = 1.0;
-        params.p29 = 1.0;
-        params.p30 = 2.0;
-        params.p31 = 0.0;
-        params.p32 = 1.0;
-        params.p33 = 0.0005;
-        params.p34 = 0.0005;
-        params.p35 = 5e-6;
-        params.p36 = 1e-7;
-        params.p37 = 0.0;
-        params.p38 = 0.0;
-        params.p39 = 2.0;
-        params.p40 = 100.0;
-        params.p41 = 0.0;
-        params.p42 = 1e-5;
-        params.p43 = 1.0;
-        params.p44 = 1.0;
-        params.p45 = 0.0;
-        params.p46 = 0.001;
-        validate_parameter("minr", params.p46, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p47 = 5.0;
-        params.p48 = 100.0;
-        params.p49 = 2.0;
-        params.p50 = 100.0;
-        params.p51 = 2.0;
-        params
+        *Self::new_box()
     }
 }
 
@@ -167,18 +178,34 @@ fn validate_parameter(
     }
     Ok(())
 }
+fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
+fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
+    let mut boxed = Box::<[bool; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 7],
     pub branches: [usize; 7],
-    pub params: Parameters,
-    pub(crate) param_given: [bool; 52],
+    pub params: Box<Parameters>,
+    pub(crate) param_given: Box<[bool; 52]>,
     pub(crate) multiplicity: f64,
-    pub(crate) ddt_state_current: [f64; 6],
-    pub(crate) ddt_state_previous: [f64; 6],
-    pub(crate) ddt_state_initialized: [bool; 6],
-    pub(crate) idt_state_current: [f64; 0],
-    pub(crate) idt_state_previous: [f64; 0],
-    pub(crate) idt_state_initialized: [bool; 0],
+    pub(crate) ddt_state_current: Box<[f64; 6]>,
+    pub(crate) ddt_state_previous: Box<[f64; 6]>,
+    pub(crate) ddt_state_initialized: Box<[bool; 6]>,
+    pub(crate) idt_state_current: Box<[f64; 0]>,
+    pub(crate) idt_state_previous: Box<[f64; 0]>,
+    pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) scratch: Option<Box<GenericScratch<75, 7, 7>>>,
@@ -191,15 +218,15 @@ impl Clone for Instance {
         Self {
             nodes: self.nodes,
             branches: self.branches,
-            params: self.params,
-            param_given: self.param_given,
+            params: self.params.clone(),
+            param_given: self.param_given.clone(),
             multiplicity: self.multiplicity,
-            ddt_state_current: self.ddt_state_current,
-            ddt_state_previous: self.ddt_state_previous,
-            ddt_state_initialized: self.ddt_state_initialized,
-            idt_state_current: self.idt_state_current,
-            idt_state_previous: self.idt_state_previous,
-            idt_state_initialized: self.idt_state_initialized,
+            ddt_state_current: self.ddt_state_current.clone(),
+            ddt_state_previous: self.ddt_state_previous.clone(),
+            ddt_state_initialized: self.ddt_state_initialized.clone(),
+            idt_state_current: self.idt_state_current.clone(),
+            idt_state_previous: self.idt_state_previous.clone(),
+            idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
             scratch: None,
@@ -229,19 +256,19 @@ impl Instance {
         Self {
             nodes: mapped,
             branches: [0usize; Self::BRANCH_COUNT],
-            params: Parameters::default(),
-            param_given: [false; Self::PARAMETER_COUNT],
+            params: Parameters::new_box(),
+            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
             multiplicity: 1.0,
-            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],
-            idt_state_current: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_previous: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_initialized: [false; Self::IDT_STATE_COUNT],
+            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),
+            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scratch: Some(Box::new(GenericScratch::new())),
-            reactive_scratch: Some(Box::new(GenericReactiveScratch::new())),
+            scratch: Some(GenericScratch::new_box()),
+            reactive_scratch: Some(GenericReactiveScratch::new_box()),
         }
     }
 

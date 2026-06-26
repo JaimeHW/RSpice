@@ -3624,6 +3624,8 @@ impl Instance {
         let eq0_e163_d_n9: f64 = (p.p3 * s.dn[115][9]);
         let eq0_e163_d_n10: f64 = (p.p3 * s.dn[115][10]);
         let eq0_e163_d_n11: f64 = (p.p3 * s.dn[115][11]);
+        let eq0_e163_d_b0: f64 = (p.p3 * s.db[115][0]);
+        let eq0_e163_d_b1: f64 = (p.p3 * s.db[115][1]);
         let eq0_e165: f64 = (eq0_e163 * p.p1);
         let eq0_e165_d_n0: f64 = (eq0_e163_d_n0 * p.p1);
         let eq0_e165_d_n1: f64 = (eq0_e163_d_n1 * p.p1);
@@ -3637,9 +3639,11 @@ impl Instance {
         let eq0_e165_d_n9: f64 = (eq0_e163_d_n9 * p.p1);
         let eq0_e165_d_n10: f64 = (eq0_e163_d_n10 * p.p1);
         let eq0_e165_d_n11: f64 = (eq0_e163_d_n11 * p.p1);
+        let eq0_e165_d_b0: f64 = (eq0_e163_d_b0 * p.p1);
+        let eq0_e165_d_b1: f64 = (eq0_e163_d_b1 * p.p1);
         let eq0_value: f64 = eq0_e165;
         let eq0_node_derivatives: [f64; 12] = [eq0_e165_d_n0, eq0_e165_d_n1, eq0_e165_d_n2, eq0_e165_d_n3, eq0_e165_d_n4, eq0_e165_d_n5, eq0_e165_d_n6, eq0_e165_d_n7, eq0_e165_d_n8, eq0_e165_d_n9, eq0_e165_d_n10, eq0_e165_d_n11];
-        let eq0_branch_derivatives: [f64; 0] = [];
+        let eq0_branch_derivatives: [f64; 2] = [eq0_e165_d_b0, eq0_e165_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[7]),
             Some(nodes[8]),
@@ -3663,6 +3667,8 @@ impl Instance {
         let eq1_e168_d_n9: f64 = (p.p3 * s.dn[156][9]);
         let eq1_e168_d_n10: f64 = (p.p3 * s.dn[156][10]);
         let eq1_e168_d_n11: f64 = (p.p3 * s.dn[156][11]);
+        let eq1_e168_d_b0: f64 = (p.p3 * s.db[156][0]);
+        let eq1_e168_d_b1: f64 = (p.p3 * s.db[156][1]);
         let eq1_e170: f64 = (eq1_e168 * p.p1);
         let eq1_e170_d_n0: f64 = (eq1_e168_d_n0 * p.p1);
         let eq1_e170_d_n1: f64 = (eq1_e168_d_n1 * p.p1);
@@ -3676,9 +3682,11 @@ impl Instance {
         let eq1_e170_d_n9: f64 = (eq1_e168_d_n9 * p.p1);
         let eq1_e170_d_n10: f64 = (eq1_e168_d_n10 * p.p1);
         let eq1_e170_d_n11: f64 = (eq1_e168_d_n11 * p.p1);
+        let eq1_e170_d_b0: f64 = (eq1_e168_d_b0 * p.p1);
+        let eq1_e170_d_b1: f64 = (eq1_e168_d_b1 * p.p1);
         let eq1_value: f64 = eq1_e170;
         let eq1_node_derivatives: [f64; 12] = [eq1_e170_d_n0, eq1_e170_d_n1, eq1_e170_d_n2, eq1_e170_d_n3, eq1_e170_d_n4, eq1_e170_d_n5, eq1_e170_d_n6, eq1_e170_d_n7, eq1_e170_d_n8, eq1_e170_d_n9, eq1_e170_d_n10, eq1_e170_d_n11];
-        let eq1_branch_derivatives: [f64; 0] = [];
+        let eq1_branch_derivatives: [f64; 2] = [eq1_e170_d_b0, eq1_e170_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[8]),
             Some(nodes[4]),
@@ -3702,6 +3710,8 @@ impl Instance {
         let eq2_e174_d_n9: f64 = (s.dn[159][9] + s.dn[162][9]);
         let eq2_e174_d_n10: f64 = (s.dn[159][10] + s.dn[162][10]);
         let eq2_e174_d_n11: f64 = (s.dn[159][11] + s.dn[162][11]);
+        let eq2_e174_d_b0: f64 = (s.db[159][0] + s.db[162][0]);
+        let eq2_e174_d_b1: f64 = (s.db[159][1] + s.db[162][1]);
         let eq2_e176: f64 = (eq2_e174 + s.v[163]);
         let eq2_e176_d_n0: f64 = (eq2_e174_d_n0 + s.dn[163][0]);
         let eq2_e176_d_n1: f64 = (eq2_e174_d_n1 + s.dn[163][1]);
@@ -3715,6 +3725,8 @@ impl Instance {
         let eq2_e176_d_n9: f64 = (eq2_e174_d_n9 + s.dn[163][9]);
         let eq2_e176_d_n10: f64 = (eq2_e174_d_n10 + s.dn[163][10]);
         let eq2_e176_d_n11: f64 = (eq2_e174_d_n11 + s.dn[163][11]);
+        let eq2_e176_d_b0: f64 = (eq2_e174_d_b0 + s.db[163][0]);
+        let eq2_e176_d_b1: f64 = (eq2_e174_d_b1 + s.db[163][1]);
         let eq2_e177: f64 = (p.p3 * eq2_e176);
         let eq2_e177_d_n0: f64 = (p.p3 * eq2_e176_d_n0);
         let eq2_e177_d_n1: f64 = (p.p3 * eq2_e176_d_n1);
@@ -3728,6 +3740,8 @@ impl Instance {
         let eq2_e177_d_n9: f64 = (p.p3 * eq2_e176_d_n9);
         let eq2_e177_d_n10: f64 = (p.p3 * eq2_e176_d_n10);
         let eq2_e177_d_n11: f64 = (p.p3 * eq2_e176_d_n11);
+        let eq2_e177_d_b0: f64 = (p.p3 * eq2_e176_d_b0);
+        let eq2_e177_d_b1: f64 = (p.p3 * eq2_e176_d_b1);
         let eq2_e179: f64 = (eq2_e177 * p.p1);
         let eq2_e179_d_n0: f64 = (eq2_e177_d_n0 * p.p1);
         let eq2_e179_d_n1: f64 = (eq2_e177_d_n1 * p.p1);
@@ -3741,9 +3755,11 @@ impl Instance {
         let eq2_e179_d_n9: f64 = (eq2_e177_d_n9 * p.p1);
         let eq2_e179_d_n10: f64 = (eq2_e177_d_n10 * p.p1);
         let eq2_e179_d_n11: f64 = (eq2_e177_d_n11 * p.p1);
+        let eq2_e179_d_b0: f64 = (eq2_e177_d_b0 * p.p1);
+        let eq2_e179_d_b1: f64 = (eq2_e177_d_b1 * p.p1);
         let eq2_value: f64 = eq2_e179;
         let eq2_node_derivatives: [f64; 12] = [eq2_e179_d_n0, eq2_e179_d_n1, eq2_e179_d_n2, eq2_e179_d_n3, eq2_e179_d_n4, eq2_e179_d_n5, eq2_e179_d_n6, eq2_e179_d_n7, eq2_e179_d_n8, eq2_e179_d_n9, eq2_e179_d_n10, eq2_e179_d_n11];
-        let eq2_branch_derivatives: [f64; 0] = [];
+        let eq2_branch_derivatives: [f64; 2] = [eq2_e179_d_b0, eq2_e179_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[5]),
             Some(nodes[4]),
@@ -3767,6 +3783,8 @@ impl Instance {
         let eq3_e183_d_n9: f64 = (s.dn[158][9] + s.dn[160][9]);
         let eq3_e183_d_n10: f64 = (s.dn[158][10] + s.dn[160][10]);
         let eq3_e183_d_n11: f64 = (s.dn[158][11] + s.dn[160][11]);
+        let eq3_e183_d_b0: f64 = (s.db[158][0] + s.db[160][0]);
+        let eq3_e183_d_b1: f64 = (s.db[158][1] + s.db[160][1]);
         let eq3_e186: f64 = (s.v[338] * s.v[246]);
         let eq3_e186_d_n0: f64 = (s.v[338] * s.dn[246][0]);
         let eq3_e186_d_n1: f64 = (s.v[338] * s.dn[246][1]);
@@ -3780,6 +3798,8 @@ impl Instance {
         let eq3_e186_d_n9: f64 = (s.v[338] * s.dn[246][9]);
         let eq3_e186_d_n10: f64 = (s.v[338] * s.dn[246][10]);
         let eq3_e186_d_n11: f64 = (s.v[338] * s.dn[246][11]);
+        let eq3_e186_d_b0: f64 = (s.v[338] * s.db[246][0]);
+        let eq3_e186_d_b1: f64 = (s.v[338] * s.db[246][1]);
         let eq3_e187: f64 = (eq3_e183 + eq3_e186);
         let eq3_e187_d_n0: f64 = (eq3_e183_d_n0 + eq3_e186_d_n0);
         let eq3_e187_d_n1: f64 = (eq3_e183_d_n1 + eq3_e186_d_n1);
@@ -3793,6 +3813,8 @@ impl Instance {
         let eq3_e187_d_n9: f64 = (eq3_e183_d_n9 + eq3_e186_d_n9);
         let eq3_e187_d_n10: f64 = (eq3_e183_d_n10 + eq3_e186_d_n10);
         let eq3_e187_d_n11: f64 = (eq3_e183_d_n11 + eq3_e186_d_n11);
+        let eq3_e187_d_b0: f64 = (eq3_e183_d_b0 + eq3_e186_d_b0);
+        let eq3_e187_d_b1: f64 = (eq3_e183_d_b1 + eq3_e186_d_b1);
         let eq3_e189: f64 = (eq3_e187 - s.v[57]);
         let eq3_e189_d_n0: f64 = (eq3_e187_d_n0 - s.dn[57][0]);
         let eq3_e189_d_n1: f64 = (eq3_e187_d_n1 - s.dn[57][1]);
@@ -3806,6 +3828,8 @@ impl Instance {
         let eq3_e189_d_n9: f64 = (eq3_e187_d_n9 - s.dn[57][9]);
         let eq3_e189_d_n10: f64 = (eq3_e187_d_n10 - s.dn[57][10]);
         let eq3_e189_d_n11: f64 = (eq3_e187_d_n11 - s.dn[57][11]);
+        let eq3_e189_d_b0: f64 = (eq3_e187_d_b0 - s.db[57][0]);
+        let eq3_e189_d_b1: f64 = (eq3_e187_d_b1 - s.db[57][1]);
         let eq3_e191: f64 = (eq3_e189 + s.v[352]);
         let eq3_e191_d_n0: f64 = (eq3_e189_d_n0 + s.dn[352][0]);
         let eq3_e191_d_n1: f64 = (eq3_e189_d_n1 + s.dn[352][1]);
@@ -3819,6 +3843,8 @@ impl Instance {
         let eq3_e191_d_n9: f64 = (eq3_e189_d_n9 + s.dn[352][9]);
         let eq3_e191_d_n10: f64 = (eq3_e189_d_n10 + s.dn[352][10]);
         let eq3_e191_d_n11: f64 = (eq3_e189_d_n11 + s.dn[352][11]);
+        let eq3_e191_d_b0: f64 = (eq3_e189_d_b0 + s.db[352][0]);
+        let eq3_e191_d_b1: f64 = (eq3_e189_d_b1 + s.db[352][1]);
         let eq3_e193: f64 = (eq3_e191 + s.v[351]);
         let eq3_e193_d_n0: f64 = (eq3_e191_d_n0 + s.dn[351][0]);
         let eq3_e193_d_n1: f64 = (eq3_e191_d_n1 + s.dn[351][1]);
@@ -3832,6 +3858,8 @@ impl Instance {
         let eq3_e193_d_n9: f64 = (eq3_e191_d_n9 + s.dn[351][9]);
         let eq3_e193_d_n10: f64 = (eq3_e191_d_n10 + s.dn[351][10]);
         let eq3_e193_d_n11: f64 = (eq3_e191_d_n11 + s.dn[351][11]);
+        let eq3_e193_d_b0: f64 = (eq3_e191_d_b0 + s.db[351][0]);
+        let eq3_e193_d_b1: f64 = (eq3_e191_d_b1 + s.db[351][1]);
         let eq3_e194: f64 = (p.p3 * eq3_e193);
         let eq3_e194_d_n0: f64 = (p.p3 * eq3_e193_d_n0);
         let eq3_e194_d_n1: f64 = (p.p3 * eq3_e193_d_n1);
@@ -3845,6 +3873,8 @@ impl Instance {
         let eq3_e194_d_n9: f64 = (p.p3 * eq3_e193_d_n9);
         let eq3_e194_d_n10: f64 = (p.p3 * eq3_e193_d_n10);
         let eq3_e194_d_n11: f64 = (p.p3 * eq3_e193_d_n11);
+        let eq3_e194_d_b0: f64 = (p.p3 * eq3_e193_d_b0);
+        let eq3_e194_d_b1: f64 = (p.p3 * eq3_e193_d_b1);
         let eq3_e196: f64 = (eq3_e194 * p.p1);
         let eq3_e196_d_n0: f64 = (eq3_e194_d_n0 * p.p1);
         let eq3_e196_d_n1: f64 = (eq3_e194_d_n1 * p.p1);
@@ -3858,9 +3888,11 @@ impl Instance {
         let eq3_e196_d_n9: f64 = (eq3_e194_d_n9 * p.p1);
         let eq3_e196_d_n10: f64 = (eq3_e194_d_n10 * p.p1);
         let eq3_e196_d_n11: f64 = (eq3_e194_d_n11 * p.p1);
+        let eq3_e196_d_b0: f64 = (eq3_e194_d_b0 * p.p1);
+        let eq3_e196_d_b1: f64 = (eq3_e194_d_b1 * p.p1);
         let eq3_value: f64 = eq3_e196;
         let eq3_node_derivatives: [f64; 12] = [eq3_e196_d_n0, eq3_e196_d_n1, eq3_e196_d_n2, eq3_e196_d_n3, eq3_e196_d_n4, eq3_e196_d_n5, eq3_e196_d_n6, eq3_e196_d_n7, eq3_e196_d_n8, eq3_e196_d_n9, eq3_e196_d_n10, eq3_e196_d_n11];
-        let eq3_branch_derivatives: [f64; 0] = [];
+        let eq3_branch_derivatives: [f64; 2] = [eq3_e196_d_b0, eq3_e196_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[4]),
@@ -3871,7 +3903,7 @@ impl Instance {
             &eq3_branch_derivatives,
             multiplicity,
         );
-        let (eq4_e205, eq4_e205_d_n0, eq4_e205_d_n1, eq4_e205_d_n2, eq4_e205_d_n3, eq4_e205_d_n4, eq4_e205_d_n5, eq4_e205_d_n6, eq4_e205_d_n7, eq4_e205_d_n8, eq4_e205_d_n9, eq4_e205_d_n10, eq4_e205_d_n11,) = {
+        let (eq4_e205, eq4_e205_d_n0, eq4_e205_d_n1, eq4_e205_d_n2, eq4_e205_d_n3, eq4_e205_d_n4, eq4_e205_d_n5, eq4_e205_d_n6, eq4_e205_d_n7, eq4_e205_d_n8, eq4_e205_d_n9, eq4_e205_d_n10, eq4_e205_d_n11, eq4_e205_d_b0, eq4_e205_d_b1,) = {
     if s.b[597] {
         let eq4_e200: f64 = (-s.v[82]);
         let eq4_e200_d_n0: f64 = (-s.dn[82][0]);
@@ -3886,6 +3918,8 @@ impl Instance {
         let eq4_e200_d_n9: f64 = (-s.dn[82][9]);
         let eq4_e200_d_n10: f64 = (-s.dn[82][10]);
         let eq4_e200_d_n11: f64 = (-s.dn[82][11]);
+        let eq4_e200_d_b0: f64 = (-s.db[82][0]);
+        let eq4_e200_d_b1: f64 = (-s.db[82][1]);
         let eq4_e201: f64 = (p.p3 * eq4_e200);
         let eq4_e201_d_n0: f64 = (p.p3 * eq4_e200_d_n0);
         let eq4_e201_d_n1: f64 = (p.p3 * eq4_e200_d_n1);
@@ -3899,6 +3933,8 @@ impl Instance {
         let eq4_e201_d_n9: f64 = (p.p3 * eq4_e200_d_n9);
         let eq4_e201_d_n10: f64 = (p.p3 * eq4_e200_d_n10);
         let eq4_e201_d_n11: f64 = (p.p3 * eq4_e200_d_n11);
+        let eq4_e201_d_b0: f64 = (p.p3 * eq4_e200_d_b0);
+        let eq4_e201_d_b1: f64 = (p.p3 * eq4_e200_d_b1);
         let eq4_e203: f64 = (eq4_e201 * p.p1);
         let eq4_e203_d_n0: f64 = (eq4_e201_d_n0 * p.p1);
         let eq4_e203_d_n1: f64 = (eq4_e201_d_n1 * p.p1);
@@ -3912,14 +3948,16 @@ impl Instance {
         let eq4_e203_d_n9: f64 = (eq4_e201_d_n9 * p.p1);
         let eq4_e203_d_n10: f64 = (eq4_e201_d_n10 * p.p1);
         let eq4_e203_d_n11: f64 = (eq4_e201_d_n11 * p.p1);
-        (eq4_e203, eq4_e203_d_n0, eq4_e203_d_n1, eq4_e203_d_n2, eq4_e203_d_n3, eq4_e203_d_n4, eq4_e203_d_n5, eq4_e203_d_n6, eq4_e203_d_n7, eq4_e203_d_n8, eq4_e203_d_n9, eq4_e203_d_n10, eq4_e203_d_n11,)
+        let eq4_e203_d_b0: f64 = (eq4_e201_d_b0 * p.p1);
+        let eq4_e203_d_b1: f64 = (eq4_e201_d_b1 * p.p1);
+        (eq4_e203, eq4_e203_d_n0, eq4_e203_d_n1, eq4_e203_d_n2, eq4_e203_d_n3, eq4_e203_d_n4, eq4_e203_d_n5, eq4_e203_d_n6, eq4_e203_d_n7, eq4_e203_d_n8, eq4_e203_d_n9, eq4_e203_d_n10, eq4_e203_d_n11, eq4_e203_d_b0, eq4_e203_d_b1,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
         let eq4_value: f64 = eq4_e205;
         let eq4_node_derivatives: [f64; 12] = [eq4_e205_d_n0, eq4_e205_d_n1, eq4_e205_d_n2, eq4_e205_d_n3, eq4_e205_d_n4, eq4_e205_d_n5, eq4_e205_d_n6, eq4_e205_d_n7, eq4_e205_d_n8, eq4_e205_d_n9, eq4_e205_d_n10, eq4_e205_d_n11];
-        let eq4_branch_derivatives: [f64; 0] = [];
+        let eq4_branch_derivatives: [f64; 2] = [eq4_e205_d_b0, eq4_e205_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[7]),
@@ -3930,7 +3968,7 @@ impl Instance {
             &eq4_branch_derivatives,
             multiplicity,
         );
-        let (eq5_e215, eq5_e215_d_n0, eq5_e215_d_n1, eq5_e215_d_n2, eq5_e215_d_n3, eq5_e215_d_n4, eq5_e215_d_n5, eq5_e215_d_n6, eq5_e215_d_n7, eq5_e215_d_n8, eq5_e215_d_n9, eq5_e215_d_n10, eq5_e215_d_n11,) = {
+        let (eq5_e215, eq5_e215_d_n0, eq5_e215_d_n1, eq5_e215_d_n2, eq5_e215_d_n3, eq5_e215_d_n4, eq5_e215_d_n5, eq5_e215_d_n6, eq5_e215_d_n7, eq5_e215_d_n8, eq5_e215_d_n9, eq5_e215_d_n10, eq5_e215_d_n11, eq5_e215_d_b0, eq5_e215_d_b1,) = {
     if (!s.b[597]) {
         let eq5_e210: f64 = (-s.v[82]);
         let eq5_e210_d_n0: f64 = (-s.dn[82][0]);
@@ -3945,6 +3983,8 @@ impl Instance {
         let eq5_e210_d_n9: f64 = (-s.dn[82][9]);
         let eq5_e210_d_n10: f64 = (-s.dn[82][10]);
         let eq5_e210_d_n11: f64 = (-s.dn[82][11]);
+        let eq5_e210_d_b0: f64 = (-s.db[82][0]);
+        let eq5_e210_d_b1: f64 = (-s.db[82][1]);
         let eq5_e211: f64 = (p.p3 * eq5_e210);
         let eq5_e211_d_n0: f64 = (p.p3 * eq5_e210_d_n0);
         let eq5_e211_d_n1: f64 = (p.p3 * eq5_e210_d_n1);
@@ -3958,6 +3998,8 @@ impl Instance {
         let eq5_e211_d_n9: f64 = (p.p3 * eq5_e210_d_n9);
         let eq5_e211_d_n10: f64 = (p.p3 * eq5_e210_d_n10);
         let eq5_e211_d_n11: f64 = (p.p3 * eq5_e210_d_n11);
+        let eq5_e211_d_b0: f64 = (p.p3 * eq5_e210_d_b0);
+        let eq5_e211_d_b1: f64 = (p.p3 * eq5_e210_d_b1);
         let eq5_e213: f64 = (eq5_e211 * p.p1);
         let eq5_e213_d_n0: f64 = (eq5_e211_d_n0 * p.p1);
         let eq5_e213_d_n1: f64 = (eq5_e211_d_n1 * p.p1);
@@ -3971,14 +4013,16 @@ impl Instance {
         let eq5_e213_d_n9: f64 = (eq5_e211_d_n9 * p.p1);
         let eq5_e213_d_n10: f64 = (eq5_e211_d_n10 * p.p1);
         let eq5_e213_d_n11: f64 = (eq5_e211_d_n11 * p.p1);
-        (eq5_e213, eq5_e213_d_n0, eq5_e213_d_n1, eq5_e213_d_n2, eq5_e213_d_n3, eq5_e213_d_n4, eq5_e213_d_n5, eq5_e213_d_n6, eq5_e213_d_n7, eq5_e213_d_n8, eq5_e213_d_n9, eq5_e213_d_n10, eq5_e213_d_n11,)
+        let eq5_e213_d_b0: f64 = (eq5_e211_d_b0 * p.p1);
+        let eq5_e213_d_b1: f64 = (eq5_e211_d_b1 * p.p1);
+        (eq5_e213, eq5_e213_d_n0, eq5_e213_d_n1, eq5_e213_d_n2, eq5_e213_d_n3, eq5_e213_d_n4, eq5_e213_d_n5, eq5_e213_d_n6, eq5_e213_d_n7, eq5_e213_d_n8, eq5_e213_d_n9, eq5_e213_d_n10, eq5_e213_d_n11, eq5_e213_d_b0, eq5_e213_d_b1,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
         let eq5_value: f64 = eq5_e215;
         let eq5_node_derivatives: [f64; 12] = [eq5_e215_d_n0, eq5_e215_d_n1, eq5_e215_d_n2, eq5_e215_d_n3, eq5_e215_d_n4, eq5_e215_d_n5, eq5_e215_d_n6, eq5_e215_d_n7, eq5_e215_d_n8, eq5_e215_d_n9, eq5_e215_d_n10, eq5_e215_d_n11];
-        let eq5_branch_derivatives: [f64; 0] = [];
+        let eq5_branch_derivatives: [f64; 2] = [eq5_e215_d_b0, eq5_e215_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[8]),
@@ -4002,6 +4046,8 @@ impl Instance {
         let eq6_e218_d_n9: f64 = (p.p3 * s.dn[179][9]);
         let eq6_e218_d_n10: f64 = (p.p3 * s.dn[179][10]);
         let eq6_e218_d_n11: f64 = (p.p3 * s.dn[179][11]);
+        let eq6_e218_d_b0: f64 = (p.p3 * s.db[179][0]);
+        let eq6_e218_d_b1: f64 = (p.p3 * s.db[179][1]);
         let eq6_e220: f64 = (eq6_e218 * p.p1);
         let eq6_e220_d_n0: f64 = (eq6_e218_d_n0 * p.p1);
         let eq6_e220_d_n1: f64 = (eq6_e218_d_n1 * p.p1);
@@ -4015,9 +4061,11 @@ impl Instance {
         let eq6_e220_d_n9: f64 = (eq6_e218_d_n9 * p.p1);
         let eq6_e220_d_n10: f64 = (eq6_e218_d_n10 * p.p1);
         let eq6_e220_d_n11: f64 = (eq6_e218_d_n11 * p.p1);
+        let eq6_e220_d_b0: f64 = (eq6_e218_d_b0 * p.p1);
+        let eq6_e220_d_b1: f64 = (eq6_e218_d_b1 * p.p1);
         let eq6_value: f64 = eq6_e220;
         let eq6_node_derivatives: [f64; 12] = [eq6_e220_d_n0, eq6_e220_d_n1, eq6_e220_d_n2, eq6_e220_d_n3, eq6_e220_d_n4, eq6_e220_d_n5, eq6_e220_d_n6, eq6_e220_d_n7, eq6_e220_d_n8, eq6_e220_d_n9, eq6_e220_d_n10, eq6_e220_d_n11];
-        let eq6_branch_derivatives: [f64; 0] = [];
+        let eq6_branch_derivatives: [f64; 2] = [eq6_e220_d_b0, eq6_e220_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[5]),
             Some(nodes[3]),
@@ -4041,6 +4089,8 @@ impl Instance {
         let eq7_e223_d_n9: f64 = (p.p3 * s.dn[182][9]);
         let eq7_e223_d_n10: f64 = (p.p3 * s.dn[182][10]);
         let eq7_e223_d_n11: f64 = (p.p3 * s.dn[182][11]);
+        let eq7_e223_d_b0: f64 = (p.p3 * s.db[182][0]);
+        let eq7_e223_d_b1: f64 = (p.p3 * s.db[182][1]);
         let eq7_e225: f64 = (eq7_e223 * p.p1);
         let eq7_e225_d_n0: f64 = (eq7_e223_d_n0 * p.p1);
         let eq7_e225_d_n1: f64 = (eq7_e223_d_n1 * p.p1);
@@ -4054,9 +4104,11 @@ impl Instance {
         let eq7_e225_d_n9: f64 = (eq7_e223_d_n9 * p.p1);
         let eq7_e225_d_n10: f64 = (eq7_e223_d_n10 * p.p1);
         let eq7_e225_d_n11: f64 = (eq7_e223_d_n11 * p.p1);
+        let eq7_e225_d_b0: f64 = (eq7_e223_d_b0 * p.p1);
+        let eq7_e225_d_b1: f64 = (eq7_e223_d_b1 * p.p1);
         let eq7_value: f64 = eq7_e225;
         let eq7_node_derivatives: [f64; 12] = [eq7_e225_d_n0, eq7_e225_d_n1, eq7_e225_d_n2, eq7_e225_d_n3, eq7_e225_d_n4, eq7_e225_d_n5, eq7_e225_d_n6, eq7_e225_d_n7, eq7_e225_d_n8, eq7_e225_d_n9, eq7_e225_d_n10, eq7_e225_d_n11];
-        let eq7_branch_derivatives: [f64; 0] = [];
+        let eq7_branch_derivatives: [f64; 2] = [eq7_e225_d_b0, eq7_e225_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[3]),
@@ -4065,45 +4117,6 @@ impl Instance {
             &eq7_node_derivatives,
             branches,
             &eq7_branch_derivatives,
-            multiplicity,
-        );
-        let eq8_e228: f64 = (p.p3 * s.v[180]);
-        let eq8_e228_d_n0: f64 = (p.p3 * s.dn[180][0]);
-        let eq8_e228_d_n1: f64 = (p.p3 * s.dn[180][1]);
-        let eq8_e228_d_n2: f64 = (p.p3 * s.dn[180][2]);
-        let eq8_e228_d_n3: f64 = (p.p3 * s.dn[180][3]);
-        let eq8_e228_d_n4: f64 = (p.p3 * s.dn[180][4]);
-        let eq8_e228_d_n5: f64 = (p.p3 * s.dn[180][5]);
-        let eq8_e228_d_n6: f64 = (p.p3 * s.dn[180][6]);
-        let eq8_e228_d_n7: f64 = (p.p3 * s.dn[180][7]);
-        let eq8_e228_d_n8: f64 = (p.p3 * s.dn[180][8]);
-        let eq8_e228_d_n9: f64 = (p.p3 * s.dn[180][9]);
-        let eq8_e228_d_n10: f64 = (p.p3 * s.dn[180][10]);
-        let eq8_e228_d_n11: f64 = (p.p3 * s.dn[180][11]);
-        let eq8_e230: f64 = (eq8_e228 * p.p1);
-        let eq8_e230_d_n0: f64 = (eq8_e228_d_n0 * p.p1);
-        let eq8_e230_d_n1: f64 = (eq8_e228_d_n1 * p.p1);
-        let eq8_e230_d_n2: f64 = (eq8_e228_d_n2 * p.p1);
-        let eq8_e230_d_n3: f64 = (eq8_e228_d_n3 * p.p1);
-        let eq8_e230_d_n4: f64 = (eq8_e228_d_n4 * p.p1);
-        let eq8_e230_d_n5: f64 = (eq8_e228_d_n5 * p.p1);
-        let eq8_e230_d_n6: f64 = (eq8_e228_d_n6 * p.p1);
-        let eq8_e230_d_n7: f64 = (eq8_e228_d_n7 * p.p1);
-        let eq8_e230_d_n8: f64 = (eq8_e228_d_n8 * p.p1);
-        let eq8_e230_d_n9: f64 = (eq8_e228_d_n9 * p.p1);
-        let eq8_e230_d_n10: f64 = (eq8_e228_d_n10 * p.p1);
-        let eq8_e230_d_n11: f64 = (eq8_e228_d_n11 * p.p1);
-        let eq8_value: f64 = eq8_e230;
-        let eq8_node_derivatives: [f64; 12] = [eq8_e230_d_n0, eq8_e230_d_n1, eq8_e230_d_n2, eq8_e230_d_n3, eq8_e230_d_n4, eq8_e230_d_n5, eq8_e230_d_n6, eq8_e230_d_n7, eq8_e230_d_n8, eq8_e230_d_n9, eq8_e230_d_n10, eq8_e230_d_n11];
-        let eq8_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_dense(
-            Some(nodes[1]),
-            Some(nodes[3]),
-            multiplicity * (eq8_value),
-            nodes,
-            &eq8_node_derivatives,
-            branches,
-            &eq8_branch_derivatives,
             multiplicity,
         );
     }
@@ -4121,6 +4134,49 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
+        let eq8_e228: f64 = (p.p3 * s.v[180]);
+        let eq8_e228_d_n0: f64 = (p.p3 * s.dn[180][0]);
+        let eq8_e228_d_n1: f64 = (p.p3 * s.dn[180][1]);
+        let eq8_e228_d_n2: f64 = (p.p3 * s.dn[180][2]);
+        let eq8_e228_d_n3: f64 = (p.p3 * s.dn[180][3]);
+        let eq8_e228_d_n4: f64 = (p.p3 * s.dn[180][4]);
+        let eq8_e228_d_n5: f64 = (p.p3 * s.dn[180][5]);
+        let eq8_e228_d_n6: f64 = (p.p3 * s.dn[180][6]);
+        let eq8_e228_d_n7: f64 = (p.p3 * s.dn[180][7]);
+        let eq8_e228_d_n8: f64 = (p.p3 * s.dn[180][8]);
+        let eq8_e228_d_n9: f64 = (p.p3 * s.dn[180][9]);
+        let eq8_e228_d_n10: f64 = (p.p3 * s.dn[180][10]);
+        let eq8_e228_d_n11: f64 = (p.p3 * s.dn[180][11]);
+        let eq8_e228_d_b0: f64 = (p.p3 * s.db[180][0]);
+        let eq8_e228_d_b1: f64 = (p.p3 * s.db[180][1]);
+        let eq8_e230: f64 = (eq8_e228 * p.p1);
+        let eq8_e230_d_n0: f64 = (eq8_e228_d_n0 * p.p1);
+        let eq8_e230_d_n1: f64 = (eq8_e228_d_n1 * p.p1);
+        let eq8_e230_d_n2: f64 = (eq8_e228_d_n2 * p.p1);
+        let eq8_e230_d_n3: f64 = (eq8_e228_d_n3 * p.p1);
+        let eq8_e230_d_n4: f64 = (eq8_e228_d_n4 * p.p1);
+        let eq8_e230_d_n5: f64 = (eq8_e228_d_n5 * p.p1);
+        let eq8_e230_d_n6: f64 = (eq8_e228_d_n6 * p.p1);
+        let eq8_e230_d_n7: f64 = (eq8_e228_d_n7 * p.p1);
+        let eq8_e230_d_n8: f64 = (eq8_e228_d_n8 * p.p1);
+        let eq8_e230_d_n9: f64 = (eq8_e228_d_n9 * p.p1);
+        let eq8_e230_d_n10: f64 = (eq8_e228_d_n10 * p.p1);
+        let eq8_e230_d_n11: f64 = (eq8_e228_d_n11 * p.p1);
+        let eq8_e230_d_b0: f64 = (eq8_e228_d_b0 * p.p1);
+        let eq8_e230_d_b1: f64 = (eq8_e228_d_b1 * p.p1);
+        let eq8_value: f64 = eq8_e230;
+        let eq8_node_derivatives: [f64; 12] = [eq8_e230_d_n0, eq8_e230_d_n1, eq8_e230_d_n2, eq8_e230_d_n3, eq8_e230_d_n4, eq8_e230_d_n5, eq8_e230_d_n6, eq8_e230_d_n7, eq8_e230_d_n8, eq8_e230_d_n9, eq8_e230_d_n10, eq8_e230_d_n11];
+        let eq8_branch_derivatives: [f64; 2] = [eq8_e230_d_b0, eq8_e230_d_b1];
+        stamper.stamp_current_dense(
+            Some(nodes[1]),
+            Some(nodes[3]),
+            multiplicity * (eq8_value),
+            nodes,
+            &eq8_node_derivatives,
+            branches,
+            &eq8_branch_derivatives,
+            multiplicity,
+        );
         let eq9_e233: f64 = (p.p3 * s.v[181]);
         let eq9_e233_d_n0: f64 = (p.p3 * s.dn[181][0]);
         let eq9_e233_d_n1: f64 = (p.p3 * s.dn[181][1]);
@@ -4134,6 +4190,8 @@ impl Instance {
         let eq9_e233_d_n9: f64 = (p.p3 * s.dn[181][9]);
         let eq9_e233_d_n10: f64 = (p.p3 * s.dn[181][10]);
         let eq9_e233_d_n11: f64 = (p.p3 * s.dn[181][11]);
+        let eq9_e233_d_b0: f64 = (p.p3 * s.db[181][0]);
+        let eq9_e233_d_b1: f64 = (p.p3 * s.db[181][1]);
         let eq9_e235: f64 = (eq9_e233 * p.p1);
         let eq9_e235_d_n0: f64 = (eq9_e233_d_n0 * p.p1);
         let eq9_e235_d_n1: f64 = (eq9_e233_d_n1 * p.p1);
@@ -4147,9 +4205,11 @@ impl Instance {
         let eq9_e235_d_n9: f64 = (eq9_e233_d_n9 * p.p1);
         let eq9_e235_d_n10: f64 = (eq9_e233_d_n10 * p.p1);
         let eq9_e235_d_n11: f64 = (eq9_e233_d_n11 * p.p1);
+        let eq9_e235_d_b0: f64 = (eq9_e233_d_b0 * p.p1);
+        let eq9_e235_d_b1: f64 = (eq9_e233_d_b1 * p.p1);
         let eq9_value: f64 = eq9_e235;
         let eq9_node_derivatives: [f64; 12] = [eq9_e235_d_n0, eq9_e235_d_n1, eq9_e235_d_n2, eq9_e235_d_n3, eq9_e235_d_n4, eq9_e235_d_n5, eq9_e235_d_n6, eq9_e235_d_n7, eq9_e235_d_n8, eq9_e235_d_n9, eq9_e235_d_n10, eq9_e235_d_n11];
-        let eq9_branch_derivatives: [f64; 0] = [];
+        let eq9_branch_derivatives: [f64; 2] = [eq9_e235_d_b0, eq9_e235_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[3]),
             Some(nodes[7]),
@@ -4173,6 +4233,8 @@ impl Instance {
         let eq10_e238_d_n9: f64 = (p.p3 * s.dn[188][9]);
         let eq10_e238_d_n10: f64 = (p.p3 * s.dn[188][10]);
         let eq10_e238_d_n11: f64 = (p.p3 * s.dn[188][11]);
+        let eq10_e238_d_b0: f64 = (p.p3 * s.db[188][0]);
+        let eq10_e238_d_b1: f64 = (p.p3 * s.db[188][1]);
         let eq10_e240: f64 = (eq10_e238 * p.p1);
         let eq10_e240_d_n0: f64 = (eq10_e238_d_n0 * p.p1);
         let eq10_e240_d_n1: f64 = (eq10_e238_d_n1 * p.p1);
@@ -4186,9 +4248,11 @@ impl Instance {
         let eq10_e240_d_n9: f64 = (eq10_e238_d_n9 * p.p1);
         let eq10_e240_d_n10: f64 = (eq10_e238_d_n10 * p.p1);
         let eq10_e240_d_n11: f64 = (eq10_e238_d_n11 * p.p1);
+        let eq10_e240_d_b0: f64 = (eq10_e238_d_b0 * p.p1);
+        let eq10_e240_d_b1: f64 = (eq10_e238_d_b1 * p.p1);
         let eq10_value: f64 = eq10_e240;
         let eq10_node_derivatives: [f64; 12] = [eq10_e240_d_n0, eq10_e240_d_n1, eq10_e240_d_n2, eq10_e240_d_n3, eq10_e240_d_n4, eq10_e240_d_n5, eq10_e240_d_n6, eq10_e240_d_n7, eq10_e240_d_n8, eq10_e240_d_n9, eq10_e240_d_n10, eq10_e240_d_n11];
-        let eq10_branch_derivatives: [f64; 0] = [];
+        let eq10_branch_derivatives: [f64; 2] = [eq10_e240_d_b0, eq10_e240_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[5]),
             Some(nodes[6]),
@@ -4213,6 +4277,8 @@ impl Instance {
         let eq11_e245_d_n9: f64 = (eq11_e243 * s.dn[209][9]);
         let eq11_e245_d_n10: f64 = (eq11_e243 * s.dn[209][10]);
         let eq11_e245_d_n11: f64 = (eq11_e243 * s.dn[209][11]);
+        let eq11_e245_d_b0: f64 = (eq11_e243 * s.db[209][0]);
+        let eq11_e245_d_b1: f64 = (eq11_e243 * s.db[209][1]);
         let eq11_e246: f64 = (p.p3 * eq11_e245);
         let eq11_e246_d_n0: f64 = (p.p3 * eq11_e245_d_n0);
         let eq11_e246_d_n1: f64 = (p.p3 * eq11_e245_d_n1);
@@ -4226,6 +4292,8 @@ impl Instance {
         let eq11_e246_d_n9: f64 = (p.p3 * eq11_e245_d_n9);
         let eq11_e246_d_n10: f64 = (p.p3 * eq11_e245_d_n10);
         let eq11_e246_d_n11: f64 = (p.p3 * eq11_e245_d_n11);
+        let eq11_e246_d_b0: f64 = (p.p3 * eq11_e245_d_b0);
+        let eq11_e246_d_b1: f64 = (p.p3 * eq11_e245_d_b1);
         let eq11_e248: f64 = (eq11_e246 * p.p1);
         let eq11_e248_d_n0: f64 = (eq11_e246_d_n0 * p.p1);
         let eq11_e248_d_n1: f64 = (eq11_e246_d_n1 * p.p1);
@@ -4239,9 +4307,11 @@ impl Instance {
         let eq11_e248_d_n9: f64 = (eq11_e246_d_n9 * p.p1);
         let eq11_e248_d_n10: f64 = (eq11_e246_d_n10 * p.p1);
         let eq11_e248_d_n11: f64 = (eq11_e246_d_n11 * p.p1);
+        let eq11_e248_d_b0: f64 = (eq11_e246_d_b0 * p.p1);
+        let eq11_e248_d_b1: f64 = (eq11_e246_d_b1 * p.p1);
         let eq11_value: f64 = eq11_e248;
         let eq11_node_derivatives: [f64; 12] = [eq11_e248_d_n0, eq11_e248_d_n1, eq11_e248_d_n2, eq11_e248_d_n3, eq11_e248_d_n4, eq11_e248_d_n5, eq11_e248_d_n6, eq11_e248_d_n7, eq11_e248_d_n8, eq11_e248_d_n9, eq11_e248_d_n10, eq11_e248_d_n11];
-        let eq11_branch_derivatives: [f64; 0] = [];
+        let eq11_branch_derivatives: [f64; 2] = [eq11_e248_d_b0, eq11_e248_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[8]),
@@ -4265,6 +4335,8 @@ impl Instance {
         let eq12_e251_d_n9: f64 = (p.p3 * s.dn[259][9]);
         let eq12_e251_d_n10: f64 = (p.p3 * s.dn[259][10]);
         let eq12_e251_d_n11: f64 = (p.p3 * s.dn[259][11]);
+        let eq12_e251_d_b0: f64 = (p.p3 * s.db[259][0]);
+        let eq12_e251_d_b1: f64 = (p.p3 * s.db[259][1]);
         let eq12_e253: f64 = (eq12_e251 / s.v[28]);
         let eq12_e253_d_n0: f64 = (((eq12_e251_d_n0 * s.v[28]) - (eq12_e251 * s.dn[28][0])) / (s.v[28] * s.v[28]));
         let eq12_e253_d_n1: f64 = (((eq12_e251_d_n1 * s.v[28]) - (eq12_e251 * s.dn[28][1])) / (s.v[28] * s.v[28]));
@@ -4278,6 +4350,8 @@ impl Instance {
         let eq12_e253_d_n9: f64 = (((eq12_e251_d_n9 * s.v[28]) - (eq12_e251 * s.dn[28][9])) / (s.v[28] * s.v[28]));
         let eq12_e253_d_n10: f64 = (((eq12_e251_d_n10 * s.v[28]) - (eq12_e251 * s.dn[28][10])) / (s.v[28] * s.v[28]));
         let eq12_e253_d_n11: f64 = (((eq12_e251_d_n11 * s.v[28]) - (eq12_e251 * s.dn[28][11])) / (s.v[28] * s.v[28]));
+        let eq12_e253_d_b0: f64 = (((eq12_e251_d_b0 * s.v[28]) - (eq12_e251 * s.db[28][0])) / (s.v[28] * s.v[28]));
+        let eq12_e253_d_b1: f64 = (((eq12_e251_d_b1 * s.v[28]) - (eq12_e251 * s.db[28][1])) / (s.v[28] * s.v[28]));
         let eq12_e255: f64 = (eq12_e253 * p.p1);
         let eq12_e255_d_n0: f64 = (eq12_e253_d_n0 * p.p1);
         let eq12_e255_d_n1: f64 = (eq12_e253_d_n1 * p.p1);
@@ -4291,9 +4365,11 @@ impl Instance {
         let eq12_e255_d_n9: f64 = (eq12_e253_d_n9 * p.p1);
         let eq12_e255_d_n10: f64 = (eq12_e253_d_n10 * p.p1);
         let eq12_e255_d_n11: f64 = (eq12_e253_d_n11 * p.p1);
+        let eq12_e255_d_b0: f64 = (eq12_e253_d_b0 * p.p1);
+        let eq12_e255_d_b1: f64 = (eq12_e253_d_b1 * p.p1);
         let eq12_value: f64 = eq12_e255;
         let eq12_node_derivatives: [f64; 12] = [eq12_e255_d_n0, eq12_e255_d_n1, eq12_e255_d_n2, eq12_e255_d_n3, eq12_e255_d_n4, eq12_e255_d_n5, eq12_e255_d_n6, eq12_e255_d_n7, eq12_e255_d_n8, eq12_e255_d_n9, eq12_e255_d_n10, eq12_e255_d_n11];
-        let eq12_branch_derivatives: [f64; 0] = [];
+        let eq12_branch_derivatives: [f64; 2] = [eq12_e255_d_b0, eq12_e255_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[2]),
             Some(nodes[4]),
@@ -4317,6 +4393,8 @@ impl Instance {
         let eq13_e258_d_n9: f64 = (p.p3 * s.dn[260][9]);
         let eq13_e258_d_n10: f64 = (p.p3 * s.dn[260][10]);
         let eq13_e258_d_n11: f64 = (p.p3 * s.dn[260][11]);
+        let eq13_e258_d_b0: f64 = (p.p3 * s.db[260][0]);
+        let eq13_e258_d_b1: f64 = (p.p3 * s.db[260][1]);
         let eq13_e260: f64 = (eq13_e258 / s.v[30]);
         let eq13_e260_d_n0: f64 = (((eq13_e258_d_n0 * s.v[30]) - (eq13_e258 * s.dn[30][0])) / (s.v[30] * s.v[30]));
         let eq13_e260_d_n1: f64 = (((eq13_e258_d_n1 * s.v[30]) - (eq13_e258 * s.dn[30][1])) / (s.v[30] * s.v[30]));
@@ -4330,6 +4408,8 @@ impl Instance {
         let eq13_e260_d_n9: f64 = (((eq13_e258_d_n9 * s.v[30]) - (eq13_e258 * s.dn[30][9])) / (s.v[30] * s.v[30]));
         let eq13_e260_d_n10: f64 = (((eq13_e258_d_n10 * s.v[30]) - (eq13_e258 * s.dn[30][10])) / (s.v[30] * s.v[30]));
         let eq13_e260_d_n11: f64 = (((eq13_e258_d_n11 * s.v[30]) - (eq13_e258 * s.dn[30][11])) / (s.v[30] * s.v[30]));
+        let eq13_e260_d_b0: f64 = (((eq13_e258_d_b0 * s.v[30]) - (eq13_e258 * s.db[30][0])) / (s.v[30] * s.v[30]));
+        let eq13_e260_d_b1: f64 = (((eq13_e258_d_b1 * s.v[30]) - (eq13_e258 * s.db[30][1])) / (s.v[30] * s.v[30]));
         let eq13_e262: f64 = (eq13_e260 * p.p1);
         let eq13_e262_d_n0: f64 = (eq13_e260_d_n0 * p.p1);
         let eq13_e262_d_n1: f64 = (eq13_e260_d_n1 * p.p1);
@@ -4343,9 +4423,11 @@ impl Instance {
         let eq13_e262_d_n9: f64 = (eq13_e260_d_n9 * p.p1);
         let eq13_e262_d_n10: f64 = (eq13_e260_d_n10 * p.p1);
         let eq13_e262_d_n11: f64 = (eq13_e260_d_n11 * p.p1);
+        let eq13_e262_d_b0: f64 = (eq13_e260_d_b0 * p.p1);
+        let eq13_e262_d_b1: f64 = (eq13_e260_d_b1 * p.p1);
         let eq13_value: f64 = eq13_e262;
         let eq13_node_derivatives: [f64; 12] = [eq13_e262_d_n0, eq13_e262_d_n1, eq13_e262_d_n2, eq13_e262_d_n3, eq13_e262_d_n4, eq13_e262_d_n5, eq13_e262_d_n6, eq13_e262_d_n7, eq13_e262_d_n8, eq13_e262_d_n9, eq13_e262_d_n10, eq13_e262_d_n11];
-        let eq13_branch_derivatives: [f64; 0] = [];
+        let eq13_branch_derivatives: [f64; 2] = [eq13_e262_d_b0, eq13_e262_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[1]),
             Some(nodes[5]),
@@ -4369,6 +4451,8 @@ impl Instance {
         let eq14_e266_d_n9: f64 = (s.dn[215][9] + s.dn[220][9]);
         let eq14_e266_d_n10: f64 = (s.dn[215][10] + s.dn[220][10]);
         let eq14_e266_d_n11: f64 = (s.dn[215][11] + s.dn[220][11]);
+        let eq14_e266_d_b0: f64 = (s.db[215][0] + s.db[220][0]);
+        let eq14_e266_d_b1: f64 = (s.db[215][1] + s.db[220][1]);
         let eq14_e268: f64 = (eq14_e266 + s.v[235]);
         let eq14_e268_d_n0: f64 = (eq14_e266_d_n0 + s.dn[235][0]);
         let eq14_e268_d_n1: f64 = (eq14_e266_d_n1 + s.dn[235][1]);
@@ -4382,6 +4466,8 @@ impl Instance {
         let eq14_e268_d_n9: f64 = (eq14_e266_d_n9 + s.dn[235][9]);
         let eq14_e268_d_n10: f64 = (eq14_e266_d_n10 + s.dn[235][10]);
         let eq14_e268_d_n11: f64 = (eq14_e266_d_n11 + s.dn[235][11]);
+        let eq14_e268_d_b0: f64 = (eq14_e266_d_b0 + s.db[235][0]);
+        let eq14_e268_d_b1: f64 = (eq14_e266_d_b1 + s.db[235][1]);
         let eq14_e269: f64 = (p.p3 * eq14_e268);
         let eq14_e269_d_n0: f64 = (p.p3 * eq14_e268_d_n0);
         let eq14_e269_d_n1: f64 = (p.p3 * eq14_e268_d_n1);
@@ -4395,6 +4481,8 @@ impl Instance {
         let eq14_e269_d_n9: f64 = (p.p3 * eq14_e268_d_n9);
         let eq14_e269_d_n10: f64 = (p.p3 * eq14_e268_d_n10);
         let eq14_e269_d_n11: f64 = (p.p3 * eq14_e268_d_n11);
+        let eq14_e269_d_b0: f64 = (p.p3 * eq14_e268_d_b0);
+        let eq14_e269_d_b1: f64 = (p.p3 * eq14_e268_d_b1);
         let eq14_e270: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, eq14_e269);
         let eq14_e270_d_n0: f64 = (eq14_e269_d_n0 * ddt_scale);
         let eq14_e270_d_n1: f64 = (eq14_e269_d_n1 * ddt_scale);
@@ -4408,6 +4496,8 @@ impl Instance {
         let eq14_e270_d_n9: f64 = (eq14_e269_d_n9 * ddt_scale);
         let eq14_e270_d_n10: f64 = (eq14_e269_d_n10 * ddt_scale);
         let eq14_e270_d_n11: f64 = (eq14_e269_d_n11 * ddt_scale);
+        let eq14_e270_d_b0: f64 = (eq14_e269_d_b0 * ddt_scale);
+        let eq14_e270_d_b1: f64 = (eq14_e269_d_b1 * ddt_scale);
         let eq14_e272: f64 = (eq14_e270 * p.p1);
         let eq14_e272_d_n0: f64 = (eq14_e270_d_n0 * p.p1);
         let eq14_e272_d_n1: f64 = (eq14_e270_d_n1 * p.p1);
@@ -4421,9 +4511,11 @@ impl Instance {
         let eq14_e272_d_n9: f64 = (eq14_e270_d_n9 * p.p1);
         let eq14_e272_d_n10: f64 = (eq14_e270_d_n10 * p.p1);
         let eq14_e272_d_n11: f64 = (eq14_e270_d_n11 * p.p1);
+        let eq14_e272_d_b0: f64 = (eq14_e270_d_b0 * p.p1);
+        let eq14_e272_d_b1: f64 = (eq14_e270_d_b1 * p.p1);
         let eq14_value: f64 = eq14_e272;
         let eq14_node_derivatives: [f64; 12] = [eq14_e272_d_n0, eq14_e272_d_n1, eq14_e272_d_n2, eq14_e272_d_n3, eq14_e272_d_n4, eq14_e272_d_n5, eq14_e272_d_n6, eq14_e272_d_n7, eq14_e272_d_n8, eq14_e272_d_n9, eq14_e272_d_n10, eq14_e272_d_n11];
-        let eq14_branch_derivatives: [f64; 0] = [];
+        let eq14_branch_derivatives: [f64; 2] = [eq14_e272_d_b0, eq14_e272_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[4]),
@@ -4447,6 +4539,8 @@ impl Instance {
         let eq15_e275_d_n9: f64 = (p.p3 * s.dn[217][9]);
         let eq15_e275_d_n10: f64 = (p.p3 * s.dn[217][10]);
         let eq15_e275_d_n11: f64 = (p.p3 * s.dn[217][11]);
+        let eq15_e275_d_b0: f64 = (p.p3 * s.db[217][0]);
+        let eq15_e275_d_b1: f64 = (p.p3 * s.db[217][1]);
         let eq15_e276: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, eq15_e275);
         let eq15_e276_d_n0: f64 = (eq15_e275_d_n0 * ddt_scale);
         let eq15_e276_d_n1: f64 = (eq15_e275_d_n1 * ddt_scale);
@@ -4460,6 +4554,8 @@ impl Instance {
         let eq15_e276_d_n9: f64 = (eq15_e275_d_n9 * ddt_scale);
         let eq15_e276_d_n10: f64 = (eq15_e275_d_n10 * ddt_scale);
         let eq15_e276_d_n11: f64 = (eq15_e275_d_n11 * ddt_scale);
+        let eq15_e276_d_b0: f64 = (eq15_e275_d_b0 * ddt_scale);
+        let eq15_e276_d_b1: f64 = (eq15_e275_d_b1 * ddt_scale);
         let eq15_e278: f64 = (eq15_e276 * p.p1);
         let eq15_e278_d_n0: f64 = (eq15_e276_d_n0 * p.p1);
         let eq15_e278_d_n1: f64 = (eq15_e276_d_n1 * p.p1);
@@ -4473,9 +4569,11 @@ impl Instance {
         let eq15_e278_d_n9: f64 = (eq15_e276_d_n9 * p.p1);
         let eq15_e278_d_n10: f64 = (eq15_e276_d_n10 * p.p1);
         let eq15_e278_d_n11: f64 = (eq15_e276_d_n11 * p.p1);
+        let eq15_e278_d_b0: f64 = (eq15_e276_d_b0 * p.p1);
+        let eq15_e278_d_b1: f64 = (eq15_e276_d_b1 * p.p1);
         let eq15_value: f64 = eq15_e278;
         let eq15_node_derivatives: [f64; 12] = [eq15_e278_d_n0, eq15_e278_d_n1, eq15_e278_d_n2, eq15_e278_d_n3, eq15_e278_d_n4, eq15_e278_d_n5, eq15_e278_d_n6, eq15_e278_d_n7, eq15_e278_d_n8, eq15_e278_d_n9, eq15_e278_d_n10, eq15_e278_d_n11];
-        let eq15_branch_derivatives: [f64; 0] = [];
+        let eq15_branch_derivatives: [f64; 2] = [eq15_e278_d_b0, eq15_e278_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[5]),
             Some(nodes[4]),
@@ -4486,6 +4584,21 @@ impl Instance {
             &eq15_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_2(
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        branches: &[usize; Instance::BRANCH_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
         let eq16_e282: f64 = (s.v[218] + s.v[221]);
         let eq16_e282_d_n0: f64 = (s.dn[218][0] + s.dn[221][0]);
         let eq16_e282_d_n1: f64 = (s.dn[218][1] + s.dn[221][1]);
@@ -4499,6 +4612,8 @@ impl Instance {
         let eq16_e282_d_n9: f64 = (s.dn[218][9] + s.dn[221][9]);
         let eq16_e282_d_n10: f64 = (s.dn[218][10] + s.dn[221][10]);
         let eq16_e282_d_n11: f64 = (s.dn[218][11] + s.dn[221][11]);
+        let eq16_e282_d_b0: f64 = (s.db[218][0] + s.db[221][0]);
+        let eq16_e282_d_b1: f64 = (s.db[218][1] + s.db[221][1]);
         let eq16_e284: f64 = (eq16_e282 + s.v[238]);
         let eq16_e284_d_n0: f64 = (eq16_e282_d_n0 + s.dn[238][0]);
         let eq16_e284_d_n1: f64 = (eq16_e282_d_n1 + s.dn[238][1]);
@@ -4512,6 +4627,8 @@ impl Instance {
         let eq16_e284_d_n9: f64 = (eq16_e282_d_n9 + s.dn[238][9]);
         let eq16_e284_d_n10: f64 = (eq16_e282_d_n10 + s.dn[238][10]);
         let eq16_e284_d_n11: f64 = (eq16_e282_d_n11 + s.dn[238][11]);
+        let eq16_e284_d_b0: f64 = (eq16_e282_d_b0 + s.db[238][0]);
+        let eq16_e284_d_b1: f64 = (eq16_e282_d_b1 + s.db[238][1]);
         let eq16_e285: f64 = (p.p3 * eq16_e284);
         let eq16_e285_d_n0: f64 = (p.p3 * eq16_e284_d_n0);
         let eq16_e285_d_n1: f64 = (p.p3 * eq16_e284_d_n1);
@@ -4525,6 +4642,8 @@ impl Instance {
         let eq16_e285_d_n9: f64 = (p.p3 * eq16_e284_d_n9);
         let eq16_e285_d_n10: f64 = (p.p3 * eq16_e284_d_n10);
         let eq16_e285_d_n11: f64 = (p.p3 * eq16_e284_d_n11);
+        let eq16_e285_d_b0: f64 = (p.p3 * eq16_e284_d_b0);
+        let eq16_e285_d_b1: f64 = (p.p3 * eq16_e284_d_b1);
         let eq16_e286: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, eq16_e285);
         let eq16_e286_d_n0: f64 = (eq16_e285_d_n0 * ddt_scale);
         let eq16_e286_d_n1: f64 = (eq16_e285_d_n1 * ddt_scale);
@@ -4538,6 +4657,8 @@ impl Instance {
         let eq16_e286_d_n9: f64 = (eq16_e285_d_n9 * ddt_scale);
         let eq16_e286_d_n10: f64 = (eq16_e285_d_n10 * ddt_scale);
         let eq16_e286_d_n11: f64 = (eq16_e285_d_n11 * ddt_scale);
+        let eq16_e286_d_b0: f64 = (eq16_e285_d_b0 * ddt_scale);
+        let eq16_e286_d_b1: f64 = (eq16_e285_d_b1 * ddt_scale);
         let eq16_e288: f64 = (eq16_e286 * p.p1);
         let eq16_e288_d_n0: f64 = (eq16_e286_d_n0 * p.p1);
         let eq16_e288_d_n1: f64 = (eq16_e286_d_n1 * p.p1);
@@ -4551,9 +4672,11 @@ impl Instance {
         let eq16_e288_d_n9: f64 = (eq16_e286_d_n9 * p.p1);
         let eq16_e288_d_n10: f64 = (eq16_e286_d_n10 * p.p1);
         let eq16_e288_d_n11: f64 = (eq16_e286_d_n11 * p.p1);
+        let eq16_e288_d_b0: f64 = (eq16_e286_d_b0 * p.p1);
+        let eq16_e288_d_b1: f64 = (eq16_e286_d_b1 * p.p1);
         let eq16_value: f64 = eq16_e288;
         let eq16_node_derivatives: [f64; 12] = [eq16_e288_d_n0, eq16_e288_d_n1, eq16_e288_d_n2, eq16_e288_d_n3, eq16_e288_d_n4, eq16_e288_d_n5, eq16_e288_d_n6, eq16_e288_d_n7, eq16_e288_d_n8, eq16_e288_d_n9, eq16_e288_d_n10, eq16_e288_d_n11];
-        let eq16_branch_derivatives: [f64; 0] = [];
+        let eq16_branch_derivatives: [f64; 2] = [eq16_e288_d_b0, eq16_e288_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[8]),
@@ -4577,6 +4700,8 @@ impl Instance {
         let eq17_e291_d_n9: f64 = (p.p3 * s.dn[233][9]);
         let eq17_e291_d_n10: f64 = (p.p3 * s.dn[233][10]);
         let eq17_e291_d_n11: f64 = (p.p3 * s.dn[233][11]);
+        let eq17_e291_d_b0: f64 = (p.p3 * s.db[233][0]);
+        let eq17_e291_d_b1: f64 = (p.p3 * s.db[233][1]);
         let eq17_e292: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, eq17_e291);
         let eq17_e292_d_n0: f64 = (eq17_e291_d_n0 * ddt_scale);
         let eq17_e292_d_n1: f64 = (eq17_e291_d_n1 * ddt_scale);
@@ -4590,6 +4715,8 @@ impl Instance {
         let eq17_e292_d_n9: f64 = (eq17_e291_d_n9 * ddt_scale);
         let eq17_e292_d_n10: f64 = (eq17_e291_d_n10 * ddt_scale);
         let eq17_e292_d_n11: f64 = (eq17_e291_d_n11 * ddt_scale);
+        let eq17_e292_d_b0: f64 = (eq17_e291_d_b0 * ddt_scale);
+        let eq17_e292_d_b1: f64 = (eq17_e291_d_b1 * ddt_scale);
         let eq17_e294: f64 = (eq17_e292 * p.p1);
         let eq17_e294_d_n0: f64 = (eq17_e292_d_n0 * p.p1);
         let eq17_e294_d_n1: f64 = (eq17_e292_d_n1 * p.p1);
@@ -4603,9 +4730,11 @@ impl Instance {
         let eq17_e294_d_n9: f64 = (eq17_e292_d_n9 * p.p1);
         let eq17_e294_d_n10: f64 = (eq17_e292_d_n10 * p.p1);
         let eq17_e294_d_n11: f64 = (eq17_e292_d_n11 * p.p1);
+        let eq17_e294_d_b0: f64 = (eq17_e292_d_b0 * p.p1);
+        let eq17_e294_d_b1: f64 = (eq17_e292_d_b1 * p.p1);
         let eq17_value: f64 = eq17_e294;
         let eq17_node_derivatives: [f64; 12] = [eq17_e294_d_n0, eq17_e294_d_n1, eq17_e294_d_n2, eq17_e294_d_n3, eq17_e294_d_n4, eq17_e294_d_n5, eq17_e294_d_n6, eq17_e294_d_n7, eq17_e294_d_n8, eq17_e294_d_n9, eq17_e294_d_n10, eq17_e294_d_n11];
-        let eq17_branch_derivatives: [f64; 0] = [];
+        let eq17_branch_derivatives: [f64; 2] = [eq17_e294_d_b0, eq17_e294_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[3]),
             Some(nodes[7]),
@@ -4616,21 +4745,6 @@ impl Instance {
             &eq17_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_2(
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        branches: &[usize; Instance::BRANCH_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
         let eq18_e297: f64 = (p.p3 * s.v[222]);
         let eq18_e297_d_n0: f64 = (p.p3 * s.dn[222][0]);
         let eq18_e297_d_n1: f64 = (p.p3 * s.dn[222][1]);
@@ -4644,6 +4758,8 @@ impl Instance {
         let eq18_e297_d_n9: f64 = (p.p3 * s.dn[222][9]);
         let eq18_e297_d_n10: f64 = (p.p3 * s.dn[222][10]);
         let eq18_e297_d_n11: f64 = (p.p3 * s.dn[222][11]);
+        let eq18_e297_d_b0: f64 = (p.p3 * s.db[222][0]);
+        let eq18_e297_d_b1: f64 = (p.p3 * s.db[222][1]);
         let eq18_e298: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 4, eq18_e297);
         let eq18_e298_d_n0: f64 = (eq18_e297_d_n0 * ddt_scale);
         let eq18_e298_d_n1: f64 = (eq18_e297_d_n1 * ddt_scale);
@@ -4657,6 +4773,8 @@ impl Instance {
         let eq18_e298_d_n9: f64 = (eq18_e297_d_n9 * ddt_scale);
         let eq18_e298_d_n10: f64 = (eq18_e297_d_n10 * ddt_scale);
         let eq18_e298_d_n11: f64 = (eq18_e297_d_n11 * ddt_scale);
+        let eq18_e298_d_b0: f64 = (eq18_e297_d_b0 * ddt_scale);
+        let eq18_e298_d_b1: f64 = (eq18_e297_d_b1 * ddt_scale);
         let eq18_e300: f64 = (eq18_e298 * p.p1);
         let eq18_e300_d_n0: f64 = (eq18_e298_d_n0 * p.p1);
         let eq18_e300_d_n1: f64 = (eq18_e298_d_n1 * p.p1);
@@ -4670,9 +4788,11 @@ impl Instance {
         let eq18_e300_d_n9: f64 = (eq18_e298_d_n9 * p.p1);
         let eq18_e300_d_n10: f64 = (eq18_e298_d_n10 * p.p1);
         let eq18_e300_d_n11: f64 = (eq18_e298_d_n11 * p.p1);
+        let eq18_e300_d_b0: f64 = (eq18_e298_d_b0 * p.p1);
+        let eq18_e300_d_b1: f64 = (eq18_e298_d_b1 * p.p1);
         let eq18_value: f64 = eq18_e300;
         let eq18_node_derivatives: [f64; 12] = [eq18_e300_d_n0, eq18_e300_d_n1, eq18_e300_d_n2, eq18_e300_d_n3, eq18_e300_d_n4, eq18_e300_d_n5, eq18_e300_d_n6, eq18_e300_d_n7, eq18_e300_d_n8, eq18_e300_d_n9, eq18_e300_d_n10, eq18_e300_d_n11];
-        let eq18_branch_derivatives: [f64; 0] = [];
+        let eq18_branch_derivatives: [f64; 2] = [eq18_e300_d_b0, eq18_e300_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[5]),
             Some(nodes[6]),
@@ -4697,6 +4817,8 @@ impl Instance {
         let eq19_e305_d_n9: f64 = (eq19_e303 * s.dn[263][9]);
         let eq19_e305_d_n10: f64 = (eq19_e303 * s.dn[263][10]);
         let eq19_e305_d_n11: f64 = (eq19_e303 * s.dn[263][11]);
+        let eq19_e305_d_b0: f64 = (eq19_e303 * s.db[263][0]);
+        let eq19_e305_d_b1: f64 = (eq19_e303 * s.db[263][1]);
         let eq19_e306: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 5, eq19_e305);
         let eq19_e306_d_n0: f64 = (eq19_e305_d_n0 * ddt_scale);
         let eq19_e306_d_n1: f64 = (eq19_e305_d_n1 * ddt_scale);
@@ -4710,6 +4832,8 @@ impl Instance {
         let eq19_e306_d_n9: f64 = (eq19_e305_d_n9 * ddt_scale);
         let eq19_e306_d_n10: f64 = (eq19_e305_d_n10 * ddt_scale);
         let eq19_e306_d_n11: f64 = (eq19_e305_d_n11 * ddt_scale);
+        let eq19_e306_d_b0: f64 = (eq19_e305_d_b0 * ddt_scale);
+        let eq19_e306_d_b1: f64 = (eq19_e305_d_b1 * ddt_scale);
         let eq19_e308: f64 = (eq19_e306 * p.p1);
         let eq19_e308_d_n0: f64 = (eq19_e306_d_n0 * p.p1);
         let eq19_e308_d_n1: f64 = (eq19_e306_d_n1 * p.p1);
@@ -4723,9 +4847,11 @@ impl Instance {
         let eq19_e308_d_n9: f64 = (eq19_e306_d_n9 * p.p1);
         let eq19_e308_d_n10: f64 = (eq19_e306_d_n10 * p.p1);
         let eq19_e308_d_n11: f64 = (eq19_e306_d_n11 * p.p1);
+        let eq19_e308_d_b0: f64 = (eq19_e306_d_b0 * p.p1);
+        let eq19_e308_d_b1: f64 = (eq19_e306_d_b1 * p.p1);
         let eq19_value: f64 = eq19_e308;
         let eq19_node_derivatives: [f64; 12] = [eq19_e308_d_n0, eq19_e308_d_n1, eq19_e308_d_n2, eq19_e308_d_n3, eq19_e308_d_n4, eq19_e308_d_n5, eq19_e308_d_n6, eq19_e308_d_n7, eq19_e308_d_n8, eq19_e308_d_n9, eq19_e308_d_n10, eq19_e308_d_n11];
-        let eq19_branch_derivatives: [f64; 0] = [];
+        let eq19_branch_derivatives: [f64; 2] = [eq19_e308_d_b0, eq19_e308_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[1]),
             Some(nodes[2]),
@@ -4750,6 +4876,8 @@ impl Instance {
         let eq20_e313_d_n9: f64 = (eq20_e311 * s.dn[264][9]);
         let eq20_e313_d_n10: f64 = (eq20_e311 * s.dn[264][10]);
         let eq20_e313_d_n11: f64 = (eq20_e311 * s.dn[264][11]);
+        let eq20_e313_d_b0: f64 = (eq20_e311 * s.db[264][0]);
+        let eq20_e313_d_b1: f64 = (eq20_e311 * s.db[264][1]);
         let eq20_e314: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 6, eq20_e313);
         let eq20_e314_d_n0: f64 = (eq20_e313_d_n0 * ddt_scale);
         let eq20_e314_d_n1: f64 = (eq20_e313_d_n1 * ddt_scale);
@@ -4763,6 +4891,8 @@ impl Instance {
         let eq20_e314_d_n9: f64 = (eq20_e313_d_n9 * ddt_scale);
         let eq20_e314_d_n10: f64 = (eq20_e313_d_n10 * ddt_scale);
         let eq20_e314_d_n11: f64 = (eq20_e313_d_n11 * ddt_scale);
+        let eq20_e314_d_b0: f64 = (eq20_e313_d_b0 * ddt_scale);
+        let eq20_e314_d_b1: f64 = (eq20_e313_d_b1 * ddt_scale);
         let eq20_e316: f64 = (eq20_e314 * p.p1);
         let eq20_e316_d_n0: f64 = (eq20_e314_d_n0 * p.p1);
         let eq20_e316_d_n1: f64 = (eq20_e314_d_n1 * p.p1);
@@ -4776,9 +4906,11 @@ impl Instance {
         let eq20_e316_d_n9: f64 = (eq20_e314_d_n9 * p.p1);
         let eq20_e316_d_n10: f64 = (eq20_e314_d_n10 * p.p1);
         let eq20_e316_d_n11: f64 = (eq20_e314_d_n11 * p.p1);
+        let eq20_e316_d_b0: f64 = (eq20_e314_d_b0 * p.p1);
+        let eq20_e316_d_b1: f64 = (eq20_e314_d_b1 * p.p1);
         let eq20_value: f64 = eq20_e316;
         let eq20_node_derivatives: [f64; 12] = [eq20_e316_d_n0, eq20_e316_d_n1, eq20_e316_d_n2, eq20_e316_d_n3, eq20_e316_d_n4, eq20_e316_d_n5, eq20_e316_d_n6, eq20_e316_d_n7, eq20_e316_d_n8, eq20_e316_d_n9, eq20_e316_d_n10, eq20_e316_d_n11];
-        let eq20_branch_derivatives: [f64; 0] = [];
+        let eq20_branch_derivatives: [f64; 2] = [eq20_e316_d_b0, eq20_e316_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[1]),
             Some(nodes[0]),
@@ -4802,6 +4934,8 @@ impl Instance {
         let eq21_e319_d_n9: f64 = (p.p3 * s.dn[176][9]);
         let eq21_e319_d_n10: f64 = (p.p3 * s.dn[176][10]);
         let eq21_e319_d_n11: f64 = (p.p3 * s.dn[176][11]);
+        let eq21_e319_d_b0: f64 = (p.p3 * s.db[176][0]);
+        let eq21_e319_d_b1: f64 = (p.p3 * s.db[176][1]);
         let eq21_e321: f64 = (eq21_e319 * p.p1);
         let eq21_e321_d_n0: f64 = (eq21_e319_d_n0 * p.p1);
         let eq21_e321_d_n1: f64 = (eq21_e319_d_n1 * p.p1);
@@ -4815,9 +4949,11 @@ impl Instance {
         let eq21_e321_d_n9: f64 = (eq21_e319_d_n9 * p.p1);
         let eq21_e321_d_n10: f64 = (eq21_e319_d_n10 * p.p1);
         let eq21_e321_d_n11: f64 = (eq21_e319_d_n11 * p.p1);
+        let eq21_e321_d_b0: f64 = (eq21_e319_d_b0 * p.p1);
+        let eq21_e321_d_b1: f64 = (eq21_e319_d_b1 * p.p1);
         let eq21_value: f64 = eq21_e321;
         let eq21_node_derivatives: [f64; 12] = [eq21_e321_d_n0, eq21_e321_d_n1, eq21_e321_d_n2, eq21_e321_d_n3, eq21_e321_d_n4, eq21_e321_d_n5, eq21_e321_d_n6, eq21_e321_d_n7, eq21_e321_d_n8, eq21_e321_d_n9, eq21_e321_d_n10, eq21_e321_d_n11];
-        let eq21_branch_derivatives: [f64; 0] = [];
+        let eq21_branch_derivatives: [f64; 2] = [eq21_e321_d_b0, eq21_e321_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[1]),
             Some(nodes[9]),
@@ -4841,6 +4977,8 @@ impl Instance {
         let eq22_e324_d_n9: f64 = (p.p3 * s.dn[262][9]);
         let eq22_e324_d_n10: f64 = (p.p3 * s.dn[262][10]);
         let eq22_e324_d_n11: f64 = (p.p3 * s.dn[262][11]);
+        let eq22_e324_d_b0: f64 = (p.p3 * s.db[262][0]);
+        let eq22_e324_d_b1: f64 = (p.p3 * s.db[262][1]);
         let eq22_e326: f64 = (eq22_e324 * s.v[108]);
         let eq22_e326_d_n0: f64 = ((eq22_e324_d_n0 * s.v[108]) + (eq22_e324 * s.dn[108][0]));
         let eq22_e326_d_n1: f64 = ((eq22_e324_d_n1 * s.v[108]) + (eq22_e324 * s.dn[108][1]));
@@ -4854,6 +4992,8 @@ impl Instance {
         let eq22_e326_d_n9: f64 = ((eq22_e324_d_n9 * s.v[108]) + (eq22_e324 * s.dn[108][9]));
         let eq22_e326_d_n10: f64 = ((eq22_e324_d_n10 * s.v[108]) + (eq22_e324 * s.dn[108][10]));
         let eq22_e326_d_n11: f64 = ((eq22_e324_d_n11 * s.v[108]) + (eq22_e324 * s.dn[108][11]));
+        let eq22_e326_d_b0: f64 = ((eq22_e324_d_b0 * s.v[108]) + (eq22_e324 * s.db[108][0]));
+        let eq22_e326_d_b1: f64 = ((eq22_e324_d_b1 * s.v[108]) + (eq22_e324 * s.db[108][1]));
         let eq22_e328: f64 = (eq22_e326 * p.p1);
         let eq22_e328_d_n0: f64 = (eq22_e326_d_n0 * p.p1);
         let eq22_e328_d_n1: f64 = (eq22_e326_d_n1 * p.p1);
@@ -4867,9 +5007,11 @@ impl Instance {
         let eq22_e328_d_n9: f64 = (eq22_e326_d_n9 * p.p1);
         let eq22_e328_d_n10: f64 = (eq22_e326_d_n10 * p.p1);
         let eq22_e328_d_n11: f64 = (eq22_e326_d_n11 * p.p1);
+        let eq22_e328_d_b0: f64 = (eq22_e326_d_b0 * p.p1);
+        let eq22_e328_d_b1: f64 = (eq22_e326_d_b1 * p.p1);
         let eq22_value: f64 = eq22_e328;
         let eq22_node_derivatives: [f64; 12] = [eq22_e328_d_n0, eq22_e328_d_n1, eq22_e328_d_n2, eq22_e328_d_n3, eq22_e328_d_n4, eq22_e328_d_n5, eq22_e328_d_n6, eq22_e328_d_n7, eq22_e328_d_n8, eq22_e328_d_n9, eq22_e328_d_n10, eq22_e328_d_n11];
-        let eq22_branch_derivatives: [f64; 0] = [];
+        let eq22_branch_derivatives: [f64; 2] = [eq22_e328_d_b0, eq22_e328_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[0]),
             Some(nodes[9]),
@@ -4893,6 +5035,8 @@ impl Instance {
         let eq23_e332_d_n9: f64 = (s.dn[230][9] + s.dn[242][9]);
         let eq23_e332_d_n10: f64 = (s.dn[230][10] + s.dn[242][10]);
         let eq23_e332_d_n11: f64 = (s.dn[230][11] + s.dn[242][11]);
+        let eq23_e332_d_b0: f64 = (s.db[230][0] + s.db[242][0]);
+        let eq23_e332_d_b1: f64 = (s.db[230][1] + s.db[242][1]);
         let eq23_e333: f64 = (p.p3 * eq23_e332);
         let eq23_e333_d_n0: f64 = (p.p3 * eq23_e332_d_n0);
         let eq23_e333_d_n1: f64 = (p.p3 * eq23_e332_d_n1);
@@ -4906,6 +5050,8 @@ impl Instance {
         let eq23_e333_d_n9: f64 = (p.p3 * eq23_e332_d_n9);
         let eq23_e333_d_n10: f64 = (p.p3 * eq23_e332_d_n10);
         let eq23_e333_d_n11: f64 = (p.p3 * eq23_e332_d_n11);
+        let eq23_e333_d_b0: f64 = (p.p3 * eq23_e332_d_b0);
+        let eq23_e333_d_b1: f64 = (p.p3 * eq23_e332_d_b1);
         let eq23_e334: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 7, eq23_e333);
         let eq23_e334_d_n0: f64 = (eq23_e333_d_n0 * ddt_scale);
         let eq23_e334_d_n1: f64 = (eq23_e333_d_n1 * ddt_scale);
@@ -4919,6 +5065,8 @@ impl Instance {
         let eq23_e334_d_n9: f64 = (eq23_e333_d_n9 * ddt_scale);
         let eq23_e334_d_n10: f64 = (eq23_e333_d_n10 * ddt_scale);
         let eq23_e334_d_n11: f64 = (eq23_e333_d_n11 * ddt_scale);
+        let eq23_e334_d_b0: f64 = (eq23_e333_d_b0 * ddt_scale);
+        let eq23_e334_d_b1: f64 = (eq23_e333_d_b1 * ddt_scale);
         let eq23_e336: f64 = (eq23_e334 * p.p1);
         let eq23_e336_d_n0: f64 = (eq23_e334_d_n0 * p.p1);
         let eq23_e336_d_n1: f64 = (eq23_e334_d_n1 * p.p1);
@@ -4932,9 +5080,11 @@ impl Instance {
         let eq23_e336_d_n9: f64 = (eq23_e334_d_n9 * p.p1);
         let eq23_e336_d_n10: f64 = (eq23_e334_d_n10 * p.p1);
         let eq23_e336_d_n11: f64 = (eq23_e334_d_n11 * p.p1);
+        let eq23_e336_d_b0: f64 = (eq23_e334_d_b0 * p.p1);
+        let eq23_e336_d_b1: f64 = (eq23_e334_d_b1 * p.p1);
         let eq23_value: f64 = eq23_e336;
         let eq23_node_derivatives: [f64; 12] = [eq23_e336_d_n0, eq23_e336_d_n1, eq23_e336_d_n2, eq23_e336_d_n3, eq23_e336_d_n4, eq23_e336_d_n5, eq23_e336_d_n6, eq23_e336_d_n7, eq23_e336_d_n8, eq23_e336_d_n9, eq23_e336_d_n10, eq23_e336_d_n11];
-        let eq23_branch_derivatives: [f64; 0] = [];
+        let eq23_branch_derivatives: [f64; 2] = [eq23_e336_d_b0, eq23_e336_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[1]),
             Some(nodes[9]),
@@ -4945,6 +5095,23 @@ impl Instance {
             &eq23_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_3(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        branches: &[usize; Instance::BRANCH_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
+        let nv11 = ctx.node_voltage(nodes[11]);
         let eq24_e341: f64 = (s.v[338] * s.v[249]);
         let eq24_e341_d_n0: f64 = (s.v[338] * s.dn[249][0]);
         let eq24_e341_d_n1: f64 = (s.v[338] * s.dn[249][1]);
@@ -4958,6 +5125,8 @@ impl Instance {
         let eq24_e341_d_n9: f64 = (s.v[338] * s.dn[249][9]);
         let eq24_e341_d_n10: f64 = (s.v[338] * s.dn[249][10]);
         let eq24_e341_d_n11: f64 = (s.v[338] * s.dn[249][11]);
+        let eq24_e341_d_b0: f64 = (s.v[338] * s.db[249][0]);
+        let eq24_e341_d_b1: f64 = (s.v[338] * s.db[249][1]);
         let eq24_e342: f64 = (s.v[161] + eq24_e341);
         let eq24_e342_d_n0: f64 = (s.dn[161][0] + eq24_e341_d_n0);
         let eq24_e342_d_n1: f64 = (s.dn[161][1] + eq24_e341_d_n1);
@@ -4971,6 +5140,8 @@ impl Instance {
         let eq24_e342_d_n9: f64 = (s.dn[161][9] + eq24_e341_d_n9);
         let eq24_e342_d_n10: f64 = (s.dn[161][10] + eq24_e341_d_n10);
         let eq24_e342_d_n11: f64 = (s.dn[161][11] + eq24_e341_d_n11);
+        let eq24_e342_d_b0: f64 = (s.db[161][0] + eq24_e341_d_b0);
+        let eq24_e342_d_b1: f64 = (s.db[161][1] + eq24_e341_d_b1);
         let eq24_e344: f64 = (eq24_e342 + s.v[164]);
         let eq24_e344_d_n0: f64 = (eq24_e342_d_n0 + s.dn[164][0]);
         let eq24_e344_d_n1: f64 = (eq24_e342_d_n1 + s.dn[164][1]);
@@ -4984,6 +5155,8 @@ impl Instance {
         let eq24_e344_d_n9: f64 = (eq24_e342_d_n9 + s.dn[164][9]);
         let eq24_e344_d_n10: f64 = (eq24_e342_d_n10 + s.dn[164][10]);
         let eq24_e344_d_n11: f64 = (eq24_e342_d_n11 + s.dn[164][11]);
+        let eq24_e344_d_b0: f64 = (eq24_e342_d_b0 + s.db[164][0]);
+        let eq24_e344_d_b1: f64 = (eq24_e342_d_b1 + s.db[164][1]);
         let eq24_e345: f64 = (p.p3 * eq24_e344);
         let eq24_e345_d_n0: f64 = (p.p3 * eq24_e344_d_n0);
         let eq24_e345_d_n1: f64 = (p.p3 * eq24_e344_d_n1);
@@ -4997,6 +5170,8 @@ impl Instance {
         let eq24_e345_d_n9: f64 = (p.p3 * eq24_e344_d_n9);
         let eq24_e345_d_n10: f64 = (p.p3 * eq24_e344_d_n10);
         let eq24_e345_d_n11: f64 = (p.p3 * eq24_e344_d_n11);
+        let eq24_e345_d_b0: f64 = (p.p3 * eq24_e344_d_b0);
+        let eq24_e345_d_b1: f64 = (p.p3 * eq24_e344_d_b1);
         let eq24_e347: f64 = (eq24_e345 * p.p1);
         let eq24_e347_d_n0: f64 = (eq24_e345_d_n0 * p.p1);
         let eq24_e347_d_n1: f64 = (eq24_e345_d_n1 * p.p1);
@@ -5010,9 +5185,11 @@ impl Instance {
         let eq24_e347_d_n9: f64 = (eq24_e345_d_n9 * p.p1);
         let eq24_e347_d_n10: f64 = (eq24_e345_d_n10 * p.p1);
         let eq24_e347_d_n11: f64 = (eq24_e345_d_n11 * p.p1);
+        let eq24_e347_d_b0: f64 = (eq24_e345_d_b0 * p.p1);
+        let eq24_e347_d_b1: f64 = (eq24_e345_d_b1 * p.p1);
         let eq24_value: f64 = eq24_e347;
         let eq24_node_derivatives: [f64; 12] = [eq24_e347_d_n0, eq24_e347_d_n1, eq24_e347_d_n2, eq24_e347_d_n3, eq24_e347_d_n4, eq24_e347_d_n5, eq24_e347_d_n6, eq24_e347_d_n7, eq24_e347_d_n8, eq24_e347_d_n9, eq24_e347_d_n10, eq24_e347_d_n11];
-        let eq24_branch_derivatives: [f64; 0] = [];
+        let eq24_branch_derivatives: [f64; 2] = [eq24_e347_d_b0, eq24_e347_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[5]),
             Some(nodes[10]),
@@ -5036,6 +5213,8 @@ impl Instance {
         let eq25_e351_d_n9: f64 = (s.dn[227][9] + s.dn[243][9]);
         let eq25_e351_d_n10: f64 = (s.dn[227][10] + s.dn[243][10]);
         let eq25_e351_d_n11: f64 = (s.dn[227][11] + s.dn[243][11]);
+        let eq25_e351_d_b0: f64 = (s.db[227][0] + s.db[243][0]);
+        let eq25_e351_d_b1: f64 = (s.db[227][1] + s.db[243][1]);
         let eq25_e352: f64 = (p.p3 * eq25_e351);
         let eq25_e352_d_n0: f64 = (p.p3 * eq25_e351_d_n0);
         let eq25_e352_d_n1: f64 = (p.p3 * eq25_e351_d_n1);
@@ -5049,6 +5228,8 @@ impl Instance {
         let eq25_e352_d_n9: f64 = (p.p3 * eq25_e351_d_n9);
         let eq25_e352_d_n10: f64 = (p.p3 * eq25_e351_d_n10);
         let eq25_e352_d_n11: f64 = (p.p3 * eq25_e351_d_n11);
+        let eq25_e352_d_b0: f64 = (p.p3 * eq25_e351_d_b0);
+        let eq25_e352_d_b1: f64 = (p.p3 * eq25_e351_d_b1);
         let eq25_e353: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 8, eq25_e352);
         let eq25_e353_d_n0: f64 = (eq25_e352_d_n0 * ddt_scale);
         let eq25_e353_d_n1: f64 = (eq25_e352_d_n1 * ddt_scale);
@@ -5062,6 +5243,8 @@ impl Instance {
         let eq25_e353_d_n9: f64 = (eq25_e352_d_n9 * ddt_scale);
         let eq25_e353_d_n10: f64 = (eq25_e352_d_n10 * ddt_scale);
         let eq25_e353_d_n11: f64 = (eq25_e352_d_n11 * ddt_scale);
+        let eq25_e353_d_b0: f64 = (eq25_e352_d_b0 * ddt_scale);
+        let eq25_e353_d_b1: f64 = (eq25_e352_d_b1 * ddt_scale);
         let eq25_e355: f64 = (eq25_e353 * p.p1);
         let eq25_e355_d_n0: f64 = (eq25_e353_d_n0 * p.p1);
         let eq25_e355_d_n1: f64 = (eq25_e353_d_n1 * p.p1);
@@ -5075,9 +5258,11 @@ impl Instance {
         let eq25_e355_d_n9: f64 = (eq25_e353_d_n9 * p.p1);
         let eq25_e355_d_n10: f64 = (eq25_e353_d_n10 * p.p1);
         let eq25_e355_d_n11: f64 = (eq25_e353_d_n11 * p.p1);
+        let eq25_e355_d_b0: f64 = (eq25_e353_d_b0 * p.p1);
+        let eq25_e355_d_b1: f64 = (eq25_e353_d_b1 * p.p1);
         let eq25_value: f64 = eq25_e355;
         let eq25_node_derivatives: [f64; 12] = [eq25_e355_d_n0, eq25_e355_d_n1, eq25_e355_d_n2, eq25_e355_d_n3, eq25_e355_d_n4, eq25_e355_d_n5, eq25_e355_d_n6, eq25_e355_d_n7, eq25_e355_d_n8, eq25_e355_d_n9, eq25_e355_d_n10, eq25_e355_d_n11];
-        let eq25_branch_derivatives: [f64; 0] = [];
+        let eq25_branch_derivatives: [f64; 2] = [eq25_e355_d_b0, eq25_e355_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[5]),
             Some(nodes[10]),
@@ -5088,24 +5273,7 @@ impl Instance {
             &eq25_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_3(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        branches: &[usize; Instance::BRANCH_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv11 = ctx.node_voltage(nodes[11]);
-        let (eq26_e365, eq26_e365_d_n0, eq26_e365_d_n1, eq26_e365_d_n2, eq26_e365_d_n3, eq26_e365_d_n4, eq26_e365_d_n5, eq26_e365_d_n6, eq26_e365_d_n7, eq26_e365_d_n8, eq26_e365_d_n9, eq26_e365_d_n10, eq26_e365_d_n11,) = {
+        let (eq26_e365, eq26_e365_d_n0, eq26_e365_d_n1, eq26_e365_d_n2, eq26_e365_d_n3, eq26_e365_d_n4, eq26_e365_d_n5, eq26_e365_d_n6, eq26_e365_d_n7, eq26_e365_d_n8, eq26_e365_d_n9, eq26_e365_d_n10, eq26_e365_d_n11, eq26_e365_d_b0, eq26_e365_d_b1,) = {
     if s.b[598] {
         let eq26_e359: f64 = (p.p3 * s.v[251]);
         let eq26_e359_d_n0: f64 = (p.p3 * s.dn[251][0]);
@@ -5120,6 +5288,8 @@ impl Instance {
         let eq26_e359_d_n9: f64 = (p.p3 * s.dn[251][9]);
         let eq26_e359_d_n10: f64 = (p.p3 * s.dn[251][10]);
         let eq26_e359_d_n11: f64 = (p.p3 * s.dn[251][11]);
+        let eq26_e359_d_b0: f64 = (p.p3 * s.db[251][0]);
+        let eq26_e359_d_b1: f64 = (p.p3 * s.db[251][1]);
         let eq26_e361: f64 = (eq26_e359 * s.v[109]);
         let eq26_e361_d_n0: f64 = ((eq26_e359_d_n0 * s.v[109]) + (eq26_e359 * s.dn[109][0]));
         let eq26_e361_d_n1: f64 = ((eq26_e359_d_n1 * s.v[109]) + (eq26_e359 * s.dn[109][1]));
@@ -5133,6 +5303,8 @@ impl Instance {
         let eq26_e361_d_n9: f64 = ((eq26_e359_d_n9 * s.v[109]) + (eq26_e359 * s.dn[109][9]));
         let eq26_e361_d_n10: f64 = ((eq26_e359_d_n10 * s.v[109]) + (eq26_e359 * s.dn[109][10]));
         let eq26_e361_d_n11: f64 = ((eq26_e359_d_n11 * s.v[109]) + (eq26_e359 * s.dn[109][11]));
+        let eq26_e361_d_b0: f64 = ((eq26_e359_d_b0 * s.v[109]) + (eq26_e359 * s.db[109][0]));
+        let eq26_e361_d_b1: f64 = ((eq26_e359_d_b1 * s.v[109]) + (eq26_e359 * s.db[109][1]));
         let eq26_e363: f64 = (eq26_e361 * p.p1);
         let eq26_e363_d_n0: f64 = (eq26_e361_d_n0 * p.p1);
         let eq26_e363_d_n1: f64 = (eq26_e361_d_n1 * p.p1);
@@ -5146,14 +5318,16 @@ impl Instance {
         let eq26_e363_d_n9: f64 = (eq26_e361_d_n9 * p.p1);
         let eq26_e363_d_n10: f64 = (eq26_e361_d_n10 * p.p1);
         let eq26_e363_d_n11: f64 = (eq26_e361_d_n11 * p.p1);
-        (eq26_e363, eq26_e363_d_n0, eq26_e363_d_n1, eq26_e363_d_n2, eq26_e363_d_n3, eq26_e363_d_n4, eq26_e363_d_n5, eq26_e363_d_n6, eq26_e363_d_n7, eq26_e363_d_n8, eq26_e363_d_n9, eq26_e363_d_n10, eq26_e363_d_n11,)
+        let eq26_e363_d_b0: f64 = (eq26_e361_d_b0 * p.p1);
+        let eq26_e363_d_b1: f64 = (eq26_e361_d_b1 * p.p1);
+        (eq26_e363, eq26_e363_d_n0, eq26_e363_d_n1, eq26_e363_d_n2, eq26_e363_d_n3, eq26_e363_d_n4, eq26_e363_d_n5, eq26_e363_d_n6, eq26_e363_d_n7, eq26_e363_d_n8, eq26_e363_d_n9, eq26_e363_d_n10, eq26_e363_d_n11, eq26_e363_d_b0, eq26_e363_d_b1,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
         let eq26_value: f64 = eq26_e365;
         let eq26_node_derivatives: [f64; 12] = [eq26_e365_d_n0, eq26_e365_d_n1, eq26_e365_d_n2, eq26_e365_d_n3, eq26_e365_d_n4, eq26_e365_d_n5, eq26_e365_d_n6, eq26_e365_d_n7, eq26_e365_d_n8, eq26_e365_d_n9, eq26_e365_d_n10, eq26_e365_d_n11];
-        let eq26_branch_derivatives: [f64; 0] = [];
+        let eq26_branch_derivatives: [f64; 2] = [eq26_e365_d_b0, eq26_e365_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[9]),
             Some(nodes[10]),
@@ -5176,7 +5350,7 @@ impl Instance {
             branches[0],
             eq27_value,
         );
-        let (eq28_e380, eq28_e380_d_n0, eq28_e380_d_n1, eq28_e380_d_n2, eq28_e380_d_n3, eq28_e380_d_n4, eq28_e380_d_n5, eq28_e380_d_n6, eq28_e380_d_n7, eq28_e380_d_n8, eq28_e380_d_n9, eq28_e380_d_n10, eq28_e380_d_n11,) = {
+        let (eq28_e380, eq28_e380_d_n0, eq28_e380_d_n1, eq28_e380_d_n2, eq28_e380_d_n3, eq28_e380_d_n4, eq28_e380_d_n5, eq28_e380_d_n6, eq28_e380_d_n7, eq28_e380_d_n8, eq28_e380_d_n9, eq28_e380_d_n10, eq28_e380_d_n11, eq28_e380_d_b0, eq28_e380_d_b1,) = {
     if s.b[599] {
         let eq28_e374: f64 = (p.p3 * s.v[252]);
         let eq28_e374_d_n0: f64 = (p.p3 * s.dn[252][0]);
@@ -5191,6 +5365,8 @@ impl Instance {
         let eq28_e374_d_n9: f64 = (p.p3 * s.dn[252][9]);
         let eq28_e374_d_n10: f64 = (p.p3 * s.dn[252][10]);
         let eq28_e374_d_n11: f64 = (p.p3 * s.dn[252][11]);
+        let eq28_e374_d_b0: f64 = (p.p3 * s.db[252][0]);
+        let eq28_e374_d_b1: f64 = (p.p3 * s.db[252][1]);
         let eq28_e376: f64 = (eq28_e374 * s.v[110]);
         let eq28_e376_d_n0: f64 = ((eq28_e374_d_n0 * s.v[110]) + (eq28_e374 * s.dn[110][0]));
         let eq28_e376_d_n1: f64 = ((eq28_e374_d_n1 * s.v[110]) + (eq28_e374 * s.dn[110][1]));
@@ -5204,6 +5380,8 @@ impl Instance {
         let eq28_e376_d_n9: f64 = ((eq28_e374_d_n9 * s.v[110]) + (eq28_e374 * s.dn[110][9]));
         let eq28_e376_d_n10: f64 = ((eq28_e374_d_n10 * s.v[110]) + (eq28_e374 * s.dn[110][10]));
         let eq28_e376_d_n11: f64 = ((eq28_e374_d_n11 * s.v[110]) + (eq28_e374 * s.dn[110][11]));
+        let eq28_e376_d_b0: f64 = ((eq28_e374_d_b0 * s.v[110]) + (eq28_e374 * s.db[110][0]));
+        let eq28_e376_d_b1: f64 = ((eq28_e374_d_b1 * s.v[110]) + (eq28_e374 * s.db[110][1]));
         let eq28_e378: f64 = (eq28_e376 * p.p1);
         let eq28_e378_d_n0: f64 = (eq28_e376_d_n0 * p.p1);
         let eq28_e378_d_n1: f64 = (eq28_e376_d_n1 * p.p1);
@@ -5217,14 +5395,16 @@ impl Instance {
         let eq28_e378_d_n9: f64 = (eq28_e376_d_n9 * p.p1);
         let eq28_e378_d_n10: f64 = (eq28_e376_d_n10 * p.p1);
         let eq28_e378_d_n11: f64 = (eq28_e376_d_n11 * p.p1);
-        (eq28_e378, eq28_e378_d_n0, eq28_e378_d_n1, eq28_e378_d_n2, eq28_e378_d_n3, eq28_e378_d_n4, eq28_e378_d_n5, eq28_e378_d_n6, eq28_e378_d_n7, eq28_e378_d_n8, eq28_e378_d_n9, eq28_e378_d_n10, eq28_e378_d_n11,)
+        let eq28_e378_d_b0: f64 = (eq28_e376_d_b0 * p.p1);
+        let eq28_e378_d_b1: f64 = (eq28_e376_d_b1 * p.p1);
+        (eq28_e378, eq28_e378_d_n0, eq28_e378_d_n1, eq28_e378_d_n2, eq28_e378_d_n3, eq28_e378_d_n4, eq28_e378_d_n5, eq28_e378_d_n6, eq28_e378_d_n7, eq28_e378_d_n8, eq28_e378_d_n9, eq28_e378_d_n10, eq28_e378_d_n11, eq28_e378_d_b0, eq28_e378_d_b1,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
         let eq28_value: f64 = eq28_e380;
         let eq28_node_derivatives: [f64; 12] = [eq28_e380_d_n0, eq28_e380_d_n1, eq28_e380_d_n2, eq28_e380_d_n3, eq28_e380_d_n4, eq28_e380_d_n5, eq28_e380_d_n6, eq28_e380_d_n7, eq28_e380_d_n8, eq28_e380_d_n9, eq28_e380_d_n10, eq28_e380_d_n11];
-        let eq28_branch_derivatives: [f64; 0] = [];
+        let eq28_branch_derivatives: [f64; 2] = [eq28_e380_d_b0, eq28_e380_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[10]),
             Some(nodes[7]),
@@ -5275,9 +5455,11 @@ impl Instance {
         let eq32_e395_d_n9: f64 = (s.dn[330][9] * eq32_e394);
         let eq32_e395_d_n10: f64 = (s.dn[330][10] * eq32_e394);
         let eq32_e395_d_n11: f64 = ((s.dn[330][11] * eq32_e394) + (s.v[330] * ddt_scale));
+        let eq32_e395_d_b0: f64 = (s.db[330][0] * eq32_e394);
+        let eq32_e395_d_b1: f64 = (s.db[330][1] * eq32_e394);
         let eq32_value: f64 = eq32_e395;
         let eq32_node_derivatives: [f64; 12] = [eq32_e395_d_n0, eq32_e395_d_n1, eq32_e395_d_n2, eq32_e395_d_n3, eq32_e395_d_n4, eq32_e395_d_n5, eq32_e395_d_n6, eq32_e395_d_n7, eq32_e395_d_n8, eq32_e395_d_n9, eq32_e395_d_n10, eq32_e395_d_n11];
-        let eq32_branch_derivatives: [f64; 0] = [];
+        let eq32_branch_derivatives: [f64; 2] = [eq32_e395_d_b0, eq32_e395_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[6]),
             Some(nodes[4]),
@@ -5301,9 +5483,11 @@ impl Instance {
         let eq33_e398_d_n9: f64 = (s.dn[328][9] * (nv11 - 0.0));
         let eq33_e398_d_n10: f64 = (s.dn[328][10] * (nv11 - 0.0));
         let eq33_e398_d_n11: f64 = ((s.dn[328][11] * (nv11 - 0.0)) + s.v[328]);
+        let eq33_e398_d_b0: f64 = (s.db[328][0] * (nv11 - 0.0));
+        let eq33_e398_d_b1: f64 = (s.db[328][1] * (nv11 - 0.0));
         let eq33_value: f64 = eq33_e398;
         let eq33_node_derivatives: [f64; 12] = [eq33_e398_d_n0, eq33_e398_d_n1, eq33_e398_d_n2, eq33_e398_d_n3, eq33_e398_d_n4, eq33_e398_d_n5, eq33_e398_d_n6, eq33_e398_d_n7, eq33_e398_d_n8, eq33_e398_d_n9, eq33_e398_d_n10, eq33_e398_d_n11];
-        let eq33_branch_derivatives: [f64; 0] = [];
+        let eq33_branch_derivatives: [f64; 2] = [eq33_e398_d_b0, eq33_e398_d_b1];
         stamper.stamp_current_dense(
             Some(nodes[8]),
             Some(nodes[6]),
@@ -5438,6 +5622,14 @@ impl Instance {
             Some(nodes[3]),
             multiplicity * (eq51_value),
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_4(
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+    ) {
         let eq52_value: f64 = 0.0;
         stamper.stamp_current_const(
             Some(nodes[5]),
@@ -5577,6 +5769,8 @@ impl Instance {
         let eq14_e266_d_n9: f64 = (s.dn[215][9] + s.dn[220][9]);
         let eq14_e266_d_n10: f64 = (s.dn[215][10] + s.dn[220][10]);
         let eq14_e266_d_n11: f64 = (s.dn[215][11] + s.dn[220][11]);
+        let eq14_e266_d_b0: f64 = (s.db[215][0] + s.db[220][0]);
+        let eq14_e266_d_b1: f64 = (s.db[215][1] + s.db[220][1]);
         let eq14_e268: f64 = (eq14_e266 + s.v[235]);
         let eq14_e268_d_n0: f64 = (eq14_e266_d_n0 + s.dn[235][0]);
         let eq14_e268_d_n1: f64 = (eq14_e266_d_n1 + s.dn[235][1]);
@@ -5590,6 +5784,8 @@ impl Instance {
         let eq14_e268_d_n9: f64 = (eq14_e266_d_n9 + s.dn[235][9]);
         let eq14_e268_d_n10: f64 = (eq14_e266_d_n10 + s.dn[235][10]);
         let eq14_e268_d_n11: f64 = (eq14_e266_d_n11 + s.dn[235][11]);
+        let eq14_e268_d_b0: f64 = (eq14_e266_d_b0 + s.db[235][0]);
+        let eq14_e268_d_b1: f64 = (eq14_e266_d_b1 + s.db[235][1]);
         let eq14_e269: f64 = (p.p3 * eq14_e268);
         let eq14_e269_d_n0: f64 = (p.p3 * eq14_e268_d_n0);
         let eq14_e269_d_n1: f64 = (p.p3 * eq14_e268_d_n1);
@@ -5603,6 +5799,8 @@ impl Instance {
         let eq14_e269_d_n9: f64 = (p.p3 * eq14_e268_d_n9);
         let eq14_e269_d_n10: f64 = (p.p3 * eq14_e268_d_n10);
         let eq14_e269_d_n11: f64 = (p.p3 * eq14_e268_d_n11);
+        let eq14_e269_d_b0: f64 = (p.p3 * eq14_e268_d_b0);
+        let eq14_e269_d_b1: f64 = (p.p3 * eq14_e268_d_b1);
         let eq14_e270_q: f64 = eq14_e269;
         let eq14_e272: f64 = (eq14_e269 * p.p1);
         let eq14_e272_d_n0: f64 = (eq14_e269_d_n0 * p.p1);
@@ -5617,6 +5815,8 @@ impl Instance {
         let eq14_e272_d_n9: f64 = (eq14_e269_d_n9 * p.p1);
         let eq14_e272_d_n10: f64 = (eq14_e269_d_n10 * p.p1);
         let eq14_e272_d_n11: f64 = (eq14_e269_d_n11 * p.p1);
+        let eq14_e272_d_b0: f64 = (eq14_e269_d_b0 * p.p1);
+        let eq14_e272_d_b1: f64 = (eq14_e269_d_b1 * p.p1);
         let eq14_e272_q: f64 = (eq14_e270_q * p.p1);
         let eq14_e272_q_d_n0: f64 = (eq14_e269_d_n0 * p.p1);
         let eq14_e272_q_d_n1: f64 = (eq14_e269_d_n1 * p.p1);
@@ -5630,8 +5830,10 @@ impl Instance {
         let eq14_e272_q_d_n9: f64 = (eq14_e269_d_n9 * p.p1);
         let eq14_e272_q_d_n10: f64 = (eq14_e269_d_n10 * p.p1);
         let eq14_e272_q_d_n11: f64 = (eq14_e269_d_n11 * p.p1);
+        let eq14_e272_q_d_b0: f64 = (eq14_e269_d_b0 * p.p1);
+        let eq14_e272_q_d_b1: f64 = (eq14_e269_d_b1 * p.p1);
         let eq14_reactive_node_derivatives: [f64; 12] = [eq14_e272_q_d_n0, eq14_e272_q_d_n1, eq14_e272_q_d_n2, eq14_e272_q_d_n3, eq14_e272_q_d_n4, eq14_e272_q_d_n5, eq14_e272_q_d_n6, eq14_e272_q_d_n7, eq14_e272_q_d_n8, eq14_e272_q_d_n9, eq14_e272_q_d_n10, eq14_e272_q_d_n11];
-        let eq14_reactive_branch_derivatives: [f64; 0] = [];
+        let eq14_reactive_branch_derivatives: [f64; 2] = [eq14_e272_q_d_b0, eq14_e272_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[4]),
@@ -5654,6 +5856,8 @@ impl Instance {
         let eq15_e275_d_n9: f64 = (p.p3 * s.dn[217][9]);
         let eq15_e275_d_n10: f64 = (p.p3 * s.dn[217][10]);
         let eq15_e275_d_n11: f64 = (p.p3 * s.dn[217][11]);
+        let eq15_e275_d_b0: f64 = (p.p3 * s.db[217][0]);
+        let eq15_e275_d_b1: f64 = (p.p3 * s.db[217][1]);
         let eq15_e276_q: f64 = eq15_e275;
         let eq15_e278: f64 = (eq15_e275 * p.p1);
         let eq15_e278_d_n0: f64 = (eq15_e275_d_n0 * p.p1);
@@ -5668,6 +5872,8 @@ impl Instance {
         let eq15_e278_d_n9: f64 = (eq15_e275_d_n9 * p.p1);
         let eq15_e278_d_n10: f64 = (eq15_e275_d_n10 * p.p1);
         let eq15_e278_d_n11: f64 = (eq15_e275_d_n11 * p.p1);
+        let eq15_e278_d_b0: f64 = (eq15_e275_d_b0 * p.p1);
+        let eq15_e278_d_b1: f64 = (eq15_e275_d_b1 * p.p1);
         let eq15_e278_q: f64 = (eq15_e276_q * p.p1);
         let eq15_e278_q_d_n0: f64 = (eq15_e275_d_n0 * p.p1);
         let eq15_e278_q_d_n1: f64 = (eq15_e275_d_n1 * p.p1);
@@ -5681,8 +5887,10 @@ impl Instance {
         let eq15_e278_q_d_n9: f64 = (eq15_e275_d_n9 * p.p1);
         let eq15_e278_q_d_n10: f64 = (eq15_e275_d_n10 * p.p1);
         let eq15_e278_q_d_n11: f64 = (eq15_e275_d_n11 * p.p1);
+        let eq15_e278_q_d_b0: f64 = (eq15_e275_d_b0 * p.p1);
+        let eq15_e278_q_d_b1: f64 = (eq15_e275_d_b1 * p.p1);
         let eq15_reactive_node_derivatives: [f64; 12] = [eq15_e278_q_d_n0, eq15_e278_q_d_n1, eq15_e278_q_d_n2, eq15_e278_q_d_n3, eq15_e278_q_d_n4, eq15_e278_q_d_n5, eq15_e278_q_d_n6, eq15_e278_q_d_n7, eq15_e278_q_d_n8, eq15_e278_q_d_n9, eq15_e278_q_d_n10, eq15_e278_q_d_n11];
-        let eq15_reactive_branch_derivatives: [f64; 0] = [];
+        let eq15_reactive_branch_derivatives: [f64; 2] = [eq15_e278_q_d_b0, eq15_e278_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[5]),
             Some(nodes[4]),
@@ -5705,6 +5913,8 @@ impl Instance {
         let eq16_e282_d_n9: f64 = (s.dn[218][9] + s.dn[221][9]);
         let eq16_e282_d_n10: f64 = (s.dn[218][10] + s.dn[221][10]);
         let eq16_e282_d_n11: f64 = (s.dn[218][11] + s.dn[221][11]);
+        let eq16_e282_d_b0: f64 = (s.db[218][0] + s.db[221][0]);
+        let eq16_e282_d_b1: f64 = (s.db[218][1] + s.db[221][1]);
         let eq16_e284: f64 = (eq16_e282 + s.v[238]);
         let eq16_e284_d_n0: f64 = (eq16_e282_d_n0 + s.dn[238][0]);
         let eq16_e284_d_n1: f64 = (eq16_e282_d_n1 + s.dn[238][1]);
@@ -5718,6 +5928,8 @@ impl Instance {
         let eq16_e284_d_n9: f64 = (eq16_e282_d_n9 + s.dn[238][9]);
         let eq16_e284_d_n10: f64 = (eq16_e282_d_n10 + s.dn[238][10]);
         let eq16_e284_d_n11: f64 = (eq16_e282_d_n11 + s.dn[238][11]);
+        let eq16_e284_d_b0: f64 = (eq16_e282_d_b0 + s.db[238][0]);
+        let eq16_e284_d_b1: f64 = (eq16_e282_d_b1 + s.db[238][1]);
         let eq16_e285: f64 = (p.p3 * eq16_e284);
         let eq16_e285_d_n0: f64 = (p.p3 * eq16_e284_d_n0);
         let eq16_e285_d_n1: f64 = (p.p3 * eq16_e284_d_n1);
@@ -5731,6 +5943,8 @@ impl Instance {
         let eq16_e285_d_n9: f64 = (p.p3 * eq16_e284_d_n9);
         let eq16_e285_d_n10: f64 = (p.p3 * eq16_e284_d_n10);
         let eq16_e285_d_n11: f64 = (p.p3 * eq16_e284_d_n11);
+        let eq16_e285_d_b0: f64 = (p.p3 * eq16_e284_d_b0);
+        let eq16_e285_d_b1: f64 = (p.p3 * eq16_e284_d_b1);
         let eq16_e286_q: f64 = eq16_e285;
         let eq16_e288: f64 = (eq16_e285 * p.p1);
         let eq16_e288_d_n0: f64 = (eq16_e285_d_n0 * p.p1);
@@ -5745,6 +5959,8 @@ impl Instance {
         let eq16_e288_d_n9: f64 = (eq16_e285_d_n9 * p.p1);
         let eq16_e288_d_n10: f64 = (eq16_e285_d_n10 * p.p1);
         let eq16_e288_d_n11: f64 = (eq16_e285_d_n11 * p.p1);
+        let eq16_e288_d_b0: f64 = (eq16_e285_d_b0 * p.p1);
+        let eq16_e288_d_b1: f64 = (eq16_e285_d_b1 * p.p1);
         let eq16_e288_q: f64 = (eq16_e286_q * p.p1);
         let eq16_e288_q_d_n0: f64 = (eq16_e285_d_n0 * p.p1);
         let eq16_e288_q_d_n1: f64 = (eq16_e285_d_n1 * p.p1);
@@ -5758,8 +5974,10 @@ impl Instance {
         let eq16_e288_q_d_n9: f64 = (eq16_e285_d_n9 * p.p1);
         let eq16_e288_q_d_n10: f64 = (eq16_e285_d_n10 * p.p1);
         let eq16_e288_q_d_n11: f64 = (eq16_e285_d_n11 * p.p1);
+        let eq16_e288_q_d_b0: f64 = (eq16_e285_d_b0 * p.p1);
+        let eq16_e288_q_d_b1: f64 = (eq16_e285_d_b1 * p.p1);
         let eq16_reactive_node_derivatives: [f64; 12] = [eq16_e288_q_d_n0, eq16_e288_q_d_n1, eq16_e288_q_d_n2, eq16_e288_q_d_n3, eq16_e288_q_d_n4, eq16_e288_q_d_n5, eq16_e288_q_d_n6, eq16_e288_q_d_n7, eq16_e288_q_d_n8, eq16_e288_q_d_n9, eq16_e288_q_d_n10, eq16_e288_q_d_n11];
-        let eq16_reactive_branch_derivatives: [f64; 0] = [];
+        let eq16_reactive_branch_derivatives: [f64; 2] = [eq16_e288_q_d_b0, eq16_e288_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[8]),
@@ -5782,6 +6000,8 @@ impl Instance {
         let eq17_e291_d_n9: f64 = (p.p3 * s.dn[233][9]);
         let eq17_e291_d_n10: f64 = (p.p3 * s.dn[233][10]);
         let eq17_e291_d_n11: f64 = (p.p3 * s.dn[233][11]);
+        let eq17_e291_d_b0: f64 = (p.p3 * s.db[233][0]);
+        let eq17_e291_d_b1: f64 = (p.p3 * s.db[233][1]);
         let eq17_e292_q: f64 = eq17_e291;
         let eq17_e294: f64 = (eq17_e291 * p.p1);
         let eq17_e294_d_n0: f64 = (eq17_e291_d_n0 * p.p1);
@@ -5796,6 +6016,8 @@ impl Instance {
         let eq17_e294_d_n9: f64 = (eq17_e291_d_n9 * p.p1);
         let eq17_e294_d_n10: f64 = (eq17_e291_d_n10 * p.p1);
         let eq17_e294_d_n11: f64 = (eq17_e291_d_n11 * p.p1);
+        let eq17_e294_d_b0: f64 = (eq17_e291_d_b0 * p.p1);
+        let eq17_e294_d_b1: f64 = (eq17_e291_d_b1 * p.p1);
         let eq17_e294_q: f64 = (eq17_e292_q * p.p1);
         let eq17_e294_q_d_n0: f64 = (eq17_e291_d_n0 * p.p1);
         let eq17_e294_q_d_n1: f64 = (eq17_e291_d_n1 * p.p1);
@@ -5809,8 +6031,10 @@ impl Instance {
         let eq17_e294_q_d_n9: f64 = (eq17_e291_d_n9 * p.p1);
         let eq17_e294_q_d_n10: f64 = (eq17_e291_d_n10 * p.p1);
         let eq17_e294_q_d_n11: f64 = (eq17_e291_d_n11 * p.p1);
+        let eq17_e294_q_d_b0: f64 = (eq17_e291_d_b0 * p.p1);
+        let eq17_e294_q_d_b1: f64 = (eq17_e291_d_b1 * p.p1);
         let eq17_reactive_node_derivatives: [f64; 12] = [eq17_e294_q_d_n0, eq17_e294_q_d_n1, eq17_e294_q_d_n2, eq17_e294_q_d_n3, eq17_e294_q_d_n4, eq17_e294_q_d_n5, eq17_e294_q_d_n6, eq17_e294_q_d_n7, eq17_e294_q_d_n8, eq17_e294_q_d_n9, eq17_e294_q_d_n10, eq17_e294_q_d_n11];
-        let eq17_reactive_branch_derivatives: [f64; 0] = [];
+        let eq17_reactive_branch_derivatives: [f64; 2] = [eq17_e294_q_d_b0, eq17_e294_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[7]),
@@ -5833,6 +6057,8 @@ impl Instance {
         let eq18_e297_d_n9: f64 = (p.p3 * s.dn[222][9]);
         let eq18_e297_d_n10: f64 = (p.p3 * s.dn[222][10]);
         let eq18_e297_d_n11: f64 = (p.p3 * s.dn[222][11]);
+        let eq18_e297_d_b0: f64 = (p.p3 * s.db[222][0]);
+        let eq18_e297_d_b1: f64 = (p.p3 * s.db[222][1]);
         let eq18_e298_q: f64 = eq18_e297;
         let eq18_e300: f64 = (eq18_e297 * p.p1);
         let eq18_e300_d_n0: f64 = (eq18_e297_d_n0 * p.p1);
@@ -5847,6 +6073,8 @@ impl Instance {
         let eq18_e300_d_n9: f64 = (eq18_e297_d_n9 * p.p1);
         let eq18_e300_d_n10: f64 = (eq18_e297_d_n10 * p.p1);
         let eq18_e300_d_n11: f64 = (eq18_e297_d_n11 * p.p1);
+        let eq18_e300_d_b0: f64 = (eq18_e297_d_b0 * p.p1);
+        let eq18_e300_d_b1: f64 = (eq18_e297_d_b1 * p.p1);
         let eq18_e300_q: f64 = (eq18_e298_q * p.p1);
         let eq18_e300_q_d_n0: f64 = (eq18_e297_d_n0 * p.p1);
         let eq18_e300_q_d_n1: f64 = (eq18_e297_d_n1 * p.p1);
@@ -5860,8 +6088,10 @@ impl Instance {
         let eq18_e300_q_d_n9: f64 = (eq18_e297_d_n9 * p.p1);
         let eq18_e300_q_d_n10: f64 = (eq18_e297_d_n10 * p.p1);
         let eq18_e300_q_d_n11: f64 = (eq18_e297_d_n11 * p.p1);
+        let eq18_e300_q_d_b0: f64 = (eq18_e297_d_b0 * p.p1);
+        let eq18_e300_q_d_b1: f64 = (eq18_e297_d_b1 * p.p1);
         let eq18_reactive_node_derivatives: [f64; 12] = [eq18_e300_q_d_n0, eq18_e300_q_d_n1, eq18_e300_q_d_n2, eq18_e300_q_d_n3, eq18_e300_q_d_n4, eq18_e300_q_d_n5, eq18_e300_q_d_n6, eq18_e300_q_d_n7, eq18_e300_q_d_n8, eq18_e300_q_d_n9, eq18_e300_q_d_n10, eq18_e300_q_d_n11];
-        let eq18_reactive_branch_derivatives: [f64; 0] = [];
+        let eq18_reactive_branch_derivatives: [f64; 2] = [eq18_e300_q_d_b0, eq18_e300_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[5]),
             Some(nodes[6]),
@@ -5885,6 +6115,8 @@ impl Instance {
         let eq19_e305_d_n9: f64 = (eq19_e303 * s.dn[263][9]);
         let eq19_e305_d_n10: f64 = (eq19_e303 * s.dn[263][10]);
         let eq19_e305_d_n11: f64 = (eq19_e303 * s.dn[263][11]);
+        let eq19_e305_d_b0: f64 = (eq19_e303 * s.db[263][0]);
+        let eq19_e305_d_b1: f64 = (eq19_e303 * s.db[263][1]);
         let eq19_e306_q: f64 = eq19_e305;
         let eq19_e308: f64 = (eq19_e305 * p.p1);
         let eq19_e308_d_n0: f64 = (eq19_e305_d_n0 * p.p1);
@@ -5899,6 +6131,8 @@ impl Instance {
         let eq19_e308_d_n9: f64 = (eq19_e305_d_n9 * p.p1);
         let eq19_e308_d_n10: f64 = (eq19_e305_d_n10 * p.p1);
         let eq19_e308_d_n11: f64 = (eq19_e305_d_n11 * p.p1);
+        let eq19_e308_d_b0: f64 = (eq19_e305_d_b0 * p.p1);
+        let eq19_e308_d_b1: f64 = (eq19_e305_d_b1 * p.p1);
         let eq19_e308_q: f64 = (eq19_e306_q * p.p1);
         let eq19_e308_q_d_n0: f64 = (eq19_e305_d_n0 * p.p1);
         let eq19_e308_q_d_n1: f64 = (eq19_e305_d_n1 * p.p1);
@@ -5912,8 +6146,10 @@ impl Instance {
         let eq19_e308_q_d_n9: f64 = (eq19_e305_d_n9 * p.p1);
         let eq19_e308_q_d_n10: f64 = (eq19_e305_d_n10 * p.p1);
         let eq19_e308_q_d_n11: f64 = (eq19_e305_d_n11 * p.p1);
+        let eq19_e308_q_d_b0: f64 = (eq19_e305_d_b0 * p.p1);
+        let eq19_e308_q_d_b1: f64 = (eq19_e305_d_b1 * p.p1);
         let eq19_reactive_node_derivatives: [f64; 12] = [eq19_e308_q_d_n0, eq19_e308_q_d_n1, eq19_e308_q_d_n2, eq19_e308_q_d_n3, eq19_e308_q_d_n4, eq19_e308_q_d_n5, eq19_e308_q_d_n6, eq19_e308_q_d_n7, eq19_e308_q_d_n8, eq19_e308_q_d_n9, eq19_e308_q_d_n10, eq19_e308_q_d_n11];
-        let eq19_reactive_branch_derivatives: [f64; 0] = [];
+        let eq19_reactive_branch_derivatives: [f64; 2] = [eq19_e308_q_d_b0, eq19_e308_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[1]),
             Some(nodes[2]),
@@ -5937,6 +6173,8 @@ impl Instance {
         let eq20_e313_d_n9: f64 = (eq20_e311 * s.dn[264][9]);
         let eq20_e313_d_n10: f64 = (eq20_e311 * s.dn[264][10]);
         let eq20_e313_d_n11: f64 = (eq20_e311 * s.dn[264][11]);
+        let eq20_e313_d_b0: f64 = (eq20_e311 * s.db[264][0]);
+        let eq20_e313_d_b1: f64 = (eq20_e311 * s.db[264][1]);
         let eq20_e314_q: f64 = eq20_e313;
         let eq20_e316: f64 = (eq20_e313 * p.p1);
         let eq20_e316_d_n0: f64 = (eq20_e313_d_n0 * p.p1);
@@ -5951,6 +6189,8 @@ impl Instance {
         let eq20_e316_d_n9: f64 = (eq20_e313_d_n9 * p.p1);
         let eq20_e316_d_n10: f64 = (eq20_e313_d_n10 * p.p1);
         let eq20_e316_d_n11: f64 = (eq20_e313_d_n11 * p.p1);
+        let eq20_e316_d_b0: f64 = (eq20_e313_d_b0 * p.p1);
+        let eq20_e316_d_b1: f64 = (eq20_e313_d_b1 * p.p1);
         let eq20_e316_q: f64 = (eq20_e314_q * p.p1);
         let eq20_e316_q_d_n0: f64 = (eq20_e313_d_n0 * p.p1);
         let eq20_e316_q_d_n1: f64 = (eq20_e313_d_n1 * p.p1);
@@ -5964,8 +6204,10 @@ impl Instance {
         let eq20_e316_q_d_n9: f64 = (eq20_e313_d_n9 * p.p1);
         let eq20_e316_q_d_n10: f64 = (eq20_e313_d_n10 * p.p1);
         let eq20_e316_q_d_n11: f64 = (eq20_e313_d_n11 * p.p1);
+        let eq20_e316_q_d_b0: f64 = (eq20_e313_d_b0 * p.p1);
+        let eq20_e316_q_d_b1: f64 = (eq20_e313_d_b1 * p.p1);
         let eq20_reactive_node_derivatives: [f64; 12] = [eq20_e316_q_d_n0, eq20_e316_q_d_n1, eq20_e316_q_d_n2, eq20_e316_q_d_n3, eq20_e316_q_d_n4, eq20_e316_q_d_n5, eq20_e316_q_d_n6, eq20_e316_q_d_n7, eq20_e316_q_d_n8, eq20_e316_q_d_n9, eq20_e316_q_d_n10, eq20_e316_q_d_n11];
-        let eq20_reactive_branch_derivatives: [f64; 0] = [];
+        let eq20_reactive_branch_derivatives: [f64; 2] = [eq20_e316_q_d_b0, eq20_e316_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[1]),
             Some(nodes[0]),
@@ -5973,70 +6215,6 @@ impl Instance {
             &eq20_reactive_node_derivatives,
             branches,
             &eq20_reactive_branch_derivatives,
-            multiplicity,
-        );
-        let eq23_e332: f64 = (s.v[230] + s.v[242]);
-        let eq23_e332_d_n0: f64 = (s.dn[230][0] + s.dn[242][0]);
-        let eq23_e332_d_n1: f64 = (s.dn[230][1] + s.dn[242][1]);
-        let eq23_e332_d_n2: f64 = (s.dn[230][2] + s.dn[242][2]);
-        let eq23_e332_d_n3: f64 = (s.dn[230][3] + s.dn[242][3]);
-        let eq23_e332_d_n4: f64 = (s.dn[230][4] + s.dn[242][4]);
-        let eq23_e332_d_n5: f64 = (s.dn[230][5] + s.dn[242][5]);
-        let eq23_e332_d_n6: f64 = (s.dn[230][6] + s.dn[242][6]);
-        let eq23_e332_d_n7: f64 = (s.dn[230][7] + s.dn[242][7]);
-        let eq23_e332_d_n8: f64 = (s.dn[230][8] + s.dn[242][8]);
-        let eq23_e332_d_n9: f64 = (s.dn[230][9] + s.dn[242][9]);
-        let eq23_e332_d_n10: f64 = (s.dn[230][10] + s.dn[242][10]);
-        let eq23_e332_d_n11: f64 = (s.dn[230][11] + s.dn[242][11]);
-        let eq23_e333: f64 = (p.p3 * eq23_e332);
-        let eq23_e333_d_n0: f64 = (p.p3 * eq23_e332_d_n0);
-        let eq23_e333_d_n1: f64 = (p.p3 * eq23_e332_d_n1);
-        let eq23_e333_d_n2: f64 = (p.p3 * eq23_e332_d_n2);
-        let eq23_e333_d_n3: f64 = (p.p3 * eq23_e332_d_n3);
-        let eq23_e333_d_n4: f64 = (p.p3 * eq23_e332_d_n4);
-        let eq23_e333_d_n5: f64 = (p.p3 * eq23_e332_d_n5);
-        let eq23_e333_d_n6: f64 = (p.p3 * eq23_e332_d_n6);
-        let eq23_e333_d_n7: f64 = (p.p3 * eq23_e332_d_n7);
-        let eq23_e333_d_n8: f64 = (p.p3 * eq23_e332_d_n8);
-        let eq23_e333_d_n9: f64 = (p.p3 * eq23_e332_d_n9);
-        let eq23_e333_d_n10: f64 = (p.p3 * eq23_e332_d_n10);
-        let eq23_e333_d_n11: f64 = (p.p3 * eq23_e332_d_n11);
-        let eq23_e334_q: f64 = eq23_e333;
-        let eq23_e336: f64 = (eq23_e333 * p.p1);
-        let eq23_e336_d_n0: f64 = (eq23_e333_d_n0 * p.p1);
-        let eq23_e336_d_n1: f64 = (eq23_e333_d_n1 * p.p1);
-        let eq23_e336_d_n2: f64 = (eq23_e333_d_n2 * p.p1);
-        let eq23_e336_d_n3: f64 = (eq23_e333_d_n3 * p.p1);
-        let eq23_e336_d_n4: f64 = (eq23_e333_d_n4 * p.p1);
-        let eq23_e336_d_n5: f64 = (eq23_e333_d_n5 * p.p1);
-        let eq23_e336_d_n6: f64 = (eq23_e333_d_n6 * p.p1);
-        let eq23_e336_d_n7: f64 = (eq23_e333_d_n7 * p.p1);
-        let eq23_e336_d_n8: f64 = (eq23_e333_d_n8 * p.p1);
-        let eq23_e336_d_n9: f64 = (eq23_e333_d_n9 * p.p1);
-        let eq23_e336_d_n10: f64 = (eq23_e333_d_n10 * p.p1);
-        let eq23_e336_d_n11: f64 = (eq23_e333_d_n11 * p.p1);
-        let eq23_e336_q: f64 = (eq23_e334_q * p.p1);
-        let eq23_e336_q_d_n0: f64 = (eq23_e333_d_n0 * p.p1);
-        let eq23_e336_q_d_n1: f64 = (eq23_e333_d_n1 * p.p1);
-        let eq23_e336_q_d_n2: f64 = (eq23_e333_d_n2 * p.p1);
-        let eq23_e336_q_d_n3: f64 = (eq23_e333_d_n3 * p.p1);
-        let eq23_e336_q_d_n4: f64 = (eq23_e333_d_n4 * p.p1);
-        let eq23_e336_q_d_n5: f64 = (eq23_e333_d_n5 * p.p1);
-        let eq23_e336_q_d_n6: f64 = (eq23_e333_d_n6 * p.p1);
-        let eq23_e336_q_d_n7: f64 = (eq23_e333_d_n7 * p.p1);
-        let eq23_e336_q_d_n8: f64 = (eq23_e333_d_n8 * p.p1);
-        let eq23_e336_q_d_n9: f64 = (eq23_e333_d_n9 * p.p1);
-        let eq23_e336_q_d_n10: f64 = (eq23_e333_d_n10 * p.p1);
-        let eq23_e336_q_d_n11: f64 = (eq23_e333_d_n11 * p.p1);
-        let eq23_reactive_node_derivatives: [f64; 12] = [eq23_e336_q_d_n0, eq23_e336_q_d_n1, eq23_e336_q_d_n2, eq23_e336_q_d_n3, eq23_e336_q_d_n4, eq23_e336_q_d_n5, eq23_e336_q_d_n6, eq23_e336_q_d_n7, eq23_e336_q_d_n8, eq23_e336_q_d_n9, eq23_e336_q_d_n10, eq23_e336_q_d_n11];
-        let eq23_reactive_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[1]),
-            Some(nodes[9]),
-            nodes,
-            &eq23_reactive_node_derivatives,
-            branches,
-            &eq23_reactive_branch_derivatives,
             multiplicity,
         );
     }
@@ -6051,6 +6229,78 @@ impl Instance {
         multiplicity: f64,
     ) {
         let nv11 = ctx.node_voltage(nodes[11]);
+        let eq23_e332: f64 = (s.v[230] + s.v[242]);
+        let eq23_e332_d_n0: f64 = (s.dn[230][0] + s.dn[242][0]);
+        let eq23_e332_d_n1: f64 = (s.dn[230][1] + s.dn[242][1]);
+        let eq23_e332_d_n2: f64 = (s.dn[230][2] + s.dn[242][2]);
+        let eq23_e332_d_n3: f64 = (s.dn[230][3] + s.dn[242][3]);
+        let eq23_e332_d_n4: f64 = (s.dn[230][4] + s.dn[242][4]);
+        let eq23_e332_d_n5: f64 = (s.dn[230][5] + s.dn[242][5]);
+        let eq23_e332_d_n6: f64 = (s.dn[230][6] + s.dn[242][6]);
+        let eq23_e332_d_n7: f64 = (s.dn[230][7] + s.dn[242][7]);
+        let eq23_e332_d_n8: f64 = (s.dn[230][8] + s.dn[242][8]);
+        let eq23_e332_d_n9: f64 = (s.dn[230][9] + s.dn[242][9]);
+        let eq23_e332_d_n10: f64 = (s.dn[230][10] + s.dn[242][10]);
+        let eq23_e332_d_n11: f64 = (s.dn[230][11] + s.dn[242][11]);
+        let eq23_e332_d_b0: f64 = (s.db[230][0] + s.db[242][0]);
+        let eq23_e332_d_b1: f64 = (s.db[230][1] + s.db[242][1]);
+        let eq23_e333: f64 = (p.p3 * eq23_e332);
+        let eq23_e333_d_n0: f64 = (p.p3 * eq23_e332_d_n0);
+        let eq23_e333_d_n1: f64 = (p.p3 * eq23_e332_d_n1);
+        let eq23_e333_d_n2: f64 = (p.p3 * eq23_e332_d_n2);
+        let eq23_e333_d_n3: f64 = (p.p3 * eq23_e332_d_n3);
+        let eq23_e333_d_n4: f64 = (p.p3 * eq23_e332_d_n4);
+        let eq23_e333_d_n5: f64 = (p.p3 * eq23_e332_d_n5);
+        let eq23_e333_d_n6: f64 = (p.p3 * eq23_e332_d_n6);
+        let eq23_e333_d_n7: f64 = (p.p3 * eq23_e332_d_n7);
+        let eq23_e333_d_n8: f64 = (p.p3 * eq23_e332_d_n8);
+        let eq23_e333_d_n9: f64 = (p.p3 * eq23_e332_d_n9);
+        let eq23_e333_d_n10: f64 = (p.p3 * eq23_e332_d_n10);
+        let eq23_e333_d_n11: f64 = (p.p3 * eq23_e332_d_n11);
+        let eq23_e333_d_b0: f64 = (p.p3 * eq23_e332_d_b0);
+        let eq23_e333_d_b1: f64 = (p.p3 * eq23_e332_d_b1);
+        let eq23_e334_q: f64 = eq23_e333;
+        let eq23_e336: f64 = (eq23_e333 * p.p1);
+        let eq23_e336_d_n0: f64 = (eq23_e333_d_n0 * p.p1);
+        let eq23_e336_d_n1: f64 = (eq23_e333_d_n1 * p.p1);
+        let eq23_e336_d_n2: f64 = (eq23_e333_d_n2 * p.p1);
+        let eq23_e336_d_n3: f64 = (eq23_e333_d_n3 * p.p1);
+        let eq23_e336_d_n4: f64 = (eq23_e333_d_n4 * p.p1);
+        let eq23_e336_d_n5: f64 = (eq23_e333_d_n5 * p.p1);
+        let eq23_e336_d_n6: f64 = (eq23_e333_d_n6 * p.p1);
+        let eq23_e336_d_n7: f64 = (eq23_e333_d_n7 * p.p1);
+        let eq23_e336_d_n8: f64 = (eq23_e333_d_n8 * p.p1);
+        let eq23_e336_d_n9: f64 = (eq23_e333_d_n9 * p.p1);
+        let eq23_e336_d_n10: f64 = (eq23_e333_d_n10 * p.p1);
+        let eq23_e336_d_n11: f64 = (eq23_e333_d_n11 * p.p1);
+        let eq23_e336_d_b0: f64 = (eq23_e333_d_b0 * p.p1);
+        let eq23_e336_d_b1: f64 = (eq23_e333_d_b1 * p.p1);
+        let eq23_e336_q: f64 = (eq23_e334_q * p.p1);
+        let eq23_e336_q_d_n0: f64 = (eq23_e333_d_n0 * p.p1);
+        let eq23_e336_q_d_n1: f64 = (eq23_e333_d_n1 * p.p1);
+        let eq23_e336_q_d_n2: f64 = (eq23_e333_d_n2 * p.p1);
+        let eq23_e336_q_d_n3: f64 = (eq23_e333_d_n3 * p.p1);
+        let eq23_e336_q_d_n4: f64 = (eq23_e333_d_n4 * p.p1);
+        let eq23_e336_q_d_n5: f64 = (eq23_e333_d_n5 * p.p1);
+        let eq23_e336_q_d_n6: f64 = (eq23_e333_d_n6 * p.p1);
+        let eq23_e336_q_d_n7: f64 = (eq23_e333_d_n7 * p.p1);
+        let eq23_e336_q_d_n8: f64 = (eq23_e333_d_n8 * p.p1);
+        let eq23_e336_q_d_n9: f64 = (eq23_e333_d_n9 * p.p1);
+        let eq23_e336_q_d_n10: f64 = (eq23_e333_d_n10 * p.p1);
+        let eq23_e336_q_d_n11: f64 = (eq23_e333_d_n11 * p.p1);
+        let eq23_e336_q_d_b0: f64 = (eq23_e333_d_b0 * p.p1);
+        let eq23_e336_q_d_b1: f64 = (eq23_e333_d_b1 * p.p1);
+        let eq23_reactive_node_derivatives: [f64; 12] = [eq23_e336_q_d_n0, eq23_e336_q_d_n1, eq23_e336_q_d_n2, eq23_e336_q_d_n3, eq23_e336_q_d_n4, eq23_e336_q_d_n5, eq23_e336_q_d_n6, eq23_e336_q_d_n7, eq23_e336_q_d_n8, eq23_e336_q_d_n9, eq23_e336_q_d_n10, eq23_e336_q_d_n11];
+        let eq23_reactive_branch_derivatives: [f64; 2] = [eq23_e336_q_d_b0, eq23_e336_q_d_b1];
+        stamper.stamp_current_reactive_dense(
+            Some(nodes[1]),
+            Some(nodes[9]),
+            nodes,
+            &eq23_reactive_node_derivatives,
+            branches,
+            &eq23_reactive_branch_derivatives,
+            multiplicity,
+        );
         let eq25_e351: f64 = (s.v[227] + s.v[243]);
         let eq25_e351_d_n0: f64 = (s.dn[227][0] + s.dn[243][0]);
         let eq25_e351_d_n1: f64 = (s.dn[227][1] + s.dn[243][1]);
@@ -6064,6 +6314,8 @@ impl Instance {
         let eq25_e351_d_n9: f64 = (s.dn[227][9] + s.dn[243][9]);
         let eq25_e351_d_n10: f64 = (s.dn[227][10] + s.dn[243][10]);
         let eq25_e351_d_n11: f64 = (s.dn[227][11] + s.dn[243][11]);
+        let eq25_e351_d_b0: f64 = (s.db[227][0] + s.db[243][0]);
+        let eq25_e351_d_b1: f64 = (s.db[227][1] + s.db[243][1]);
         let eq25_e352: f64 = (p.p3 * eq25_e351);
         let eq25_e352_d_n0: f64 = (p.p3 * eq25_e351_d_n0);
         let eq25_e352_d_n1: f64 = (p.p3 * eq25_e351_d_n1);
@@ -6077,6 +6329,8 @@ impl Instance {
         let eq25_e352_d_n9: f64 = (p.p3 * eq25_e351_d_n9);
         let eq25_e352_d_n10: f64 = (p.p3 * eq25_e351_d_n10);
         let eq25_e352_d_n11: f64 = (p.p3 * eq25_e351_d_n11);
+        let eq25_e352_d_b0: f64 = (p.p3 * eq25_e351_d_b0);
+        let eq25_e352_d_b1: f64 = (p.p3 * eq25_e351_d_b1);
         let eq25_e353_q: f64 = eq25_e352;
         let eq25_e355: f64 = (eq25_e352 * p.p1);
         let eq25_e355_d_n0: f64 = (eq25_e352_d_n0 * p.p1);
@@ -6091,6 +6345,8 @@ impl Instance {
         let eq25_e355_d_n9: f64 = (eq25_e352_d_n9 * p.p1);
         let eq25_e355_d_n10: f64 = (eq25_e352_d_n10 * p.p1);
         let eq25_e355_d_n11: f64 = (eq25_e352_d_n11 * p.p1);
+        let eq25_e355_d_b0: f64 = (eq25_e352_d_b0 * p.p1);
+        let eq25_e355_d_b1: f64 = (eq25_e352_d_b1 * p.p1);
         let eq25_e355_q: f64 = (eq25_e353_q * p.p1);
         let eq25_e355_q_d_n0: f64 = (eq25_e352_d_n0 * p.p1);
         let eq25_e355_q_d_n1: f64 = (eq25_e352_d_n1 * p.p1);
@@ -6104,8 +6360,10 @@ impl Instance {
         let eq25_e355_q_d_n9: f64 = (eq25_e352_d_n9 * p.p1);
         let eq25_e355_q_d_n10: f64 = (eq25_e352_d_n10 * p.p1);
         let eq25_e355_q_d_n11: f64 = (eq25_e352_d_n11 * p.p1);
+        let eq25_e355_q_d_b0: f64 = (eq25_e352_d_b0 * p.p1);
+        let eq25_e355_q_d_b1: f64 = (eq25_e352_d_b1 * p.p1);
         let eq25_reactive_node_derivatives: [f64; 12] = [eq25_e355_q_d_n0, eq25_e355_q_d_n1, eq25_e355_q_d_n2, eq25_e355_q_d_n3, eq25_e355_q_d_n4, eq25_e355_q_d_n5, eq25_e355_q_d_n6, eq25_e355_q_d_n7, eq25_e355_q_d_n8, eq25_e355_q_d_n9, eq25_e355_q_d_n10, eq25_e355_q_d_n11];
-        let eq25_reactive_branch_derivatives: [f64; 0] = [];
+        let eq25_reactive_branch_derivatives: [f64; 2] = [eq25_e355_q_d_b0, eq25_e355_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[5]),
             Some(nodes[10]),
@@ -6129,6 +6387,8 @@ impl Instance {
         let eq32_e395_d_n9: f64 = (s.dn[330][9] * (nv11 - 0.0));
         let eq32_e395_d_n10: f64 = (s.dn[330][10] * (nv11 - 0.0));
         let eq32_e395_d_n11: f64 = ((s.dn[330][11] * (nv11 - 0.0)) + s.v[330]);
+        let eq32_e395_d_b0: f64 = (s.db[330][0] * (nv11 - 0.0));
+        let eq32_e395_d_b1: f64 = (s.db[330][1] * (nv11 - 0.0));
         let eq32_e395_q: f64 = (s.v[330] * eq32_e394_q);
         let eq32_e395_q_d_n0: f64 = (s.dn[330][0] * eq32_e394_q);
         let eq32_e395_q_d_n1: f64 = (s.dn[330][1] * eq32_e394_q);
@@ -6142,8 +6402,10 @@ impl Instance {
         let eq32_e395_q_d_n9: f64 = (s.dn[330][9] * eq32_e394_q);
         let eq32_e395_q_d_n10: f64 = (s.dn[330][10] * eq32_e394_q);
         let eq32_e395_q_d_n11: f64 = ((s.dn[330][11] * eq32_e394_q) + s.v[330]);
+        let eq32_e395_q_d_b0: f64 = (s.db[330][0] * eq32_e394_q);
+        let eq32_e395_q_d_b1: f64 = (s.db[330][1] * eq32_e394_q);
         let eq32_reactive_node_derivatives: [f64; 12] = [eq32_e395_q_d_n0, eq32_e395_q_d_n1, eq32_e395_q_d_n2, eq32_e395_q_d_n3, eq32_e395_q_d_n4, eq32_e395_q_d_n5, eq32_e395_q_d_n6, eq32_e395_q_d_n7, eq32_e395_q_d_n8, eq32_e395_q_d_n9, eq32_e395_q_d_n10, eq32_e395_q_d_n11];
-        let eq32_reactive_branch_derivatives: [f64; 0] = [];
+        let eq32_reactive_branch_derivatives: [f64; 2] = [eq32_e395_q_d_b0, eq32_e395_q_d_b1];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             Some(nodes[4]),

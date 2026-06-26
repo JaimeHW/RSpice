@@ -368,368 +368,379 @@ impl Clone for Parameters {
     fn clone(&self) -> Self { *self }
 }
 
+impl Parameters {
+    fn new_box() -> Box<Self> {
+        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
+        let mut boxed = Box::<Self>::new_uninit();
+        unsafe {
+            let ptr = boxed.as_mut_ptr();
+            std::ptr::write_bytes(ptr, 0, 1);
+            let params = &mut *ptr;
+            params.p0 = 0.00018;
+            params.p1 = 2.5e-7;
+            params.p2 = 1.0;
+            params.p3 = 0.0;
+            params.p4 = 4.0;
+            params.p5 = 27.0;
+            params.p6 = 1.0;
+            params.p7 = 0.004;
+            params.p8 = 0.0;
+            params.p9 = 0.0;
+            params.p10 = 0.0;
+            params.p11 = 0.0;
+            params.p12 = 0.0;
+            params.p13 = 0.0;
+            params.p14 = 0.0;
+            params.p15 = 0.0;
+            params.p16 = 0.0;
+            params.p17 = 0.0;
+            params.p18 = 0.0;
+            params.p19 = 0.0;
+            params.p20 = 0.0;
+            params.p21 = 0.0;
+            params.p22 = 0.0;
+            params.p23 = 0.0;
+            params.p24 = 0.0;
+            params.p25 = 0.0;
+            params.p26 = 0.0;
+            params.p27 = -50.0;
+            params.p28 = 100.0;
+            params.p29 = 150.0;
+            params.p30 = 0.0008;
+            params.p31 = 0.0008;
+            params.p32 = 300000.0;
+            params.p33 = 0.135;
+            params.p34 = 2.0;
+            params.p35 = -2.72;
+            params.p36 = 0.12;
+            params.p37 = 0.016;
+            params.p38 = 0.0;
+            params.p39 = 10.0;
+            params.p40 = 0.0;
+            params.p41 = 3.5;
+            params.p42 = 0.0;
+            params.p43 = 0.0;
+            params.p44 = 0.0;
+            params.p45 = 150000.0;
+            params.p46 = -0.0004;
+            params.p47 = 2.3;
+            params.p48 = 0.0;
+            params.p49 = 0.0;
+            params.p50 = 0.0;
+            params.p51 = 0.0;
+            params.p52 = 0.0;
+            params.p53 = 4e-5;
+            params.p54 = 3e-6;
+            params.p55 = -650.0;
+            params.p56 = 0.005;
+            params.p57 = 100000.0;
+            params.p58 = 0.1;
+            params.p59 = 1.0;
+            params.p60 = 0.1;
+            params.p61 = 0.1;
+            params.p62 = 0.0;
+            params.p63 = 0.0;
+            params.p64 = 0.0;
+            params.p65 = 3.5;
+            params.p66 = 4.85e-6;
+            params.p67 = -650.0;
+            params.p68 = 0.0043;
+            params.p69 = 100000.0;
+            params.p70 = 0.1;
+            params.p71 = 1.0;
+            params.p72 = 0.35;
+            params.p73 = 0.3;
+            params.p74 = 3.8;
+            params.p75 = 0.0;
+            params.p76 = 0.0;
+            params.p77 = 3.5;
+            params.p78 = 1.0;
+            params.p79 = 0.0;
+            params.p80 = -44.5;
+            params.p81 = 0.0002;
+            params.p82 = 0.0;
+            params.p83 = 1.0;
+            params.p84 = 0.0;
+            params.p85 = 1.0;
+            params.p86 = 9e-11;
+            params.p87 = 0.0;
+            params.p88 = 0.0;
+            params.p89 = 0.0;
+            params.p90 = 120000.0;
+            params.p91 = 0.2;
+            params.p92 = 1.0;
+            params.p93 = 0.0;
+            params.p94 = 3.2;
+            params.p95 = 0.0;
+            params.p96 = -0.0004;
+            params.p97 = 0.0;
+            params.p98 = 0.0;
+            params.p99 = 0.01;
+            params.p100 = 0.0;
+            params.p101 = 0.0;
+            params.p102 = -74.5;
+            params.p103 = 0.0001;
+            params.p104 = 0.0;
+            params.p105 = 1.0;
+            params.p106 = 0.0;
+            params.p107 = 1.0;
+            params.p108 = 3e-11;
+            params.p109 = 0.0;
+            params.p110 = 0.0;
+            params.p111 = 0.0;
+            params.p112 = 120000.0;
+            params.p113 = 0.2;
+            params.p114 = 1.0;
+            params.p115 = 0.0;
+            params.p116 = 3.2;
+            params.p117 = 0.0;
+            params.p118 = -0.0004;
+            params.p119 = 0.0;
+            params.p120 = 0.0;
+            params.p121 = 0.01;
+            params.p122 = 0.0;
+            params.p123 = 0.0;
+            params.p124 = -74.5;
+            params.p125 = 0.0001;
+            params.p126 = 0.0;
+            params.p127 = 1.0;
+            params.p128 = 0.0;
+            params.p129 = 1.0;
+            params.p130 = 3e-11;
+            params.p131 = 0.0;
+            params.p132 = 0.0;
+            params.p133 = 0.0;
+            params.p134 = 120000.0;
+            params.p135 = 0.2;
+            params.p136 = 1.0;
+            params.p137 = 0.0;
+            params.p138 = 3.2;
+            params.p139 = 0.0;
+            params.p140 = -0.0004;
+            params.p141 = 0.0;
+            params.p142 = 0.0;
+            params.p143 = 0.01;
+            params.p144 = 0.0;
+            params.p145 = 0.0;
+            params.p146 = -74.5;
+            params.p147 = 0.0001;
+            params.p148 = 0.0;
+            params.p149 = 1.0;
+            params.p150 = 0.0;
+            params.p151 = 1.0;
+            params.p152 = 3e-11;
+            params.p153 = 0.0;
+            params.p154 = 0.0;
+            params.p155 = 0.0;
+            params.p156 = 120000.0;
+            params.p157 = 0.2;
+            params.p158 = 1.0;
+            params.p159 = 0.0;
+            params.p160 = 3.2;
+            params.p161 = 0.0;
+            params.p162 = -0.0004;
+            params.p163 = 0.0;
+            params.p164 = 0.0;
+            params.p165 = 0.01;
+            params.p166 = 1.0;
+            params.p167 = 0.0;
+            params.p168 = -44.5;
+            params.p169 = 0.0002;
+            params.p170 = 0.0;
+            params.p171 = 1.0;
+            params.p172 = 0.0;
+            params.p173 = 1.0;
+            params.p174 = 9e-11;
+            params.p175 = 0.0;
+            params.p176 = 0.0;
+            params.p177 = 0.0;
+            params.p178 = 120000.0;
+            params.p179 = 0.2;
+            params.p180 = 1.0;
+            params.p181 = 0.0;
+            params.p182 = 3.2;
+            params.p183 = 0.0;
+            params.p184 = -0.0004;
+            params.p185 = 0.0;
+            params.p186 = 0.0;
+            params.p187 = 0.01;
+            params.p188 = 0.0;
+            params.p189 = 0.0;
+            params.p190 = -74.5;
+            params.p191 = 0.0001;
+            params.p192 = 0.0;
+            params.p193 = 1.0;
+            params.p194 = 0.0;
+            params.p195 = 1.0;
+            params.p196 = 3e-11;
+            params.p197 = 0.0;
+            params.p198 = 0.0;
+            params.p199 = 0.0;
+            params.p200 = 120000.0;
+            params.p201 = 0.2;
+            params.p202 = 1.0;
+            params.p203 = 0.0;
+            params.p204 = 3.2;
+            params.p205 = 0.0;
+            params.p206 = -0.0004;
+            params.p207 = 0.0;
+            params.p208 = 0.0;
+            params.p209 = 0.01;
+            params.p210 = 0.0;
+            params.p211 = 0.0;
+            params.p212 = -74.5;
+            params.p213 = 0.0002;
+            params.p214 = 0.0;
+            params.p215 = 1.0;
+            params.p216 = 0.0;
+            params.p217 = 1.0;
+            params.p218 = 9e-11;
+            params.p219 = 0.0;
+            params.p220 = 0.0;
+            params.p221 = 0.0;
+            params.p222 = 120000.0;
+            params.p223 = 0.2;
+            params.p224 = 1.0;
+            params.p225 = 0.0;
+            params.p226 = 3.2;
+            params.p227 = 0.0;
+            params.p228 = -0.0004;
+            params.p229 = 0.0;
+            params.p230 = 0.0;
+            params.p231 = 0.01;
+            params.p232 = 0.0;
+            params.p233 = 0.0;
+            params.p234 = -74.5;
+            params.p235 = 0.0002;
+            params.p236 = 0.0;
+            params.p237 = 1.0;
+            params.p238 = 0.0;
+            params.p239 = 1.0;
+            params.p240 = 9e-11;
+            params.p241 = 0.0;
+            params.p242 = 0.0;
+            params.p243 = 0.0;
+            params.p244 = 120000.0;
+            params.p245 = 0.2;
+            params.p246 = 1.0;
+            params.p247 = 0.0;
+            params.p248 = 3.2;
+            params.p249 = 0.0;
+            params.p250 = -0.0004;
+            params.p251 = 0.0;
+            params.p252 = 0.0;
+            params.p253 = 0.01;
+            params.p254 = 0.0;
+            params.p255 = 0.0;
+            params.p256 = 1.1;
+            params.p257 = 0.82;
+            params.p258 = 1.0;
+            params.p259 = 1e-12;
+            params.p260 = 1.0;
+            params.p261 = 0.5;
+            params.p262 = 1.0;
+            params.p263 = 1.0;
+            params.p264 = 1e-12;
+            params.p265 = 1.0;
+            params.p266 = 0.5;
+            params.p267 = 1.0;
+            params.p268 = 0.5;
+            params.p269 = 1e-18;
+            params.p270 = 2.0;
+            params.p271 = 2.0;
+            params.p272 = 0.8;
+            params.p273 = 2e-5;
+            params.p274 = 0.8;
+            params.p275 = 0.25;
+            params.p276 = 0.0;
+            params.p277 = 600.0;
+            params.p278 = 4.0;
+            params.p279 = 0.0;
+            params.p280 = 600.0;
+            params.p281 = 4.0;
+            params.p282 = 0.0;
+            params.p283 = 0.5;
+            params.p284 = 1e-18;
+            params.p285 = 2.0;
+            params.p286 = 2.0;
+            params.p287 = 0.8;
+            params.p288 = 2e-5;
+            params.p289 = 0.8;
+            params.p290 = 0.25;
+            params.p291 = 0.0;
+            params.p292 = 0.05;
+            params.p293 = 2e-5;
+            params.p294 = 3.0;
+            params.p295 = 0.4;
+            params.p296 = 1.0;
+            params.p297 = 0.5;
+            params.p298 = 1e-21;
+            params.p299 = 20000.0;
+            params.p300 = 1.0;
+            params.p301 = 0.0;
+            params.p302 = 0.5;
+            params.p303 = 1e-21;
+            params.p304 = 20000.0;
+            params.p305 = 1.0;
+            params.p306 = 2.0;
+            params.p307 = 6e-8;
+            params.p308 = 0.5;
+            params.p309 = 2.0;
+            params.p310 = 0.0;
+            params.p311 = 0.0;
+            params.p312 = 0.0;
+            params.p313 = 1.0;
+            params.p314 = 1e-9;
+            params.p315 = 1e-9;
+            params.p316 = 50.0;
+            params.p317 = 4.0;
+            params.p318 = 50.0;
+            params.p319 = 4.0;
+            params.p320 = 25.0;
+            params.p321 = 0.0001;
+            params.p322 = 0.0;
+            params.p323 = 0.001;
+            params.p324 = 0.0;
+            params.p325 = 1.0;
+            params.p326 = 0.0;
+            params.p327 = 1.0;
+            params.p328 = 0.0;
+            params.p329 = 1000000000.0;
+            params.p330 = 0.001;
+            params.p331 = 100.0;
+            params.p332 = 3e-5;
+            params.p333 = 0.001;
+            params.p334 = 0.05;
+            params.p335 = 0.001;
+            params.p336 = 0.0001;
+            params.p337 = 10.0;
+            params.p338 = 100.0;
+            params.p339 = 10.0;
+            params.p340 = 0.05;
+            params.p341 = 1e-6;
+            params.p342 = -0.005;
+            params.p343 = 0.005;
+            params.p344 = 0.0;
+            params.p345 = 0.0;
+            params.p346 = 1e-9;
+            params.p347 = 0.0;
+            params.p348 = 3.0;
+            params.p349 = 3.0;
+            params.p350 = 0.0001;
+            params.p351 = 2.0;
+            params.p352 = 1.2;
+            params.p353 = 0.001;
+            validate_parameter("minr", params.p353, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p354 = 1e-9;
+            params.p355 = 0.0;
+            boxed.assume_init()
+        }
+    }
+}
+
 impl Default for Parameters {
     fn default() -> Self {
-        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
-        let mut params: Self = unsafe { std::mem::zeroed::<Self>() };
-        params.p0 = 0.00018;
-        params.p1 = 2.5e-7;
-        params.p2 = 1.0;
-        params.p3 = 0.0;
-        params.p4 = 4.0;
-        params.p5 = 27.0;
-        params.p6 = 1.0;
-        params.p7 = 0.004;
-        params.p8 = 0.0;
-        params.p9 = 0.0;
-        params.p10 = 0.0;
-        params.p11 = 0.0;
-        params.p12 = 0.0;
-        params.p13 = 0.0;
-        params.p14 = 0.0;
-        params.p15 = 0.0;
-        params.p16 = 0.0;
-        params.p17 = 0.0;
-        params.p18 = 0.0;
-        params.p19 = 0.0;
-        params.p20 = 0.0;
-        params.p21 = 0.0;
-        params.p22 = 0.0;
-        params.p23 = 0.0;
-        params.p24 = 0.0;
-        params.p25 = 0.0;
-        params.p26 = 0.0;
-        params.p27 = -50.0;
-        params.p28 = 100.0;
-        params.p29 = 150.0;
-        params.p30 = 0.0008;
-        params.p31 = 0.0008;
-        params.p32 = 300000.0;
-        params.p33 = 0.135;
-        params.p34 = 2.0;
-        params.p35 = -2.72;
-        params.p36 = 0.12;
-        params.p37 = 0.016;
-        params.p38 = 0.0;
-        params.p39 = 10.0;
-        params.p40 = 0.0;
-        params.p41 = 3.5;
-        params.p42 = 0.0;
-        params.p43 = 0.0;
-        params.p44 = 0.0;
-        params.p45 = 150000.0;
-        params.p46 = -0.0004;
-        params.p47 = 2.3;
-        params.p48 = 0.0;
-        params.p49 = 0.0;
-        params.p50 = 0.0;
-        params.p51 = 0.0;
-        params.p52 = 0.0;
-        params.p53 = 4e-5;
-        params.p54 = 3e-6;
-        params.p55 = -650.0;
-        params.p56 = 0.005;
-        params.p57 = 100000.0;
-        params.p58 = 0.1;
-        params.p59 = 1.0;
-        params.p60 = 0.1;
-        params.p61 = 0.1;
-        params.p62 = 0.0;
-        params.p63 = 0.0;
-        params.p64 = 0.0;
-        params.p65 = 3.5;
-        params.p66 = 4.85e-6;
-        params.p67 = -650.0;
-        params.p68 = 0.0043;
-        params.p69 = 100000.0;
-        params.p70 = 0.1;
-        params.p71 = 1.0;
-        params.p72 = 0.35;
-        params.p73 = 0.3;
-        params.p74 = 3.8;
-        params.p75 = 0.0;
-        params.p76 = 0.0;
-        params.p77 = 3.5;
-        params.p78 = 1.0;
-        params.p79 = 0.0;
-        params.p80 = -44.5;
-        params.p81 = 0.0002;
-        params.p82 = 0.0;
-        params.p83 = 1.0;
-        params.p84 = 0.0;
-        params.p85 = 1.0;
-        params.p86 = 9e-11;
-        params.p87 = 0.0;
-        params.p88 = 0.0;
-        params.p89 = 0.0;
-        params.p90 = 120000.0;
-        params.p91 = 0.2;
-        params.p92 = 1.0;
-        params.p93 = 0.0;
-        params.p94 = 3.2;
-        params.p95 = 0.0;
-        params.p96 = -0.0004;
-        params.p97 = 0.0;
-        params.p98 = 0.0;
-        params.p99 = 0.01;
-        params.p100 = 0.0;
-        params.p101 = 0.0;
-        params.p102 = -74.5;
-        params.p103 = 0.0001;
-        params.p104 = 0.0;
-        params.p105 = 1.0;
-        params.p106 = 0.0;
-        params.p107 = 1.0;
-        params.p108 = 3e-11;
-        params.p109 = 0.0;
-        params.p110 = 0.0;
-        params.p111 = 0.0;
-        params.p112 = 120000.0;
-        params.p113 = 0.2;
-        params.p114 = 1.0;
-        params.p115 = 0.0;
-        params.p116 = 3.2;
-        params.p117 = 0.0;
-        params.p118 = -0.0004;
-        params.p119 = 0.0;
-        params.p120 = 0.0;
-        params.p121 = 0.01;
-        params.p122 = 0.0;
-        params.p123 = 0.0;
-        params.p124 = -74.5;
-        params.p125 = 0.0001;
-        params.p126 = 0.0;
-        params.p127 = 1.0;
-        params.p128 = 0.0;
-        params.p129 = 1.0;
-        params.p130 = 3e-11;
-        params.p131 = 0.0;
-        params.p132 = 0.0;
-        params.p133 = 0.0;
-        params.p134 = 120000.0;
-        params.p135 = 0.2;
-        params.p136 = 1.0;
-        params.p137 = 0.0;
-        params.p138 = 3.2;
-        params.p139 = 0.0;
-        params.p140 = -0.0004;
-        params.p141 = 0.0;
-        params.p142 = 0.0;
-        params.p143 = 0.01;
-        params.p144 = 0.0;
-        params.p145 = 0.0;
-        params.p146 = -74.5;
-        params.p147 = 0.0001;
-        params.p148 = 0.0;
-        params.p149 = 1.0;
-        params.p150 = 0.0;
-        params.p151 = 1.0;
-        params.p152 = 3e-11;
-        params.p153 = 0.0;
-        params.p154 = 0.0;
-        params.p155 = 0.0;
-        params.p156 = 120000.0;
-        params.p157 = 0.2;
-        params.p158 = 1.0;
-        params.p159 = 0.0;
-        params.p160 = 3.2;
-        params.p161 = 0.0;
-        params.p162 = -0.0004;
-        params.p163 = 0.0;
-        params.p164 = 0.0;
-        params.p165 = 0.01;
-        params.p166 = 1.0;
-        params.p167 = 0.0;
-        params.p168 = -44.5;
-        params.p169 = 0.0002;
-        params.p170 = 0.0;
-        params.p171 = 1.0;
-        params.p172 = 0.0;
-        params.p173 = 1.0;
-        params.p174 = 9e-11;
-        params.p175 = 0.0;
-        params.p176 = 0.0;
-        params.p177 = 0.0;
-        params.p178 = 120000.0;
-        params.p179 = 0.2;
-        params.p180 = 1.0;
-        params.p181 = 0.0;
-        params.p182 = 3.2;
-        params.p183 = 0.0;
-        params.p184 = -0.0004;
-        params.p185 = 0.0;
-        params.p186 = 0.0;
-        params.p187 = 0.01;
-        params.p188 = 0.0;
-        params.p189 = 0.0;
-        params.p190 = -74.5;
-        params.p191 = 0.0001;
-        params.p192 = 0.0;
-        params.p193 = 1.0;
-        params.p194 = 0.0;
-        params.p195 = 1.0;
-        params.p196 = 3e-11;
-        params.p197 = 0.0;
-        params.p198 = 0.0;
-        params.p199 = 0.0;
-        params.p200 = 120000.0;
-        params.p201 = 0.2;
-        params.p202 = 1.0;
-        params.p203 = 0.0;
-        params.p204 = 3.2;
-        params.p205 = 0.0;
-        params.p206 = -0.0004;
-        params.p207 = 0.0;
-        params.p208 = 0.0;
-        params.p209 = 0.01;
-        params.p210 = 0.0;
-        params.p211 = 0.0;
-        params.p212 = -74.5;
-        params.p213 = 0.0002;
-        params.p214 = 0.0;
-        params.p215 = 1.0;
-        params.p216 = 0.0;
-        params.p217 = 1.0;
-        params.p218 = 9e-11;
-        params.p219 = 0.0;
-        params.p220 = 0.0;
-        params.p221 = 0.0;
-        params.p222 = 120000.0;
-        params.p223 = 0.2;
-        params.p224 = 1.0;
-        params.p225 = 0.0;
-        params.p226 = 3.2;
-        params.p227 = 0.0;
-        params.p228 = -0.0004;
-        params.p229 = 0.0;
-        params.p230 = 0.0;
-        params.p231 = 0.01;
-        params.p232 = 0.0;
-        params.p233 = 0.0;
-        params.p234 = -74.5;
-        params.p235 = 0.0002;
-        params.p236 = 0.0;
-        params.p237 = 1.0;
-        params.p238 = 0.0;
-        params.p239 = 1.0;
-        params.p240 = 9e-11;
-        params.p241 = 0.0;
-        params.p242 = 0.0;
-        params.p243 = 0.0;
-        params.p244 = 120000.0;
-        params.p245 = 0.2;
-        params.p246 = 1.0;
-        params.p247 = 0.0;
-        params.p248 = 3.2;
-        params.p249 = 0.0;
-        params.p250 = -0.0004;
-        params.p251 = 0.0;
-        params.p252 = 0.0;
-        params.p253 = 0.01;
-        params.p254 = 0.0;
-        params.p255 = 0.0;
-        params.p256 = 1.1;
-        params.p257 = 0.82;
-        params.p258 = 1.0;
-        params.p259 = 1e-12;
-        params.p260 = 1.0;
-        params.p261 = 0.5;
-        params.p262 = 1.0;
-        params.p263 = 1.0;
-        params.p264 = 1e-12;
-        params.p265 = 1.0;
-        params.p266 = 0.5;
-        params.p267 = 1.0;
-        params.p268 = 0.5;
-        params.p269 = 1e-18;
-        params.p270 = 2.0;
-        params.p271 = 2.0;
-        params.p272 = 0.8;
-        params.p273 = 2e-5;
-        params.p274 = 0.8;
-        params.p275 = 0.25;
-        params.p276 = 0.0;
-        params.p277 = 600.0;
-        params.p278 = 4.0;
-        params.p279 = 0.0;
-        params.p280 = 600.0;
-        params.p281 = 4.0;
-        params.p282 = 0.0;
-        params.p283 = 0.5;
-        params.p284 = 1e-18;
-        params.p285 = 2.0;
-        params.p286 = 2.0;
-        params.p287 = 0.8;
-        params.p288 = 2e-5;
-        params.p289 = 0.8;
-        params.p290 = 0.25;
-        params.p291 = 0.0;
-        params.p292 = 0.05;
-        params.p293 = 2e-5;
-        params.p294 = 3.0;
-        params.p295 = 0.4;
-        params.p296 = 1.0;
-        params.p297 = 0.5;
-        params.p298 = 1e-21;
-        params.p299 = 20000.0;
-        params.p300 = 1.0;
-        params.p301 = 0.0;
-        params.p302 = 0.5;
-        params.p303 = 1e-21;
-        params.p304 = 20000.0;
-        params.p305 = 1.0;
-        params.p306 = 2.0;
-        params.p307 = 6e-8;
-        params.p308 = 0.5;
-        params.p309 = 2.0;
-        params.p310 = 0.0;
-        params.p311 = 0.0;
-        params.p312 = 0.0;
-        params.p313 = 1.0;
-        params.p314 = 1e-9;
-        params.p315 = 1e-9;
-        params.p316 = 50.0;
-        params.p317 = 4.0;
-        params.p318 = 50.0;
-        params.p319 = 4.0;
-        params.p320 = 25.0;
-        params.p321 = 0.0001;
-        params.p322 = 0.0;
-        params.p323 = 0.001;
-        params.p324 = 0.0;
-        params.p325 = 1.0;
-        params.p326 = 0.0;
-        params.p327 = 1.0;
-        params.p328 = 0.0;
-        params.p329 = 1000000000.0;
-        params.p330 = 0.001;
-        params.p331 = 100.0;
-        params.p332 = 3e-5;
-        params.p333 = 0.001;
-        params.p334 = 0.05;
-        params.p335 = 0.001;
-        params.p336 = 0.0001;
-        params.p337 = 10.0;
-        params.p338 = 100.0;
-        params.p339 = 10.0;
-        params.p340 = 0.05;
-        params.p341 = 1e-6;
-        params.p342 = -0.005;
-        params.p343 = 0.005;
-        params.p344 = 0.0;
-        params.p345 = 0.0;
-        params.p346 = 1e-9;
-        params.p347 = 0.0;
-        params.p348 = 3.0;
-        params.p349 = 3.0;
-        params.p350 = 0.0001;
-        params.p351 = 2.0;
-        params.p352 = 1.2;
-        params.p353 = 0.001;
-        validate_parameter("minr", params.p353, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p354 = 1e-9;
-        params.p355 = 0.0;
-        params
+        *Self::new_box()
     }
 }
 
@@ -775,18 +786,34 @@ fn validate_parameter(
     }
     Ok(())
 }
+fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
+fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
+    let mut boxed = Box::<[bool; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 30],
     pub branches: [usize; 36],
-    pub params: Parameters,
-    pub(crate) param_given: [bool; 356],
+    pub params: Box<Parameters>,
+    pub(crate) param_given: Box<[bool; 356]>,
     pub(crate) multiplicity: f64,
-    pub(crate) ddt_state_current: [f64; 146],
-    pub(crate) ddt_state_previous: [f64; 146],
-    pub(crate) ddt_state_initialized: [bool; 146],
-    pub(crate) idt_state_current: [f64; 0],
-    pub(crate) idt_state_previous: [f64; 0],
-    pub(crate) idt_state_initialized: [bool; 0],
+    pub(crate) ddt_state_current: Box<[f64; 146]>,
+    pub(crate) ddt_state_previous: Box<[f64; 146]>,
+    pub(crate) ddt_state_initialized: Box<[bool; 146]>,
+    pub(crate) idt_state_current: Box<[f64; 0]>,
+    pub(crate) idt_state_previous: Box<[f64; 0]>,
+    pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) scratch: Option<Box<GenericScratch<2701, 30, 36>>>,
@@ -799,15 +826,15 @@ impl Clone for Instance {
         Self {
             nodes: self.nodes,
             branches: self.branches,
-            params: self.params,
-            param_given: self.param_given,
+            params: self.params.clone(),
+            param_given: self.param_given.clone(),
             multiplicity: self.multiplicity,
-            ddt_state_current: self.ddt_state_current,
-            ddt_state_previous: self.ddt_state_previous,
-            ddt_state_initialized: self.ddt_state_initialized,
-            idt_state_current: self.idt_state_current,
-            idt_state_previous: self.idt_state_previous,
-            idt_state_initialized: self.idt_state_initialized,
+            ddt_state_current: self.ddt_state_current.clone(),
+            ddt_state_previous: self.ddt_state_previous.clone(),
+            ddt_state_initialized: self.ddt_state_initialized.clone(),
+            idt_state_current: self.idt_state_current.clone(),
+            idt_state_previous: self.idt_state_previous.clone(),
+            idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
             scratch: None,
@@ -837,19 +864,19 @@ impl Instance {
         Self {
             nodes: mapped,
             branches: [0usize; Self::BRANCH_COUNT],
-            params: Parameters::default(),
-            param_given: [false; Self::PARAMETER_COUNT],
+            params: Parameters::new_box(),
+            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
             multiplicity: 1.0,
-            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],
-            idt_state_current: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_previous: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_initialized: [false; Self::IDT_STATE_COUNT],
+            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),
+            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scratch: Some(Box::new(GenericScratch::new())),
-            reactive_scratch: Some(Box::new(GenericReactiveScratch::new())),
+            scratch: Some(GenericScratch::new_box()),
+            reactive_scratch: Some(GenericReactiveScratch::new_box()),
         }
     }
 

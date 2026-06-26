@@ -344,369 +344,380 @@ impl Clone for Parameters {
     fn clone(&self) -> Self { *self }
 }
 
+impl Parameters {
+    fn new_box() -> Box<Self> {
+        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
+        let mut boxed = Box::<Self>::new_uninit();
+        unsafe {
+            let ptr = boxed.as_mut_ptr();
+            std::ptr::write_bytes(ptr, 0, 1);
+            let params = &mut *ptr;
+            params.p0 = 5e-6;
+            params.p1 = 5e-6;
+            params.p2 = 1.0;
+            params.p3 = 0.0;
+            params.p4 = 0.0;
+            params.p5 = 1.0;
+            params.p6 = 0.0;
+            params.p7 = 0.0;
+            params.p8 = 0.0;
+            params.p9 = 27.0;
+            params.p10 = 0.0;
+            params.p11 = 0.0;
+            params.p12 = 0.0;
+            params.p13 = 0.0;
+            params.p14 = 1.0;
+            params.p15 = 0.0;
+            params.p16 = 0.0;
+            params.p17 = 0.0;
+            params.p18 = 0.0;
+            params.p19 = 0.0;
+            params.p20 = 0.0;
+            params.p21 = 0.0;
+            params.p22 = 0.0;
+            params.p23 = 0.0;
+            params.p24 = 0.0;
+            params.p25 = 0.0;
+            params.p26 = 0.0;
+            params.p27 = 0.0;
+            params.p28 = 0.0;
+            params.p29 = 0.0;
+            params.p30 = 1.0;
+            params.p31 = 0.0;
+            params.p32 = 0.0;
+            params.p33 = 1.0;
+            params.p34 = 7000000.0;
+            params.p35 = 9.025e-5;
+            params.p36 = 1e-7;
+            params.p37 = 1.1785;
+            params.p38 = 0.0;
+            params.p39 = 0.0;
+            params.p40 = 1e19;
+            params.p41 = 0.0;
+            params.p42 = params.p41;
+            validate_finite_parameter("XWDC", params.p42).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p43 = 1e-6;
+            params.p44 = 1e-6;
+            params.p45 = 0.0;
+            params.p46 = 0.0;
+            params.p47 = 2.0;
+            params.p48 = 0.0;
+            params.p49 = -1.0;
+            params.p50 = 0.0;
+            params.p51 = 1.0;
+            params.p52 = 0.0;
+            params.p53 = 1.0;
+            params.p54 = 0.0;
+            params.p55 = 1.1;
+            params.p56 = 1e-8;
+            params.p57 = 1e-8;
+            params.p58 = 0.0;
+            params.p59 = 1e17;
+            params.p60 = 0.0;
+            params.p61 = 1.0;
+            params.p62 = 0.0;
+            params.p63 = 1.0;
+            params.p64 = 0.0;
+            params.p65 = 1.0;
+            params.p66 = 0.0;
+            params.p67 = 0.0;
+            params.p68 = 0.0;
+            params.p69 = 0.0;
+            params.p70 = 0.0;
+            params.p71 = 0.0;
+            params.p72 = 0.0;
+            params.p73 = 0.0;
+            params.p74 = 0.23;
+            params.p75 = 0.0;
+            params.p76 = 1.0;
+            params.p77 = 0.0;
+            params.p78 = 1.0;
+            params.p79 = 0.0;
+            params.p80 = 0.0;
+            params.p81 = 0.5;
+            params.p82 = 0.0;
+            params.p83 = 0.0;
+            params.p84 = 0.0;
+            params.p85 = 1.0;
+            params.p86 = 300.0;
+            params.p87 = 30.0;
+            params.p88 = 0.0;
+            params.p89 = 0.0;
+            params.p90 = 0.0;
+            params.p91 = 1.0;
+            params.p92 = 0.0;
+            params.p93 = 1.0;
+            params.p94 = 0.3;
+            params.p95 = 0.0;
+            params.p96 = 1.0;
+            params.p97 = 0.0;
+            params.p98 = 1.0;
+            params.p99 = 0.0;
+            params.p100 = 1.0;
+            params.p101 = 0.0;
+            params.p102 = 0.0;
+            params.p103 = 1.0;
+            params.p104 = 0.0;
+            params.p105 = 2000000000000000.0;
+            params.p106 = 2.0;
+            params.p107 = 0.0;
+            params.p108 = 0.0;
+            params.p109 = 1.0;
+            params.p110 = 1.0;
+            params.p111 = 1.5;
+            params.p112 = 0.0;
+            params.p113 = 1.0;
+            params.p114 = if (params.p33 > 0.0) { 2.0 } else { 1.0 };
+            validate_parameter("BB", params.p114, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p115 = 10.0;
+            params.p116 = 50.0;
+            params.p117 = 0.0;
+            params.p118 = 10.0;
+            params.p119 = 20.0;
+            params.p120 = 0.0025;
+            params.p121 = 1.0;
+            params.p122 = 2e-6;
+            params.p123 = 0.8;
+            params.p124 = 3e-8;
+            params.p125 = 0.5;
+            params.p126 = 0.0;
+            params.p127 = 1.0;
+            params.p128 = 0.8;
+            params.p129 = 0.0;
+            params.p130 = 1.0;
+            params.p131 = 0.0;
+            params.p132 = 1.0;
+            params.p133 = -1.0;
+            params.p134 = 0.0;
+            params.p135 = 1.0;
+            params.p136 = 0.002;
+            params.p137 = 1e-8;
+            params.p138 = 1e-20;
+            params.p139 = 1.5;
+            params.p140 = 0.55;
+            params.p141 = 0.0;
+            params.p142 = 0.0;
+            params.p143 = 0.0;
+            params.p144 = 0.0;
+            params.p145 = 0.0;
+            params.p146 = 0.0;
+            params.p147 = 5e17;
+            params.p148 = 0.0;
+            params.p149 = 1.0;
+            params.p150 = 0.0;
+            params.p151 = 1.0;
+            params.p152 = 0.0;
+            params.p153 = 0.0;
+            params.p154 = 0.0;
+            params.p155 = 1.0;
+            params.p156 = 0.0;
+            params.p157 = 1.0;
+            params.p158 = 0.0;
+            params.p159 = 0.0;
+            params.p160 = 0.0;
+            params.p161 = 0.0;
+            params.p162 = 0.0;
+            params.p163 = 0.0;
+            params.p164 = 1.0;
+            params.p165 = 0.0;
+            params.p166 = 0.0;
+            params.p167 = 1.0;
+            params.p168 = 0.0;
+            params.p169 = 0.0;
+            params.p170 = 1.0;
+            params.p171 = 0.0;
+            params.p172 = 0.0;
+            params.p173 = 0.0;
+            params.p174 = 0.0;
+            params.p175 = 3e-8;
+            params.p176 = 0.7;
+            params.p177 = 2.0;
+            params.p178 = 1.0;
+            params.p179 = 1.0;
+            params.p180 = 0.0;
+            params.p181 = 0.01;
+            params.p182 = 0.1;
+            params.p183 = 0.0;
+            params.p184 = 1.0;
+            params.p185 = 0.0;
+            params.p186 = 1.0;
+            params.p187 = 0.0;
+            params.p188 = 1.0;
+            params.p189 = 0.0;
+            params.p190 = 0.0;
+            params.p191 = 1.0;
+            params.p192 = 5e18;
+            params.p193 = 0.0;
+            params.p194 = 0.0;
+            params.p195 = 0.0;
+            params.p196 = 5e-6;
+            params.p197 = 1000000.0;
+            params.p198 = 0.3;
+            params.p199 = 0.0;
+            params.p200 = 0.2;
+            params.p201 = 1e-6;
+            params.p202 = 0.0;
+            params.p203 = 10000.0;
+            params.p204 = 20000000.0;
+            params.p205 = 0.3;
+            params.p206 = 0.0;
+            params.p207 = 7500.0;
+            params.p208 = 0.25;
+            params.p209 = 1e-6;
+            params.p210 = 1e-15;
+            params.p211 = 5000000.0;
+            params.p212 = -5000000.0;
+            params.p213 = 5e-16;
+            params.p214 = 1.0;
+            params.p215 = 0.0;
+            params.p216 = 0.01;
+            params.p217 = 0.005;
+            params.p218 = 10000000000.0;
+            params.p219 = 1e-16;
+            params.p220 = 0.0;
+            params.p221 = 1.0;
+            params.p222 = 27.0;
+            params.p223 = 1e-10;
+            params.p224 = 0.7;
+            params.p225 = 8e-7;
+            params.p226 = 3.5e-9;
+            params.p227 = 1e-8;
+            params.p228 = params.p226;
+            validate_parameter("TFOXGIDL", params.p228, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p229 = 1e-8;
+            params.p230 = 1e17;
+            params.p231 = 1e18;
+            params.p232 = 0.0;
+            params.p233 = 1.0;
+            params.p234 = 0.0;
+            params.p235 = 1.0;
+            params.p236 = 100000000000000.0;
+            params.p237 = 0.1;
+            params.p238 = 1e-7;
+            params.p239 = 0.0;
+            params.p240 = 3.5;
+            params.p241 = 0.0;
+            params.p242 = 1.0;
+            params.p243 = 0.0;
+            params.p244 = 1.0;
+            params.p245 = 100.0;
+            params.p246 = 0.0;
+            params.p247 = 0.0;
+            params.p248 = 0.0;
+            params.p249 = 25000.0;
+            params.p250 = 0.0;
+            params.p251 = 2e-8;
+            params.p252 = 1e-8;
+            params.p253 = 0.0;
+            params.p254 = 3.0;
+            params.p255 = 3.5;
+            params.p256 = 1.0;
+            params.p257 = 0.5;
+            params.p258 = 0.0;
+            params.p259 = 0.0;
+            params.p260 = 1.0;
+            params.p261 = 1.0;
+            params.p262 = 1.0;
+            params.p263 = 1.0;
+            params.p264 = 1e-11;
+            params.p265 = 1.5e-11;
+            params.p266 = 5e-16;
+            params.p267 = 1.0;
+            params.p268 = 0.0;
+            params.p269 = 1.0;
+            params.p270 = 1.0;
+            params.p271 = 1.0;
+            params.p272 = 1e-11;
+            params.p273 = 1.5e-11;
+            params.p274 = 1.0;
+            params.p275 = params.p94;
+            validate_finite_parameter("MUEPH0B", params.p275).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p276 = params.p249;
+            validate_finite_parameter("MUEPH1B", params.p276).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p277 = params.p95;
+            validate_finite_parameter("MUEPHWB", params.p277).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p278 = params.p96;
+            validate_finite_parameter("MUEPWPB", params.p278).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p279 = params.p99;
+            validate_finite_parameter("MUEPHSB", params.p279).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p280 = params.p100;
+            validate_finite_parameter("MUEPSPB", params.p280).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p281 = params.p97;
+            validate_finite_parameter("MUEPHLB", params.p281).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p282 = params.p98;
+            validate_finite_parameter("MUEPLPB", params.p282).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p283 = params.p106;
+            validate_finite_parameter("MUESR0B", params.p283).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p284 = params.p105;
+            validate_parameter("MUESR1B", params.p284, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p285 = params.p107;
+            validate_finite_parameter("MUESRLB", params.p285).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p286 = params.p110;
+            validate_finite_parameter("MUESLPB", params.p286).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p287 = params.p108;
+            validate_finite_parameter("MUESRWB", params.p287).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p288 = params.p109;
+            validate_finite_parameter("MUESWPB", params.p288).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p289 = params.p86;
+            validate_finite_parameter("MUECB0B", params.p289).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p290 = params.p87;
+            validate_finite_parameter("MUECB1B", params.p290).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p291 = params.p88;
+            validate_finite_parameter("MUECB0LPB", params.p291).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p292 = params.p89;
+            validate_finite_parameter("MUECB1LPB", params.p292).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p293 = params.p90;
+            validate_finite_parameter("MUECB0L2B", params.p293).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p294 = params.p91;
+            validate_finite_parameter("MUECB0L2PB", params.p294).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p295 = params.p92;
+            validate_finite_parameter("MUECB1L2B", params.p295).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p296 = params.p93;
+            validate_finite_parameter("MUECB1L2PB", params.p296).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p297 = 0.0;
+            params.p298 = 0.0;
+            params.p299 = 0.0;
+            params.p300 = 0.0;
+            params.p301 = 1.0;
+            params.p302 = params.p299;
+            validate_finite_parameter("MUEQBB", params.p302).expect("generated Verilog-A parameter default must satisfy declared range");
+            params.p303 = 0.0;
+            params.p304 = 0.0;
+            params.p305 = 0.0;
+            params.p306 = 0.0;
+            params.p307 = 0.0;
+            params.p308 = 1.0;
+            params.p309 = 1.0;
+            params.p310 = 1e-6;
+            params.p311 = 1e-6;
+            params.p312 = 0.0;
+            params.p313 = 0.0;
+            params.p314 = 0.0;
+            params.p315 = 1e19;
+            params.p316 = 1000.0;
+            params.p317 = 1000.0;
+            params.p318 = 30000000.0;
+            params.p319 = 30000000.0;
+            params.p320 = 0.0;
+            params.p321 = 0.0;
+            params.p322 = 1e-6;
+            params.p323 = 1.0;
+            params.p324 = 1.0;
+            params.p325 = 0.0;
+            params.p326 = 0.0;
+            params.p327 = 1.0;
+            params.p328 = 0.0;
+            params.p329 = 1.0;
+            params.p330 = 0.0;
+            params.p331 = 1.0;
+            boxed.assume_init()
+        }
+    }
+}
+
 impl Default for Parameters {
     fn default() -> Self {
-        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
-        let mut params: Self = unsafe { std::mem::zeroed::<Self>() };
-        params.p0 = 5e-6;
-        params.p1 = 5e-6;
-        params.p2 = 1.0;
-        params.p3 = 0.0;
-        params.p4 = 0.0;
-        params.p5 = 1.0;
-        params.p6 = 0.0;
-        params.p7 = 0.0;
-        params.p8 = 0.0;
-        params.p9 = 27.0;
-        params.p10 = 0.0;
-        params.p11 = 0.0;
-        params.p12 = 0.0;
-        params.p13 = 0.0;
-        params.p14 = 1.0;
-        params.p15 = 0.0;
-        params.p16 = 0.0;
-        params.p17 = 0.0;
-        params.p18 = 0.0;
-        params.p19 = 0.0;
-        params.p20 = 0.0;
-        params.p21 = 0.0;
-        params.p22 = 0.0;
-        params.p23 = 0.0;
-        params.p24 = 0.0;
-        params.p25 = 0.0;
-        params.p26 = 0.0;
-        params.p27 = 0.0;
-        params.p28 = 0.0;
-        params.p29 = 0.0;
-        params.p30 = 1.0;
-        params.p31 = 0.0;
-        params.p32 = 0.0;
-        params.p33 = 1.0;
-        params.p34 = 7000000.0;
-        params.p35 = 9.025e-5;
-        params.p36 = 1e-7;
-        params.p37 = 1.1785;
-        params.p38 = 0.0;
-        params.p39 = 0.0;
-        params.p40 = 1e19;
-        params.p41 = 0.0;
-        params.p42 = params.p41;
-        validate_finite_parameter("XWDC", params.p42).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p43 = 1e-6;
-        params.p44 = 1e-6;
-        params.p45 = 0.0;
-        params.p46 = 0.0;
-        params.p47 = 2.0;
-        params.p48 = 0.0;
-        params.p49 = -1.0;
-        params.p50 = 0.0;
-        params.p51 = 1.0;
-        params.p52 = 0.0;
-        params.p53 = 1.0;
-        params.p54 = 0.0;
-        params.p55 = 1.1;
-        params.p56 = 1e-8;
-        params.p57 = 1e-8;
-        params.p58 = 0.0;
-        params.p59 = 1e17;
-        params.p60 = 0.0;
-        params.p61 = 1.0;
-        params.p62 = 0.0;
-        params.p63 = 1.0;
-        params.p64 = 0.0;
-        params.p65 = 1.0;
-        params.p66 = 0.0;
-        params.p67 = 0.0;
-        params.p68 = 0.0;
-        params.p69 = 0.0;
-        params.p70 = 0.0;
-        params.p71 = 0.0;
-        params.p72 = 0.0;
-        params.p73 = 0.0;
-        params.p74 = 0.23;
-        params.p75 = 0.0;
-        params.p76 = 1.0;
-        params.p77 = 0.0;
-        params.p78 = 1.0;
-        params.p79 = 0.0;
-        params.p80 = 0.0;
-        params.p81 = 0.5;
-        params.p82 = 0.0;
-        params.p83 = 0.0;
-        params.p84 = 0.0;
-        params.p85 = 1.0;
-        params.p86 = 300.0;
-        params.p87 = 30.0;
-        params.p88 = 0.0;
-        params.p89 = 0.0;
-        params.p90 = 0.0;
-        params.p91 = 1.0;
-        params.p92 = 0.0;
-        params.p93 = 1.0;
-        params.p94 = 0.3;
-        params.p95 = 0.0;
-        params.p96 = 1.0;
-        params.p97 = 0.0;
-        params.p98 = 1.0;
-        params.p99 = 0.0;
-        params.p100 = 1.0;
-        params.p101 = 0.0;
-        params.p102 = 0.0;
-        params.p103 = 1.0;
-        params.p104 = 0.0;
-        params.p105 = 2000000000000000.0;
-        params.p106 = 2.0;
-        params.p107 = 0.0;
-        params.p108 = 0.0;
-        params.p109 = 1.0;
-        params.p110 = 1.0;
-        params.p111 = 1.5;
-        params.p112 = 0.0;
-        params.p113 = 1.0;
-        params.p114 = if (params.p33 > 0.0) { 2.0 } else { 1.0 };
-        validate_parameter("BB", params.p114, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p115 = 10.0;
-        params.p116 = 50.0;
-        params.p117 = 0.0;
-        params.p118 = 10.0;
-        params.p119 = 20.0;
-        params.p120 = 0.0025;
-        params.p121 = 1.0;
-        params.p122 = 2e-6;
-        params.p123 = 0.8;
-        params.p124 = 3e-8;
-        params.p125 = 0.5;
-        params.p126 = 0.0;
-        params.p127 = 1.0;
-        params.p128 = 0.8;
-        params.p129 = 0.0;
-        params.p130 = 1.0;
-        params.p131 = 0.0;
-        params.p132 = 1.0;
-        params.p133 = -1.0;
-        params.p134 = 0.0;
-        params.p135 = 1.0;
-        params.p136 = 0.002;
-        params.p137 = 1e-8;
-        params.p138 = 1e-20;
-        params.p139 = 1.5;
-        params.p140 = 0.55;
-        params.p141 = 0.0;
-        params.p142 = 0.0;
-        params.p143 = 0.0;
-        params.p144 = 0.0;
-        params.p145 = 0.0;
-        params.p146 = 0.0;
-        params.p147 = 5e17;
-        params.p148 = 0.0;
-        params.p149 = 1.0;
-        params.p150 = 0.0;
-        params.p151 = 1.0;
-        params.p152 = 0.0;
-        params.p153 = 0.0;
-        params.p154 = 0.0;
-        params.p155 = 1.0;
-        params.p156 = 0.0;
-        params.p157 = 1.0;
-        params.p158 = 0.0;
-        params.p159 = 0.0;
-        params.p160 = 0.0;
-        params.p161 = 0.0;
-        params.p162 = 0.0;
-        params.p163 = 0.0;
-        params.p164 = 1.0;
-        params.p165 = 0.0;
-        params.p166 = 0.0;
-        params.p167 = 1.0;
-        params.p168 = 0.0;
-        params.p169 = 0.0;
-        params.p170 = 1.0;
-        params.p171 = 0.0;
-        params.p172 = 0.0;
-        params.p173 = 0.0;
-        params.p174 = 0.0;
-        params.p175 = 3e-8;
-        params.p176 = 0.7;
-        params.p177 = 2.0;
-        params.p178 = 1.0;
-        params.p179 = 1.0;
-        params.p180 = 0.0;
-        params.p181 = 0.01;
-        params.p182 = 0.1;
-        params.p183 = 0.0;
-        params.p184 = 1.0;
-        params.p185 = 0.0;
-        params.p186 = 1.0;
-        params.p187 = 0.0;
-        params.p188 = 1.0;
-        params.p189 = 0.0;
-        params.p190 = 0.0;
-        params.p191 = 1.0;
-        params.p192 = 5e18;
-        params.p193 = 0.0;
-        params.p194 = 0.0;
-        params.p195 = 0.0;
-        params.p196 = 5e-6;
-        params.p197 = 1000000.0;
-        params.p198 = 0.3;
-        params.p199 = 0.0;
-        params.p200 = 0.2;
-        params.p201 = 1e-6;
-        params.p202 = 0.0;
-        params.p203 = 10000.0;
-        params.p204 = 20000000.0;
-        params.p205 = 0.3;
-        params.p206 = 0.0;
-        params.p207 = 7500.0;
-        params.p208 = 0.25;
-        params.p209 = 1e-6;
-        params.p210 = 1e-15;
-        params.p211 = 5000000.0;
-        params.p212 = -5000000.0;
-        params.p213 = 5e-16;
-        params.p214 = 1.0;
-        params.p215 = 0.0;
-        params.p216 = 0.01;
-        params.p217 = 0.005;
-        params.p218 = 10000000000.0;
-        params.p219 = 1e-16;
-        params.p220 = 0.0;
-        params.p221 = 1.0;
-        params.p222 = 27.0;
-        params.p223 = 1e-10;
-        params.p224 = 0.7;
-        params.p225 = 8e-7;
-        params.p226 = 3.5e-9;
-        params.p227 = 1e-8;
-        params.p228 = params.p226;
-        validate_parameter("TFOXGIDL", params.p228, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p229 = 1e-8;
-        params.p230 = 1e17;
-        params.p231 = 1e18;
-        params.p232 = 0.0;
-        params.p233 = 1.0;
-        params.p234 = 0.0;
-        params.p235 = 1.0;
-        params.p236 = 100000000000000.0;
-        params.p237 = 0.1;
-        params.p238 = 1e-7;
-        params.p239 = 0.0;
-        params.p240 = 3.5;
-        params.p241 = 0.0;
-        params.p242 = 1.0;
-        params.p243 = 0.0;
-        params.p244 = 1.0;
-        params.p245 = 100.0;
-        params.p246 = 0.0;
-        params.p247 = 0.0;
-        params.p248 = 0.0;
-        params.p249 = 25000.0;
-        params.p250 = 0.0;
-        params.p251 = 2e-8;
-        params.p252 = 1e-8;
-        params.p253 = 0.0;
-        params.p254 = 3.0;
-        params.p255 = 3.5;
-        params.p256 = 1.0;
-        params.p257 = 0.5;
-        params.p258 = 0.0;
-        params.p259 = 0.0;
-        params.p260 = 1.0;
-        params.p261 = 1.0;
-        params.p262 = 1.0;
-        params.p263 = 1.0;
-        params.p264 = 1e-11;
-        params.p265 = 1.5e-11;
-        params.p266 = 5e-16;
-        params.p267 = 1.0;
-        params.p268 = 0.0;
-        params.p269 = 1.0;
-        params.p270 = 1.0;
-        params.p271 = 1.0;
-        params.p272 = 1e-11;
-        params.p273 = 1.5e-11;
-        params.p274 = 1.0;
-        params.p275 = params.p94;
-        validate_finite_parameter("MUEPH0B", params.p275).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p276 = params.p249;
-        validate_finite_parameter("MUEPH1B", params.p276).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p277 = params.p95;
-        validate_finite_parameter("MUEPHWB", params.p277).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p278 = params.p96;
-        validate_finite_parameter("MUEPWPB", params.p278).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p279 = params.p99;
-        validate_finite_parameter("MUEPHSB", params.p279).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p280 = params.p100;
-        validate_finite_parameter("MUEPSPB", params.p280).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p281 = params.p97;
-        validate_finite_parameter("MUEPHLB", params.p281).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p282 = params.p98;
-        validate_finite_parameter("MUEPLPB", params.p282).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p283 = params.p106;
-        validate_finite_parameter("MUESR0B", params.p283).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p284 = params.p105;
-        validate_parameter("MUESR1B", params.p284, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p285 = params.p107;
-        validate_finite_parameter("MUESRLB", params.p285).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p286 = params.p110;
-        validate_finite_parameter("MUESLPB", params.p286).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p287 = params.p108;
-        validate_finite_parameter("MUESRWB", params.p287).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p288 = params.p109;
-        validate_finite_parameter("MUESWPB", params.p288).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p289 = params.p86;
-        validate_finite_parameter("MUECB0B", params.p289).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p290 = params.p87;
-        validate_finite_parameter("MUECB1B", params.p290).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p291 = params.p88;
-        validate_finite_parameter("MUECB0LPB", params.p291).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p292 = params.p89;
-        validate_finite_parameter("MUECB1LPB", params.p292).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p293 = params.p90;
-        validate_finite_parameter("MUECB0L2B", params.p293).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p294 = params.p91;
-        validate_finite_parameter("MUECB0L2PB", params.p294).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p295 = params.p92;
-        validate_finite_parameter("MUECB1L2B", params.p295).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p296 = params.p93;
-        validate_finite_parameter("MUECB1L2PB", params.p296).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p297 = 0.0;
-        params.p298 = 0.0;
-        params.p299 = 0.0;
-        params.p300 = 0.0;
-        params.p301 = 1.0;
-        params.p302 = params.p299;
-        validate_finite_parameter("MUEQBB", params.p302).expect("generated Verilog-A parameter default must satisfy declared range");
-        params.p303 = 0.0;
-        params.p304 = 0.0;
-        params.p305 = 0.0;
-        params.p306 = 0.0;
-        params.p307 = 0.0;
-        params.p308 = 1.0;
-        params.p309 = 1.0;
-        params.p310 = 1e-6;
-        params.p311 = 1e-6;
-        params.p312 = 0.0;
-        params.p313 = 0.0;
-        params.p314 = 0.0;
-        params.p315 = 1e19;
-        params.p316 = 1000.0;
-        params.p317 = 1000.0;
-        params.p318 = 30000000.0;
-        params.p319 = 30000000.0;
-        params.p320 = 0.0;
-        params.p321 = 0.0;
-        params.p322 = 1e-6;
-        params.p323 = 1.0;
-        params.p324 = 1.0;
-        params.p325 = 0.0;
-        params.p326 = 0.0;
-        params.p327 = 1.0;
-        params.p328 = 0.0;
-        params.p329 = 1.0;
-        params.p330 = 0.0;
-        params.p331 = 1.0;
-        params
+        *Self::new_box()
     }
 }
 
@@ -752,18 +763,34 @@ fn validate_parameter(
     }
     Ok(())
 }
+fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
+fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
+    let mut boxed = Box::<[bool; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 13],
     pub branches: [usize; 8],
-    pub params: Parameters,
-    pub(crate) param_given: [bool; 332],
+    pub params: Box<Parameters>,
+    pub(crate) param_given: Box<[bool; 332]>,
     pub(crate) multiplicity: f64,
-    pub(crate) ddt_state_current: [f64; 9],
-    pub(crate) ddt_state_previous: [f64; 9],
-    pub(crate) ddt_state_initialized: [bool; 9],
-    pub(crate) idt_state_current: [f64; 0],
-    pub(crate) idt_state_previous: [f64; 0],
-    pub(crate) idt_state_initialized: [bool; 0],
+    pub(crate) ddt_state_current: Box<[f64; 9]>,
+    pub(crate) ddt_state_previous: Box<[f64; 9]>,
+    pub(crate) ddt_state_initialized: Box<[bool; 9]>,
+    pub(crate) idt_state_current: Box<[f64; 0]>,
+    pub(crate) idt_state_previous: Box<[f64; 0]>,
+    pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) scratch: Option<Box<GenericScratch<1096, 13, 8>>>,
@@ -776,15 +803,15 @@ impl Clone for Instance {
         Self {
             nodes: self.nodes,
             branches: self.branches,
-            params: self.params,
-            param_given: self.param_given,
+            params: self.params.clone(),
+            param_given: self.param_given.clone(),
             multiplicity: self.multiplicity,
-            ddt_state_current: self.ddt_state_current,
-            ddt_state_previous: self.ddt_state_previous,
-            ddt_state_initialized: self.ddt_state_initialized,
-            idt_state_current: self.idt_state_current,
-            idt_state_previous: self.idt_state_previous,
-            idt_state_initialized: self.idt_state_initialized,
+            ddt_state_current: self.ddt_state_current.clone(),
+            ddt_state_previous: self.ddt_state_previous.clone(),
+            ddt_state_initialized: self.ddt_state_initialized.clone(),
+            idt_state_current: self.idt_state_current.clone(),
+            idt_state_previous: self.idt_state_previous.clone(),
+            idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
             scratch: None,
@@ -814,19 +841,19 @@ impl Instance {
         Self {
             nodes: mapped,
             branches: [0usize; Self::BRANCH_COUNT],
-            params: Parameters::default(),
-            param_given: [false; Self::PARAMETER_COUNT],
+            params: Parameters::new_box(),
+            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
             multiplicity: 1.0,
-            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],
-            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],
-            idt_state_current: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_previous: [0.0; Self::IDT_STATE_COUNT],
-            idt_state_initialized: [false; Self::IDT_STATE_COUNT],
+            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
+            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),
+            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
+            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scratch: Some(Box::new(GenericScratch::new())),
-            reactive_scratch: Some(Box::new(GenericReactiveScratch::new())),
+            scratch: Some(GenericScratch::new_box()),
+            reactive_scratch: Some(GenericReactiveScratch::new_box()),
         }
     }
 

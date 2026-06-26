@@ -24,6 +24,16 @@ mod stamp_blocks_4;
 mod stamp_blocks_5;
 #[path = "stamp_blocks_6.rs"]
 mod stamp_blocks_6;
+#[path = "stamp_blocks_7.rs"]
+mod stamp_blocks_7;
+#[path = "stamp_blocks_8.rs"]
+mod stamp_blocks_8;
+#[path = "stamp_blocks_9.rs"]
+mod stamp_blocks_9;
+#[path = "stamp_blocks_10.rs"]
+mod stamp_blocks_10;
+#[path = "stamp_blocks_11.rs"]
+mod stamp_blocks_11;
 
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 
@@ -95,20 +105,20 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
 
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
-        let param_given = &self.param_given;
+        let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
-        let ddt_state_current = &mut self.ddt_state_current;
-        let ddt_state_previous = &mut self.ddt_state_previous;
-        let ddt_state_initialized = &mut self.ddt_state_initialized;
+        let ddt_state_current = self.ddt_state_current.as_mut();
+        let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(Scratch::new())).as_mut(),
+            slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
         Self::stamp_transient_block_0(ctx, s, p, nodes);
@@ -489,40 +499,91 @@ impl Instance {
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_3(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_transient_equations_block_4(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_4(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_5(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_transient_equations_block_6(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_6(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_7(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_transient_equations_block_8(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_9(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_10(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_11(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_12(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_13(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_14(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_15(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_16(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_17(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_18(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_19(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_20(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_21(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_8(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_9(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_10(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_11(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_12(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_13(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_14(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_15(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_16(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_17(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_18(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_19(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_20(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_21(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_transient_equations_block_22(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_23(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_24(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_25(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_26(stamper, s, branches);
+        Self::stamp_transient_equations_block_25(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_26(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_27(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_28(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_29(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_30(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_31(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_32(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_33(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_34(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_35(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_36(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_37(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_38(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_39(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_40(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_41(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_42(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_43(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_44(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_45(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_46(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_47(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_48(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_49(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_50(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_51(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_52(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_53(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_54(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_55(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_56(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_57(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_58(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_59(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_60(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_61(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_62(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_63(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_64(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_65(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_66(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_67(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_68(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_69(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_70(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_71(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_72(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_73(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_74(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_75(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_76(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_77(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
-        let param_given = &self.param_given;
+        let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let s = match &mut self.reactive_scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(ReactiveScratch::new())).as_mut(),
+            slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
         };
 
         Self::stamp_reactive_block_0(ctx, s, p, nodes);
@@ -574,7 +635,41 @@ impl Instance {
         Self::stamp_reactive_equations_block_17(stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_18(stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_19(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_20(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_21(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_20(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_21(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_22(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_23(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_24(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_25(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_26(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_27(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_28(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_29(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_30(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_31(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_32(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_33(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_34(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_35(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_36(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_37(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_38(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_39(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_40(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_41(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_42(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_43(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_44(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_45(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_46(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_47(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_48(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_49(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_50(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_51(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_52(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_53(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_54(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_55(ctx, stamper, s, p, nodes, multiplicity);
     }
 }

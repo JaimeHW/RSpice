@@ -89,20 +89,20 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
 
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
-        let param_given = &self.param_given;
+        let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
-        let ddt_state_current = &mut self.ddt_state_current;
-        let ddt_state_previous = &mut self.ddt_state_previous;
-        let ddt_state_initialized = &mut self.ddt_state_initialized;
+        let ddt_state_current = self.ddt_state_current.as_mut();
+        let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(Scratch::new())).as_mut(),
+            slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
         Self::stamp_transient_block_0(s, p, param_given);
@@ -216,22 +216,25 @@ impl Instance {
 
         Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_2(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_3(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_transient_equations_block_4(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_5(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_3(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_4(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_transient_equations_block_5(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_transient_equations_block_6(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_7(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_8(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_9(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
-        let param_given = &self.param_given;
+        let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let s = match &mut self.reactive_scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(ReactiveScratch::new())).as_mut(),
+            slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
         };
 
         Self::stamp_reactive_block_0(s, p, param_given);
@@ -258,7 +261,9 @@ impl Instance {
         Self::stamp_reactive_block_21(ctx, s, p, nodes);
 
         Self::stamp_reactive_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_1(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_2(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_3(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_4(stamper, s, p, nodes, branches, multiplicity);
     }
 }

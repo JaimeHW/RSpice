@@ -91,20 +91,20 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
 
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
-        let param_given = &self.param_given;
+        let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
-        let ddt_state_current = &mut self.ddt_state_current;
-        let ddt_state_previous = &mut self.ddt_state_previous;
-        let ddt_state_initialized = &mut self.ddt_state_initialized;
+        let ddt_state_current = self.ddt_state_current.as_mut();
+        let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(Scratch::new())).as_mut(),
+            slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
         Self::stamp_transient_block_0(ctx, s, p);
@@ -167,15 +167,16 @@ impl Instance {
 
         Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_2(stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_3(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_4(ctx, stamper, s, p, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq39_value: f64 = 0.0;
         stamper.stamp_current_const(
             Some(nodes[5]),
             None,
             multiplicity * (eq39_value),
         );
-        Self::stamp_transient_equations_block_4(ctx, stamper, s, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_5(ctx, stamper, s, nodes, branches, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq45_e779: f64 = (s.v[334] * s.v[1805]);
         let eq45_e779_d_n0: f64 = ((s.dn[334][0] * s.v[1805]) + (s.v[334] * s.dn[1805][0]));
         let eq45_e779_d_n1: f64 = ((s.dn[334][1] * s.v[1805]) + (s.v[334] * s.dn[1805][1]));
@@ -191,6 +192,10 @@ impl Instance {
         let eq45_e779_d_n11: f64 = ((s.dn[334][11] * s.v[1805]) + (s.v[334] * s.dn[1805][11]));
         let eq45_e779_d_n12: f64 = ((s.dn[334][12] * s.v[1805]) + (s.v[334] * s.dn[1805][12]));
         let eq45_e779_d_n13: f64 = ((s.dn[334][13] * s.v[1805]) + (s.v[334] * s.dn[1805][13]));
+        let eq45_e779_d_b0: f64 = ((s.db[334][0] * s.v[1805]) + (s.v[334] * s.db[1805][0]));
+        let eq45_e779_d_b1: f64 = ((s.db[334][1] * s.v[1805]) + (s.v[334] * s.db[1805][1]));
+        let eq45_e779_d_b2: f64 = ((s.db[334][2] * s.v[1805]) + (s.v[334] * s.db[1805][2]));
+        let eq45_e779_d_b3: f64 = ((s.db[334][3] * s.v[1805]) + (s.v[334] * s.db[1805][3]));
         let eq45_e781: f64 = (eq45_e779 * eq39_value);
         let eq45_e781_d_n0: f64 = (eq45_e779_d_n0 * eq39_value);
         let eq45_e781_d_n1: f64 = (eq45_e779_d_n1 * eq39_value);
@@ -206,9 +211,13 @@ impl Instance {
         let eq45_e781_d_n11: f64 = (eq45_e779_d_n11 * eq39_value);
         let eq45_e781_d_n12: f64 = (eq45_e779_d_n12 * eq39_value);
         let eq45_e781_d_n13: f64 = (eq45_e779_d_n13 * eq39_value);
+        let eq45_e781_d_b0: f64 = (eq45_e779_d_b0 * eq39_value);
+        let eq45_e781_d_b1: f64 = (eq45_e779_d_b1 * eq39_value);
+        let eq45_e781_d_b2: f64 = (eq45_e779_d_b2 * eq39_value);
+        let eq45_e781_d_b3: f64 = (eq45_e779_d_b3 * eq39_value);
         let eq45_value: f64 = eq45_e781;
         let eq45_node_derivatives: [f64; 14] = [eq45_e781_d_n0, eq45_e781_d_n1, eq45_e781_d_n2, eq45_e781_d_n3, eq45_e781_d_n4, eq45_e781_d_n5, eq45_e781_d_n6, eq45_e781_d_n7, eq45_e781_d_n8, eq45_e781_d_n9, eq45_e781_d_n10, eq45_e781_d_n11, eq45_e781_d_n12, eq45_e781_d_n13];
-        let eq45_branch_derivatives: [f64; 0] = [];
+        let eq45_branch_derivatives: [f64; 4] = [eq45_e781_d_b0, eq45_e781_d_b1, eq45_e781_d_b2, eq45_e781_d_b3];
         stamper.stamp_current_dense(
             Some(nodes[7]),
             Some(nodes[6]),
@@ -219,18 +228,18 @@ impl Instance {
             &eq45_branch_derivatives,
             multiplicity,
         );
-        Self::stamp_transient_equations_block_5(stamper, nodes, multiplicity);
+        Self::stamp_transient_equations_block_6(stamper, nodes, multiplicity);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
-        let param_given = &self.param_given;
+        let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let s = match &mut self.reactive_scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(ReactiveScratch::new())).as_mut(),
+            slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
         };
 
         Self::stamp_reactive_block_0(ctx, s, p);
@@ -266,7 +275,8 @@ impl Instance {
         Self::stamp_reactive_block_30(s, p);
 
         Self::stamp_reactive_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_2(ctx, stamper, s, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_1(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_3(ctx, stamper, s, nodes, branches, multiplicity);
     }
 }

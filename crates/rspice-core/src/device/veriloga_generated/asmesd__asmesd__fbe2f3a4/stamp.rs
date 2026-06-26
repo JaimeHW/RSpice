@@ -83,19 +83,19 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
 
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
-        let ddt_state_current = &mut self.ddt_state_current;
-        let ddt_state_previous = &mut self.ddt_state_previous;
-        let ddt_state_initialized = &mut self.ddt_state_initialized;
+        let ddt_state_current = self.ddt_state_current.as_mut();
+        let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(Scratch::new())).as_mut(),
+            slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
         Self::stamp_transient_block_0(ctx, s, p, nodes);
@@ -158,13 +158,13 @@ impl Instance {
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let p = &self.params;
+        let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
         let multiplicity = (*self).multiplicity;
         let s = match &mut self.reactive_scratch {
             Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Box::new(ReactiveScratch::new())).as_mut(),
+            slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
         };
 
         Self::stamp_reactive_block_0(ctx, s, p, nodes);
