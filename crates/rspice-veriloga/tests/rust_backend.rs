@@ -3469,6 +3469,93 @@ fn rust_backend_directly_stores_mixed_scaled_sub_from_scalar_multiply_helpers() 
 }
 
 #[test]
+fn rust_backend_directly_stores_square_sub_from_scalar_multiply_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            compact_expression_direct_store_square_sub_scaled_multiply_helpers_source(),
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact direct store square sub-from-scalar multiply helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_square_mul_sub_from_scalar_scaled_sub_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value_left: usize, value_scalar: f64, value: usize, value_scale: f64, value_output_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_square_mul_sub_from_scalar_scaled_sub_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "square sub-from-scalar multiply roots should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::mul_sub_from_scalar_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::square("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_double_nested_square_sub_from_scalar_multiply_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            compact_expression_direct_store_double_nested_square_sub_scaled_multiply_helpers_source(
+            ),
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact direct store double nested square sub-from-scalar multiply helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_square_mul_sub_from_scalar_double_scaled_sub_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value_left: usize, value_scalar: f64, nested_left: usize, nested_scalar: f64, nested_value: usize, nested_value_scale: f64, nested_output_scale: f64, value_output_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_square_mul_sub_from_scalar_double_scaled_sub_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "double nested square sub-from-scalar multiply roots should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::mul_sub_from_scalar_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::square("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_directly_stores_offset_product_add_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_offset_product_helpers_source())
@@ -12582,6 +12669,26 @@ endmodule
 "#
 }
 
+fn compact_expression_direct_store_square_sub_scaled_multiply_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_square_sub_scaled_multiply_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    parameter real input_gain = 0.25;
+    parameter real inner_gain = 0.3333333333333333;
+    parameter real output_gain = 0.5;
+    real a;
+    real shaped;
+    analog begin
+        a = V(p, n);
+        shaped = (a * a) * (limit - (a * (limit - (a * input_gain)) * inner_gain)) * output_gain;
+        I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
 fn compact_expression_direct_store_offset_product_helpers_source() -> &'static str {
     r#"
 module compact_expression_direct_store_offset_product_helpers(p, n);
@@ -12599,6 +12706,28 @@ module compact_expression_direct_store_offset_product_helpers(p, n);
         q = V(p);
         r = V(n);
         shaped = (a * value_scale) + ((q * (r + offset)) * product_scale);
+        I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_double_nested_square_sub_scaled_multiply_helpers_source()
+-> &'static str {
+    r#"
+module compact_expression_direct_store_double_nested_square_sub_scaled_multiply_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    parameter real input_gain = 0.2;
+    parameter real inner_gain = 0.25;
+    parameter real middle_gain = 0.3333333333333333;
+    parameter real output_gain = 0.5;
+    real a;
+    real shaped;
+    analog begin
+        a = V(p, n);
+        shaped = (a * a) * (limit - (a * (limit - (a * (limit - (a * input_gain)) * inner_gain)) * middle_gain)) * output_gain;
         I(p, n) <+ shaped;
     end
 endmodule

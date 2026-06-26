@@ -4827,6 +4827,78 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_square_mul_sub_from_scalar_ad_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value: AdValue, output_scale: f64) {",
+    "        let left_value = self.values[left];",
+    "        let square_value = left_value * left_value;",
+    "        let right_value = scalar - value.value;",
+    "        let left_node_derivatives = self.node_derivatives[left];",
+    "        let left_branch_derivatives = self.branch_derivatives[left];",
+    "        let scaled_square_value = square_value * output_scale;",
+    "        let scaled_right_value = right_value * output_scale;",
+    "        let square_derivative_scale = 2.0 * left_value * scaled_right_value;",
+    "        self.values[index] = square_value * scaled_right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * square_derivative_scale - scaled_square_value * value.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * square_derivative_scale - scaled_square_value * value.branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_square_mul_sub_from_scalar_scaled_sub_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value_left: usize, value_scalar: f64, value: usize, value_scale: f64, value_output_scale: f64, output_scale: f64) {",
+    "        let left_value = self.values[left];",
+    "        let square_value = left_value * left_value;",
+    "        let value_left_value = self.values[value_left];",
+    "        let value_value = self.values[value];",
+    "        let nested_right_value = value_scalar - value_value * value_scale;",
+    "        let nested_value = value_left_value * nested_right_value * value_output_scale;",
+    "        let root_right_value = scalar - nested_value;",
+    "        let left_node_derivatives = self.node_derivatives[left];",
+    "        let value_left_node_derivatives = self.node_derivatives[value_left];",
+    "        let value_node_derivatives = self.node_derivatives[value];",
+    "        let left_branch_derivatives = self.branch_derivatives[left];",
+    "        let value_left_branch_derivatives = self.branch_derivatives[value_left];",
+    "        let value_branch_derivatives = self.branch_derivatives[value];",
+    "        let scaled_square_value = square_value * output_scale;",
+    "        let scaled_root_right_value = root_right_value * output_scale;",
+    "        let square_derivative_scale = 2.0 * left_value * scaled_root_right_value;",
+    "        let nested_left_derivative_scale = nested_right_value * value_output_scale;",
+    "        let nested_value_derivative_scale = value_left_value * value_scale * value_output_scale;",
+    "        self.values[index] = square_value * scaled_root_right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * square_derivative_scale - scaled_square_value * (value_left_node_derivatives[axis] * nested_left_derivative_scale - value_node_derivatives[axis] * nested_value_derivative_scale); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * square_derivative_scale - scaled_square_value * (value_left_branch_derivatives[axis] * nested_left_derivative_scale - value_branch_derivatives[axis] * nested_value_derivative_scale); }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_square_mul_sub_from_scalar_double_scaled_sub_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value_left: usize, value_scalar: f64, nested_left: usize, nested_scalar: f64, nested_value: usize, nested_value_scale: f64, nested_output_scale: f64, value_output_scale: f64, output_scale: f64) {",
+    "        let left_value = self.values[left];",
+    "        let square_value = left_value * left_value;",
+    "        let value_left_value = self.values[value_left];",
+    "        let nested_left_value = self.values[nested_left];",
+    "        let nested_value_value = self.values[nested_value];",
+    "        let nested_right_value = nested_scalar - nested_value_value * nested_value_scale;",
+    "        let nested_value_result = nested_left_value * nested_right_value * nested_output_scale;",
+    "        let value_right_value = value_scalar - nested_value_result;",
+    "        let value_result = value_left_value * value_right_value * value_output_scale;",
+    "        let root_right_value = scalar - value_result;",
+    "        let left_node_derivatives = self.node_derivatives[left];",
+    "        let value_left_node_derivatives = self.node_derivatives[value_left];",
+    "        let nested_left_node_derivatives = self.node_derivatives[nested_left];",
+    "        let nested_value_node_derivatives = self.node_derivatives[nested_value];",
+    "        let left_branch_derivatives = self.branch_derivatives[left];",
+    "        let value_left_branch_derivatives = self.branch_derivatives[value_left];",
+    "        let nested_left_branch_derivatives = self.branch_derivatives[nested_left];",
+    "        let nested_value_branch_derivatives = self.branch_derivatives[nested_value];",
+    "        let scaled_square_value = square_value * output_scale;",
+    "        let scaled_root_right_value = root_right_value * output_scale;",
+    "        let square_derivative_scale = 2.0 * left_value * scaled_root_right_value;",
+    "        let value_left_derivative_scale = value_right_value * value_output_scale;",
+    "        let value_nested_derivative_scale = value_left_value * value_output_scale;",
+    "        let nested_left_derivative_scale = nested_right_value * nested_output_scale;",
+    "        let nested_value_derivative_scale = nested_left_value * nested_value_scale * nested_output_scale;",
+    "        self.values[index] = square_value * scaled_root_right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * square_derivative_scale - scaled_square_value * (value_left_node_derivatives[axis] * value_left_derivative_scale - value_nested_derivative_scale * (nested_left_node_derivatives[axis] * nested_left_derivative_scale - nested_value_node_derivatives[axis] * nested_value_derivative_scale)); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * square_derivative_scale - scaled_square_value * (value_left_branch_derivatives[axis] * value_left_derivative_scale - value_nested_derivative_scale * (nested_left_branch_derivatives[axis] * nested_left_derivative_scale - nested_value_branch_derivatives[axis] * nested_value_derivative_scale)); }",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_mul_sub_from_scalar_ad_lhs(&mut self, index: usize, scalar: f64, value: AdValue, source: usize) {",
     "        let left_value = scalar - value.value;",
     "        let source_value = self.values[source];",
@@ -10945,6 +11017,58 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_rhs_scaled_output")
         && args.len() == 4
     {
+        if let Some(square_args) = compact_ad_call_args(args[0], "square")
+            && square_args.len() == 1
+            && let Some(left) = compact_scratch_ad_value_index(square_args[0])
+        {
+            if let Some(value_args) =
+                compact_ad_call_args(args[2], "mul_sub_from_scalar_rhs_scaled_output")
+                && value_args.len() == 4
+                && let Some(value_left) = compact_scratch_ad_value_index(value_args[0])
+            {
+                if let Some(nested_args) =
+                    compact_ad_call_args(value_args[2], "mul_sub_from_scalar_rhs_scaled_output")
+                    && nested_args.len() == 4
+                    && let Some(nested_left) = compact_scratch_ad_value_index(nested_args[0])
+                    && let Some(scaled_nested_value_args) =
+                        compact_ad_call_args(nested_args[2], "scale")
+                    && scaled_nested_value_args.len() == 2
+                    && let Some(scaled_nested_value) =
+                        compact_scratch_ad_value_index(scaled_nested_value_args[0])
+                {
+                    return Some(format!(
+                        "scratch.store_square_mul_sub_from_scalar_double_scaled_sub_rhs_scaled_output({target_index}, {left}, {}, {value_left}, {}, {nested_left}, {}, {scaled_nested_value}, {}, {}, {}, {});",
+                        args[1],
+                        value_args[1],
+                        nested_args[1],
+                        scaled_nested_value_args[1],
+                        nested_args[3],
+                        value_args[3],
+                        args[3]
+                    ));
+                }
+
+                if let Some(scaled_value_args) = compact_ad_call_args(value_args[2], "scale")
+                    && scaled_value_args.len() == 2
+                    && let Some(scaled_value) = compact_scratch_ad_value_index(scaled_value_args[0])
+                {
+                    return Some(format!(
+                        "scratch.store_square_mul_sub_from_scalar_scaled_sub_rhs_scaled_output({target_index}, {left}, {}, {value_left}, {}, {scaled_value}, {}, {}, {});",
+                        args[1], value_args[1], scaled_value_args[1], value_args[3], args[3]
+                    ));
+                }
+            }
+
+            if !compact_non_atomic_ad_value(args[2]) {
+                return None;
+            }
+
+            return Some(format!(
+                "scratch.store_square_mul_sub_from_scalar_ad_rhs_scaled_output({target_index}, {left}, {}, {}, {});",
+                args[1], args[2], args[3]
+            ));
+        }
+
         let left = compact_scratch_ad_value_index(args[0])?;
         if let Some(value_args) = compact_ad_call_args(args[2], "scale")
             && value_args.len() == 2
