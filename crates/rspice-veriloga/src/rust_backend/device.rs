@@ -307,6 +307,7 @@ fn compact_generated_stamp_helper_surface(mut source: String) -> String {
 }
 
 fn compact_generated_stamp_surface(mut source: String) -> String {
+    source = compact_immediate_generated_ad_local_stores(source);
     source = compact_conditional_ad_rvalue_stores(source);
     for (from, to) in [
         ("scratch.reactive_node_derivatives", "scratch.rdn"),
@@ -338,6 +339,127 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
         source = source.replace(from, to);
     }
     merge_adjacent_simple_if_blocks(cache_context_reads(source))
+}
+
+fn compact_immediate_generated_ad_local_stores(source: String) -> String {
+    const NEEDLE: &str = "let assign";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let let_start = cursor + relative_start;
+        let line_start = source[..let_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..let_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = let_start + "let".len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_immediate_generated_ad_local_store_replacement(&source, let_start, indent)
+        else {
+            let skip_to = let_start + "let".len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_immediate_generated_ad_local_store_replacement(
+    source: &str,
+    let_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    let name_start = let_start + "let ".len();
+    let name_end = source[name_start..]
+        .find(|ch: char| !is_compact_ident_char(ch))
+        .map(|offset| name_start + offset)?;
+    let name = &source[name_start..name_end];
+    if !compact_generated_ad_local(name) {
+        return None;
+    }
+
+    let mut cursor = skip_compact_horizontal_whitespace(source, name_end);
+    if source.as_bytes().get(cursor) != Some(&b':') {
+        return None;
+    }
+    cursor = skip_compact_horizontal_whitespace(source, cursor + 1);
+    if !source[cursor..].starts_with("AdValue") {
+        return None;
+    }
+    cursor = skip_compact_horizontal_whitespace(source, cursor + "AdValue".len());
+    if source.as_bytes().get(cursor) != Some(&b'=') {
+        return None;
+    }
+    let value_start = cursor + 1;
+    let value_end = value_start + find_top_level_ascii_byte(&source[value_start..], b';')?;
+    let value = source[value_start..value_end].trim();
+
+    let store_start = skip_compact_whitespace(source, value_end + 1);
+    const STORE_NEEDLE: &str = "scratch.store_ad_value(";
+    if !source[store_start..].starts_with(STORE_NEEDLE) {
+        return None;
+    }
+
+    let open_paren = store_start + "scratch.store_ad_value".len();
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 2 || args[1].trim() != name {
+        return None;
+    }
+    let target_index = args[0].trim().parse().ok()?;
+    let replacement = compact_direct_ad_value_store_replacement(target_index, value, indent)?;
+
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_direct_ad_value_store_replacement(
+    target_index: usize,
+    value: &str,
+    indent: &str,
+) -> Option<String> {
+    if let Some(source_index) = compact_scratch_ad_value_index(value) {
+        if source_index == target_index {
+            return Some(String::new());
+        }
+        let mut replacement = String::new();
+        push_indented_compact_line(
+            &mut replacement,
+            indent,
+            &format!("scratch.copy_ad({target_index}, {source_index});"),
+        );
+        return Some(replacement);
+    }
+
+    if let Some(conditional) = parse_compact_if_block(value) {
+        let then_store = compact_conditional_ad_branch_store(target_index, conditional.then_expr)?;
+        let else_store = compact_conditional_ad_branch_store(target_index, conditional.else_expr)?;
+        return Some(compact_conditional_store_replacement(
+            indent,
+            conditional.condition,
+            then_store,
+            else_store,
+        ));
+    }
+
+    let line = compact_scratch_store_helper_call(target_index, value)?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    Some(replacement)
 }
 
 fn compact_conditional_ad_rvalue_stores(source: String) -> String {
@@ -393,30 +515,30 @@ fn compact_conditional_ad_rvalue_store_replacement(
     let then_store = compact_conditional_ad_branch_store(target_index, conditional.then_expr)?;
     let else_store = compact_conditional_ad_branch_store(target_index, conditional.else_expr)?;
 
-    let mut statement_end = close_paren + 1;
-    while matches!(source.as_bytes().get(statement_end), Some(b' ' | b'\t')) {
-        statement_end += 1;
-    }
-    if source.as_bytes().get(statement_end) != Some(&b';') {
-        return None;
-    }
-    statement_end += 1;
-    if source.as_bytes().get(statement_end) == Some(&b'\r')
-        && source.as_bytes().get(statement_end + 1) == Some(&b'\n')
-    {
-        statement_end += 2;
-    } else if source.as_bytes().get(statement_end) == Some(&b'\n') {
-        statement_end += 1;
-    }
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    let replacement = compact_conditional_store_replacement(
+        indent,
+        conditional.condition,
+        then_store,
+        else_store,
+    );
+    Some((statement_end, replacement))
+}
 
+fn compact_conditional_store_replacement(
+    indent: &str,
+    condition: &str,
+    then_store: Option<String>,
+    else_store: Option<String>,
+) -> String {
     if then_store.is_none() && else_store.is_none() {
-        return Some((statement_end, String::new()));
+        return String::new();
     }
 
     let mut replacement = String::new();
     replacement.push_str(indent);
     replacement.push_str("if ");
-    replacement.push_str(conditional.condition.trim());
+    replacement.push_str(condition.trim());
     replacement.push_str(" {\n");
     let branch_indent = format!("{indent}    ");
     if let Some(line) = then_store {
@@ -429,7 +551,7 @@ fn compact_conditional_ad_rvalue_store_replacement(
     }
     replacement.push_str(indent);
     replacement.push_str("}\n");
-    Some((statement_end, replacement))
+    replacement
 }
 
 #[derive(Debug)]
@@ -501,6 +623,46 @@ fn compact_conditional_ad_branch_store(target_index: usize, value: &str) -> Opti
     }
 
     compact_scratch_store_helper_call(target_index, value).map(Some)
+}
+
+fn compact_statement_end_after_call(source: &str, close_paren: usize) -> Option<usize> {
+    let mut statement_end = close_paren + 1;
+    while matches!(source.as_bytes().get(statement_end), Some(b' ' | b'\t')) {
+        statement_end += 1;
+    }
+    if source.as_bytes().get(statement_end) != Some(&b';') {
+        return None;
+    }
+    statement_end += 1;
+    if source.as_bytes().get(statement_end) == Some(&b'\r')
+        && source.as_bytes().get(statement_end + 1) == Some(&b'\n')
+    {
+        statement_end += 2;
+    } else if source.as_bytes().get(statement_end) == Some(&b'\n') {
+        statement_end += 1;
+    }
+    Some(statement_end)
+}
+
+fn skip_compact_horizontal_whitespace(source: &str, mut index: usize) -> usize {
+    while matches!(source.as_bytes().get(index), Some(b' ' | b'\t')) {
+        index += 1;
+    }
+    index
+}
+
+fn skip_compact_whitespace(source: &str, mut index: usize) -> usize {
+    while matches!(
+        source.as_bytes().get(index),
+        Some(b' ' | b'\t' | b'\r' | b'\n')
+    ) {
+        index += 1;
+    }
+    index
+}
+
+fn is_compact_ident_char(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn find_matching_ascii_delimiter(
@@ -586,6 +748,25 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value(7, {"), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_immediate_generated_ad_local_store_as_direct_store() {
+        let source = r#"
+fn stamp() {
+    let assign10_ad_e20: AdValue = AdValue::mul(scratch.ad_value(2), scratch.ad_value(3));
+    scratch.store_ad_value(8, assign10_ad_e20);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(compact.contains("s.store_mul(8, 2, 3);"), "{compact}");
+        assert!(!compact.contains("let assign10_ad_e20"), "{compact}");
+        assert!(
+            !compact.contains("s.store_ad_value(8, assign10_ad_e20);"),
+            "{compact}"
+        );
     }
 }
 

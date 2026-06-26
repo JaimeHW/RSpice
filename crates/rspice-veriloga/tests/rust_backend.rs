@@ -2188,7 +2188,9 @@ fn rust_backend_fuses_expression_scaled_multiply_chains() {
         stamp.contains("A::mul_scaled_lhs(")
             || stamp.contains("A::mul_scaled_rhs(")
             || stamp.contains("A::add_scaled_product(")
-            || stamp.contains("A::add_scaled_products("),
+            || stamp.contains("A::add_scaled_products(")
+            || stamp.contains("s.store_add_scaled_product(")
+            || stamp.contains("s.store_add_scaled_products("),
         "{stamp}"
     );
     assert!(!stamp.contains("A::mul(A::scale("), "{stamp}");
