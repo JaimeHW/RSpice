@@ -5649,6 +5649,10 @@ fn rust_backend_fuses_sub_from_scalar_mixed_multiply_store_helpers() {
         "store_mul_sub_from_scalar_rhs",
         "store_mul_sub_from_scalar_ad_lhs",
         "store_mul_sub_from_scalar_ad_rhs",
+        "store_mul_sub_from_scalar_lhs_ad_rhs",
+        "store_mul_sub_from_scalar_lhs_ad",
+        "store_mul_sub_from_scalar_rhs_ad_lhs",
+        "store_mul_sub_from_scalar_rhs_ad",
     ] {
         assert!(
             support.contains(&format!("pub(crate) fn {helper}(")),
@@ -14143,6 +14147,10 @@ module compact_sub_from_scalar_mixed_multiply_store(p, n);
     real e;
     real f;
     real g;
+    real h;
+    real i;
+    real j;
+    real k;
     analog begin
         a = V(p, n);
         b = V(n, p);
@@ -14151,7 +14159,11 @@ module compact_sub_from_scalar_mixed_multiply_store(p, n);
         e = c * (limit - b);
         f = (limit - exp(a)) * c;
         g = c * (limit - exp(b));
-        I(p, n) <+ d + e + f + g;
+        h = (limit - a) * sqrt(c);
+        i = (limit - exp(a)) * sqrt(c);
+        j = exp(a) * (limit - b);
+        k = exp(a) * (limit - sqrt(b));
+        I(p, n) <+ d + e + f + g + h + i + j + k;
     end
 endmodule
 "#

@@ -839,6 +839,74 @@ fn stamp() {
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
+
+    #[test]
+    fn rewrites_sub_from_scalar_multiply_ad_rvalue_stores_as_direct_stores() {
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(17, AdValue::mul_sub_from_scalar_rhs(AdValue::exp(scratch.ad_value(2)), params.scalar, scratch.ad_value(3)));
+    scratch.store_ad_value(18, AdValue::mul_sub_from_scalar_rhs(AdValue::exp(scratch.ad_value(2)), params.scalar, AdValue::sqrt(scratch.ad_value(3))));
+    scratch.store_ad_value(19, AdValue::mul_sub_from_scalar_lhs(params.scalar, scratch.ad_value(2), AdValue::sqrt(scratch.ad_value(3))));
+    scratch.store_ad_value(20, AdValue::mul_sub_from_scalar_lhs(params.scalar, AdValue::exp(scratch.ad_value(2)), AdValue::sqrt(scratch.ad_value(3))));
+    scratch.store_ad_value(21, AdValue::mul_sub_from_scalar_lhs_scaled_output(params.scalar, scratch.ad_value(2), scratch.ad_value(3), params.scale));
+    scratch.store_ad_value(22, AdValue::mul_sub_from_scalar_lhs_scaled_output(params.scalar, AdValue::exp(scratch.ad_value(2)), scratch.ad_value(3), params.scale));
+    scratch.store_ad_value(23, AdValue::mul_sub_from_scalar_lhs_scaled_output(params.scalar, scratch.ad_value(2), AdValue::sqrt(scratch.ad_value(3)), params.scale));
+    scratch.store_ad_value(24, AdValue::mul_sub_from_scalar_lhs_scaled_output(params.scalar, AdValue::exp(scratch.ad_value(2)), AdValue::sqrt(scratch.ad_value(3)), params.scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_rhs_ad_lhs(17, A::exp(s.ad_value(2)), p.scalar, 3);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_rhs_ad(18, A::exp(s.ad_value(2)), p.scalar, A::sqrt(s.ad_value(3)));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_lhs_ad_rhs(19, p.scalar, 2, A::sqrt(s.ad_value(3)));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_lhs_ad(20, p.scalar, A::exp(s.ad_value(2)), A::sqrt(s.ad_value(3)));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_lhs_scaled_output(21, p.scalar, 2, 3, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_lhs_scaled_ad_lhs(22, p.scalar, A::exp(s.ad_value(2)), 3, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_lhs_scaled_ad_rhs(23, p.scalar, 2, A::sqrt(s.ad_value(3)), p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_sub_from_scalar_lhs_scaled_ad(24, p.scalar, A::exp(s.ad_value(2)), A::sqrt(s.ad_value(3)), p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
 }
 
 #[derive(Debug)]
@@ -5405,6 +5473,92 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = source_value * right_value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * right_value - source_value * value_node_derivatives[axis]; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * right_value - source_value * value_branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_lhs_ad_rhs(&mut self, index: usize, scalar: f64, value: usize, right: AdValue) {",
+    "        let left_value = scalar - self.values[value];",
+    "        let value_node_derivatives = self.node_derivatives[value];",
+    "        let value_branch_derivatives = self.branch_derivatives[value];",
+    "        self.values[index] = left_value * right.value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -value_node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -value_branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_lhs_ad(&mut self, index: usize, scalar: f64, value: AdValue, right: AdValue) {",
+    "        let left_value = scalar - value.value;",
+    "        self.values[index] = left_value * right.value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -value.node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -value.branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_rhs_ad_lhs(&mut self, index: usize, left: AdValue, scalar: f64, value: usize) {",
+    "        let right_value = scalar - self.values[value];",
+    "        let value_node_derivatives = self.node_derivatives[value];",
+    "        let value_branch_derivatives = self.branch_derivatives[value];",
+    "        self.values[index] = left.value * right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value - left.value * value_node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value - left.value * value_branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_rhs_ad(&mut self, index: usize, left: AdValue, scalar: f64, value: AdValue) {",
+    "        let right_value = scalar - value.value;",
+    "        self.values[index] = left.value * right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value - left.value * value.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value - left.value * value.branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_lhs_scaled_output(&mut self, index: usize, scalar: f64, value: usize, right: usize, output_scale: f64) {",
+    "        let left_value = scalar - self.values[value];",
+    "        let right_value = self.values[right];",
+    "        let value_node_derivatives = self.node_derivatives[value];",
+    "        let right_node_derivatives = self.node_derivatives[right];",
+    "        let value_branch_derivatives = self.branch_derivatives[value];",
+    "        let right_branch_derivatives = self.branch_derivatives[right];",
+    "        let scaled_left_value = left_value * output_scale;",
+    "        let scaled_right_value = right_value * output_scale;",
+    "        self.values[index] = left_value * scaled_right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -value_node_derivatives[axis] * scaled_right_value + scaled_left_value * right_node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -value_branch_derivatives[axis] * scaled_right_value + scaled_left_value * right_branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_lhs_scaled_ad_lhs(&mut self, index: usize, scalar: f64, value: AdValue, right: usize, output_scale: f64) {",
+    "        let left_value = scalar - value.value;",
+    "        let right_value = self.values[right];",
+    "        let right_node_derivatives = self.node_derivatives[right];",
+    "        let right_branch_derivatives = self.branch_derivatives[right];",
+    "        let scaled_left_value = left_value * output_scale;",
+    "        let scaled_right_value = right_value * output_scale;",
+    "        self.values[index] = left_value * scaled_right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -value.node_derivatives[axis] * scaled_right_value + scaled_left_value * right_node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -value.branch_derivatives[axis] * scaled_right_value + scaled_left_value * right_branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_lhs_scaled_ad_rhs(&mut self, index: usize, scalar: f64, value: usize, right: AdValue, output_scale: f64) {",
+    "        let left_value = scalar - self.values[value];",
+    "        let value_node_derivatives = self.node_derivatives[value];",
+    "        let value_branch_derivatives = self.branch_derivatives[value];",
+    "        let scaled_left_value = left_value * output_scale;",
+    "        let scaled_right_value = right.value * output_scale;",
+    "        self.values[index] = left_value * scaled_right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -value_node_derivatives[axis] * scaled_right_value + scaled_left_value * right.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -value_branch_derivatives[axis] * scaled_right_value + scaled_left_value * right.branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_from_scalar_lhs_scaled_ad(&mut self, index: usize, scalar: f64, value: AdValue, right: AdValue, output_scale: f64) {",
+    "        let left_value = scalar - value.value;",
+    "        let scaled_left_value = left_value * output_scale;",
+    "        let scaled_right_value = right.value * output_scale;",
+    "        self.values[index] = left_value * scaled_right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -value.node_derivatives[axis] * scaled_right_value + scaled_left_value * right.node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -value.branch_derivatives[axis] * scaled_right_value + scaled_left_value * right.branch_derivatives[axis]; }",
     "    }",
     "",
     "    #[inline]",
@@ -13150,40 +13304,42 @@ fn compact_sub_from_scalar_mixed_multiply_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_lhs_scaled_output") {
+        if args.len() != 4 {
+            return None;
+        }
+        return compact_mul_sub_from_scalar_lhs_store_helper_call(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            Some(args[3]),
+        );
+    }
+
     if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_lhs") {
         if args.len() != 3 {
             return None;
         }
-        let right = compact_scratch_ad_value_index(args[2])?;
-        if let Some(value) = compact_scratch_ad_value_index(args[1]) {
-            return Some(format!(
-                "scratch.store_mul_sub_from_scalar_lhs({target_index}, {}, {value}, {right});",
-                args[0]
-            ));
-        }
-        let value = compact_scratch_or_non_atomic_ad_arg(args[1])?;
-        return Some(format!(
-            "scratch.store_mul_sub_from_scalar_ad_lhs({target_index}, {}, {value}, {right});",
-            args[0]
-        ));
+        return compact_mul_sub_from_scalar_lhs_store_helper_call(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            None,
+        );
     }
 
     if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_rhs") {
         if args.len() != 3 {
             return None;
         }
-        let left = compact_scratch_ad_value_index(args[0])?;
-        if let Some(value) = compact_scratch_ad_value_index(args[2]) {
-            return Some(format!(
-                "scratch.store_mul_sub_from_scalar_rhs({target_index}, {left}, {}, {value});",
-                args[1]
-            ));
-        }
-        let value = compact_scratch_or_non_atomic_ad_arg(args[2])?;
-        return Some(format!(
-            "scratch.store_mul_sub_from_scalar_ad_rhs({target_index}, {left}, {}, {value});",
-            args[1]
-        ));
+        return compact_mul_sub_from_scalar_rhs_store_helper_call(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+        );
     }
 
     let args = compact_ad_call_args(value, "mul")?;
@@ -13194,41 +13350,123 @@ fn compact_sub_from_scalar_mixed_multiply_store_helper_call(
     let left = compact_scratch_ad_value_index(args[0]);
     let right = compact_scratch_ad_value_index(args[1]);
     match (left, right) {
-        (None, Some(right)) => {
+        (None, Some(_right)) => {
             let sub_args = compact_ad_call_args(args[0], "sub_from_scalar")?;
             if sub_args.len() != 2 {
                 return None;
             }
-            if let Some(value) = compact_scratch_ad_value_index(sub_args[1]) {
-                return Some(format!(
-                    "scratch.store_mul_sub_from_scalar_lhs({target_index}, {}, {value}, {right});",
-                    sub_args[0]
-                ));
-            }
-            let value = compact_scratch_or_non_atomic_ad_arg(sub_args[1])?;
-            Some(format!(
-                "scratch.store_mul_sub_from_scalar_ad_lhs({target_index}, {}, {value}, {right});",
-                sub_args[0]
-            ))
+            compact_mul_sub_from_scalar_lhs_store_helper_call(
+                target_index,
+                sub_args[0],
+                sub_args[1],
+                args[1],
+                None,
+            )
         }
-        (Some(left), None) => {
+        (Some(_left), None) => {
             let sub_args = compact_ad_call_args(args[1], "sub_from_scalar")?;
             if sub_args.len() != 2 {
                 return None;
             }
-            if let Some(value) = compact_scratch_ad_value_index(sub_args[1]) {
-                return Some(format!(
-                    "scratch.store_mul_sub_from_scalar_rhs({target_index}, {left}, {}, {value});",
-                    sub_args[0]
-                ));
-            }
-            let value = compact_scratch_or_non_atomic_ad_arg(sub_args[1])?;
-            Some(format!(
-                "scratch.store_mul_sub_from_scalar_ad_rhs({target_index}, {left}, {}, {value});",
-                sub_args[0]
-            ))
+            compact_mul_sub_from_scalar_rhs_store_helper_call(
+                target_index,
+                args[0],
+                sub_args[0],
+                sub_args[1],
+            )
         }
         _ => None,
+    }
+}
+
+fn compact_mul_sub_from_scalar_lhs_store_helper_call(
+    target_index: usize,
+    scalar_arg: &str,
+    value_arg: &str,
+    right_arg: &str,
+    output_scale: Option<&str>,
+) -> Option<String> {
+    let value_index = compact_scratch_ad_value_index(value_arg);
+    let right_index = compact_scratch_ad_value_index(right_arg);
+    match (value_index, right_index, output_scale) {
+        (Some(value), Some(right), None) => Some(format!(
+            "scratch.store_mul_sub_from_scalar_lhs({target_index}, {scalar_arg}, {value}, {right});"
+        )),
+        (None, Some(right), None) => {
+            let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_ad_lhs({target_index}, {scalar_arg}, {value}, {right});"
+            ))
+        }
+        (Some(value), None, None) => {
+            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_lhs_ad_rhs({target_index}, {scalar_arg}, {value}, {right});"
+            ))
+        }
+        (None, None, None) => {
+            let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
+            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_lhs_ad({target_index}, {scalar_arg}, {value}, {right});"
+            ))
+        }
+        (Some(value), Some(right), Some(scale)) => Some(format!(
+            "scratch.store_mul_sub_from_scalar_lhs_scaled_output({target_index}, {scalar_arg}, {value}, {right}, {scale});"
+        )),
+        (None, Some(right), Some(scale)) => {
+            let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_lhs_scaled_ad_lhs({target_index}, {scalar_arg}, {value}, {right}, {scale});"
+            ))
+        }
+        (Some(value), None, Some(scale)) => {
+            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_lhs_scaled_ad_rhs({target_index}, {scalar_arg}, {value}, {right}, {scale});"
+            ))
+        }
+        (None, None, Some(scale)) => {
+            let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
+            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_lhs_scaled_ad({target_index}, {scalar_arg}, {value}, {right}, {scale});"
+            ))
+        }
+    }
+}
+
+fn compact_mul_sub_from_scalar_rhs_store_helper_call(
+    target_index: usize,
+    left_arg: &str,
+    scalar_arg: &str,
+    value_arg: &str,
+) -> Option<String> {
+    let left_index = compact_scratch_ad_value_index(left_arg);
+    let value_index = compact_scratch_ad_value_index(value_arg);
+    match (left_index, value_index) {
+        (Some(left), Some(value)) => Some(format!(
+            "scratch.store_mul_sub_from_scalar_rhs({target_index}, {left}, {scalar_arg}, {value});"
+        )),
+        (Some(left), None) => {
+            let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_ad_rhs({target_index}, {left}, {scalar_arg}, {value});"
+            ))
+        }
+        (None, Some(value)) => {
+            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_rhs_ad_lhs({target_index}, {left}, {scalar_arg}, {value});"
+            ))
+        }
+        (None, None) => {
+            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
+            let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
+            Some(format!(
+                "scratch.store_mul_sub_from_scalar_rhs_ad({target_index}, {left}, {scalar_arg}, {value});"
+            ))
+        }
     }
 }
 
