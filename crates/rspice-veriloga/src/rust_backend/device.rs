@@ -6006,6 +6006,20 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn add_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
+        "        let mut result = first;",
+        "        let first_value = result.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        result.value = first_value + second_value + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * first_scale + second.node_derivatives[index] * second_scale + (product_left.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * first_scale + second.branch_derivatives[index] * second_scale + (product_left.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn add_scaled_sub_value_product(scalar: f64, subtrahend: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
         "        let mut result = subtrahend;",
         "        let value_term = (scalar - result.value) * value_scale;",
@@ -12964,6 +12978,60 @@ fn compact_add_scaled_product_ad_expression(
     value_scale: &str,
     product: &CompactProduct2<'_>,
 ) -> String {
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs") {
+        if args.len() == 4 {
+            return format!(
+                "AdValue::add_scaled_inputs_product({}, {}, {}, {}, {}, {}, {})",
+                args[0],
+                compact_scalar_mul(args[1], value_scale),
+                args[2],
+                compact_scalar_mul(args[3], value_scale),
+                product.left,
+                product.right,
+                product.scale
+            );
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub_scaled_inputs") {
+        if args.len() == 4 {
+            let second_scale = compact_scalar_negate(&compact_scalar_mul(args[3], value_scale));
+            return format!(
+                "AdValue::add_scaled_inputs_product({}, {}, {}, {}, {}, {}, {})",
+                args[0],
+                compact_scalar_mul(args[1], value_scale),
+                args[2],
+                second_scale,
+                product.left,
+                product.right,
+                product.scale
+            );
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add") {
+        if args.len() == 2 {
+            return format!(
+                "AdValue::add_scaled_inputs_product({}, {value_scale}, {}, {value_scale}, {}, {}, {})",
+                args[0], args[1], product.left, product.right, product.scale
+            );
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub") {
+        if args.len() == 2 {
+            return format!(
+                "AdValue::add_scaled_inputs_product({}, {value_scale}, {}, {}, {}, {}, {})",
+                args[0],
+                args[1],
+                compact_scalar_negate(value_scale),
+                product.left,
+                product.right,
+                product.scale
+            );
+        }
+    }
+
     if let Some(args) = compact_ad_call_args(value, "sub_from_scalar") {
         if args.len() == 2 {
             return format!(
@@ -13196,6 +13264,22 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             args[2],
             args[3],
             compact_scalar_mul(args[4], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs_product") {
+        if args.len() != 7 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_inputs_product({}, {}, {}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            compact_scalar_mul(args[3], scale),
+            args[4],
+            args[5],
+            compact_scalar_mul(args[6], scale)
         ));
     }
 

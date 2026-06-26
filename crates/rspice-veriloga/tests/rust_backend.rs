@@ -2249,6 +2249,40 @@ fn rust_backend_fuses_expression_sub_from_scalar_value_product_add_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_affine_product_add_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_affine_product_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression affine product");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_inputs_product("), "{stamp}");
+    assert!(
+        !stamp.contains("A::add_scaled_product(A::add_scaled_inputs("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::add_scaled_product(A::add("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_nested_multiply_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_nested_multiply_source())
@@ -10096,6 +10130,29 @@ module compact_expression_sub_from_scalar_value_product(p, n);
         q = V(p);
         r = V(n);
         b = (limit - a) + (q * r);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_affine_product_source() -> &'static str {
+    r#"
+module compact_expression_affine_product(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real left_scale = 2.0;
+    parameter real right_scale = 3.0;
+    parameter real product_scale = 4.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = ((a * left_scale) + (q * right_scale)) + ((q * r) * product_scale);
         I(p, n) <+ b;
     end
 endmodule
