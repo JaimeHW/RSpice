@@ -666,9 +666,11 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
     assert!(stamp.contains("ctx.node_voltage(nodes[1])"));
     assert!(stamp.contains("p.p0"));
     assert!(stamp.contains("eq0_value"));
-    assert!(stamp.contains("GeneratedDerivative::node(nodes[0]"));
-    assert!(stamp.contains("GeneratedDerivative::node(nodes[1]"));
-    assert!(stamp.contains("stamper.stamp_current"));
+    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(
+        !stamp.contains("GeneratedDerivative::node"),
+        "two-node sparse currents should use the fixed-arity stamper path instead of constructing a derivative slice:\n{stamp}"
+    );
     assert!(!stamp.contains("Bytecode"));
     assert!(!stamp.contains("Interpreter"));
     assert!(!stamp.contains("HashMap"));
@@ -708,6 +710,61 @@ fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     assert!(!stamp.contains("_d_n0: f64 = 0.0"), "{stamp}");
     assert!(!stamp.contains("_d_n1: f64 = 0.0"), "{stamp}");
     assert!(!stamp.contains("_d_n0: f64 = if"), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_const("), "{stamp}");
+    assert!(
+        !stamp.contains("GeneratedDerivative::"),
+        "constant current contributions should not construct empty derivative slices:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("GeneratedDerivative,"),
+        "fixed/const-only stamp files should not import GeneratedDerivative:\n{stamp}"
+    );
+}
+
+#[test]
+fn rust_backend_uses_derivative_free_stamp_for_constant_potential() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(constant_potential_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile constant potential source");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("stamper.stamp_potential_const("), "{stamp}");
+    assert!(
+        !stamp.contains("GeneratedDerivative::"),
+        "constant potential contributions should not construct empty derivative slices:\n{stamp}"
+    );
+}
+
+#[test]
+fn rust_backend_uses_fixed_arity_stamp_for_three_node_sparse_current() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(three_node_sparse_current_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile three-node sparse current source");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("stamper.stamp_current_node3("), "{stamp}");
+    assert!(
+        !stamp.contains("GeneratedDerivative::node"),
+        "three-node sparse currents should use the fixed-arity stamper path instead of constructing a derivative slice:\n{stamp}"
+    );
 }
 
 #[test]
@@ -756,11 +813,44 @@ fn rust_backend_does_not_copy_scratch_derivatives_through_temporary_locals() {
         !stamp.contains("if (p.p0 > 0.0) { s.v[0] } else { s.v[0] }"),
         "{stamp}"
     );
-    assert!(
-        stamp.contains("GeneratedDerivative::node(nodes[0]"),
-        "{stamp}"
-    );
+    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
     assert!(stamp.contains("s.dn[1][0]"), "{stamp}");
+}
+
+#[test]
+fn rust_backend_merges_adjacent_identical_conditional_blocks() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(repeated_conditional_assignment_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile repeated conditional assignments");
+    let stamp = generated
+        .files
+        .iter()
+        .filter(|file| {
+            file.relative_path == "stamp.rs" || file.relative_path.starts_with("stamp_blocks_")
+        })
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let condition = "\n        if s.b[4] {";
+    let inverted_condition = "\n        if (!s.b[4]) {";
+    assert!(stamp.contains(condition), "{stamp}");
+    assert!(stamp.contains(inverted_condition), "{stamp}");
+    assert_eq!(
+        stamp.matches(condition).count(),
+        1,
+        "adjacent generated assignment blocks with the same condition should be grouped so the condition is evaluated once:\n{stamp}"
+    );
+    assert_eq!(
+        stamp.matches(inverted_condition).count(),
+        1,
+        "adjacent generated assignment blocks with the same inverted condition should be grouped so the condition is evaluated once:\n{stamp}"
+    );
 }
 
 #[test]
@@ -783,7 +873,7 @@ fn rust_backend_lowers_compact_conditional_noop_branch_as_guarded_store() {
 
     assert!(stamp.contains("if (p.p0 > 0.0) {"), "{stamp}");
     assert!(
-        stamp.contains("s.store_ad(0, &A::voltage(ctx, &nodes, Some(0), Some(1)));"),
+        stamp.contains("s.store_voltage(0, ctx, nodes, Some(0), Some(1));"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::constant(s.v[0])"), "{stamp}");
@@ -843,6 +933,186 @@ fn rust_backend_uses_compact_scalar_store_helper() {
 }
 
 #[test]
+fn rust_backend_moves_compact_ad_rvalue_stores_into_scratch() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_conditional_ad_branch_assignment_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact AD rvalue stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("s.store_ad_value(0, A::sqrt(A::voltage(ctx, nodes, Some(0), Some(1))));"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_ad_value(0, A::exp(A::voltage(ctx, nodes, Some(1), Some(0))));"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad(0, &A::sqrt(A::voltage"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad(0, &A::exp(A::voltage"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_moves_same_branch_generated_ad_locals_into_scratch() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_generated_ad_local_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile generated AD local store");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains(": A = "), "{stamp}");
+    assert!(stamp.contains("s.store_ad_value(0, assign"), "{stamp}");
+    assert!(!stamp.contains("s.store_ad(0, &assign"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_compact_voltage_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_voltage_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact voltage stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_voltage(")
+            && support.contains("pub(crate) fn store_scaled_voltage(")
+            && support.contains("pub(crate) fn store_offset_voltage("),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_voltage(0, ctx, nodes, Some(0), Some(1));"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_scaled_voltage(1, ctx, nodes, Some(0), Some(1), p.p0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_scaled_voltage(2, ctx, nodes, Some(0), Some(1), -1.0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_offset_voltage(3, ctx, nodes, Some(0), Some(1), p.p1);"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_ad_value(0, A::voltage"), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_ad_value(1, A::scale(A::voltage"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(2, A::neg(A::voltage"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(3, A::offset(A::voltage"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_hot_general_ad_store_helpers() {
+    let support = render_runtime_support_module();
+
+    for wrapper in [
+        "self.store_ad_value(index, AdValue::add(left, right));",
+        "self.store_ad_value(index, AdValue::sub(left, right));",
+        "self.store_ad_value(index, AdValue::mul(left, right));",
+        "self.store_ad_value(index, AdValue::div(left, right));",
+        "self.store_ad_value(index, AdValue::pow(left, right));",
+        "self.store_ad_value(index, AdValue::min(left, right));",
+        "self.store_ad_value(index, AdValue::max(left, right));",
+        "self.store_ad_value(index, AdValue::scale(value, scale));",
+        "self.store_ad_value(index, AdValue::neg(value));",
+        "self.store_ad_value(index, AdValue::sqrt(value));",
+        "self.store_ad_value(index, AdValue::exp(value));",
+        "self.store_ad_value(index, AdValue::ln(value));",
+        "self.store_ad_value(index, AdValue::abs(value));",
+        "self.store_ad_value(index, AdValue::square(value));",
+        "self.store_ad_value(index, AdValue::sub_from_scalar(scalar, value));",
+        "self.store_ad_value(index, AdValue::div_from_scalar(scalar, value));",
+        "self.store_ad_value(index, AdValue::pow_from_scalar(scalar, value));",
+        "self.store_ad_value(index, AdValue::powf(value, exponent));",
+    ] {
+        assert!(!support.contains(wrapper), "{support}");
+    }
+
+    assert!(support.contains("self.v[index] = left.value + right.value;"));
+    assert!(support.contains("self.v[index] = left.value * right.value;"));
+    assert!(support.contains("self.v[index] = value.value * scale;"));
+    assert!(support.contains("let exponent = right.value;"));
+    assert!(
+        support.contains("pow_derivative(output, base, exponent, left.dn[axis], right.dn[axis])"),
+        "{support}"
+    );
+}
+
+#[test]
+fn rust_backend_uses_in_place_hot_ad_value_operations() {
+    let support = render_runtime_support_module();
+
+    for zeroing_constructor in [
+        "let mut value = Self::constant(left.value + right.value);",
+        "let mut value = Self::constant(left.value - right.value);",
+        "let mut value = Self::constant(left.value * right.value);",
+        "let mut value = Self::constant(arg.value * arg.value);",
+        "let mut value = Self::constant(quotient);",
+        "let mut value = Self::constant(left.value % right.value);",
+        "let mut result = Self::constant(value);",
+    ] {
+        assert!(!support.contains(zeroing_constructor), "{support}");
+    }
+
+    assert!(support.contains("let mut value = left;"), "{support}");
+    assert!(support.contains("value.value += right.value;"), "{support}");
+    assert!(
+        support.contains("let left_value = value.value;"),
+        "{support}"
+    );
+    assert!(support.contains("let mut result = left;"), "{support}");
+}
+
+#[test]
 fn rust_backend_compacts_generated_scratch_storage_field_names() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_scalar_noop_branch_assignment_source())
@@ -866,6 +1136,10 @@ fn rust_backend_compacts_generated_scratch_storage_field_names() {
         "{support}"
     );
     assert!(
+        support.contains("pub(crate) b: [bool; VARIABLE_COUNT],"),
+        "{support}"
+    );
+    assert!(
         support.contains("pub(crate) dn: [[f64; NODE_COUNT]; VARIABLE_COUNT],"),
         "{support}"
     );
@@ -876,7 +1150,7 @@ fn rust_backend_compacts_generated_scratch_storage_field_names() {
     assert!(stamp.contains("s.v["), "{stamp}");
     assert!(!stamp.contains("scratch."), "{stamp}");
     assert!(stamp.contains("type A = GenericAdValue"), "{stamp}");
-    assert!(stamp.contains("A::voltage("), "{stamp}");
+    assert!(stamp.contains("s.store_voltage("), "{stamp}");
     assert!(!stamp.contains("AdValue::"), "{stamp}");
     assert!(!stamp.contains("s.values["), "{stamp}");
     assert!(!stamp.contains("s.node_derivatives"), "{stamp}");
@@ -903,7 +1177,7 @@ fn rust_backend_lowers_compact_conditional_scalar_branch_as_direct_store() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_ad(1, &A::voltage(ctx, &nodes, Some(0), Some(1)));"),
+        stamp.contains("s.store_voltage(1, ctx, nodes, Some(0), Some(1));"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_scalar(1, s.v[0]);"), "{stamp}");
@@ -931,14 +1205,37 @@ fn rust_backend_lowers_compact_conditional_ad_branches_as_direct_stores() {
 
     assert!(stamp.contains("if (p.p0 > 0.0) {"), "{stamp}");
     assert!(
-        stamp.contains("s.store_ad(0, &A::sqrt(A::voltage(ctx, &nodes, Some(0), Some(1))));"),
+        stamp.contains("s.store_ad_value(0, A::sqrt(A::voltage(ctx, nodes, Some(0), Some(1))));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_ad(0, &A::exp(A::voltage(ctx, &nodes, Some(1), Some(0))));"),
+        stamp.contains("s.store_ad_value(0, A::exp(A::voltage(ctx, nodes, Some(1), Some(0))));"),
         "{stamp}"
     );
     assert!(!stamp.contains(": A = {"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_general_ad_store_helpers_for_block_valued_operands() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_conditional_ad_branch_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled conditional AD branch assignment");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("s.store_scale_ad(0, {"), "{stamp}");
+    assert!(!stamp.contains("s.store_ad_value(0, A::scale({"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -1125,6 +1422,1291 @@ fn rust_backend_uses_compact_nested_ad_operation_store_helpers() {
 }
 
 #[test]
+fn rust_backend_uses_compact_scaled_input_unary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_input_unary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled-input unary operation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_sqrt_scaled_input(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_exp_scaled_input(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_limexp_scaled_input(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_sin_scaled_input(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_ln_scaled_input(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_sqrt_scaled_input("), "{stamp}");
+    assert!(stamp.contains("s.store_exp_scaled_input("), "{stamp}");
+    assert!(stamp.contains("s.store_limexp_scaled_input("), "{stamp}");
+    assert!(stamp.contains("s.store_sin_scaled_input("), "{stamp}");
+    assert!(stamp.contains("s.store_ln_scaled_input("), "{stamp}");
+    assert!(!stamp.contains("s.store_sqrt_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limexp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_sin_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_ln_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_limited_exp_store_helpers_for_scratch_sources() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_limited_exp_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact limited-exp operation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_limexp(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_limited_exp(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_limexp("), "{stamp}");
+    assert!(stamp.contains("s.store_limited_exp("), "{stamp}");
+    assert!(!stamp.contains("s.store_limexp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limited_exp_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_output_scaled_input_unary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_output_scaled_input_unary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled-output scaled-input unary operation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_scaled_sqrt_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_exp_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_limexp_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_limited_exp_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_ln_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_scaled_sqrt_scaled_input("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_scaled_exp_scaled_input("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_scaled_limexp_scaled_input("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_scaled_limited_exp_scaled_input("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("s.store_scaled_ln_scaled_input("), "{stamp}");
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_sqrt_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limexp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limited_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_ln_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_offset_input_unary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_offset_input_unary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact offset-input unary operation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_sqrt_offset_input(&mut self, index: usize, source: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_exp_offset_input(&mut self, index: usize, source: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_ln_offset_input(&mut self, index: usize, source: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_sqrt_offset_input("), "{stamp}");
+    assert!(stamp.contains("s.store_exp_offset_input("), "{stamp}");
+    assert!(stamp.contains("s.store_ln_offset_input("), "{stamp}");
+    assert!(!stamp.contains("s.store_sqrt_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_ln_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_negated_input_unary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_negated_input_unary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact negated-input unary operation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_sqrt_neg_input(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_exp_neg_input(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_limexp_neg_input(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_limited_exp_neg_input(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_ln_neg_input(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_sqrt_neg_input("), "{stamp}");
+    assert!(stamp.contains("s.store_exp_neg_input("), "{stamp}");
+    assert!(stamp.contains("s.store_limexp_neg_input("), "{stamp}");
+    assert!(stamp.contains("s.store_limited_exp_neg_input("), "{stamp}");
+    assert!(stamp.contains("s.store_ln_neg_input("), "{stamp}");
+    assert!(!stamp.contains("s.store_sqrt_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limexp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limited_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_ln_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_output_scaled_and_offset_unary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_output_scaled_and_offset_unary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact output-scaled and output-offset unary stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support
+            .contains("fn store_scaled_square(&mut self, index: usize, source: usize, scale: f64)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_abs(&mut self, index: usize, source: usize, scale: f64)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_ln(&mut self, index: usize, source: usize, scale: f64)"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_limited_exp(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_limited_exp(&mut self, index: usize, source: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_scaled_square("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_abs("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_ln("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_limited_exp("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_square("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_abs("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_sqrt("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_exp("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_ln("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_limexp("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_limited_exp("), "{stamp}");
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_and_offset_negation_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_and_offset_negation_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled and offset negation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("s.store_scale(") && stamp.contains("(-p.p0)"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_offset_scaled(") && stamp.contains("-1.0, (-p.p1)"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_ad("), "{stamp}");
+    assert!(!stamp.contains("A::neg(s.ad_value("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_div_from_scalar_affine_input_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_div_from_scalar_affine_input_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scalar division by affine input stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_div_from_scalar_offset_input(&mut self, index: usize, scalar: f64, source: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_div_from_scalar_scaled_input(&mut self, index: usize, scalar: f64, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_div_from_scalar_offset_scaled_input(&mut self, index: usize, scalar: f64, source: usize, scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_div_from_scalar_offset_input("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_div_from_scalar_scaled_input("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_div_from_scalar_offset_scaled_input("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_div_from_scalar_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_sqrt_square_and_affine_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_sqrt_square_and_affine_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact sqrt square and affine stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_sqrt_square_offset(&mut self, index: usize, source: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_sqrt_square_add(&mut self, index: usize, square_source: usize, add_source: usize)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_sqrt_square_sum(&mut self, index: usize, left: usize, right: usize)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_sqrt_offset_scaled_input(&mut self, index: usize, source: usize, scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_sqrt_square_offset("), "{stamp}");
+    assert!(stamp.contains("s.store_sqrt_square_add("), "{stamp}");
+    assert!(stamp.contains("s.store_sqrt_square_sum("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_sqrt_offset_scaled_input("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_sqrt_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_mul_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_mul_scaled_ad_lhs(&mut self, index: usize, left: AdValue")
+            && support.contains("right: usize, scale: f64)"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_result_scaled_mixed_mul_div_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact result-scaled mixed mul/div stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
+    assert!(
+        support.contains("fn store_scaled_div_ad_rhs(&mut self, index: usize, left: usize"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_div_ad_lhs(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_scaled_div_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_div_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_mixed_add_sub_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_mixed_add_sub_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled mixed add/sub stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_scaled_add_ad_rhs(&mut self, index: usize, left: usize, right: AdValue"
+        ) && support.contains("right: AdValue")
+            && support.contains("scale: f64)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_add_ad_lhs(&mut self, index: usize, left: AdValue")
+            && support.contains("right: usize, scale: f64)"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_sub_ad_rhs(&mut self, index: usize, left: usize, right: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_sub_ad_lhs(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_scaled_add_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_add_ad_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_sub_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_sub_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_general_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_general_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled general AD stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_scaled_offset_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_add_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_sub_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_mul_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_div_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_scaled_offset_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_add_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_sub_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_mul_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_div_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_general_unary_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled general unary AD stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_scaled_exp_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_ln_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_sqrt_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_limexp_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_limited_exp_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_abs_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_scaled_powf_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_div_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_scaled_exp_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_ln_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_sqrt_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_limexp_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_limited_exp_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_abs_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_powf_ad("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_scaled_sub_from_scalar_ad("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_scaled_div_from_scalar_ad("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_mixed_scaled_operand_add_sub_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_mixed_scaled_operand_add_sub_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact mixed scaled-operand add/sub stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_add_scaled_ad_lhs(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_sub_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_sub_scaled_ad_lhs(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_add_scaled_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_add_scaled_ad_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_sub_scaled_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_sub_scaled_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_add_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_sub_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_binary_operand_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_binary_operand_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled binary operand stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_add_scaled_inputs(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_sub_scaled_inputs(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_add_scaled_inputs("), "{stamp}");
+    assert!(stamp.contains("s.store_sub_scaled_inputs("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_div("), "{stamp}");
+    assert!(!stamp.contains("s.store_add_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_sub_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_div_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_scaled_output_scaled_binary_operand_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_output_scaled_binary_operand_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled-output scaled binary operand stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("s.store_add_scaled_inputs("), "{stamp}");
+    assert!(stamp.contains("s.store_sub_scaled_inputs("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_div("), "{stamp}");
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_offset_binary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_offset_binary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact offset binary stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_offset_add(&mut self, index: usize, left: usize, right: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_sub(&mut self, index: usize, left: usize, right: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_mul(&mut self, index: usize, left: usize, right: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_div(&mut self, index: usize, left: usize, right: usize, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_offset_add("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_sub("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_mul("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_div("), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_offset_scaled_binary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_offset_scaled_binary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact offset-scaled binary stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_offset_scaled_add(&mut self, index: usize, left: usize, right: usize, scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_scaled_sub(&mut self, index: usize, left: usize, right: usize, scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_scaled_mul(&mut self, index: usize, left: usize, right: usize, scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_scaled_div(&mut self, index: usize, left: usize, right: usize, scale: f64, offset: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_offset_scaled_add("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_scaled_sub("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_scaled_mul("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_scaled_div("), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_offset_general_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_offset_general_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact offset general AD stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_offset_scaled_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_add_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_sub_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_mul_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_div_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_exp_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_sqrt_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_ln_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_limited_exp_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_powf_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_div_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_offset_scaled_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_add_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_sub_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_mul_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_div_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_exp_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_sqrt_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_ln_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_limited_exp_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_powf_ad("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_offset_sub_from_scalar_ad("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_offset_div_from_scalar_ad("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_offset_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_offset_special_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_offset_special_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact offset special AD stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_offset_pow_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_offset_pow_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_min_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_max_ad(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_abs_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_atan_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_cosh_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_offset_sin_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_offset_pow_ad("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_offset_pow_from_scalar_ad("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("s.store_offset_min_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_max_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_abs_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_atan_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_cosh_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_offset_sin_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_div_from_scalar_general_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_div_from_scalar_general_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact div-from-scalar general AD stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_div_from_scalar_offset_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_scaled_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_add_ad(&mut self, index: usize, scalar: f64, left: AdValue",
+        "fn store_div_from_scalar_sub_ad(&mut self, index: usize, scalar: f64, left: AdValue",
+        "fn store_div_from_scalar_mul_ad(&mut self, index: usize, scalar: f64, left: AdValue",
+        "fn store_div_from_scalar_div_ad(&mut self, index: usize, scalar: f64, left: AdValue",
+        "fn store_div_from_scalar_sqrt_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_square_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, denominator_scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_div_from_scalar_ad(&mut self, index: usize, scalar: f64, denominator_scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_pow_ad(&mut self, index: usize, scalar: f64, left: AdValue",
+        "fn store_div_from_scalar_powf_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_exp_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_sin_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_sinh_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+    ] {
+        assert!(support.contains(helper), "{support}");
+    }
+
+    for call in [
+        "s.store_div_from_scalar_offset_ad(",
+        "s.store_div_from_scalar_scaled_ad(",
+        "s.store_div_from_scalar_add_ad(",
+        "s.store_div_from_scalar_sub_ad(",
+        "s.store_div_from_scalar_mul_ad(",
+        "s.store_div_from_scalar_div_ad(",
+        "s.store_div_from_scalar_sqrt_ad(",
+        "s.store_div_from_scalar_square_ad(",
+        "s.store_div_from_scalar_sub_from_scalar_ad(",
+        "s.store_div_from_scalar_div_from_scalar_ad(",
+        "s.store_div_from_scalar_pow_ad(",
+        "s.store_div_from_scalar_powf_ad(",
+        "s.store_div_from_scalar_exp_ad(",
+        "s.store_div_from_scalar_sin_ad(",
+        "s.store_div_from_scalar_sinh_ad(",
+    ] {
+        assert!(stamp.contains(call), "{stamp}");
+    }
+    assert!(!stamp.contains("s.store_div_from_scalar_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_sqrt_general_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_sqrt_general_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact sqrt general AD stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_sqrt_offset_ad(&mut self, index: usize, value: AdValue",
+        "fn store_sqrt_scaled_ad(&mut self, index: usize, value: AdValue",
+        "fn store_sqrt_add_ad(&mut self, index: usize, left: AdValue",
+        "fn store_sqrt_sub_ad(&mut self, index: usize, left: AdValue",
+        "fn store_sqrt_mul_ad(&mut self, index: usize, left: AdValue",
+        "fn store_sqrt_div_ad(&mut self, index: usize, left: AdValue",
+        "fn store_sqrt_abs_ad(&mut self, index: usize, value: AdValue",
+        "fn store_sqrt_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_sqrt_div_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+    ] {
+        assert!(support.contains(helper), "{support}");
+    }
+
+    for call in [
+        "s.store_sqrt_offset_ad(",
+        "s.store_sqrt_scaled_ad(",
+        "s.store_sqrt_add_ad(",
+        "s.store_sqrt_sub_ad(",
+        "s.store_sqrt_mul_ad(",
+        "s.store_sqrt_div_ad(",
+        "s.store_sqrt_abs_ad(",
+        "s.store_sqrt_sub_from_scalar_ad(",
+        "s.store_sqrt_div_from_scalar_ad(",
+    ] {
+        assert!(stamp.contains(call), "{stamp}");
+    }
+    assert!(!stamp.contains("s.store_sqrt_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_unary_binary_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_unary_binary_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact unary binary stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_sqrt_add(&mut self, index: usize, left: usize, right: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_exp_sub(&mut self, index: usize, left: usize, right: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_limited_exp_div(&mut self, index: usize, left: usize, right: usize)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_sqrt_add("), "{stamp}");
+    assert!(stamp.contains("s.store_sqrt_sub("), "{stamp}");
+    assert!(stamp.contains("s.store_sqrt_mul("), "{stamp}");
+    assert!(stamp.contains("s.store_sqrt_div("), "{stamp}");
+    assert!(stamp.contains("s.store_exp_sub("), "{stamp}");
+    assert!(stamp.contains("s.store_exp_mul("), "{stamp}");
+    assert!(stamp.contains("s.store_exp_div("), "{stamp}");
+    assert!(stamp.contains("s.store_ln_div("), "{stamp}");
+    assert!(stamp.contains("s.store_limexp_div("), "{stamp}");
+    assert!(stamp.contains("s.store_limited_exp_sub("), "{stamp}");
+    assert!(stamp.contains("s.store_limited_exp_mul("), "{stamp}");
+    assert!(stamp.contains("s.store_limited_exp_div("), "{stamp}");
+    assert!(!stamp.contains("s.store_sqrt_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_ln_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limexp_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_limited_exp_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_combines_scaled_offset_scaled_inputs() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_offset_scaled_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled offset-scaled source");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("s.store_offset_scaled(1, 0, ((p.p0) * (p.p1)), ((p.p2) * (p.p1)));"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_mixed_scratch_ad_store_source())
@@ -1152,11 +2734,11 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_mul_ad_rhs(2, 0, A::exp(s.ad_value(1)));"),
+        stamp.contains("s.store_mul_ad_rhs(2, 0, A::atan(s.ad_value(1)));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_mul_ad_lhs(3, A::exp(s.ad_value(0)), 1);"),
+        stamp.contains("s.store_mul_ad_lhs(3, A::atan(s.ad_value(0)), 1);"),
         "{stamp}"
     );
     assert!(
@@ -1183,6 +2765,613 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
         stamp.contains("s.store_div_ad_lhs(9, A::sqrt(s.ad_value(0)), 1);"),
         "{stamp}"
     );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_nested_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_nested_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact nested mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul3_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul3_rhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_ad_product_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_ad_product_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul3_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul3_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_ad_product_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_ad_product_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_affine_nested_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_affine_nested_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact affine nested mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul3_affine_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul3_affine_rhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_ad_affine_product_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_ad_affine_product_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul3_affine_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul3_affine_rhs("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_mul_ad_affine_product_lhs("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_ad_affine_product_rhs("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_add_sub_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_add_sub_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact add/sub mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul_add_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_add_rhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_sub_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_sub_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul_add_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_add_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_sub_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_sub_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_general_add_sub_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_general_add_sub_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact general add/sub mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul_add_ad_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_add_ad_rhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_sub_ad_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_sub_ad_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul_add_ad_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_add_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_sub_ad_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_sub_ad_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_offset_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_offset_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact offset mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul_offset_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_offset_rhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_offset_ad_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_offset_ad_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul_offset_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_offset_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_offset_ad_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_offset_ad_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_sub_from_scalar_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_sub_from_scalar_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact sub-from-scalar mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "store_mul_sub_from_scalar_lhs",
+        "store_mul_sub_from_scalar_rhs",
+        "store_mul_sub_from_scalar_ad_lhs",
+        "store_mul_sub_from_scalar_ad_rhs",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_scaled_value_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_value_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled-value mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in ["store_mul_scale_ad_lhs", "store_mul_scale_ad_rhs"] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_div_from_scalar_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_div_from_scalar_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact div-from-scalar mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "store_mul_div_from_scalar_lhs",
+        "store_mul_div_from_scalar_rhs",
+        "store_mul_div_from_scalar_ad_lhs",
+        "store_mul_div_from_scalar_ad_rhs",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_pow_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_pow_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact pow mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "store_mul_pow_ad_lhs",
+        "store_mul_pow_ad_rhs",
+        "store_mul_powf_ad_lhs",
+        "store_mul_powf_ad_rhs",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_extended_unary_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_extended_unary_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact extended unary mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "store_mul_limexp_lhs",
+        "store_mul_limexp_rhs",
+        "store_mul_abs_lhs",
+        "store_mul_abs_rhs",
+        "store_mul_cos_ad_lhs",
+        "store_mul_cos_ad_rhs",
+        "store_mul_tanh_ad_lhs",
+        "store_mul_tanh_ad_rhs",
+        "store_mul_limited_exp_lhs",
+        "store_mul_limited_exp_ad_rhs",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_negated_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_negated_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact negated mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul_neg_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_neg_rhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_neg_ad_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_neg_ad_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul_neg_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_neg_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_neg_ad_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_neg_ad_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert!(!stamp.contains("A::neg("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_division_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_division_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact division mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul_div_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_div_rhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_div_ad_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_div_ad_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul_div_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_div_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_div_ad_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_div_ad_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_square_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_square_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact square mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("pub(crate) fn store_mul_square_lhs("),
+        "{support}"
+    );
+    assert!(
+        support.contains("pub(crate) fn store_mul_square_rhs("),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_mul_square_lhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_square_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_unary_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_unary_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact unary mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "store_mul_exp_lhs",
+        "store_mul_exp_rhs",
+        "store_mul_ln_lhs",
+        "store_mul_ln_rhs",
+        "store_mul_sqrt_lhs",
+        "store_mul_sqrt_rhs",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_nested_unary_mixed_multiply_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_nested_unary_mixed_multiply_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact nested unary mixed multiply stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "store_mul_exp_ad_lhs",
+        "store_mul_exp_ad_rhs",
+        "store_mul_ln_ad_lhs",
+        "store_mul_ln_ad_rhs",
+        "store_mul_sqrt_ad_lhs",
+        "store_mul_sqrt_ad_rhs",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -1226,21 +3415,14 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         stamp.contains("s.store_div_ad(5, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
         "{stamp}"
     );
+    assert!(stamp.contains("s.store_sqrt_add(6, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_exp_add(7, 0, 1);"), "{stamp}");
     assert!(
-        stamp.contains("s.store_sqrt_ad(6, A::add(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_scaled_sqrt_ad(8, A::add(s.ad_value(0), s.ad_value(1)), p.p0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_exp_ad(7, A::add(s.ad_value(0), s.ad_value(1)));"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("s.store_scale_ad(8, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))), p.p0);"),
-        "{stamp}"
-    );
-    assert!(
-        stamp
-            .contains("s.store_offset_ad(9, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))), p.p1);"),
+        stamp.contains("s.store_offset_sqrt_ad(9, A::add(s.ad_value(0), s.ad_value(1)), p.p1);"),
         "{stamp}"
     );
     assert!(
@@ -1251,7 +3433,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
     );
     assert!(
         stamp.contains(
-            "s.store_div_from_scalar_ad(11, p.p0, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"
+            "s.store_div_from_scalar_sqrt_ad(11, p.p0, A::add(s.ad_value(0), s.ad_value(1)));"
         ),
         "{stamp}"
     );
@@ -1292,11 +3474,23 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         "{stamp}"
     );
     assert!(
+        stamp.contains("s.store_pow_ad(10, s.ad_value(0), A::offset(s.ad_value(1), p.p0));"),
+        "{stamp}"
+    );
+    assert!(
         stamp.contains("s.store_min_ad(3, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
         "{stamp}"
     );
     assert!(
         stamp.contains("s.store_max_ad(4, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_min_ad(11, s.ad_value(0), A::offset(s.ad_value(1), p.p0));"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_max_ad(12, s.ad_value(0), A::offset(s.ad_value(1), p.p0));"),
         "{stamp}"
     );
     assert!(
@@ -1325,6 +3519,10 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         stamp.contains("s.store_limexp_ad(9, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"),
         "{stamp}"
     );
+    assert!(
+        !stamp.contains("s.store_ad_value(10, A::pow(s.ad_value(0), A::offset"),
+        "{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -1347,7 +3545,7 @@ fn rust_backend_lowers_compact_numeric_scale_without_full_ad_multiply() {
         .as_str();
 
     assert!(
-        stamp.contains("A::scale(A::voltage(ctx, &nodes, Some(0), Some(1)), 2.0)"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), 2.0);"),
         "{stamp}"
     );
     assert!(
@@ -1376,15 +3574,19 @@ fn rust_backend_lowers_compact_additive_numeric_identities_directly() {
         .as_str();
 
     assert!(
-        !stamp.contains("A::add(A::voltage(ctx, &nodes, Some(0), Some(1)), A::constant(0.0))"),
+        !stamp.contains("A::add(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(0.0))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::sub(A::constant(0.0), A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        !stamp.contains("A::sub(A::constant(0.0), A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_ad(1, &A::neg(A::voltage(ctx, &nodes, Some(0), Some(1))))"),
+        stamp.contains("s.store_scaled_voltage(1, ctx, nodes, Some(0), Some(1), -1.0);"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(1, A::neg(A::voltage"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -1409,16 +3611,16 @@ fn rust_backend_lowers_compact_duplicate_ad_operands_directly() {
         .as_str();
 
     assert!(
-        stamp.contains("A::scale(A::voltage(ctx, &nodes, Some(0), Some(1)), 2.0)"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), 2.0);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_scalar(1, 0.0);"), "{stamp}");
     assert!(
-        !stamp.contains("A::add(A::voltage(ctx, &nodes, Some(0), Some(1)), A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        !stamp.contains("A::add(A::voltage(ctx, nodes, Some(0), Some(1)), A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::sub(A::voltage(ctx, &nodes, Some(0), Some(1)), A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        !stamp.contains("A::sub(A::voltage(ctx, nodes, Some(0), Some(1)), A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -1549,7 +3751,7 @@ fn rust_backend_lowers_compact_parameter_scale_without_full_ad_multiply() {
         .as_str();
 
     assert!(
-        stamp.contains("A::scale(A::voltage(ctx, &nodes, Some(0), Some(1)), p.p0)"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), p.p0);"),
         "{stamp}"
     );
     assert!(
@@ -1578,12 +3780,12 @@ fn rust_backend_lowers_compact_scalar_expression_scale_without_full_ad_multiply(
         .as_str();
 
     assert!(
-        stamp.contains("A::scale(A::voltage(ctx, &nodes, Some(0), Some(1)), (p.p0 - 1.0))"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (p.p0 - 1.0));"),
         "{stamp}"
     );
     assert!(
         !stamp.contains(
-            "A::mul(A::constant((p.p0 - 1.0)), A::voltage(ctx, &nodes, Some(0), Some(1)))"
+            "A::mul(A::constant((p.p0 - 1.0)), A::voltage(ctx, nodes, Some(0), Some(1)))"
         ),
         "{stamp}"
     );
@@ -1609,11 +3811,11 @@ fn rust_backend_lowers_compact_scalar_numerator_division_without_constant_ad_wra
         .as_str();
 
     assert!(
-        stamp.contains("A::div_from_scalar(2.0, A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        stamp.contains("A::div_from_scalar(2.0, A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::div(A::constant(2.0), A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        !stamp.contains("A::div(A::constant(2.0), A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -1638,7 +3840,7 @@ fn rust_backend_combines_nested_compact_scalar_scales() {
         .as_str();
 
     assert!(
-        stamp.contains("A::scale(A::voltage(ctx, &nodes, Some(0), Some(1)), (3.0 * p.p0))"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (3.0 * p.p0));"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::scale(A::scale"), "{stamp}");
@@ -1664,7 +3866,7 @@ fn rust_backend_combines_scaled_compact_duplicate_ad_operands() {
         .as_str();
 
     assert!(
-        stamp.contains("A::scale(A::voltage(ctx, &nodes, Some(0), Some(1)), (2.0 * p.p0))"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (2.0 * p.p0));"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::scale(A::scale"), "{stamp}");
@@ -1716,8 +3918,9 @@ fn rust_backend_folds_compact_scalar_comparisons_without_ad_wrappers() {
         .contents
         .as_str();
 
+    assert!(stamp.contains("s.b[0] = (p.p0 <= 0.0);"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if (p.p0 <= 0.0) { 1.0 } else { 0.0 };"),
+        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
@@ -1746,13 +3949,71 @@ fn rust_backend_stores_zero_derivative_compact_comparison_assignments_as_values(
         .contents
         .as_str();
 
+    assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p.p0);"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if ((nv0 - nv1) > p.p0) { 1.0 } else { 0.0 };"),
+        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(stamp.contains("let eq0_e3_d_n0: f64 = s.v[0];"), "{stamp}");
     assert!(!stamp.contains("s.dn[0]"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_caches_compact_boolean_assignments_for_later_conditions() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_boolean_reuse_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact boolean reuse");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p.p0);"), "{stamp}");
+    assert!(
+        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("if s.b[0] {"), "{stamp}");
+    assert!(!stamp.contains("if (s.v[0] != 0.0)"), "{stamp}");
+    assert!(stamp.contains("(s.v[1] + s.v[0])"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_caches_compact_boolean_literal_conditionals_for_later_conditions() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_boolean_literal_conditional_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact boolean literal conditional");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("s.b[0] = (!(p.p0 > 0.0));"), "{stamp}");
+    assert!(
+        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("if s.b[0] {"), "{stamp}");
+    assert!(!stamp.contains("if (s.v[0] != 0.0)"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -1823,13 +4084,14 @@ fn rust_backend_lowers_compact_mixed_scalar_comparisons_without_scalar_ad_wrappe
         .contents
         .as_str();
 
+    assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > 0.0);"), "{stamp}");
     assert!(
-        stamp.contains("s.v[0] = if ((nv0 - nv1) > 0.0) { 1.0 } else { 0.0 };"),
+        stamp.contains("s.v[0] = if s.b[0] { 1.0 } else { 0.0 };"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(
-        !stamp.contains("A::voltage(ctx, &nodes, Some(0), Some(1)).value > 0.0"),
+        !stamp.contains("A::voltage(ctx, nodes, Some(0), Some(1)).value > 0.0"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::constant(0.0).value"), "{stamp}");
@@ -1855,6 +4117,8 @@ fn rust_backend_lowers_compact_scalar_truth_conditions_without_ad_wrappers() {
         .as_str();
 
     assert!(stamp.contains("if (p.p0 != 0.0)"), "{stamp}");
+    assert!(stamp.contains("if (p.p0 == 0.0)"), "{stamp}");
+    assert!(!stamp.contains("!(p.p0 != 0.0)"), "{stamp}");
     assert!(!stamp.contains("A::constant(p.p0).value != 0.0"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -1909,19 +4173,23 @@ fn rust_backend_lowers_compact_scalar_offsets_without_full_ad_add_or_subtract() 
         .as_str();
 
     assert!(
-        stamp.contains("A::offset(A::voltage(ctx, &nodes, Some(0), Some(1)), p.p0)"),
+        stamp.contains("s.store_offset_voltage(0, ctx, nodes, Some(0), Some(1), p.p0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("A::sub_from_scalar(1.0, A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        !stamp.contains("s.store_ad_value(0, A::offset(A::voltage"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::add(A::voltage(ctx, &nodes, Some(0), Some(1)), A::constant(p.p0))"),
+        stamp.contains("A::sub_from_scalar(1.0, A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::sub(A::constant(1.0), A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        !stamp.contains("A::add(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p.p0))"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::sub(A::constant(1.0), A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -1978,6 +4246,22 @@ fn rust_backend_omits_reactive_work_for_models_without_ddt() {
     assert!(!reactive_body.contains("g = "), "{reactive_body}");
     assert!(!reactive_body.contains("_q"), "{reactive_body}");
     assert!(
+        !reactive_body.contains("let p ="),
+        "empty reactive stamps should not bind params:\n{reactive_body}"
+    );
+    assert!(
+        !reactive_body.contains("let nodes ="),
+        "empty reactive stamps should not bind nodes:\n{reactive_body}"
+    );
+    assert!(
+        !reactive_body.contains("let branches ="),
+        "empty reactive stamps should not bind branches:\n{reactive_body}"
+    );
+    assert!(
+        !reactive_body.contains("let timestep ="),
+        "empty reactive stamps should not bind timestep:\n{reactive_body}"
+    );
+    assert!(
         !reactive_body.contains("stamp_current_reactive"),
         "{reactive_body}"
     );
@@ -2012,7 +4296,11 @@ endmodule
         .contents
         .as_str();
 
-    assert!(stamp.contains("let mut s = Scratch::new();"), "{stamp}");
+    assert!(
+        stamp.contains("let s = match &mut self.scratch {"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("Scratch::new();"), "{stamp}");
     assert!(stamp.contains("s.v[0] = (1.0 / p.p0);"), "{stamp}");
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(stamp.contains("eq0_value"), "{stamp}");
@@ -2085,11 +4373,16 @@ fn rust_backend_splits_transient_and_reactive_scratch_storage() {
     assert!(!transient_scratch.contains("pub(crate) rv:"), "{stamp}");
     assert!(!transient_scratch.contains("pub(crate) rdn:"), "{stamp}");
     assert!(reactive_scratch.contains("pub(crate) rv:"), "{stamp}");
-    assert!(stamp.contains("let mut s = Scratch::new();"), "{stamp}");
     assert!(
-        stamp.contains("let mut s = ReactiveScratch::new();"),
+        stamp.contains("let s = match &mut self.scratch {"),
         "{stamp}"
     );
+    assert!(
+        stamp.contains("let s = match &mut self.reactive_scratch {"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("Scratch::new();"), "{stamp}");
+    assert!(!stamp.contains("ReactiveScratch::new();"), "{stamp}");
     assert!(stamp.contains("type Scratch = GenericScratch"), "{stamp}");
     assert!(
         stamp.contains("type ReactiveScratch = GenericReactiveScratch"),
@@ -2148,21 +4441,354 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("let mut s = Scratch::new();"), "{stamp}");
+    assert!(
+        stamp.contains("let s = match &mut self.scratch {"),
+        "{stamp}"
+    );
     assert!(stamp.contains("#[path = \"stamp_blocks_0.rs\"]"), "{stamp}");
     assert!(stamp.contains("mod stamp_blocks_0;"), "{stamp}");
+    assert!(stamp.contains("let p = &self.params;"), "{stamp}");
+    assert!(stamp.contains("let nodes = &(*self).nodes;"), "{stamp}");
     assert!(
-        stamp.contains("self.stamp_transient_block_0(ctx, stamper, &mut s);"),
+        stamp.contains("let branches = &(*self).branches;"),
         "{stamp}"
     );
     assert!(
-        helper.contains(
-            "use super::{A, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, Scratch, THERMAL_VOLTAGE_PER_K};"
+        !stamp.contains("let param_given = &self.param_given;"),
+        "plain algebraic stamps should not bind unused parameter-presence state:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let time = (*self).time;"),
+        "plain algebraic stamps should not bind unused simulator time:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let timestep = (*self).timestep;"),
+        "plain algebraic stamps should not bind unused timestep:\n{stamp}"
+    );
+    assert!(!stamp.contains("let p = self.params;"), "{stamp}");
+    assert!(!stamp.contains("let nodes = self.nodes;"), "{stamp}");
+    assert!(!stamp.contains("let branches = self.branches;"), "{stamp}");
+    assert!(
+        !stamp.contains("let param_given = self.param_given;"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("Self::stamp_transient_block_0(ctx, s, nodes)"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains(
+            "Self::stamp_transient_block_0(ctx, stamper, s, p, nodes, branches, param_given"
         ),
+        "plain algebraic helper calls should not pass unused parameter-presence state:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("param_given, multiplicity, time, timestep"),
+        "plain algebraic helper calls should not carry unused common scalars:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("multiplicity, time"),
+        "plain algebraic helper calls should not carry unused time:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("multiplicity, timestep"),
+        "plain algebraic helper calls should not carry unused timestep:\n{stamp}"
+    );
+    assert!(!stamp.contains("time, timestep"), "{stamp}");
+    assert!(
+        !stamp.contains("ddt_state_current"),
+        "algebraic generated stamps should not borrow transient operator state arrays:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("idt_state_current"),
+        "algebraic generated stamps should not borrow integration state arrays:\n{stamp}"
+    );
+    assert!(
+        helper.contains("use super::{A, ddt_jacobian, eval_ddt, eval_idt, GeneratedDerivative"),
+        "{helper}"
+    );
+    assert!(
+        helper.contains("use super::super::state::{Instance, Parameters};"),
         "{helper}"
     );
     assert!(helper.contains("fn stamp_transient_block_0"), "{helper}");
+    assert!(
+        !helper.contains("p: &Parameters"),
+        "plain assignment helper ABI should not carry unused parameters:\n{helper}"
+    );
+    assert!(
+        helper.contains("nodes: &[usize; Instance::NODE_COUNT]"),
+        "{helper}"
+    );
+    assert!(
+        !helper.contains("branches: &[usize; Instance::BRANCH_COUNT]"),
+        "plain assignment helper ABI should not carry unused branches:\n{helper}"
+    );
+    assert!(
+        !helper.contains("multiplicity: f64"),
+        "plain assignment helper ABI should not carry unused multiplicity:\n{helper}"
+    );
+    assert!(
+        !helper.contains("param_given: &[bool; Instance::PARAMETER_COUNT]"),
+        "plain algebraic helper ABI should not carry unused parameter-presence state:\n{helper}"
+    );
+    assert!(
+        !helper.contains("time: f64"),
+        "plain algebraic helper ABI should not carry unused simulator time:\n{helper}"
+    );
+    assert!(
+        !helper.contains("timestep: f64"),
+        "plain algebraic helper ABI should not carry unused timestep:\n{helper}"
+    );
+    assert!(
+        !helper.contains("ddt_state_current"),
+        "algebraic helper ABI should not carry ddt state arrays:\n{helper}"
+    );
+    assert!(
+        !helper.contains("idt_state_current"),
+        "algebraic helper ABI should not carry idt state arrays:\n{helper}"
+    );
+    assert!(!helper.contains("p: Parameters"), "{helper}");
+    assert!(
+        !helper.contains("nodes: [usize; Instance::NODE_COUNT]"),
+        "{helper}"
+    );
+    assert!(
+        !helper.contains("branches: [usize; Instance::BRANCH_COUNT]"),
+        "{helper}"
+    );
+    assert!(
+        !helper.contains("param_given: [bool; Instance::PARAMETER_COUNT]"),
+        "{helper}"
+    );
     assert!(helper.contains("fn stamp_transient_block_1"), "{helper}");
+}
+
+#[test]
+fn rust_backend_omits_unused_base_arguments_from_assignment_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_assignment_chain_source(320))
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile chunked assignment chain");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("Self::stamp_transient_block_0(ctx, s, nodes)"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("Self::stamp_transient_block_1(s)"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_block_0(ctx, stamper"),
+        "assignment helpers should not receive an unused stamper:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_block_1(ctx"),
+        "scratch-only assignment helpers should not receive unused context:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_block_0(ctx, stamper, s, p"),
+        "assignment helpers should not receive unused parameters:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_block_0(ctx, stamper, s, nodes, branches"),
+        "assignment helpers should not receive unused branch maps:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_block_0(ctx, stamper, s, nodes, multiplicity"),
+        "assignment helpers should not receive unused multiplicity:\n{stamp}"
+    );
+    let block0_signature = helper
+        .split("fn stamp_transient_block_0")
+        .nth(1)
+        .expect("block 0 helper")
+        .split(") {")
+        .next()
+        .expect("block 0 signature");
+    assert!(
+        block0_signature.contains("ctx: &GeneratedEvalContext<'_>"),
+        "{block0_signature}"
+    );
+    assert!(
+        !block0_signature.contains("stamper: &mut"),
+        "assignment helper ABI should not carry unused stampers:\n{block0_signature}"
+    );
+    assert!(
+        block0_signature.contains("s: &mut Scratch"),
+        "{block0_signature}"
+    );
+    assert!(
+        !block0_signature.contains("p: &Parameters"),
+        "assignment helper ABI should not carry unused parameters:\n{block0_signature}"
+    );
+    assert!(
+        block0_signature.contains("nodes: &[usize; Instance::NODE_COUNT]"),
+        "{block0_signature}"
+    );
+    assert!(
+        !block0_signature.contains("branches: &[usize; Instance::BRANCH_COUNT]"),
+        "assignment helper ABI should not carry unused branch maps:\n{block0_signature}"
+    );
+    assert!(
+        !block0_signature.contains("multiplicity: f64"),
+        "assignment helper ABI should not carry unused multiplicity:\n{block0_signature}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_keeps_used_common_stamp_helper_arguments() {
+    let time_artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_time_assignment_chain_source(320))
+        .expect("time canonical IR");
+    let time_generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&time_artifact)
+    .expect("transpile chunked time assignment chain");
+    let time_stamp = time_generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("time stamp file")
+        .contents
+        .as_str();
+    let time_helper = time_generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("time stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(
+        time_stamp.contains("let time = (*self).time;"),
+        "{time_stamp}"
+    );
+    assert!(
+        time_stamp.contains("Self::stamp_transient_block_0(ctx, s, nodes, time)"),
+        "{time_stamp}"
+    );
+    assert!(
+        !time_stamp.contains("param_given, multiplicity"),
+        "time-only helper calls should not pass unused parameter-presence state:\n{time_stamp}"
+    );
+    assert!(
+        !time_stamp.contains("time, timestep"),
+        "time-only helper calls should not pass unused timestep:\n{time_stamp}"
+    );
+    assert!(time_helper.contains("time: f64"), "{time_helper}");
+    assert!(
+        !time_helper.contains("param_given: &[bool; Instance::PARAMETER_COUNT]"),
+        "time-only helper ABI should not carry unused parameter-presence state:\n{time_helper}"
+    );
+    assert!(
+        !time_helper.contains("timestep: f64"),
+        "time-only helper ABI should not carry unused timestep:\n{time_helper}"
+    );
+    assert_generated_rust_compiles(&time_generated);
+
+    let param_given_artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_param_given_assignment_chain_source(320))
+        .expect("param_given canonical IR");
+    let param_given_generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&param_given_artifact)
+    .expect("transpile chunked param-given assignment chain");
+    let param_given_stamp = param_given_generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("param_given stamp file")
+        .contents
+        .as_str();
+    let param_given_helper = param_given_generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("param_given stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(
+        param_given_stamp.contains("let param_given = &self.param_given;"),
+        "{param_given_stamp}"
+    );
+    assert!(
+        param_given_stamp.contains("Self::stamp_transient_block_0(ctx, s, nodes, param_given)"),
+        "{param_given_stamp}"
+    );
+    assert!(
+        !param_given_stamp.contains("multiplicity, time"),
+        "param-given-only helper calls should not pass unused time:\n{param_given_stamp}"
+    );
+    assert!(
+        !param_given_stamp.contains("multiplicity, timestep"),
+        "param-given-only helper calls should not pass unused timestep:\n{param_given_stamp}"
+    );
+    assert!(
+        param_given_helper.contains("param_given: &[bool; Instance::PARAMETER_COUNT]"),
+        "{param_given_helper}"
+    );
+    assert!(
+        !param_given_helper.contains("time: f64"),
+        "param-given-only helper ABI should not carry unused time:\n{param_given_helper}"
+    );
+    assert!(
+        !param_given_helper.contains("timestep: f64"),
+        "param-given-only helper ABI should not carry unused timestep:\n{param_given_helper}"
+    );
+    assert_generated_rust_compiles(&param_given_generated);
+}
+
+#[test]
+fn rust_backend_caches_context_reads_inside_stamp_helper_blocks() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_direct_voltage_equation_source(24))
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile chunked direct voltage equations");
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(
+        helper.contains("let nv0 = ctx.node_voltage(nodes[0]);"),
+        "{helper}"
+    );
+    assert!(
+        helper.contains("let nv1 = ctx.node_voltage(nodes[1]);"),
+        "{helper}"
+    );
+    assert!(
+        !helper.contains("ctx.node_voltage(nodes[0]) - ctx.node_voltage(nodes[1])"),
+        "helper blocks should not repeatedly fetch the same node voltages:\n{helper}"
+    );
 }
 
 #[test]
@@ -2213,14 +4839,283 @@ fn rust_backend_splits_large_equation_bodies_into_helper_blocks() {
 
     assert!(stamp.contains("#[path = \"stamp_blocks_0.rs\"]"), "{stamp}");
     assert!(
-        stamp.contains("self.stamp_transient_equation_0_block_0(ctx, stamper, &mut s);"),
+        stamp.contains("Self::stamp_transient_equations_block_0(stamper, s, nodes, multiplicity)"),
+        "{stamp}"
+    );
+    let equation_helper_calls = stamp
+        .matches("Self::stamp_transient_equations_block_")
+        .count();
+    assert!(
+        equation_helper_calls < 20,
+        "split equations should be packed into helper calls, got {equation_helper_calls}:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_equation_0_block_0"),
+        "split equations should not emit one helper call per equation:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("param_given, multiplicity"),
+        "plain algebraic equation helper calls should not pass unused parameter-presence state:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("multiplicity, time"),
+        "plain algebraic equation helper calls should not pass unused time:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("multiplicity, timestep"),
+        "plain algebraic equation helper calls should not pass unused timestep:\n{stamp}"
+    );
+    assert!(
+        helper.contains("fn stamp_transient_equations_block_0"),
+        "{helper}"
+    );
+    let equation_helper_methods = helper
+        .matches("fn stamp_transient_equations_block_")
+        .count();
+    assert!(
+        equation_helper_methods < 20,
+        "split equations should be packed into helper methods, got {equation_helper_methods}:\n{helper}"
+    );
+    assert!(
+        !helper.contains("param_given: &[bool; Instance::PARAMETER_COUNT]"),
+        "plain algebraic equation helper ABI should not carry unused parameter-presence state:\n{helper}"
+    );
+    assert!(
+        !helper.contains("time: f64"),
+        "plain algebraic equation helper ABI should not carry unused time:\n{helper}"
+    );
+    assert!(
+        !helper.contains("timestep: f64"),
+        "plain algebraic equation helper ABI should not carry unused timestep:\n{helper}"
+    );
+    assert!(!stamp.contains("__rspice_equation_chunk_start"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_hoists_dynamic_operator_scales_across_helper_blocks() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_ddt_equation_source(12))
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile chunked ddt equation device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("let ddt_active = timestep.abs() > Instance::DDT_EPSILON;"),
         "{stamp}"
     );
     assert!(
-        helper.contains("fn stamp_transient_equation_0_block_0"),
+        stamp.contains("let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("let idt_scale = if ddt_active"),
+        "DDT-only stamps should not compute an IDT scale:\n{stamp}"
+    );
+    assert!(
+        stamp.contains(
+            "Self::stamp_transient_equations_block_0(stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current"
+        ),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_equation_0_block_0"),
+        "DDT equation helpers should be packed instead of one call per equation:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("param_given, multiplicity"),
+        "DDT-only helper calls should not pass unused parameter-presence state:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("multiplicity, time"),
+        "DDT-only helper calls should not pass unused simulator time:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("multiplicity, timestep"),
+        "DDT-only helper calls should not pass raw timestep once scales are hoisted:\n{stamp}"
+    );
+    assert!(helper.contains("ddt_active: bool"), "{helper}");
+    assert!(helper.contains("ddt_scale: f64"), "{helper}");
+    assert!(
+        !helper.contains("param_given: &[bool; Instance::PARAMETER_COUNT]"),
+        "DDT-only helper ABI should not carry unused parameter-presence state:\n{helper}"
+    );
+    assert!(
+        !helper.contains("time: f64"),
+        "DDT-only helper ABI should not carry unused simulator time:\n{helper}"
+    );
+    assert!(
+        !helper.contains("timestep: f64"),
+        "DDT-only helper ABI should not carry raw timestep once scales are hoisted:\n{helper}"
+    );
+    assert!(
+        !helper.contains("idt_scale: f64"),
+        "DDT-only helper ABI should not carry IDT scale:\n{helper}"
+    );
+    assert!(helper.contains("ddt_state_current"), "{helper}");
+    assert!(
+        !helper.contains("idt_state_current"),
+        "DDT-only helper ABI should not carry IDT state arrays:\n{helper}"
+    );
+    assert!(
+        !helper.contains("let ddt_scale = if timestep.abs()"),
+        "helper blocks should reuse the stamp-level ddt scale instead of recomputing division:\n{helper}"
+    );
+    assert!(
+        helper.contains(
+            "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale"
+        ),
         "{helper}"
     );
-    assert!(!stamp.contains("__rspice_equation_chunk_start"), "{stamp}");
+    let reactive_body = stamp
+        .split("pub fn stamp_reactive")
+        .nth(1)
+        .expect("reactive stamp body");
+    assert!(
+        !reactive_body.contains("ddt_active"),
+        "reactive stamps use the ddt operand derivatives directly and should not compute transient scales:\n{reactive_body}"
+    );
+    assert!(
+        !reactive_body.contains("ddt_state_current"),
+        "reactive stamps should not borrow transient DDT state arrays:\n{reactive_body}"
+    );
+    assert!(
+        !reactive_body.contains("idt_state_current"),
+        "reactive stamps should not borrow transient IDT state arrays:\n{reactive_body}"
+    );
+    let reactive_helper_signature = helper
+        .split("fn stamp_reactive_equations_block_0")
+        .nth(1)
+        .expect("reactive helper")
+        .split(") {")
+        .next()
+        .expect("reactive helper signature");
+    assert!(
+        !reactive_helper_signature.contains("ddt_active"),
+        "reactive helper ABI should stay lean:\n{reactive_helper_signature}"
+    );
+    assert!(
+        !reactive_helper_signature.contains("ddt_state_current"),
+        "reactive helper ABI should not carry transient DDT state arrays:\n{reactive_helper_signature}"
+    );
+    assert!(
+        !reactive_helper_signature.contains("idt_state_current"),
+        "reactive helper ABI should not carry transient IDT state arrays:\n{reactive_helper_signature}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_omits_dynamic_operator_state_from_algebraic_helpers_in_dynamic_models() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_dynamic_assignment_source(320))
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile mixed algebraic and ddt device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("let ddt_active = timestep.abs() > Instance::DDT_EPSILON;"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains(
+            "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale"
+        ),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("Self::stamp_transient_block_0(ctx, s, nodes)"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("Self::stamp_transient_block_0(ctx, s, nodes, ddt_active"),
+        "algebraic helpers in dynamic models should not receive DDT runtime state:\n{stamp}"
+    );
+    assert!(helper.contains("fn stamp_transient_block_0"), "{helper}");
+    assert!(
+        !helper.contains("ddt_active: bool"),
+        "algebraic helper ABI should not carry DDT activity state:\n{helper}"
+    );
+    assert!(
+        !helper.contains("ddt_scale: f64"),
+        "algebraic helper ABI should not carry DDT scale:\n{helper}"
+    );
+    assert!(
+        !helper.contains("ddt_state_current"),
+        "algebraic helper ABI should not carry DDT state arrays:\n{helper}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_borrowed_helper_arrays_compile_with_dense_stamps() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_dense_equation_source(120))
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile chunked dense equation device");
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    assert!(
+        helper.contains("nodes: &[usize; Instance::NODE_COUNT]"),
+        "{helper}"
+    );
+    assert!(helper.contains("stamper.stamp_current_dense("), "{helper}");
+    assert!(
+        helper.contains(
+            "            nodes,\n            &eq0_node_derivatives,\n            branches,"
+        ),
+        "{helper}"
+    );
+    assert!(
+        !helper.contains(
+            "            &nodes,\n            &eq0_node_derivatives,\n            &branches,"
+        ),
+        "borrowed helper nodes and branches should not be borrowed again:\n{helper}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2251,14 +5146,9 @@ fn rust_backend_lowers_runtime_loops_with_derivative_shadows() {
     assert!(state.contains("MAX_ANALOG_LOOP_ITERATIONS"), "{state}");
     assert!(stamp.contains("while"), "{stamp}");
     assert!(stamp.contains("loop_guard"), "{stamp}");
-    assert!(
-        stamp.contains("GeneratedDerivative::node(nodes[0]"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("GeneratedDerivative::node(nodes[1]"),
-        "{stamp}"
-    );
+    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(stamp.contains("s.dn[1][0]"), "{stamp}");
+    assert!(stamp.contains("s.dn[1][1]"), "{stamp}");
 }
 
 #[test]
@@ -2392,6 +5282,47 @@ fn rust_backend_lowers_ddt_current_into_stateful_stamp_and_reactive_stamp() {
 }
 
 #[test]
+fn rust_backend_uses_single_ddt_derivative_scale_per_stamp_body() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(wide_ddt_current_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile wide ddt current");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("let ddt_active = timestep.abs() > Instance::DDT_EPSILON;"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("ddt_jacobian(timestep, 0.0)"), "{stamp}");
+    assert!(
+        !stamp.contains("ddt_jacobian(timestep, 1.0)")
+            && !stamp.contains("ddt_jacobian(timestep, -1.0)"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("let eq0_e"), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2(")
+            && stamp.contains("multiplicity * (ddt_scale)"),
+        "{stamp}"
+    );
+    assert!(stamp.contains(": f64 = -ddt_scale;"), "{stamp}");
+    assert!(!stamp.contains("nodes[2]"), "{stamp}");
+}
+
+#[test]
 fn rust_backend_skips_dead_ddx_assignment() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddx_op_info_source())
@@ -2452,6 +5383,32 @@ fn rust_backend_lowers_ddx_feeding_current_as_projected_constant() {
 }
 
 #[test]
+fn rust_backend_lowers_scaled_ddx_projection_as_scalar_store() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(scaled_ddx_current_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile scaled ddx-fed current contribution");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("s.store_scalar(0, (A::ddx_projection") && stamp.contains("* p.p0));"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::scale(A::constant(A::ddx_projection"),
+        "{stamp}"
+    );
+}
+
+#[test]
 fn generated_ddx_fed_current_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddx_current_source())
@@ -2497,8 +5454,8 @@ fn generated_ddt_followed_by_parameter_use_rust_compiles_with_runtime_stub() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("let p = self.params;"), "{stamp}");
-    assert!(!stamp.contains("let p = &self.params;"), "{stamp}");
+    assert!(stamp.contains("let p = &self.params;"), "{stamp}");
+    assert!(!stamp.contains("let p = self.params;"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2528,8 +5485,25 @@ fn rust_backend_lowers_idt_potential_state() {
     assert!(state.contains("IDT_STATE_COUNT: usize = 1"), "{state}");
     assert!(state.contains("eval_idt"), "{state}");
     assert!(state.contains("idt_jacobian"), "{state}");
-    assert!(stamp.contains("self.eval_idt"), "{stamp}");
-    assert!(stamp.contains("self.idt_jacobian"), "{stamp}");
+    assert!(
+        stamp.contains(
+            "eval_idt(idt_state_current, idt_state_previous, idt_state_initialized, ddt_active, idt_scale"
+        ),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("let idt_scale = if ddt_active { timestep } else { 0.0 };"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("let ddt_scale = if ddt_active"),
+        "IDT-only stamps should not compute a DDT derivative scale:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("ddt_state_current"),
+        "IDT-only stamps should not borrow DDT state arrays:\n{stamp}"
+    );
+    assert!(stamp.contains("idt_jacobian(timestep"), "{stamp}");
     assert!(stamp.contains("stamper.stamp_potential"), "{stamp}");
 }
 
@@ -2611,10 +5585,7 @@ fn rust_backend_lowers_intrinsic_math_with_analytic_derivatives() {
         !stamp.contains("arg.clone()"),
         "generated unary intrinsics must consume owned AdValue operands without cloning derivative arrays:\n{stamp}"
     );
-    assert!(
-        stamp.contains("GeneratedDerivative::node(nodes[0]"),
-        "{stamp}"
-    );
+    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
     assert!(stamp.contains("if "), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
 }
@@ -2662,11 +5633,11 @@ fn rust_backend_lowers_compact_scalar_exponent_pow_without_constant_ad_wrapper()
         .as_str();
 
     assert!(
-        stamp.contains("A::powf(A::voltage(ctx, &nodes, Some(0), Some(1)), p.p0)"),
+        stamp.contains("A::powf(A::voltage(ctx, nodes, Some(0), Some(1)), p.p0)"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::pow(A::voltage(ctx, &nodes, Some(0), Some(1)), A::constant(p.p0))"),
+        !stamp.contains("A::pow(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p.p0))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -2691,7 +5662,13 @@ fn rust_backend_lowers_compact_scalar_base_pow_without_constant_ad_wrapper() {
         .as_str();
 
     assert!(
-        stamp.contains("A::pow_from_scalar(s.v[0], A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        stamp.contains(
+            "s.store_pow_from_scalar_ad(1, s.v[0], A::voltage(ctx, nodes, Some(0), Some(1)));"
+        ),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(1, A::pow_from_scalar"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::pow(A::constant(s.v[0])"), "{stamp}");
@@ -2717,19 +5694,275 @@ fn rust_backend_lowers_compact_scalar_min_max_without_constant_ad_wrapper() {
         .as_str();
 
     assert!(
-        stamp.contains("A::max_with_scalar(A::voltage(ctx, &nodes, Some(0), Some(1)), p.p0)"),
+        stamp.contains("A::max_with_scalar(A::voltage(ctx, nodes, Some(0), Some(1)), p.p0)"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("A::min_from_scalar(p.p1, A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        stamp.contains("A::min_from_scalar(p.p1, A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::max(A::voltage(ctx, &nodes, Some(0), Some(1)), A::constant(p.p0))"),
+        !stamp.contains("A::max(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p.p0))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::min(A::constant(p.p1), A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        !stamp.contains("A::min(A::constant(p.p1), A::voltage(ctx, nodes, Some(0), Some(1)))"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_compact_scalar_choice_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scalar_choice_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scalar choice stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "pub(crate) fn store_abs(",
+        "pub(crate) fn store_min_with_scalar(",
+        "pub(crate) fn store_max_with_scalar(",
+    ] {
+        assert!(support.contains(helper), "{support}");
+    }
+    assert!(
+        stamp.contains("s.store_max_with_scalar(1, 0, p.p0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_min_with_scalar(2, 0, p.p1);"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("s.store_abs(3, 0);"), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_ad_value(1, A::max_with_scalar(s.ad_value(0), p.p0));"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(2, A::min_with_scalar(s.ad_value(0), p.p1));"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(3, A::abs(s.ad_value(0)));"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_compact_scratch_choice_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scratch_choice_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scratch choice stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_min(&mut self, index: usize, left: usize, right: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_max(&mut self, index: usize, left: usize, right: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_min3(&mut self, index: usize, first: usize, second: usize, third: usize)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_max3(&mut self, index: usize, first: usize, second: usize, third: usize)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_min(3, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_max(4, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_min3(5, 0, 1, 2);"), "{stamp}");
+    assert!(stamp.contains("s.store_max3(6, 0, 1, 2);"), "{stamp}");
+    assert!(!stamp.contains("s.store_ad_value(3, A::min("), "{stamp}");
+    assert!(!stamp.contains("s.store_ad_value(4, A::max("), "{stamp}");
+    assert!(!stamp.contains("s.store_ad_value(5, A::min("), "{stamp}");
+    assert!(!stamp.contains("s.store_ad_value(6, A::max("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_compact_multiply_by_voltage_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_multiply_by_voltage_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact multiply-by-voltage stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_mul_voltage_ad(&mut self, index: usize, value: AdValue"),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_voltage_ad(2, s.ad_value(0), ctx, nodes, Some(0), None);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_voltage_ad(3, s.ad_value(1), ctx, nodes, Some(1), None);"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(2, A::mul(s.ad_value(0), A::voltage"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(3, A::mul(A::voltage"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_compact_divide_voltage_by_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_divide_voltage_by_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact divide-voltage-by-ad stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_div_voltage_by_ad(&mut self, index: usize"),
+        "{support}"
+    );
+    assert!(
+        stamp
+            .contains("s.store_div_voltage_by_ad(1, ctx, nodes, Some(0), Some(1), s.ad_value(0));"),
+        "{stamp}"
+    );
+    assert!(
+        stamp
+            .contains("s.store_div_voltage_by_ad(3, ctx, nodes, Some(1), Some(0), s.ad_value(2));"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(1, A::div(A::voltage"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(3, A::div(A::voltage"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_compact_abs_voltage_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_abs_voltage_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact abs-voltage store");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_abs_voltage(&mut self, index: usize"),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_abs_voltage(0, ctx, nodes, Some(0), Some(1));"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(0, A::abs(A::voltage"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_direct_compact_sub_voltage_abs_voltage_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_sub_voltage_abs_voltage_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact sub-voltage-abs-voltage store");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_sub_voltage_abs_voltage(&mut self, index: usize"),
+        "{support}"
+    );
+    assert!(
+        stamp.contains(
+            "s.store_sub_voltage_abs_voltage(0, ctx, nodes, Some(0), None, Some(1), Some(2));"
+        ),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(0, A::sub(A::voltage"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -2781,6 +6014,30 @@ fn generated_compact_scalar_literal_pow_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
+fn rust_backend_evaluates_scalar_limexp_argument_once() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scalar_limexp_argument_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile compact scalar limexp");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("let limexp_arg ="), "{stamp}");
+    assert!(stamp.contains("if limexp_arg < 80.0"), "{stamp}");
+    assert!(stamp.contains("limexp_arg.exp()"), "{stamp}");
+    assert!(stamp.contains("LIMEXP_MAX"), "{stamp}");
+    assert!(!stamp.contains("80.0_f64.exp()"), "{stamp}");
+    assert_eq!(stamp.matches("((p.p0 + 1.0) / (p.p0 + 2.0))").count(), 1);
+}
+
+#[test]
 fn generated_intrinsic_math_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(math_device_source())
@@ -2827,14 +6084,9 @@ fn rust_backend_lowers_conditional_expressions_with_selected_derivatives() {
 
     assert!(stamp.contains("if "), "{stamp}");
     assert!(stamp.contains(" > "), "{stamp}");
-    assert!(
-        stamp.contains("GeneratedDerivative::node(nodes[0]"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("GeneratedDerivative::node(nodes[1]"),
-        "{stamp}"
-    );
+    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(stamp.contains("nodes[0]"), "{stamp}");
+    assert!(stamp.contains("nodes[1]"), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
 }
 
@@ -3065,12 +6317,103 @@ fn rust_backend_lowers_simulator_system_functions_to_direct_runtime_access() {
     assert!(state.contains("mark_param_given"), "{state}");
     assert!(stamp.contains("ctx.temperature()"), "{stamp}");
     assert!(stamp.contains("ctx.thermal_voltage()"), "{stamp}");
-    assert!(stamp.contains("self.time"), "{stamp}");
-    assert!(stamp.contains("self.multiplicity"), "{stamp}");
-    assert!(stamp.contains("self.param_given[0]"), "{stamp}");
+    assert!(stamp.contains("let time = (*self).time;"), "{stamp}");
+    assert!(
+        !stamp.contains("let timestep = (*self).timestep;"),
+        "system functions without dynamic operators should not bind timestep:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let multiplicity = (*self).multiplicity;"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("param_given[0]"), "{stamp}");
     assert!(stamp.contains("1e-12"), "{stamp}");
     assert!(!stamp.contains("SystemFunction"), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
+}
+
+#[test]
+fn rust_backend_caches_repeated_simulator_scalar_context_reads() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(repeated_context_read_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile repeated context reads");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert_eq!(stamp.matches("ctx.temperature()").count(), 1, "{stamp}");
+    assert_eq!(stamp.matches("ctx.thermal_voltage()").count(), 1, "{stamp}");
+    assert!(
+        stamp.contains("let ctx_temp = ctx.temperature();"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("let ctx_thermal_vt = ctx.thermal_voltage();"),
+        "{stamp}"
+    );
+    assert!(stamp.matches("ctx_temp").count() > 2, "{stamp}");
+    assert!(stamp.matches("ctx_thermal_vt").count() > 2, "{stamp}");
+}
+
+#[test]
+fn rust_backend_lowers_param_given_conditions_as_direct_boolean_reads() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(param_given_condition_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile param-given condition device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("param_given[0] && (!param_given[1])"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("param_given[0] || (!param_given[1])"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("let param_given = &self.param_given;"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("let time = (*self).time;"),
+        "$param_given-only stamps should not bind simulator time:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let timestep = (*self).timestep;"),
+        "$param_given-only stamps should not bind timestep:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("if param_given[0] { 1.0 } else { 0.0 } != 0.0"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("if param_given[0] { 1.0 } else { 0.0 } == 1.0"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("if param_given[0] { 1.0 } else { 0.0 }"),
+        "numeric $param_given should still lower to a real-valued 1.0/0.0 expression:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -3207,9 +6550,12 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
 
     assert!(state.contains("pub p0: f64"), "{state}");
     assert!(state.contains("pub p1: f64"), "{state}");
-    assert!(stamp.contains("let p = self.params;"), "{stamp}");
-    assert!(!stamp.contains("let p = &self.params;"), "{stamp}");
-    assert!(stamp.contains("let nodes = self.nodes;"), "{stamp}");
+    assert!(stamp.contains("let p = &self.params;"), "{stamp}");
+    assert!(!stamp.contains("let p = self.params;"), "{stamp}");
+    assert!(stamp.contains("let nodes = &(*self).nodes;"), "{stamp}");
+    assert!(!stamp.contains("let nodes = self.nodes;"), "{stamp}");
+    assert!(stamp.contains("p.p0"), "{stamp}");
+    assert!(stamp.contains("p.p1"), "{stamp}");
     assert!(
         stamp.contains("let nv0 = ctx.node_voltage(nodes[0]);"),
         "{stamp}"
@@ -3218,12 +6564,7 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
         stamp.contains("let nv1 = ctx.node_voltage(nodes[1]);"),
         "{stamp}"
     );
-    assert!(stamp.contains("p.p0"), "{stamp}");
-    assert!(stamp.contains("p.p1"), "{stamp}");
-    assert!(
-        !stamp.contains("ctx.node_voltage(nodes[0]) - ctx.node_voltage(nodes[1])"),
-        "{stamp}"
-    );
+    assert!(stamp.contains("nv0 - nv1"), "{stamp}");
     assert!(!stamp.contains("params.p0"), "{stamp}");
     assert!(!stamp.contains("params.p1"), "{stamp}");
     assert!(!stamp.contains("self.params.p0"), "{stamp}");
@@ -3239,7 +6580,7 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
 }
 
 #[test]
-fn rust_backend_uses_copy_clone_state_without_debug_derives() {
+fn rust_backend_uses_compact_clone_state_without_debug_derives() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_parameter_state_source())
         .expect("canonical IR");
@@ -3259,10 +6600,74 @@ fn rust_backend_uses_copy_clone_state_without_debug_derives() {
         state.contains("fn clone(&self) -> Self { *self }"),
         "{state}"
     );
-    assert!(state.contains("impl Copy for Instance {}"), "{state}");
+    assert!(!state.contains("impl Copy for Instance {}"), "{state}");
+    assert!(
+        state.contains("pub(crate) scratch: Option<Box<GenericScratch<"),
+        "{state}"
+    );
+    assert!(
+        state.contains("pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<"),
+        "{state}"
+    );
+    assert!(
+        state.contains("scratch: Some(Box::new(GenericScratch::new()))"),
+        "{state}"
+    );
+    assert!(
+        state.contains("reactive_scratch: Some(Box::new(GenericReactiveScratch::new()))"),
+        "{state}"
+    );
+    assert!(state.contains("scratch: None"), "{state}");
+    assert!(state.contains("reactive_scratch: None"), "{state}");
     assert!(
         !state.contains("#[derive(Debug, Clone)]"),
         "large generated state should not synthesize Debug or field-by-field Clone impls:\n{state}"
+    );
+}
+
+#[test]
+fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_parameter_state_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile compact parameter-state device");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+
+    assert!(
+        state.contains("pub fn restore_from_snapshot(&mut self, snapshot: Self)"),
+        "{state}"
+    );
+    assert!(
+        state.contains("let scratch = self.scratch.take();"),
+        "{state}"
+    );
+    assert!(
+        state.contains("let reactive_scratch = self.reactive_scratch.take();"),
+        "{state}"
+    );
+    assert!(
+        state.contains("scratch,"),
+        "restore must preserve the active transient scratch allocation:\n{state}"
+    );
+    assert!(
+        state.contains("reactive_scratch,"),
+        "restore must preserve the active reactive scratch allocation:\n{state}"
+    );
+    assert!(
+        !state.contains("scratch: snapshot.scratch"),
+        "restore must not import snapshot scratch, which clones intentionally strip:\n{state}"
+    );
+    assert!(
+        !state.contains("reactive_scratch: snapshot.reactive_scratch"),
+        "restore must not import snapshot reactive scratch, which clones intentionally strip:\n{state}"
     );
 }
 
@@ -3339,6 +6744,78 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedStamper<'a> {{
+        pub fn stamp_current_const(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+        ) {{
+            *self.touched += value;
+        }}
+
+        pub fn stamp_current_node1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += value + derivative0;
+        }}
+
+        pub fn stamp_current_node2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1;
+        }}
+
+        pub fn stamp_current_node3(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+            _node2: usize,
+            derivative2: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1 + derivative2;
+        }}
+
+        pub fn stamp_current_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _branch0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += value + derivative0;
+        }}
+
+        pub fn stamp_current_branch2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _branch0: usize,
+            derivative0: f64,
+            _branch1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1;
+        }}
+
         pub fn stamp_current(
             &mut self,
             _pos: Option<usize>,
@@ -3376,6 +6853,54 @@ pub mod runtime {{
             *self.touched += multiplicity;
         }}
 
+        pub fn stamp_potential_const(&mut self, _branch: usize, value: f64) {{
+            *self.touched += value;
+        }}
+
+        pub fn stamp_potential_node1(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += value + derivative0;
+        }}
+
+        pub fn stamp_potential_node2(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1;
+        }}
+
+        pub fn stamp_potential_branch1(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            _branch0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += value + derivative0;
+        }}
+
+        pub fn stamp_potential_branch2(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            _branch0: usize,
+            derivative0: f64,
+            _branch1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1;
+        }}
+
         pub fn stamp_potential(
             &mut self,
             _branch: usize,
@@ -3405,6 +6930,64 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedReactiveStamper<'a> {{
+        pub fn stamp_current_reactive_node1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += derivative0;
+        }}
+
+        pub fn stamp_current_reactive_node2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1;
+        }}
+
+        pub fn stamp_current_reactive_node3(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+            _node2: usize,
+            derivative2: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1 + derivative2;
+        }}
+
+        pub fn stamp_current_reactive_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _branch0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += derivative0;
+        }}
+
+        pub fn stamp_current_reactive_branch2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _branch0: usize,
+            derivative0: f64,
+            _branch1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1;
+        }}
+
         pub fn stamp_current_reactive(
             &mut self,
             _pos: Option<usize>,
@@ -3435,6 +7018,46 @@ pub mod runtime {{
             derivatives: &[GeneratedDerivative],
         ) {{
             *self.touched += derivatives.iter().map(|derivative| derivative.value).sum::<f64>();
+        }}
+
+        pub fn stamp_potential_reactive_node1(
+            &mut self,
+            _branch: usize,
+            _node0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += derivative0;
+        }}
+
+        pub fn stamp_potential_reactive_node2(
+            &mut self,
+            _branch: usize,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1;
+        }}
+
+        pub fn stamp_potential_reactive_branch1(
+            &mut self,
+            _branch: usize,
+            _branch0: usize,
+            derivative0: f64,
+        ) {{
+            *self.touched += derivative0;
+        }}
+
+        pub fn stamp_potential_reactive_branch2(
+            &mut self,
+            _branch: usize,
+            _branch0: usize,
+            derivative0: f64,
+            _branch1: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1;
         }}
 
         pub fn stamp_potential_reactive_dense(
@@ -3547,6 +7170,84 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedStamper<'a> {{
+        pub fn stamp_current_const(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+        ) {{
+            *self.current += value;
+        }}
+
+        pub fn stamp_current_node1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node0: usize,
+            derivative0: f64,
+        ) {{
+            *self.current += value;
+            self.node_derivatives[node0] += derivative0;
+        }}
+
+        pub fn stamp_current_node2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node0: usize,
+            derivative0: f64,
+            node1: usize,
+            derivative1: f64,
+        ) {{
+            *self.current += value;
+            self.node_derivatives[node0] += derivative0;
+            self.node_derivatives[node1] += derivative1;
+        }}
+
+        pub fn stamp_current_node3(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node0: usize,
+            derivative0: f64,
+            node1: usize,
+            derivative1: f64,
+            node2: usize,
+            derivative2: f64,
+        ) {{
+            *self.current += value;
+            self.node_derivatives[node0] += derivative0;
+            self.node_derivatives[node1] += derivative1;
+            self.node_derivatives[node2] += derivative2;
+        }}
+
+        pub fn stamp_current_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _branch0: usize,
+            _derivative0: f64,
+        ) {{
+            *self.current += value;
+        }}
+
+        pub fn stamp_current_branch2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _branch0: usize,
+            _derivative0: f64,
+            _branch1: usize,
+            _derivative1: f64,
+        ) {{
+            *self.current += value;
+        }}
+
         pub fn stamp_current(
             &mut self,
             _pos: Option<usize>,
@@ -3571,6 +7272,49 @@ pub mod runtime {{
         ) {{
         }}
 
+        pub fn stamp_potential_const(&mut self, _branch: usize, _value: f64) {{
+        }}
+
+        pub fn stamp_potential_node1(
+            &mut self,
+            _branch: usize,
+            _value: f64,
+            _node0: usize,
+            _derivative0: f64,
+        ) {{
+        }}
+
+        pub fn stamp_potential_node2(
+            &mut self,
+            _branch: usize,
+            _value: f64,
+            _node0: usize,
+            _derivative0: f64,
+            _node1: usize,
+            _derivative1: f64,
+        ) {{
+        }}
+
+        pub fn stamp_potential_branch1(
+            &mut self,
+            _branch: usize,
+            _value: f64,
+            _branch0: usize,
+            _derivative0: f64,
+        ) {{
+        }}
+
+        pub fn stamp_potential_branch2(
+            &mut self,
+            _branch: usize,
+            _value: f64,
+            _branch0: usize,
+            _derivative0: f64,
+            _branch1: usize,
+            _derivative1: f64,
+        ) {{
+        }}
+
         pub fn stamp_potential(
             &mut self,
             _branch: usize,
@@ -3585,11 +7329,100 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedReactiveStamper<'a> {{
+        pub fn stamp_current_reactive_node1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            _derivative0: f64,
+        ) {{
+        }}
+
+        pub fn stamp_current_reactive_node2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            _derivative0: f64,
+            _node1: usize,
+            _derivative1: f64,
+        ) {{
+        }}
+
+        pub fn stamp_current_reactive_node3(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            _derivative0: f64,
+            _node1: usize,
+            _derivative1: f64,
+            _node2: usize,
+            _derivative2: f64,
+        ) {{
+        }}
+
+        pub fn stamp_current_reactive_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _branch0: usize,
+            _derivative0: f64,
+        ) {{
+        }}
+
+        pub fn stamp_current_reactive_branch2(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _branch0: usize,
+            _derivative0: f64,
+            _branch1: usize,
+            _derivative1: f64,
+        ) {{
+        }}
+
         pub fn stamp_current_reactive(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
             _derivatives: &[GeneratedDerivative],
+        ) {{
+        }}
+
+        pub fn stamp_potential_reactive_node1(
+            &mut self,
+            _branch: usize,
+            _node0: usize,
+            _derivative0: f64,
+        ) {{
+        }}
+
+        pub fn stamp_potential_reactive_node2(
+            &mut self,
+            _branch: usize,
+            _node0: usize,
+            _derivative0: f64,
+            _node1: usize,
+            _derivative1: f64,
+        ) {{
+        }}
+
+        pub fn stamp_potential_reactive_branch1(
+            &mut self,
+            _branch: usize,
+            _branch0: usize,
+            _derivative0: f64,
+        ) {{
+        }}
+
+        pub fn stamp_potential_reactive_branch2(
+            &mut self,
+            _branch: usize,
+            _branch0: usize,
+            _derivative0: f64,
+            _branch1: usize,
+            _derivative1: f64,
         ) {{
         }}
 
@@ -3686,7 +7519,8 @@ endmodule
         .contents
         .as_str();
 
-    assert!(stamp.contains("80.0_f64.exp()"), "{stamp}");
+    assert!(stamp.contains("LIMEXP_MAX"), "{stamp}");
+    assert!(!stamp.contains("80.0_f64.exp()"), "{stamp}");
     assert!(stamp.contains("if "), "{stamp}");
 }
 
@@ -3709,7 +7543,7 @@ fn rust_backend_preserves_recognized_limited_exp_function_as_helper_call() {
         .as_str();
 
     assert!(
-        stamp.contains("A::limited_exp(A::voltage(ctx, &nodes, Some(0), Some(1)))"),
+        stamp.contains("A::limited_exp(A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(!stamp.contains("5.540622384e34"), "{stamp}");
@@ -3873,7 +7707,14 @@ fn rust_backend_lowers_sparse_named_branch_current_axis() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("GeneratedDerivative::branch"), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_potential_branch1("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("GeneratedDerivative::branch"),
+        "single-branch sparse potentials should use the fixed-arity stamper path:\n{stamp}"
+    );
     assert!(stamp.contains("branches[1]"), "{stamp}");
 }
 
@@ -4130,11 +7971,42 @@ fn rust_backend_lowers_potential_branch_current_axis_derivative() {
         .as_str();
 
     assert!(
-        stamp.contains("GeneratedDerivative::branch(branches[0]"),
+        stamp.contains("stamper.stamp_potential_branch1("),
         "{stamp}"
     );
     assert!(stamp.contains("p.p0"), "{stamp}");
     assert!(!stamp.contains("let eq0_d_b0"), "{stamp}");
+}
+
+#[test]
+fn rust_backend_caches_branch_current_reads_in_top_level_stamp_body() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(branch_current_cache_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile branch-current cache device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("let bi0 = ctx.branch_current(branches[0]);"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp
+            .replace("let bi0 = ctx.branch_current(branches[0]);", "")
+            .contains("ctx.branch_current(branches[0])"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -4233,6 +8105,26 @@ endmodule
 "#
 }
 
+fn constant_potential_source() -> &'static str {
+    r#"
+module const_v(p, n);
+    inout p, n;
+    electrical p, n;
+    analog V(p, n) <+ 1.0;
+endmodule
+"#
+}
+
+fn three_node_sparse_current_source() -> &'static str {
+    r#"
+module tri_sparse_i(p, n, x);
+    inout p, n, x;
+    electrical p, n, x;
+    analog I(p, n) <+ V(p, n) + V(x, n);
+endmodule
+"#
+}
+
 fn parameter_conditional_assignment_source() -> &'static str {
     r#"
 module parameter_conditional_assignment(p, n);
@@ -4260,6 +8152,33 @@ module same_branch_conditional_assignment(p, n);
         v = V(p, n);
         selected = (use_alt > 0.0) ? v : v;
         I(p, n) <+ selected;
+    end
+endmodule
+"#
+}
+
+fn repeated_conditional_assignment_source() -> &'static str {
+    r#"
+module repeated_conditional_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gate = 1.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    analog begin
+        a = V(p, n);
+        if (gate > 0.0) begin
+            b = a + 1.0;
+            c = b + 2.0;
+            d = c + 3.0;
+        end else begin
+            b = a - 1.0;
+            c = b - 2.0;
+            d = c - 3.0;
+        end
+        I(p, n) <+ d;
     end
 endmodule
 "#
@@ -4327,6 +8246,22 @@ module compact_conditional_ad_branch_assignment(p, n);
     real selected;
     analog begin
         selected = (use_alt > 0.0) ? sqrt(V(p, n)) : exp(V(n, p));
+        I(p, n) <+ selected;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_conditional_ad_branch_source() -> &'static str {
+    r#"
+module compact_scaled_conditional_ad_branch(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real use_alt = 0.0;
+    parameter real gain = 2.0;
+    real selected;
+    analog begin
+        selected = ((use_alt > 0.0) ? sqrt(V(p, n)) : exp(V(n, p))) * gain;
         I(p, n) <+ selected;
     end
 endmodule
@@ -4631,6 +8566,857 @@ endmodule
 "#
 }
 
+fn compact_scaled_input_unary_store_source() -> &'static str {
+    r#"
+module compact_scaled_input_unary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    analog begin
+        a = V(p, n);
+        b = sqrt(a * gain);
+        c = exp(a * gain);
+        d = limexp(a * gain);
+        e = sin(a * gain);
+        f = ln(a * gain);
+        I(p, n) <+ b + c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_limited_exp_store_source() -> &'static str {
+    r#"
+module compact_limited_exp_store(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real lexp;
+        input x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real b;
+    real c;
+    analog begin
+        a = V(p, n);
+        b = limexp(a);
+        c = lexp(a);
+        I(p, n) <+ b + c;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_output_scaled_input_unary_store_source() -> &'static str {
+    r#"
+module compact_scaled_output_scaled_input_unary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real output_gain = 3.0;
+    analog function real lexp;
+        input x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = sqrt(a * gain) * output_gain;
+        c = exp(a * gain) * output_gain;
+        d = limexp(a * gain) * output_gain;
+        e = lexp(a * gain) * output_gain;
+        f = ln(a * gain) * output_gain;
+        I(p, n) <+ b + c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_offset_input_unary_store_source() -> &'static str {
+    r#"
+module compact_offset_input_unary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real shift = 2.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    analog begin
+        a = V(p, n);
+        b = sqrt(a + shift);
+        c = exp(a + shift);
+        d = ln(a + shift);
+        I(p, n) <+ b + c + d;
+    end
+endmodule
+"#
+}
+
+fn compact_negated_input_unary_store_source() -> &'static str {
+    r#"
+module compact_negated_input_unary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real lexp;
+        input x;
+        real x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    analog begin
+        a = V(p, n);
+        b = sqrt(-a);
+        c = exp(-a);
+        d = limexp(-a);
+        e = lexp(-a);
+        f = ln(-a);
+        I(p, n) <+ b + c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_output_scaled_and_offset_unary_store_source() -> &'static str {
+    r#"
+module compact_output_scaled_and_offset_unary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    analog function real lexp;
+        input x;
+        real x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    real k;
+    real l;
+    analog begin
+        a = V(p, n);
+        b = (a * a) * gain;
+        c = abs(a) * gain;
+        d = ln(a) * gain;
+        e = lexp(a) * gain;
+        f = (a * a) + offset;
+        g = abs(a) + offset;
+        h = sqrt(a) + offset;
+        i = exp(a) + offset;
+        j = ln(a) + offset;
+        k = limexp(a) + offset;
+        l = lexp(a) + offset;
+        I(p, n) <+ b + c + d + e + f + g + h + i + j + k + l;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_and_offset_negation_store_source() -> &'static str {
+    r#"
+module compact_scaled_and_offset_negation_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real b;
+    real c;
+    analog begin
+        a = V(p, n);
+        b = (-a) * gain;
+        c = (-a) - offset;
+        I(p, n) <+ b + c;
+    end
+endmodule
+"#
+}
+
+fn compact_generated_ad_local_store_source() -> &'static str {
+    r#"
+module compact_generated_ad_local_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real select_branch = 1.0;
+    real a;
+    analog begin
+        a = (select_branch > 0.0) ? ddt(V(p, n)) : V(p, n);
+        I(p, n) <+ a;
+    end
+endmodule
+"#
+}
+
+fn compact_voltage_store_source() -> &'static str {
+    r#"
+module compact_voltage_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    analog begin
+        a = V(p, n);
+        b = V(p, n) * gain;
+        c = -V(p, n);
+        d = V(p, n) + offset;
+        I(p, n) <+ a + b + c + d;
+    end
+endmodule
+"#
+}
+
+fn compact_div_from_scalar_affine_input_store_source() -> &'static str {
+    r#"
+module compact_div_from_scalar_affine_input_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real numerator = 7.0;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    analog begin
+        a = V(p, n);
+        b = numerator / (a + offset);
+        c = numerator / (a * gain);
+        d = numerator / ((a * gain) + offset);
+        I(p, n) <+ b + c + d;
+    end
+endmodule
+"#
+}
+
+fn compact_sqrt_square_and_affine_store_source() -> &'static str {
+    r#"
+module compact_sqrt_square_and_affine_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = sqrt((a * a) + offset);
+        c = sqrt((a * a) + q);
+        d = sqrt((a * a) + (q * q));
+        e = sqrt((a * gain) + offset);
+        I(p, n) <+ b + c + d + e;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_scaled_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    real c;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = (a * gain) * ln(q + offset);
+        c = exp(q) * (-a);
+        I(p, n) <+ b + c;
+    end
+endmodule
+"#
+}
+
+fn compact_result_scaled_mixed_mul_div_store_source() -> &'static str {
+    r#"
+module compact_result_scaled_mixed_mul_div_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real offset = 3.0;
+    parameter real output_gain = 0.5;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = (a * ln(q + offset)) * output_gain;
+        c = (exp(q) * a) * output_gain;
+        d = (a / ln(q + offset)) * output_gain;
+        e = (exp(q) / a) * output_gain;
+        I(p, n) <+ b + c + d + e;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_mixed_add_sub_store_source() -> &'static str {
+    r#"
+module compact_scaled_mixed_add_sub_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    parameter real output_gain = 0.5;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = (a + ln(q + offset)) * output_gain;
+        c = (exp(q) + a) * output_gain;
+        d = (a - ln(q + offset)) * output_gain;
+        e = (exp(q) - a) * output_gain;
+        I(p, n) <+ b + c + d + e;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_general_ad_store_source() -> &'static str {
+    r#"
+module compact_scaled_general_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = (exp(a + q) + offset) * gain;
+        c = (sqrt(a + q) + ln(a + offset)) * gain;
+        d = (sqrt(a + q) - ln(a + offset)) * gain;
+        e = (sqrt(a + q) * ln(a + offset)) * gain;
+        f = (sqrt(a + q) / ln(a + offset)) * gain;
+        I(p, n) <+ b + c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_general_unary_ad_store_source() -> &'static str {
+    r#"
+module compact_scaled_general_unary_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    parameter real exponent = 2.0;
+    analog function real lexp;
+        input x;
+        real x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = exp(a + q) * gain;
+        c = ln(a + offset) * gain;
+        d = sqrt(a + q) * gain;
+        e = limexp(a + q) * gain;
+        f = lexp(a + q) * gain;
+        g = abs(sqrt(a + q)) * gain;
+        h = pow(sqrt(a + q), exponent) * gain;
+        i = (offset - sqrt(a + q)) * gain;
+        j = (offset / sqrt(a + q)) * gain;
+        I(p, n) <+ b + c + d + e + f + g + h + i + j;
+    end
+endmodule
+"#
+}
+
+fn compact_mixed_scaled_operand_add_sub_store_source() -> &'static str {
+    r#"
+module compact_mixed_scaled_operand_add_sub_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = (a * gain) + ln(q + offset);
+        c = exp(q) + (a * gain);
+        d = (a * gain) - ln(q + offset);
+        e = exp(q) - (a * gain);
+        I(p, n) <+ b + c + d + e;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_binary_operand_store_source() -> &'static str {
+    r#"
+module compact_scaled_binary_operand_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real shift = 3.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = (a * gain) + (b * shift);
+        d = (a * gain) - (b * shift);
+        e = (a * gain) * (b * shift);
+        f = (a * gain) / (b * shift);
+        I(p, n) <+ c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_output_scaled_binary_operand_store_source() -> &'static str {
+    r#"
+module compact_scaled_output_scaled_binary_operand_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real shift = 3.0;
+    parameter real output_gain = 4.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = ((a * gain) + (b * shift)) * output_gain;
+        d = ((a * gain) - (b * shift)) * output_gain;
+        e = ((a * gain) * (b * shift)) * output_gain;
+        f = ((a * gain) / (b * shift)) * output_gain;
+        I(p, n) <+ c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_offset_binary_store_source() -> &'static str {
+    r#"
+module compact_offset_binary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real offset = 4.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = (a + b) + offset;
+        d = (a - b) + offset;
+        e = (a * b) + offset;
+        f = (a / b) + offset;
+        I(p, n) <+ c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_offset_scaled_binary_store_source() -> &'static str {
+    r#"
+module compact_offset_scaled_binary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 4.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = ((a + b) * gain) + offset;
+        d = ((a - b) * gain) + offset;
+        e = ((a * b) * gain) + offset;
+        f = ((a / b) * gain) + offset;
+        g = ((a + b) + offset) * gain;
+        h = ((a - b) + offset) * gain;
+        i = ((a * b) + offset) * gain;
+        j = ((a / b) + offset) * gain;
+        I(p, n) <+ c + d + e + f + g + h + i + j;
+    end
+endmodule
+"#
+}
+
+fn compact_offset_general_ad_store_source() -> &'static str {
+    r#"
+module compact_offset_general_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 4.0;
+    parameter real exponent = 2.0;
+    analog function real lexp;
+        input x;
+        real x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    real k;
+    real l;
+    real m;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = (exp(a + q) * gain) + offset;
+        c = (sqrt(a + q) + ln(a + offset)) + offset;
+        d = (sqrt(a + q) - ln(a + offset)) + offset;
+        e = (sqrt(a + q) * ln(a + offset)) + offset;
+        f = (sqrt(a + q) / ln(a + offset)) + offset;
+        g = exp(a + q) + offset;
+        h = sqrt(a + q) + offset;
+        i = (offset - sqrt(a + q)) + offset;
+        j = (offset / sqrt(a + q)) + offset;
+        k = ln(a + offset) + offset;
+        l = lexp(a + q) + offset;
+        m = pow(sqrt(a + q), exponent) + offset;
+        I(p, n) <+ b + c + d + e + f + g + h + i + j + k + l + m;
+    end
+endmodule
+"#
+}
+
+fn compact_offset_special_ad_store_source() -> &'static str {
+    r#"
+module compact_offset_special_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real offset = 4.0;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    real k;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = pow(a + offset, q + offset) + offset;
+        c = pow(2.0, sqrt(a + q)) + offset;
+        d = min(sqrt(a + q), ln(a + offset)) + offset;
+        e = max(sqrt(a + q), ln(a + offset)) + offset;
+        f = abs(sqrt(a + q)) + offset;
+        g = atan(sqrt(a + q)) + offset;
+        h = cosh(sqrt(a + q)) + offset;
+        i = sin(sqrt(a + q)) + offset;
+        j = cosh(a) + offset;
+        k = (V(p) + offset) + offset;
+        I(p, n) <+ b + c + d + e + f + g + h + i + j + k;
+    end
+endmodule
+"#
+}
+
+fn compact_div_from_scalar_general_ad_store_source() -> &'static str {
+    r#"
+module compact_div_from_scalar_general_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real numerator = 2.0;
+    parameter real offset = 4.0;
+    parameter real scale = 3.0;
+    parameter real exponent = 2.0;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    real k;
+    real l;
+    real m;
+    real o;
+    real r;
+    real t;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = numerator / (sqrt(a + q) + offset);
+        c = numerator / (sqrt(a + q) * scale);
+        d = numerator / (sqrt(a + q) + ln(a + offset));
+        e = numerator / (sqrt(a + q) - ln(a + offset));
+        f = numerator / (sqrt(a + q) * ln(a + offset));
+        g = numerator / (sqrt(a + q) / ln(a + offset));
+        h = numerator / sqrt(a + q);
+        i = numerator / (offset - sqrt(a + q));
+        j = numerator / (offset / sqrt(a + q));
+        k = numerator / pow(sqrt(a + q), exponent);
+        l = numerator / exp(a + q);
+        m = numerator / sin(a + q);
+        o = numerator / sinh(a + q);
+        r = numerator / (a * a);
+        t = numerator / pow(sqrt(a + q), q + offset);
+        I(p, n) <+ b + c + d + e + f + g + h + i + j + k + l + m + o + r + t;
+    end
+endmodule
+"#
+}
+
+fn compact_sqrt_general_ad_store_source() -> &'static str {
+    r#"
+module compact_sqrt_general_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real offset = 4.0;
+    parameter real scale = 3.0;
+    real a;
+    real q;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = sqrt(exp(a + q) + offset);
+        c = sqrt(exp(a + q) * scale);
+        d = sqrt(exp(a + q) + ln(a + offset));
+        e = sqrt(exp(a + q) - ln(a + offset));
+        f = sqrt(exp(a + q) * ln(a + offset));
+        g = sqrt(exp(a + q) / ln(a + offset));
+        h = sqrt(abs(exp(a + q)));
+        i = sqrt(offset - exp(a + q));
+        j = sqrt(offset / exp(a + q));
+        I(p, n) <+ b + c + d + e + f + g + h + i + j;
+    end
+endmodule
+"#
+}
+
+fn compact_unary_binary_store_source() -> &'static str {
+    r#"
+module compact_unary_binary_store(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real lexp;
+        input x;
+        real x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    real k;
+    real l;
+    real m;
+    real o;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = sqrt(a + b);
+        d = sqrt(a - b);
+        e = sqrt(a * b);
+        f = sqrt(a / b);
+        g = exp(a - b);
+        h = exp(a * b);
+        i = exp(a / b);
+        j = ln(a / b);
+        k = limexp(a / b);
+        l = lexp(a - b);
+        m = lexp(a * b);
+        o = lexp(a / b);
+        I(p, n) <+ c + d + e + f + g + h + i + j + k + l + m + o;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_offset_scaled_source() -> &'static str {
+    r#"
+module compact_scaled_offset_scaled(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real output_gain = 3.0;
+    parameter real shift = 4.0;
+    real a;
+    real b;
+    analog begin
+        a = V(p, n);
+        b = ((a * gain) + shift) * output_gain;
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
 fn compact_mixed_scratch_ad_store_source() -> &'static str {
     r#"
 module compact_mixed_scratch_ad_store(p, n);
@@ -4649,8 +9435,8 @@ module compact_mixed_scratch_ad_store(p, n);
     analog begin
         a = V(p, n);
         b = V(n, p);
-        c = a * exp(b);
-        d = exp(a) * b;
+        c = a * atan(b);
+        d = atan(a) * b;
         e = a + sqrt(b);
         f = sqrt(a) + b;
         g = a - sqrt(b);
@@ -4658,6 +9444,431 @@ module compact_mixed_scratch_ad_store(p, n);
         i = a / sqrt(b);
         j = sqrt(a) / b;
         I(p, n) <+ c + d + e + f + g + h + i + j;
+    end
+endmodule
+"#
+}
+
+fn compact_nested_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_nested_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (a * b) * c;
+        e = c * (a * b);
+        f = (a * exp(b)) * c;
+        g = c * (exp(a) * b);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_affine_nested_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_affine_nested_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real shift = 1.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = ((a * b) + shift) * c;
+        e = c * ((a * b) * gain);
+        f = ((a * exp(b)) + shift) * c;
+        g = c * ((exp(a) * b) * gain);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_add_sub_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_add_sub_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (a + b) * c;
+        e = c * (a + b);
+        f = (a - b) * c;
+        g = c * (a - b);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_general_add_sub_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_general_add_sub_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (a + exp(b)) * c;
+        e = c * (exp(a) + b);
+        f = (a - exp(b)) * c;
+        g = c * (exp(a) - b);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_offset_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_offset_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real shift = 1.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (a + shift) * c;
+        e = c * (a + shift);
+        f = (exp(a) + shift) * c;
+        g = c * (exp(b) + shift);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_sub_from_scalar_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_sub_from_scalar_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (limit - a) * c;
+        e = c * (limit - b);
+        f = (limit - exp(a)) * c;
+        g = c * (limit - exp(b));
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_value_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_scaled_value_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (a * gain) * c;
+        e = c * (b * gain);
+        f = ((a + b) * gain) * c;
+        g = c * ((a + b) * gain);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_div_from_scalar_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_div_from_scalar_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real numerator = 2.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (numerator / a) * c;
+        e = c * (numerator / b);
+        f = (numerator / (a + b)) * c;
+        g = c * (numerator / (a + b));
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_pow_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_pow_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exponent = 2.3;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = pow(a, b) * c;
+        e = c * pow(a, b);
+        f = pow(a + b, exponent) * c;
+        g = c * pow(a + b, exponent);
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_extended_unary_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_extended_unary_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real lexp;
+        input x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    real j;
+    real k;
+    real l;
+    real m;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = limexp(a) * c;
+        e = c * limexp(b);
+        f = abs(a) * c;
+        g = c * abs(b);
+        h = cos(a + b) * c;
+        i = c * cos(a + b);
+        j = tanh(a + b) * c;
+        k = c * tanh(a + b);
+        l = lexp(a) * c;
+        m = c * lexp(a + b);
+        I(p, n) <+ d + e + f + g + h + i + j + k + l + m;
+    end
+endmodule
+"#
+}
+
+fn compact_negated_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_negated_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (-a) * c;
+        e = c * (-a);
+        f = (-(exp(a))) * c;
+        g = c * (-(exp(b)));
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_division_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_division_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (a / b) * c;
+        e = c * (a / b);
+        f = (exp(a) / b) * c;
+        g = c * (a / exp(b));
+        I(p, n) <+ d + e + f + g;
+    end
+endmodule
+"#
+}
+
+fn compact_square_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_square_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = (a * a) * c;
+        e = c * (b * b);
+        I(p, n) <+ d + e;
+    end
+endmodule
+"#
+}
+
+fn compact_unary_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_unary_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = exp(a) * c;
+        e = c * exp(b);
+        f = ln(a) * c;
+        g = c * ln(b);
+        h = sqrt(a) * c;
+        i = c * sqrt(b);
+        I(p, n) <+ d + e + f + g + h + i;
+    end
+endmodule
+"#
+}
+
+fn compact_nested_unary_mixed_multiply_store_source() -> &'static str {
+    r#"
+module compact_nested_unary_mixed_multiply_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    real i;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        d = exp(a + b) * c;
+        e = c * exp(a + b);
+        f = ln(a + b) * c;
+        g = c * ln(a + b);
+        h = sqrt(a + b) * c;
+        i = c * sqrt(a + b);
+        I(p, n) <+ d + e + f + g + h + i;
     end
 endmodule
 "#
@@ -4722,6 +9933,9 @@ module compact_general_ad_special_store(p, n);
     real h;
     real i;
     real j;
+    real k;
+    real l;
+    real m;
     analog begin
         a = V(p, n);
         b = V(n, p);
@@ -4733,7 +9947,10 @@ module compact_general_ad_special_store(p, n);
         h = pow(floor, sqrt(a + b));
         i = sin(sqrt(a + b));
         j = limexp(sqrt(a + b));
-        I(p, n) <+ c + d + e + f + g + h + i + j;
+        k = pow(a, b + floor);
+        l = min(a, b + floor);
+        m = max(a, b + floor);
+        I(p, n) <+ c + d + e + f + g + h + i + j + k + l + m;
     end
 endmodule
 "#
@@ -4886,6 +10103,48 @@ endmodule
 "#
 }
 
+fn compact_boolean_reuse_source() -> &'static str {
+    r#"
+module compact_boolean_reuse(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real trip = 0.0;
+    real flag;
+    real selected;
+    analog begin
+        flag = V(p, n) > trip;
+        if (flag) begin
+            selected = 2.0;
+        end else begin
+            selected = 3.0;
+        end
+        I(p, n) <+ (selected + flag) * V(p, n);
+    end
+endmodule
+"#
+}
+
+fn compact_boolean_literal_conditional_source() -> &'static str {
+    r#"
+module compact_boolean_literal_conditional(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 1.0;
+    real flag;
+    real selected;
+    analog begin
+        flag = (gain > 0.0) ? 0.0 : 1.0;
+        if (flag) begin
+            selected = 2.0;
+        end else begin
+            selected = 3.0;
+        end
+        I(p, n) <+ selected * V(p, n);
+    end
+endmodule
+"#
+}
+
 fn compact_comparison_scale_factor_source() -> &'static str {
     r#"
 module compact_comparison_scale_factor(p, n);
@@ -4939,6 +10198,7 @@ module compact_scalar_truth_condition(p, n);
     real selected;
     analog begin
         selected = enabled ? V(p, n) : 0.0;
+        selected = selected + (!enabled ? 1.0 : 0.0);
         I(p, n) <+ selected;
     end
 endmodule
@@ -5080,6 +10340,59 @@ endmodule
     source
 }
 
+fn chunked_time_assignment_chain_source(count: usize) -> String {
+    assert!(count > 0);
+    let mut source = String::from(
+        r#"
+module chunked_time_assignments(p, n);
+    inout p, n;
+    electrical p, n;
+"#,
+    );
+    for index in 0..count {
+        source.push_str(&format!("    real x{index};\n"));
+    }
+    source.push_str("    analog begin\n");
+    source.push_str("        x0 = V(p, n) + $abstime;\n");
+    for index in 1..count {
+        source.push_str(&format!("        x{index} = x{} + 1.0;\n", index - 1));
+    }
+    source.push_str(&format!("        I(p, n) <+ x{};\n", count - 1));
+    source.push_str(
+        r#"    end
+endmodule
+"#,
+    );
+    source
+}
+
+fn chunked_param_given_assignment_chain_source(count: usize) -> String {
+    assert!(count > 0);
+    let mut source = String::from(
+        r#"
+module chunked_param_given_assignments(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 1.0;
+"#,
+    );
+    for index in 0..count {
+        source.push_str(&format!("    real x{index};\n"));
+    }
+    source.push_str("    analog begin\n");
+    source.push_str("        x0 = V(p, n) + $param_given(gain);\n");
+    for index in 1..count {
+        source.push_str(&format!("        x{index} = x{} + 1.0;\n", index - 1));
+    }
+    source.push_str(&format!("        I(p, n) <+ x{};\n", count - 1));
+    source.push_str(
+        r#"    end
+endmodule
+"#,
+    );
+    source
+}
+
 fn chunked_equation_source(count: usize) -> String {
     assert!(count > 8);
     let mut source = String::from(
@@ -5094,6 +10407,114 @@ module chunked_equations(p, n);
     );
     for index in 0..count {
         source.push_str(&format!("        I(p, n) <+ v * {}.0;\n", index + 1));
+    }
+    source.push_str(
+        r#"    end
+endmodule
+"#,
+    );
+    source
+}
+
+fn chunked_ddt_equation_source(count: usize) -> String {
+    assert!(count > 8);
+    let mut source = String::from(
+        r#"
+module chunked_ddt_equations(p, n);
+    inout p, n;
+    electrical p, n;
+    real q;
+    analog begin
+        q = V(p, n);
+"#,
+    );
+    for index in 0..count {
+        source.push_str(&format!("        I(p, n) <+ ddt(q * {}.0);\n", index + 1));
+    }
+    source.push_str(
+        r#"    end
+endmodule
+"#,
+    );
+    source
+}
+
+fn chunked_dynamic_assignment_source(count: usize) -> String {
+    assert!(count > 0);
+    let mut source = String::from(
+        r#"
+module chunked_dynamic_assignments(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+"#,
+    );
+    for index in 0..count {
+        source.push_str(&format!("    real x{index};\n"));
+    }
+    source.push_str(
+        r#"    real q;
+    analog begin
+        x0 = V(p, n);
+"#,
+    );
+    for index in 1..count {
+        source.push_str(&format!("        x{index} = x{} + 1.0;\n", index - 1));
+    }
+    source.push_str(&format!("        I(p, n) <+ x{};\n", count - 1));
+    source.push_str(
+        r#"        q = c * V(p, n);
+        I(p, n) <+ ddt(q);
+    end
+endmodule
+"#,
+    );
+    source
+}
+
+fn chunked_direct_voltage_equation_source(count: usize) -> String {
+    assert!(count > 8);
+    let mut source = String::from(
+        r#"
+module chunked_direct_voltage_equations(p, n);
+    inout p, n;
+    electrical p, n;
+    real scale;
+    analog begin
+        scale = 1.0;
+"#,
+    );
+    for index in 0..count {
+        source.push_str(&format!(
+            "        I(p, n) <+ scale * V(p, n) * {}.0;\n",
+            index + 1
+        ));
+    }
+    source.push_str(
+        r#"    end
+endmodule
+"#,
+    );
+    source
+}
+
+fn chunked_dense_equation_source(count: usize) -> String {
+    assert!(count > 8);
+    let mut source = String::from(
+        r#"
+module chunked_dense_equations(p0, p1, p2, p3, p4, p5, p6, p7);
+    inout p0, p1, p2, p3, p4, p5, p6, p7;
+    electrical p0, p1, p2, p3, p4, p5, p6, p7;
+    real scale;
+    analog begin
+        scale = 1.0;
+"#,
+    );
+    for index in 0..count {
+        source.push_str(&format!(
+            "        I(p0, p1) <+ scale * (V(p0, p1) + sin(V(p2, p3)) + cos(V(p4, p5)) + tanh(V(p6, p7))) * {}.0;\n",
+            index + 1
+        ));
     }
     source.push_str(
         r#"    end
@@ -5257,6 +10678,17 @@ endmodule
 "#
 }
 
+fn branch_current_cache_source() -> &'static str {
+    r#"
+module branch_current_cache(p, n);
+    inout p, n;
+    electrical p, n;
+    branch (p, n) axis;
+    analog V(axis) <+ I(axis) * V(p, n);
+endmodule
+"#
+}
+
 fn sparse_named_branch_current_axis_source() -> &'static str {
     r#"
 module sparse_branch_current_axis(p, n);
@@ -5336,6 +10768,21 @@ endmodule
 "#
 }
 
+fn scaled_ddx_current_source() -> &'static str {
+    r#"
+module scaled_ddx_current(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real cap;
+    analog begin
+        cap = gain * ddx(V(p, n) * V(p, n), V(p, n));
+        I(p, n) <+ cap * V(p, n);
+    end
+endmodule
+"#
+}
+
 fn noisy_current_source() -> &'static str {
     r#"
 module noisy_source(p, n);
@@ -5345,6 +10792,16 @@ module noisy_source(p, n);
     parameter real flicker = 1e-20 from [0:inf);
     parameter real af = 1.0 from [0:inf);
     analog I(p, n) <+ white_noise(thermal, "thermal") + flicker_noise(flicker, af, "flicker");
+endmodule
+"#
+}
+
+fn wide_ddt_current_source() -> &'static str {
+    r#"
+module wide_ddt_current(p, n, aux);
+    inout p, n, aux;
+    electrical p, n, aux;
+    analog I(p, n) <+ ddt(V(p, n));
 endmodule
 "#
 }
@@ -5450,6 +10907,123 @@ endmodule
 "#
 }
 
+fn compact_scalar_choice_store_source() -> &'static str {
+    r#"
+module compact_scalar_choice_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real floor = 0.001;
+    parameter real ceiling = 1.0;
+    real source;
+    real lower;
+    real upper;
+    real magnitude;
+    analog begin
+        source = V(p, n);
+        lower = max(source, floor);
+        upper = min(source, ceiling);
+        magnitude = abs(source);
+        I(p, n) <+ lower + upper + magnitude;
+    end
+endmodule
+"#
+}
+
+fn compact_scratch_choice_store_source() -> &'static str {
+    r#"
+module compact_scratch_choice_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real lower;
+    real upper;
+    real lower3;
+    real upper3;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = V(p);
+        lower = min(a, b);
+        upper = max(a, b);
+        lower3 = min(min(a, b), c);
+        upper3 = max(max(a, b), c);
+        I(p, n) <+ lower + upper + lower3 + upper3;
+    end
+endmodule
+"#
+}
+
+fn compact_multiply_by_voltage_store_source() -> &'static str {
+    r#"
+module compact_multiply_by_voltage_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real a;
+    real b;
+    real c;
+    real d;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = a * V(p);
+        d = V(n) * b;
+        I(p, n) <+ c + d;
+    end
+endmodule
+"#
+}
+
+fn compact_divide_voltage_by_ad_store_source() -> &'static str {
+    r#"
+module compact_divide_voltage_by_ad_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real floor = 2.0;
+    real denom;
+    real ratio;
+    real product;
+    real reverse_ratio;
+    analog begin
+        denom = V(p, n) + floor;
+        ratio = V(p, n) / denom;
+        product = denom * denom;
+        reverse_ratio = V(n, p) / product;
+        I(p, n) <+ ratio + reverse_ratio;
+    end
+endmodule
+"#
+}
+
+fn compact_abs_voltage_store_source() -> &'static str {
+    r#"
+module compact_abs_voltage_store(p, n);
+    inout p, n;
+    electrical p, n;
+    real shaped;
+    analog begin
+        shaped = abs(V(p, n));
+        I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_sub_voltage_abs_voltage_store_source() -> &'static str {
+    r#"
+module compact_sub_voltage_abs_voltage_store(p, n, sense);
+    inout p, n, sense;
+    electrical p, n, sense;
+    real shaped;
+    analog begin
+        shaped = V(p) - abs(V(n, sense));
+        I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
 fn compact_scalar_literal_min_max_source() -> &'static str {
     r#"
 module compact_scalar_literal_min_max(p, n);
@@ -5475,6 +11049,21 @@ module compact_scalar_literal_pow_assignment(p, n);
     analog begin
         scale = pow(2.0, exponent);
         I(p, n) <+ scale * V(p, n);
+    end
+endmodule
+"#
+}
+
+fn compact_scalar_limexp_argument_source() -> &'static str {
+    r#"
+module compact_scalar_limexp_argument(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real bias = 1.0;
+    real shaped;
+    analog begin
+        shaped = limexp((bias + 1.0) / (bias + 2.0));
+        I(p, n) <+ shaped * V(p, n);
     end
 endmodule
 "#
@@ -5549,6 +11138,45 @@ module system_query(p, n);
         + $simparam("custom", 7.0)
         + $param_given(gain)
     );
+endmodule
+"#
+}
+
+fn repeated_context_read_source() -> &'static str {
+    r#"
+module repeated_context_read(p, n);
+    inout p, n;
+    electrical p, n;
+    real scale;
+    analog begin
+        scale = $temperature + $temperature + $vt + $vt;
+        I(p, n) <+ scale * V(p, n);
+    end
+endmodule
+"#
+}
+
+fn param_given_condition_source() -> &'static str {
+    r#"
+module param_given_condition(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 1.0;
+    parameter real offset = 0.0;
+    real selected;
+    real numeric;
+    analog begin
+        if ($param_given(gain) && !$param_given(offset)) begin
+            selected = 2.0;
+        end else begin
+            selected = 3.0;
+        end
+        if (($param_given(gain) == 1.0) || ($param_given(offset) == 0.0)) begin
+            selected = selected + 5.0;
+        end
+        numeric = $param_given(gain) + 1.0;
+        I(p, n) <+ (selected + numeric) * V(p, n);
+    end
 endmodule
 "#
 }

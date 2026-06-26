@@ -21,6 +21,7 @@ pub struct LoweredExpr {
 #[derive(Debug, Clone)]
 pub struct LoweredVariable {
     pub value: String,
+    pub condition: Option<String>,
     pub derivatives: Vec<String>,
     pub branch_derivatives: Vec<String>,
     pub has_reactive: bool,
@@ -295,7 +296,13 @@ impl ExprEmitter<'_> {
             HirExprKind::Unary { op, operand } => {
                 if op.as_str() == "Not" {
                     let condition = self.lower_condition(*operand)?;
-                    self.emit_value(&base, format!("if !{condition} {{ 1.0 }} else {{ 0.0 }}"))
+                    self.emit_value(
+                        &base,
+                        format!(
+                            "if {} {{ 1.0 }} else {{ 0.0 }}",
+                            negate_condition(&condition)
+                        ),
+                    )
                 } else {
                     let operand = self.lower(*operand)?;
                     let value = unary_value(op.as_str(), &operand.value)
@@ -1287,6 +1294,9 @@ impl ExprEmitter<'_> {
     }
 
     fn lower_condition(&mut self, id: ExprId) -> Result<String, RustBackendError> {
+        if let Some(condition) = self.direct_boolean_condition_expr(id)? {
+            return Ok(condition);
+        }
         let expression = self
             .artifact
             .mir
@@ -1299,9 +1309,14 @@ impl ExprEmitter<'_> {
             HirExprKind::Binary { op, left, right }
                 if comparison_operator(op.as_str()).is_some() =>
             {
+                let operator = comparison_operator(op.as_str()).expect("checked above");
+                if let Some(condition) =
+                    self.boolean_numeric_comparison_condition(operator, *left, *right)?
+                {
+                    return Ok(condition);
+                }
                 let left = self.lower(*left)?;
                 let right = self.lower(*right)?;
-                let operator = comparison_operator(op.as_str()).expect("checked above");
                 Ok(format!("({} {operator} {})", left.value, right.value))
             }
             HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
@@ -1316,13 +1331,81 @@ impl ExprEmitter<'_> {
             }
             HirExprKind::Unary { op, operand } if op.as_str() == "Not" => {
                 let operand = self.lower_condition(*operand)?;
-                Ok(format!("(!{operand})"))
+                Ok(negate_condition(&operand))
             }
             _ => {
                 let value = self.lower(id)?;
                 Ok(format!("({} != 0.0)", value.value))
             }
         }
+    }
+
+    fn direct_boolean_condition_expr(
+        &self,
+        id: ExprId,
+    ) -> Result<Option<String>, RustBackendError> {
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(id))
+            .ok_or_else(|| {
+                self.internal(format!("condition expression {id} is outside MIR arena"))
+            })?;
+        Ok(match &expression.kind {
+            HirExprKind::Identifier { name } => self
+                .variables
+                .get(name.as_str())
+                .and_then(|variable| variable.condition.clone()),
+            HirExprKind::SystemFunction { name, args }
+                if name.eq_ignore_ascii_case("$param_given") =>
+            {
+                let index = self.param_given_index(args.as_slice())?;
+                Some(format!("self.param_given[{index}]"))
+            }
+            HirExprKind::SystemFunction { name, args }
+                if name.eq_ignore_ascii_case("$port_connected") =>
+            {
+                self.expect_system_arity("$port_connected", args.as_slice(), 1)?;
+                Some("true".to_string())
+            }
+            _ => None,
+        })
+    }
+
+    fn boolean_numeric_comparison_condition(
+        &self,
+        operator: &str,
+        left: ExprId,
+        right: ExprId,
+    ) -> Result<Option<String>, RustBackendError> {
+        if let Some(condition) = self.direct_boolean_condition_expr(left)? {
+            if let Some(expected) = self.numeric_boolean_literal(right)? {
+                return Ok(boolean_numeric_condition(condition, operator, expected));
+            }
+        }
+        if let Some(condition) = self.direct_boolean_condition_expr(right)? {
+            if let Some(expected) = self.numeric_boolean_literal(left)? {
+                return Ok(boolean_numeric_condition(condition, operator, expected));
+            }
+        }
+        Ok(None)
+    }
+
+    fn numeric_boolean_literal(&self, id: ExprId) -> Result<Option<bool>, RustBackendError> {
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(id))
+            .ok_or_else(|| {
+                self.internal(format!("numeric expression {id} is outside MIR arena"))
+            })?;
+        Ok(match &expression.kind {
+            HirExprKind::Number { value, .. } if *value == 0.0 => Some(false),
+            HirExprKind::Number { value, .. } if *value == 1.0 => Some(true),
+            _ => None,
+        })
     }
 
     fn lower_intrinsic_value(
@@ -1727,14 +1810,20 @@ impl ExprEmitter<'_> {
                 let slot = self.ddt_slots.slot_for(id).ok_or_else(|| {
                     self.internal(format!("ddt expression {id} has no generated state slot"))
                 })?;
-                Ok(self.emit_value(base, format!("self.eval_ddt({slot}, {})", operand.value)))
+                Ok(self.emit_value(
+                    base,
+                    format!(
+                        "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, {slot}, {})",
+                        operand.value
+                    ),
+                ))
             }
             ExprMode::Reactive => Ok(operand.value),
         }
     }
 
     fn ddt_derivatives(
-        &self,
+        &mut self,
         _id: ExprId,
         args: &[ExprId],
     ) -> Result<Vec<String>, RustBackendError> {
@@ -1743,30 +1832,30 @@ impl ExprEmitter<'_> {
             .emitted
             .get(&operand_id)
             .expect("ddt operand must be emitted before derivative");
+        let operand_derivatives = operand.derivatives.clone();
         let derivatives = match self.mode {
-            ExprMode::Transient => operand
-                .derivatives
+            ExprMode::Transient => operand_derivatives
                 .iter()
-                .map(|derivative| format!("self.ddt_jacobian({derivative})"))
+                .map(|derivative| self.ddt_jacobian_expr(derivative))
                 .collect(),
-            ExprMode::Reactive => operand.derivatives.clone(),
+            ExprMode::Reactive => operand_derivatives,
         };
         Ok(derivatives)
     }
 
-    fn ddt_branch_derivatives(&self, args: &[ExprId]) -> Result<Vec<String>, RustBackendError> {
+    fn ddt_branch_derivatives(&mut self, args: &[ExprId]) -> Result<Vec<String>, RustBackendError> {
         let operand_id = self.ddt_operand(args)?;
         let operand = self
             .emitted
             .get(&operand_id)
             .expect("ddt operand must be emitted before branch derivative");
+        let operand_branch_derivatives = operand.branch_derivatives.clone();
         let derivatives = match self.mode {
-            ExprMode::Transient => operand
-                .branch_derivatives
+            ExprMode::Transient => operand_branch_derivatives
                 .iter()
-                .map(|derivative| format!("self.ddt_jacobian({derivative})"))
+                .map(|derivative| self.ddt_jacobian_expr(derivative))
                 .collect(),
-            ExprMode::Reactive => operand.branch_derivatives.clone(),
+            ExprMode::Reactive => operand_branch_derivatives,
         };
         Ok(derivatives)
     }
@@ -1813,41 +1902,44 @@ impl ExprEmitter<'_> {
                 })?;
                 Ok(self.emit_value(
                     base,
-                    format!("self.eval_idt({slot}, {}, {ic_value})", operand.value),
+                    format!(
+                        "eval_idt(idt_state_current, idt_state_previous, idt_state_initialized, ddt_active, idt_scale, {slot}, {}, {ic_value})",
+                        operand.value
+                    ),
                 ))
             }
             ExprMode::Reactive => Ok(ic_value),
         }
     }
 
-    fn idt_derivatives(&self, expr: ExprId) -> Result<Vec<String>, RustBackendError> {
+    fn idt_derivatives(&mut self, expr: ExprId) -> Result<Vec<String>, RustBackendError> {
         let operand = self
             .emitted
             .get(&expr)
             .expect("idt operand must be emitted before derivative");
+        let operand_derivatives = operand.derivatives.clone();
         let derivatives = match self.mode {
-            ExprMode::Transient => operand
-                .derivatives
+            ExprMode::Transient => operand_derivatives
                 .iter()
-                .map(|derivative| format!("self.idt_jacobian({derivative})"))
+                .map(|derivative| self.idt_jacobian_expr(derivative))
                 .collect(),
-            ExprMode::Reactive => zero_derivatives(operand.derivatives.len()),
+            ExprMode::Reactive => zero_derivatives(operand_derivatives.len()),
         };
         Ok(derivatives)
     }
 
-    fn idt_branch_derivatives(&self, expr: ExprId) -> Result<Vec<String>, RustBackendError> {
+    fn idt_branch_derivatives(&mut self, expr: ExprId) -> Result<Vec<String>, RustBackendError> {
         let operand = self
             .emitted
             .get(&expr)
             .expect("idt operand must be emitted before branch derivative");
+        let operand_branch_derivatives = operand.branch_derivatives.clone();
         let derivatives = match self.mode {
-            ExprMode::Transient => operand
-                .branch_derivatives
+            ExprMode::Transient => operand_branch_derivatives
                 .iter()
-                .map(|derivative| format!("self.idt_jacobian({derivative})"))
+                .map(|derivative| self.idt_jacobian_expr(derivative))
                 .collect(),
-            ExprMode::Reactive => zero_derivatives(operand.branch_derivatives.len()),
+            ExprMode::Reactive => zero_derivatives(operand_branch_derivatives.len()),
         };
         Ok(derivatives)
     }
@@ -1934,6 +2026,20 @@ impl ExprEmitter<'_> {
             [expr, probe] => Ok((*expr, *probe)),
             _ => Err(self.unsupported(format!("ddx expects two operands, found {}", args.len()))),
         }
+    }
+
+    fn ddt_jacobian_expr(&mut self, derivative: &str) -> String {
+        if is_zero_derivative(derivative) {
+            return "0.0".to_string();
+        }
+        scaled_derivative_expr(derivative, "ddt_scale")
+    }
+
+    fn idt_jacobian_expr(&mut self, derivative: &str) -> String {
+        if is_zero_derivative(derivative) {
+            return "0.0".to_string();
+        }
+        scaled_derivative_expr(derivative, "idt_scale")
     }
 
     fn unsupported(&self, feature: impl Into<String>) -> RustBackendError {
@@ -2072,23 +2178,25 @@ fn branch_derivative_axis_count(branch_current_unknowns: &HashMap<String, usize>
 
 fn limexp_value_expr(arg: &str) -> String {
     format!(
-        "if {arg} < 80.0 {{ ({arg}).exp() }} else {{ 80.0_f64.exp() * (1.0 + ({arg} - 80.0)) }}"
+        "{{ let limexp_arg = {arg}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) }} }}"
     )
 }
 
 fn limexp_derivative_scale_expr(arg: &str) -> String {
-    format!("if {arg} < 80.0 {{ ({arg}).exp() }} else {{ 80.0_f64.exp() }}")
+    format!(
+        "{{ let limexp_arg = {arg}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ LIMEXP_MAX }} }}"
+    )
 }
 
 fn limited_exp_value_expr(arg: &str) -> String {
     format!(
-        "if {arg} > 80.0 {{ 5.540622384e34 * (1.0 + {arg} - 80.0) }} else if {arg} < -80.0 {{ 1.804851387e-35 }} else {{ ({arg}).exp() }}"
+        "{{ let limited_exp_arg = {arg}; if limited_exp_arg > 80.0 {{ LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) }} else if limited_exp_arg < -80.0 {{ 1.804851387e-35 }} else {{ limited_exp_arg.exp() }} }}"
     )
 }
 
 fn limited_exp_derivative_scale_expr(arg: &str) -> String {
     format!(
-        "if {arg} > 80.0 {{ 5.540622384e34 }} else if {arg} < -80.0 {{ 0.0 }} else {{ ({arg}).exp() }}"
+        "{{ let limited_exp_arg = {arg}; if limited_exp_arg > 80.0 {{ LIMEXP_MAX }} else if limited_exp_arg < -80.0 {{ 0.0 }} else {{ limited_exp_arg.exp() }} }}"
     )
 }
 
@@ -2126,6 +2234,19 @@ fn is_generated_scratch_derivative_access(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '[' | ']'))
 }
 
+fn scaled_derivative_expr(derivative: &str, scale: &str) -> String {
+    let derivative = derivative.trim();
+    if is_zero_derivative(derivative) {
+        "0.0".to_string()
+    } else if is_one_derivative(derivative) {
+        scale.to_string()
+    } else if is_negative_one_derivative(derivative) {
+        format!("-{scale}")
+    } else {
+        mul_expr(derivative, scale)
+    }
+}
+
 fn is_rust_identifier(value: &str) -> bool {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -2160,6 +2281,36 @@ fn conditional_expr(condition: &str, then_expr: &str, else_expr: &str) -> String
     } else {
         format!("if {condition} {{ {then_expr} }} else {{ {else_expr} }}")
     }
+}
+
+fn boolean_numeric_condition(condition: String, operator: &str, expected: bool) -> Option<String> {
+    match (operator, expected) {
+        ("==", true) | ("!=", false) => Some(condition),
+        ("==", false) | ("!=", true) => Some(format!("(!{condition})")),
+        _ => None,
+    }
+}
+
+fn negate_condition(condition: &str) -> String {
+    let condition = condition.trim();
+    if let Some(inner) = condition
+        .strip_prefix("(!")
+        .and_then(|inner| inner.strip_suffix(')'))
+    {
+        return inner.to_string();
+    }
+    if let Some(inner) = condition
+        .strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+    {
+        if let Some(value) = inner.strip_suffix(" != 0.0") {
+            return format!("({value} == 0.0)");
+        }
+        if let Some(value) = inner.strip_suffix(" == 0.0") {
+            return format!("({value} != 0.0)");
+        }
+    }
+    format!("(!{condition})")
 }
 
 fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackendError> {
