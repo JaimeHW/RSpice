@@ -2130,6 +2130,125 @@ fn rust_backend_fuses_expression_scaled_multiply_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_sub_from_scalar_multiply_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_sub_from_scalar_multiply_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression sub-from-scalar multiply");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support
+            .contains("fn mul_sub_from_scalar_lhs(scalar: f64, value: Self, right: Self) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support
+            .contains("fn mul_sub_from_scalar_rhs(left: Self, scalar: f64, value: Self) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn mul_sub_from_scalar_lhs_scaled_output(scalar: f64, value: Self, right: Self, scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn mul_sub_from_scalar_rhs_scaled_output(left: Self, scalar: f64, value: Self, scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn add_scaled_sub_product_lhs(value: Self, value_scale: f64, scalar: f64, subtrahend: Self, product_right: Self, product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn add_scaled_sub_product_rhs(value: Self, value_scale: f64, product_left: Self, scalar: f64, subtrahend: Self, product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn mul_sub_from_scalar_scaled_offset_self(scalar: f64, value: Self, input_scale: f64, offset: f64, output_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::mul_sub_from_scalar_lhs("), "{stamp}");
+    assert!(stamp.contains("A::mul_sub_from_scalar_rhs("), "{stamp}");
+    assert!(
+        stamp.contains("A::mul_sub_from_scalar_lhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::mul_sub_from_scalar_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::mul_sub_from_scalar_scaled_offset_self("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::mul(A::sub_from_scalar("), "{stamp}");
+    assert!(
+        !stamp.contains("A::mul_scaled_output(A::sub_from_scalar("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::add_scaled_product("), "{stamp}");
+    assert!(!stamp.contains("A::sub_from_scalar("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_sub_from_scalar_value_product_add_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_sub_from_scalar_value_product_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression sub-from-scalar value product");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_sub_value_product(scalar: f64, subtrahend: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("A::add_scaled_sub_value_product("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::add_scaled_product(A::sub_from_scalar("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_nested_multiply_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_nested_multiply_source())
@@ -9924,6 +10043,59 @@ module compact_expression_scaled_multiply(p, n);
           + (exp(q) * (gain * a))
           + ((sqrt(a + q) * ln(q + offset)) * gain)
           + (((sqrt(a + q) * ln(q + offset)) * gain) * offset);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_sub_from_scalar_multiply_source() -> &'static str {
+    r#"
+module compact_expression_sub_from_scalar_multiply(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = ((limit - a) * q)
+          + (q * (limit - r))
+          + (((limit - exp(a)) * q) * gain)
+          + ((q * (limit - exp(r))) * gain)
+          + sqrt((limit - a) * (q * gain))
+          + exp((q * gain) * (limit - r))
+          + sqrt(((limit - a) * (((limit - a) * gain) + offset)) * 0.5)
+          + sqrt(((limit - (a * gain)) * (((limit - (a * gain)) * 0.3333333333333333) + offset)) * 0.5)
+          + sqrt(((limit - a) * (q + gain)) + offset)
+          + ln((q * (limit - r)) + offset);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_sub_from_scalar_value_product_source() -> &'static str {
+    r#"
+module compact_expression_sub_from_scalar_value_product(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = (limit - a) + (q * r);
         I(p, n) <+ b;
     end
 endmodule

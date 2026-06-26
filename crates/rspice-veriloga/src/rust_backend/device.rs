@@ -6006,6 +6006,45 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn add_scaled_sub_value_product(scalar: f64, subtrahend: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
+        "        let mut result = subtrahend;",
+        "        let value_term = (scalar - result.value) * value_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        result.value = value_term + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = -result.node_derivatives[index] * value_scale + (product_left.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = -result.branch_derivatives[index] * value_scale + (product_left.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn add_scaled_sub_product_lhs(value: Self, value_scale: f64, scalar: f64, subtrahend: Self, product_right: Self, product_scale: f64) -> Self {",
+        "        let mut result = value;",
+        "        let value_term = result.value * value_scale;",
+        "        let product_left_value = scalar - subtrahend.value;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        result.value = value_term + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * value_scale + (-subtrahend.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * value_scale + (-subtrahend.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn add_scaled_sub_product_rhs(value: Self, value_scale: f64, product_left: Self, scalar: f64, subtrahend: Self, product_scale: f64) -> Self {",
+        "        let mut result = value;",
+        "        let value_term = result.value * value_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = scalar - subtrahend.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        result.value = value_term + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * value_scale + (product_left.node_derivatives[index] * product_right_value - product_left_value * subtrahend.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * value_scale + (product_left.branch_derivatives[index] * product_right_value - product_left_value * subtrahend.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn add_scaled_square_product(square_value: Self, square_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
         "        let mut result = square_value;",
         "        let square_raw = result.value;",
@@ -6076,6 +6115,64 @@ fn generate_ad_value_struct() -> String {
         "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * right.value + left_value * right.node_derivatives[index]) * scale; }",
         "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * right.value + left_value * right.branch_derivatives[index]) * scale; }",
         "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_sub_from_scalar_lhs(scalar: f64, value: Self, right: Self) -> Self {",
+        "        let mut result = value;",
+        "        let left_value = scalar - result.value;",
+        "        result.value = left_value * right.value;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = -result.node_derivatives[index] * right.value + left_value * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = -result.branch_derivatives[index] * right.value + left_value * right.branch_derivatives[index]; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_sub_from_scalar_rhs(left: Self, scalar: f64, value: Self) -> Self {",
+        "        let mut result = left;",
+        "        let left_value = result.value;",
+        "        let right_value = scalar - value.value;",
+        "        result.value = left_value * right_value;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * right_value - left_value * value.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * right_value - left_value * value.branch_derivatives[index]; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_sub_from_scalar_lhs_scaled_output(scalar: f64, value: Self, right: Self, scale: f64) -> Self {",
+        "        let mut result = value;",
+        "        let left_value = scalar - result.value;",
+        "        let scaled_left_value = left_value * scale;",
+        "        let scaled_right_value = right.value * scale;",
+        "        result.value = scaled_left_value * right.value;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = -result.node_derivatives[index] * scaled_right_value + scaled_left_value * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = -result.branch_derivatives[index] * scaled_right_value + scaled_left_value * right.branch_derivatives[index]; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_sub_from_scalar_rhs_scaled_output(left: Self, scalar: f64, value: Self, scale: f64) -> Self {",
+        "        let mut result = left;",
+        "        let left_value = result.value;",
+        "        let right_value = scalar - value.value;",
+        "        let scaled_left_value = left_value * scale;",
+        "        let scaled_right_value = right_value * scale;",
+        "        result.value = left_value * scaled_right_value;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * scaled_right_value - scaled_left_value * value.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * scaled_right_value - scaled_left_value * value.branch_derivatives[index]; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_sub_from_scalar_scaled_offset_self(scalar: f64, value: Self, input_scale: f64, offset: f64, output_scale: f64) -> Self {",
+        "        let mut result = value;",
+        "        let sub_value = scalar - result.value;",
+        "        let affine_value = sub_value * input_scale + offset;",
+        "        result.value = sub_value * affine_value * output_scale;",
+        "        let derivative_scale = -((2.0 * input_scale * sub_value + offset) * output_scale);",
+        "        for derivative in &mut result.node_derivatives { *derivative *= derivative_scale; }",
+        "        for derivative in &mut result.branch_derivatives { *derivative *= derivative_scale; }",
+        "        result",
         "    }",
         "",
         "    #[inline]",
@@ -9704,6 +9801,42 @@ fn compact_sub_from_scalar_mixed_multiply_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_lhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        let right = compact_scratch_ad_value_index(args[2])?;
+        if let Some(value) = compact_scratch_ad_value_index(args[1]) {
+            return Some(format!(
+                "scratch.store_mul_sub_from_scalar_lhs({target_index}, {}, {value}, {right});",
+                args[0]
+            ));
+        }
+        let value = compact_scratch_or_non_atomic_ad_arg(args[1])?;
+        return Some(format!(
+            "scratch.store_mul_sub_from_scalar_ad_lhs({target_index}, {}, {value}, {right});",
+            args[0]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_rhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0])?;
+        if let Some(value) = compact_scratch_ad_value_index(args[2]) {
+            return Some(format!(
+                "scratch.store_mul_sub_from_scalar_rhs({target_index}, {left}, {}, {value});",
+                args[1]
+            ));
+        }
+        let value = compact_scratch_or_non_atomic_ad_arg(args[2])?;
+        return Some(format!(
+            "scratch.store_mul_sub_from_scalar_ad_rhs({target_index}, {left}, {}, {value});",
+            args[1]
+        ));
+    }
+
     let args = compact_ad_call_args(value, "mul")?;
     if args.len() != 2 {
         return None;
@@ -12581,6 +12714,30 @@ fn compact_multiply_scaled_ad_expressions(left: &str, right: &str) -> Option<Str
 
     let left_scaled = compact_scaled_ad_expression(left);
     let right_scaled = compact_scaled_ad_expression(right);
+    let left_value = left_scaled
+        .as_ref()
+        .map(|(value, _)| *value)
+        .unwrap_or(left);
+    let right_value = right_scaled
+        .as_ref()
+        .map(|(value, _)| *value)
+        .unwrap_or(right);
+    let output_scale = compact_scalar_mul(
+        left_scaled
+            .as_ref()
+            .map(|(_, scale)| scale.as_str())
+            .unwrap_or("1.0"),
+        right_scaled
+            .as_ref()
+            .map(|(_, scale)| scale.as_str())
+            .unwrap_or("1.0"),
+    );
+    if let Some(fused) =
+        compact_multiply_sub_from_scalar_ad_expression(left_value, right_value, &output_scale)
+    {
+        return Some(fused);
+    }
+
     match (left_scaled, right_scaled) {
         (Some((left, left_scale)), Some((right, right_scale))) => Some(format!(
             "AdValue::mul_scaled_output({left}, {right}, {})",
@@ -12594,6 +12751,85 @@ fn compact_multiply_scaled_ad_expressions(left: &str, right: &str) -> Option<Str
         }
         (None, None) => None,
     }
+}
+
+fn compact_multiply_sub_from_scalar_ad_expression(
+    left: &str,
+    right: &str,
+    output_scale: &str,
+) -> Option<String> {
+    if let Some(fused) =
+        compact_multiply_sub_from_scalar_scaled_offset_self_expression(left, right, output_scale)
+    {
+        return Some(fused);
+    }
+
+    if let Some(args) = compact_ad_call_args(left, "sub_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        return if compact_scalar_same(output_scale, "1.0") {
+            Some(format!(
+                "AdValue::mul_sub_from_scalar_lhs({}, {}, {right})",
+                args[0], args[1]
+            ))
+        } else {
+            Some(format!(
+                "AdValue::mul_sub_from_scalar_lhs_scaled_output({}, {}, {right}, {output_scale})",
+                args[0], args[1]
+            ))
+        };
+    }
+
+    if let Some(args) = compact_ad_call_args(right, "sub_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        return if compact_scalar_same(output_scale, "1.0") {
+            Some(format!(
+                "AdValue::mul_sub_from_scalar_rhs({left}, {}, {})",
+                args[0], args[1]
+            ))
+        } else {
+            Some(format!(
+                "AdValue::mul_sub_from_scalar_rhs_scaled_output({left}, {}, {}, {output_scale})",
+                args[0], args[1]
+            ))
+        };
+    }
+
+    None
+}
+
+fn compact_multiply_sub_from_scalar_scaled_offset_self_expression(
+    left: &str,
+    right: &str,
+    output_scale: &str,
+) -> Option<String> {
+    let left_args = compact_ad_call_args(left, "sub_from_scalar")?;
+    if left_args.len() != 2 {
+        return None;
+    }
+
+    let right_args = compact_ad_call_args(right, "scale_offset")?;
+    if right_args.len() != 3 {
+        return None;
+    }
+    let right_sub_args = compact_ad_call_args(right_args[0], "sub_from_scalar")?;
+    if right_sub_args.len() != 2 {
+        return None;
+    }
+
+    if !compact_scalar_same(left_args[0], right_sub_args[0])
+        || !compact_ad_expression_same(left_args[1], right_sub_args[1])
+    {
+        return None;
+    }
+
+    Some(format!(
+        "AdValue::mul_sub_from_scalar_scaled_offset_self({}, {}, {}, {}, {})",
+        left_args[0], left_args[1], right_args[1], right_args[2], output_scale
+    ))
 }
 
 fn compact_div_scaled_ad_expressions(left: &str, right: &str) -> Option<String> {
@@ -12696,9 +12932,10 @@ fn compact_add_sub_product_ad_expressions(helper: &str, left: &str, right: &str)
             } else {
                 value_scale
             };
-            Some(format!(
-                "AdValue::add_scaled_product({value}, {value_scale}, {}, {}, {})",
-                product.left, product.right, product.scale
+            Some(compact_add_scaled_product_ad_expression(
+                value,
+                &value_scale,
+                &product,
             ))
         }
         (None, Some(product)) => {
@@ -12708,13 +12945,56 @@ fn compact_add_sub_product_ad_expressions(helper: &str, left: &str, right: &str)
             } else {
                 product.scale
             };
-            Some(format!(
-                "AdValue::add_scaled_product({value}, {value_scale}, {}, {}, {product_scale})",
-                product.left, product.right
+            Some(compact_add_scaled_product_ad_expression(
+                value,
+                &value_scale,
+                &CompactProduct2 {
+                    left: product.left,
+                    right: product.right,
+                    scale: product_scale,
+                },
             ))
         }
         (None, None) => None,
     }
+}
+
+fn compact_add_scaled_product_ad_expression(
+    value: &str,
+    value_scale: &str,
+    product: &CompactProduct2<'_>,
+) -> String {
+    if let Some(args) = compact_ad_call_args(value, "sub_from_scalar") {
+        if args.len() == 2 {
+            return format!(
+                "AdValue::add_scaled_sub_value_product({}, {}, {value_scale}, {}, {}, {})",
+                args[0], args[1], product.left, product.right, product.scale
+            );
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(product.left, "sub_from_scalar") {
+        if args.len() == 2 {
+            return format!(
+                "AdValue::add_scaled_sub_product_lhs({value}, {value_scale}, {}, {}, {}, {})",
+                args[0], args[1], product.right, product.scale
+            );
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(product.right, "sub_from_scalar") {
+        if args.len() == 2 {
+            return format!(
+                "AdValue::add_scaled_sub_product_rhs({value}, {value_scale}, {}, {}, {}, {})",
+                product.left, args[0], args[1], product.scale
+            );
+        }
+    }
+
+    format!(
+        "AdValue::add_scaled_product({value}, {value_scale}, {}, {}, {})",
+        product.left, product.right, product.scale
+    )
 }
 
 fn compact_add_sub_scaled_ad_expressions(helper: &str, left: &str, right: &str) -> Option<String> {
@@ -12919,6 +13199,51 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         ));
     }
 
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_sub_value_product") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_sub_value_product({}, {}, {}, {}, {}, {})",
+            args[0],
+            args[1],
+            compact_scalar_mul(args[2], scale),
+            args[3],
+            args[4],
+            compact_scalar_mul(args[5], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_sub_product_lhs") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_sub_product_lhs({}, {}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            args[4],
+            compact_scalar_mul(args[5], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_sub_product_rhs") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_sub_product_rhs({}, {}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            args[4],
+            compact_scalar_mul(args[5], scale)
+        ));
+    }
+
     if let Some(args) = compact_ad_call_args(value, "add_scaled_square_product") {
         if args.len() != 5 {
             return None;
@@ -12981,6 +13306,66 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             args[0],
             args[1],
             compact_scalar_mul(args[2], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_lhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_sub_from_scalar_lhs_scaled_output({}, {}, {}, {scale})",
+            args[0], args[1], args[2]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_rhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_sub_from_scalar_rhs_scaled_output({}, {}, {}, {scale})",
+            args[0], args[1], args[2]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_lhs_scaled_output") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_sub_from_scalar_lhs_scaled_output({}, {}, {}, {})",
+            args[0],
+            args[1],
+            args[2],
+            compact_scalar_mul(args[3], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_rhs_scaled_output") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_sub_from_scalar_rhs_scaled_output({}, {}, {}, {})",
+            args[0],
+            args[1],
+            args[2],
+            compact_scalar_mul(args[3], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_sub_from_scalar_scaled_offset_self") {
+        if args.len() != 5 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_sub_from_scalar_scaled_offset_self({}, {}, {}, {}, {})",
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            compact_scalar_mul(args[4], scale)
         ));
     }
 
@@ -13303,6 +13688,11 @@ impl CompactAdEmitter<'_> {
                                     let right = self.lower(right_operand)?;
                                     let scale = compact_scalar_mul(&scale, &right_scale);
                                     compact_multiply_product3_ad_expressions(&left, &right, &scale)
+                                        .or_else(|| {
+                                            compact_multiply_sub_from_scalar_ad_expression(
+                                                &left, &right, &scale,
+                                            )
+                                        })
                                         .unwrap_or_else(|| {
                                             format!(
                                                 "AdValue::mul_scaled_lhs({left}, {scale}, {right})"
@@ -13312,6 +13702,11 @@ impl CompactAdEmitter<'_> {
                                     let left = self.lower(operand)?;
                                     let right = self.lower(*right)?;
                                     compact_multiply_product3_ad_expressions(&left, &right, &scale)
+                                        .or_else(|| {
+                                            compact_multiply_sub_from_scalar_ad_expression(
+                                                &left, &right, &scale,
+                                            )
+                                        })
                                         .unwrap_or_else(|| {
                                             format!(
                                                 "AdValue::mul_scaled_lhs({left}, {scale}, {right})"
@@ -13322,6 +13717,11 @@ impl CompactAdEmitter<'_> {
                                 let left = self.lower(*left)?;
                                 let right = self.lower(operand)?;
                                 compact_multiply_product3_ad_expressions(&left, &right, &scale)
+                                    .or_else(|| {
+                                        compact_multiply_sub_from_scalar_ad_expression(
+                                            &left, &right, &scale,
+                                        )
+                                    })
                                     .unwrap_or_else(|| {
                                         format!("AdValue::mul_scaled_rhs({left}, {right}, {scale})")
                                     })
@@ -14080,6 +14480,13 @@ impl CompactAdEmitter<'_> {
                         &right,
                         &combined_scale,
                     )
+                    .or_else(|| {
+                        compact_multiply_sub_from_scalar_ad_expression(
+                            &left,
+                            &right,
+                            &combined_scale,
+                        )
+                    })
                     .unwrap_or_else(|| {
                         format!("AdValue::mul_scaled_output({left}, {right}, {combined_scale})")
                     }));
@@ -15177,6 +15584,10 @@ fn compact_scalar_is_negative_one(value: &str) -> bool {
 }
 
 fn compact_scalar_same(left: &str, right: &str) -> bool {
+    left.trim() == right.trim()
+}
+
+fn compact_ad_expression_same(left: &str, right: &str) -> bool {
     left.trim() == right.trim()
 }
 
