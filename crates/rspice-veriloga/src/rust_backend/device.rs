@@ -6009,6 +6009,32 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn add_scaled_offset_product_lhs(value: Self, value_scale: f64, product_left: Self, product_left_offset: f64, product_right: Self, product_scale: f64) -> Self {",
+        "        let mut result = value;",
+        "        let value_term = result.value * value_scale;",
+        "        let product_left_value = product_left.value + product_left_offset;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        result.value = value_term + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * value_scale + (product_left.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * value_scale + (product_left.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn add_scaled_offset_product_rhs(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_right_offset: f64, product_scale: f64) -> Self {",
+        "        let mut result = value;",
+        "        let value_term = result.value * value_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value + product_right_offset;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        result.value = value_term + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * value_scale + (product_left.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * value_scale + (product_left.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn add_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
         "        let mut result = first;",
         "        let first_value = result.value * first_scale;",
@@ -13219,6 +13245,24 @@ fn compact_add_scaled_product_ad_expression(
         }
     }
 
+    if let Some(args) = compact_ad_call_args(product.left.as_ref(), "offset") {
+        if args.len() == 2 {
+            return format!(
+                "AdValue::add_scaled_offset_product_lhs({value}, {value_scale}, {}, {}, {}, {})",
+                args[0], args[1], product.right, product.scale
+            );
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(product.right.as_ref(), "offset") {
+        if args.len() == 2 {
+            return format!(
+                "AdValue::add_scaled_offset_product_rhs({value}, {value_scale}, {}, {}, {}, {})",
+                product.left, args[0], args[1], product.scale
+            );
+        }
+    }
+
     if let Some(args) = compact_ad_call_args(product.left.as_ref(), "sub_from_scalar") {
         if args.len() == 2 {
             return format!(
@@ -13442,6 +13486,36 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             args[2],
             args[3],
             compact_scalar_mul(args[4], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_offset_product_lhs") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_offset_product_lhs({}, {}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            args[4],
+            compact_scalar_mul(args[5], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_offset_product_rhs") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_offset_product_rhs({}, {}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            args[4],
+            compact_scalar_mul(args[5], scale)
         ));
     }
 
