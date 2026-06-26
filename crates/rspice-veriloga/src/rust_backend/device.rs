@@ -1698,6 +1698,49 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_ln_one_plus_exp_multiply_consumers_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_mul_ln_one_plus_exp_lhs",
+            "fn store_mul_ln_one_plus_exp_rhs",
+            "fn store_mul_ln_one_plus_exp_ad_lhs",
+            "fn store_mul_ln_one_plus_exp_ad_rhs",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(120, AdValue::mul(scratch.ad_value(2), AdValue::ln_one_plus_exp(scratch.ad_value(3))));
+    let assign121_ad_e20: AdValue = AdValue::mul(AdValue::ln_one_plus_exp(AdValue::sqrt(scratch.ad_value(4))), scratch.ad_value(5));
+    scratch.store_ad_value(121, assign121_ad_e20);
+    scratch.store_ad_value(122, AdValue::mul(scratch.ad_value(6), AdValue::ln_one_plus_exp(AdValue::offset(scratch.ad_value(7), params.bias))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_ln_one_plus_exp_rhs(120, 2, 3);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_mul_ln_one_plus_exp_ad_lhs(121, A::sqrt(s.ad_value(4)), 5);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_ln_one_plus_exp_ad_rhs(122, 6, A::offset(s.ad_value(7), p.bias));"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::ln_one_plus_exp("), "{compact}");
+        assert!(!compact.contains("s.store_mul_ad_rhs("), "{compact}");
+        assert!(!compact.contains("s.store_mul_ad_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_div_scaled_inputs2_offset_consumers_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -7925,6 +7968,30 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_ln_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
     "        let raw = value.value;",
     "        self.store_mul_unary_ad_rhs(index, source, value, raw.ln(), 1.0 / raw);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_ln_one_plus_exp_lhs(&mut self, index: usize, value_source: usize, source: usize) {",
+    "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[value_source]);",
+    "        self.store_mul_unary_lhs(index, value_source, source, value, derivative_scale);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_ln_one_plus_exp_rhs(&mut self, index: usize, source: usize, value_source: usize) {",
+    "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[value_source]);",
+    "        self.store_mul_unary_rhs(index, source, value_source, value, derivative_scale);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_ln_one_plus_exp_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
+    "        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);",
+    "        self.store_mul_unary_ad_lhs(index, value, source, output, derivative_scale);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_ln_one_plus_exp_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
+    "        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);",
+    "        self.store_mul_unary_ad_rhs(index, source, value, output, derivative_scale);",
     "    }",
     "",
     "    #[inline]",
@@ -17546,6 +17613,7 @@ fn compact_unary_mixed_multiply_store_helper_call(
     for (name, helper) in [
         ("exp", "store_mul_exp"),
         ("ln", "store_mul_ln"),
+        ("ln_one_plus_exp", "store_mul_ln_one_plus_exp"),
         ("sqrt", "store_mul_sqrt"),
         ("limexp", "store_mul_limexp"),
         ("limited_exp", "store_mul_limited_exp"),
