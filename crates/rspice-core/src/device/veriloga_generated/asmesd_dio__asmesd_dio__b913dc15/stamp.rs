@@ -197,7 +197,7 @@ impl Instance {
         if s.b[63] {
             let assign410_ad_e599: A = {
                 if ((!(s.v[52] >= 37.0)) && (!(s.v[52] <= (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(52)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(52))
                 } else {
                     {
                         if ((!(s.v[52] >= 37.0)) && (s.v[52] <= (-37.0))) {
@@ -216,7 +216,7 @@ impl Instance {
             };
             let assign410_ad_e633: A = {
                 if ((!(s.v[53] >= 37.0)) && (!(s.v[53] <= (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(53)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(53))
                 } else {
                     {
                         if ((!(s.v[53] >= 37.0)) && (s.v[53] <= (-37.0))) {
@@ -532,7 +532,7 @@ impl Instance {
         if s.b[63] {
             let assign410_ad_e599: A = {
                 if ((!(s.v[52] >= 37.0)) && (!(s.v[52] <= (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(52)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(52))
                 } else {
                     {
                         if ((!(s.v[52] >= 37.0)) && (s.v[52] <= (-37.0))) {
@@ -551,7 +551,7 @@ impl Instance {
             };
             let assign410_ad_e633: A = {
                 if ((!(s.v[53] >= 37.0)) && (!(s.v[53] <= (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(53)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(53))
                 } else {
                     {
                         if ((!(s.v[53] >= 37.0)) && (s.v[53] <= (-37.0))) {

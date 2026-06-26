@@ -2579,6 +2579,28 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) {
+        if raw > 0.0 {
+            (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp()))
+        } else {
+            let exp = raw.exp();
+            (exp.ln_1p(), exp / (1.0 + exp))
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp(&mut self, index: usize, source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source]);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_ln_one_plus_exp(&mut self, index: usize, source: usize, scale: f64) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source]);
+        self.store_unary_scaled(index, source, value * scale, derivative_scale * scale);
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_sqrt(&mut self, index: usize, source: usize, scale: f64) {
         let value = self.v[source].sqrt();
         self.store_unary_scaled(index, source, value * scale, scale / (2.0 * value));
@@ -2671,6 +2693,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, scale: f64) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source] * scale);
+        self.store_unary_scaled(index, source, value, derivative_scale * scale);
+    }
+
+    #[inline]
     pub(crate) fn store_sin_scaled_input(&mut self, index: usize, source: usize, scale: f64) {
         let raw = self.v[source] * scale;
         self.store_unary_scaled(index, source, raw.sin(), raw.cos() * scale);
@@ -2718,6 +2746,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_scaled_ln_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64) {
         let raw = self.v[source] * input_scale;
         self.store_unary_scaled(index, source, raw.ln() * output_scale, output_scale * input_scale / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source] * input_scale);
+        self.store_unary_scaled(index, source, value * output_scale, derivative_scale * input_scale * output_scale);
     }
 
     #[inline]
@@ -2841,6 +2875,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_ln_neg_input(&mut self, index: usize, source: usize) {
         let raw = -self.v[source];
         self.store_unary_scaled(index, source, raw.ln(), -1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp_neg_input(&mut self, index: usize, source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(-self.v[source]);
+        self.store_unary_scaled(index, source, value, -derivative_scale);
     }
 
     #[inline]
@@ -5685,6 +5725,28 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) {
+        if raw > 0.0 {
+            (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp()))
+        } else {
+            let exp = raw.exp();
+            (exp.ln_1p(), exp / (1.0 + exp))
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp(&mut self, index: usize, source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source]);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_ln_one_plus_exp(&mut self, index: usize, source: usize, scale: f64) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source]);
+        self.store_unary_scaled(index, source, value * scale, derivative_scale * scale);
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_sqrt(&mut self, index: usize, source: usize, scale: f64) {
         let value = self.v[source].sqrt();
         self.store_unary_scaled(index, source, value * scale, scale / (2.0 * value));
@@ -5777,6 +5839,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, scale: f64) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source] * scale);
+        self.store_unary_scaled(index, source, value, derivative_scale * scale);
+    }
+
+    #[inline]
     pub(crate) fn store_sin_scaled_input(&mut self, index: usize, source: usize, scale: f64) {
         let raw = self.v[source] * scale;
         self.store_unary_scaled(index, source, raw.sin(), raw.cos() * scale);
@@ -5824,6 +5892,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_scaled_ln_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64) {
         let raw = self.v[source] * input_scale;
         self.store_unary_scaled(index, source, raw.ln() * output_scale, output_scale * input_scale / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[source] * input_scale);
+        self.store_unary_scaled(index, source, value * output_scale, derivative_scale * input_scale * output_scale);
     }
 
     #[inline]
@@ -5947,6 +6021,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_ln_neg_input(&mut self, index: usize, source: usize) {
         let raw = -self.v[source];
         self.store_unary_scaled(index, source, raw.ln(), -1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_ln_one_plus_exp_neg_input(&mut self, index: usize, source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(-self.v[source]);
+        self.store_unary_scaled(index, source, value, -derivative_scale);
     }
 
     #[inline]
@@ -6380,6 +6460,10 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     pub(crate) fn limited_exp(arg: Self) -> Self { let raw = arg.value; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } }
     #[inline]
     pub(crate) fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }
+    #[inline]
+    pub(crate) fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) { if raw > 0.0 { (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp())) } else { let exp = raw.exp(); (exp.ln_1p(), exp / (1.0 + exp)) } }
+    #[inline]
+    pub(crate) fn ln_one_plus_exp(arg: Self) -> Self { let raw = arg.value; let (value, derivative_scale) = Self::ln_one_plus_exp_raw(raw); Self::unary_intrinsic(arg, value, derivative_scale) }
     #[inline]
     pub(crate) fn log10(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10)) }
     #[inline]

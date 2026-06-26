@@ -4523,11 +4523,11 @@ impl Instance {
 
         s.store_sub_scaled_ad_rhs(106, 80, s.v[8], A::scale(A::ln(s.ad_value(100)), (2.0 * s.v[84])));
 
-        s.store_add_ad_rhs(107, 104, A::scale(A::ln(A::offset(A::exp(A::scale(A::sub_from_scalar(0.05, s.ad_value(104)), s.v[85])), 1.0)), s.v[84]));
+        s.store_add_ad_rhs(107, 104, A::scale(A::ln_one_plus_exp(A::scale(A::sub_from_scalar(0.05, s.ad_value(104)), s.v[85])), s.v[84]));
 
-        s.store_add_ad_rhs(108, 105, A::scale(A::ln(A::offset(A::exp(A::scale(A::sub_from_scalar(0.05, s.ad_value(105)), s.v[85])), 1.0)), s.v[84]));
+        s.store_add_ad_rhs(108, 105, A::scale(A::ln_one_plus_exp(A::scale(A::sub_from_scalar(0.05, s.ad_value(105)), s.v[85])), s.v[84]));
 
-        s.store_add_ad_rhs(109, 106, A::scale(A::ln(A::offset(A::exp(A::scale(A::sub_from_scalar(0.05, s.ad_value(106)), s.v[85])), 1.0)), s.v[84]));
+        s.store_add_ad_rhs(109, 106, A::scale(A::ln_one_plus_exp(A::scale(A::sub_from_scalar(0.05, s.ad_value(106)), s.v[85])), s.v[84]));
 
         s.store_div_from_scalar(119, 1.0, 107);
 

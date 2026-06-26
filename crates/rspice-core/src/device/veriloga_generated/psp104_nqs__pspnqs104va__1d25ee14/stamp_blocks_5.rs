@@ -340,7 +340,7 @@ impl Instance {
                         if (((s.v[832] - p.p870) / p.p871) < (-37.0)) {
                             A::constant(p.p870)
                         } else {
-                            A::offset(A::scale(A::ln(A::offset(A::exp(A::scale(A::offset(s.ad_value(832), (-p.p870)), 1.0 / (p.p871))), 1.0)), p.p871), p.p870)
+                            A::offset(A::scale(A::ln_one_plus_exp(A::scale(A::offset(s.ad_value(832), (-p.p870)), 1.0 / (p.p871))), p.p871), p.p870)
                         }
                     }
                 } else {
@@ -348,7 +348,7 @@ impl Instance {
                         if (((s.v[832] - p.p870) / p.p871) > 37.0) {
                             s.ad_value(832)
                         } else {
-                            A::add(s.ad_value(832), A::scale(A::ln(A::offset(A::exp(A::scale(A::sub_from_scalar(p.p870, s.ad_value(832)), 1.0 / (p.p871))), 1.0)), p.p871))
+                            A::add(s.ad_value(832), A::scale(A::ln_one_plus_exp(A::scale(A::sub_from_scalar(p.p870, s.ad_value(832)), 1.0 / (p.p871))), p.p871))
                         }
                     }
                 }
@@ -947,7 +947,7 @@ impl Instance {
                         if (((s.v[833] - s.v[550]) / s.v[551]) < (-37.0)) {
                             s.ad_value(550)
                         } else {
-                            A::add(s.ad_value(550), A::mul(A::ln(A::offset(A::exp(A::div(A::sub(s.ad_value(833), s.ad_value(550)), s.ad_value(551))), 1.0)), s.ad_value(551)))
+                            A::add(s.ad_value(550), A::mul(A::ln_one_plus_exp(A::div(A::sub(s.ad_value(833), s.ad_value(550)), s.ad_value(551))), s.ad_value(551)))
                         }
                     }
                 } else {
@@ -955,7 +955,7 @@ impl Instance {
                         if (((s.v[833] - s.v[550]) / s.v[551]) > 37.0) {
                             s.ad_value(833)
                         } else {
-                            A::add(s.ad_value(833), A::mul(A::ln(A::offset(A::exp(A::div(A::sub(s.ad_value(550), s.ad_value(833)), s.ad_value(551))), 1.0)), s.ad_value(551)))
+                            A::add(s.ad_value(833), A::mul(A::ln_one_plus_exp(A::div(A::sub(s.ad_value(550), s.ad_value(833)), s.ad_value(551))), s.ad_value(551)))
                         }
                     }
                 }

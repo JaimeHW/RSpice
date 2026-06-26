@@ -3007,7 +3007,7 @@ impl Instance {
         s.v[2293] = if s.b[2293] { 1.0 } else { 0.0 };
 
         if (((s.b[2288] && s.b[2289]) && s.b[2292]) && s.b[2293]) {
-            s.store_scaled_ln_ad(2028, A::offset(A::exp(A::scale(s.ad_value(2027), 2.0)), 1.0), 0.5);
+            s.store_scaled_ln_one_plus_exp_scaled_input(2028, 2027, 2.0, 0.5);
         }
 
         if (((s.b[2288] && s.b[2289]) && s.b[2292]) && (!s.b[2293])) {
@@ -4519,7 +4519,7 @@ impl Instance {
         s.v[2580] = if s.b[2580] { 1.0 } else { 0.0 };
 
         if ((((s.b[2547] && s.b[2575]) && s.b[2576]) && s.b[2579]) && s.b[2580]) {
-            s.store_scaled_ln_ad(2028, A::offset(A::exp(A::scale(s.ad_value(2027), 2.0)), 1.0), 0.5);
+            s.store_scaled_ln_one_plus_exp_scaled_input(2028, 2027, 2.0, 0.5);
         }
 
         if ((((s.b[2547] && s.b[2575]) && s.b[2576]) && s.b[2579]) && (!s.b[2580])) {
@@ -5072,7 +5072,7 @@ impl Instance {
         s.v[2606] = if s.b[2606] { 1.0 } else { 0.0 };
 
         if ((s.b[2601] && s.b[2603]) && s.b[2606]) {
-            s.store_ln_ad(2028, A::offset(A::exp(s.ad_value(2369)), 1.0));
+            s.store_ln_one_plus_exp(2028, 2369);
         }
 
         if ((s.b[2601] && s.b[2603]) && (!s.b[2606])) {

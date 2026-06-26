@@ -5985,7 +5985,7 @@ impl Instance {
         s.v[2185] = if s.b[2185] { 1.0 } else { 0.0 };
 
         if (((s.b[2180] && s.b[2181]) && s.b[2184]) && s.b[2185]) {
-            s.store_scaled_ln_ad(1920, A::offset(A::exp(A::scale(s.ad_value(1919), 2.0)), 1.0), 0.5);
+            s.store_scaled_ln_one_plus_exp_scaled_input(1920, 1919, 2.0, 0.5);
         }
 
         if (((s.b[2180] && s.b[2181]) && s.b[2184]) && (!s.b[2185])) {

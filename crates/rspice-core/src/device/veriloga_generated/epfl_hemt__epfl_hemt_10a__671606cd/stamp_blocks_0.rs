@@ -74,7 +74,7 @@ impl Instance {
         }
 
         if (!s.b[144]) {
-            s.store_ln_ad(2, A::offset(A::exp(s.ad_value(1)), 1.0));
+            s.store_ln_one_plus_exp(2, 1);
         }
 
         s.store_offset_sub_ad(22, A::scale(s.ad_value(2), (2.0 / p.p31)), s.ad_value(21), (-((2.0 / p.p31) * ((2.0) as f64).ln())));

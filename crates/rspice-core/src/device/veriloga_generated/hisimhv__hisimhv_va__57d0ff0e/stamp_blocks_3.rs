@@ -1783,7 +1783,7 @@ impl Instance {
         s.v[2421] = if s.b[2421] { 1.0 } else { 0.0 };
 
         if ((((s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) && (!s.b[2419])) && (!s.b[2420])) && s.b[2421]) {
-            s.store_add_ad_lhs(992, A::ln(A::offset(A::exp(A::sub(s.ad_value(2146), s.ad_value(972))), 1.0)), 972);
+            s.store_add_ad_lhs(992, A::ln_one_plus_exp(A::sub(s.ad_value(2146), s.ad_value(972))), 972);
         }
 
         if ((s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) && (!s.b[2419])) {

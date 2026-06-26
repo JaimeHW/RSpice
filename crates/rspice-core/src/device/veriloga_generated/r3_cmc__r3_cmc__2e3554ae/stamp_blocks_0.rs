@@ -499,11 +499,11 @@ impl Instance {
         s.v[200] = if s.b[200] { 1.0 } else { 0.0 };
 
         if s.b[200] {
-            s.store_sub_ad_rhs(152, 49, A::mul(s.ad_value(105), A::ln(A::offset(A::exp(A::div(A::sub(s.ad_value(49), s.ad_value(150)), s.ad_value(105))), 1.0))));
+            s.store_sub_ad_rhs(152, 49, A::mul(s.ad_value(105), A::ln_one_plus_exp(A::div(A::sub(s.ad_value(49), s.ad_value(150)), s.ad_value(105)))));
         }
 
         if (!s.b[200]) {
-            s.store_sub_ad_rhs(152, 150, A::mul(s.ad_value(105), A::ln(A::offset(A::exp(A::div(A::sub(s.ad_value(150), s.ad_value(49)), s.ad_value(105))), 1.0))));
+            s.store_sub_ad_rhs(152, 150, A::mul(s.ad_value(105), A::ln_one_plus_exp(A::div(A::sub(s.ad_value(150), s.ad_value(49)), s.ad_value(105)))));
         }
 
         s.b[201] = (s.v[152] < ((-0.4) * (s.v[41] + (if (s.v[151] < (s.v[49] - s.v[152])) { s.v[151] } else { (s.v[49] - s.v[152]) }))));
@@ -1664,11 +1664,11 @@ impl Instance {
         s.v[200] = if s.b[200] { 1.0 } else { 0.0 };
 
         if s.b[200] {
-            s.store_sub_ad_rhs(152, 49, A::mul(s.ad_value(105), A::ln(A::offset(A::exp(A::div(A::sub(s.ad_value(49), s.ad_value(150)), s.ad_value(105))), 1.0))));
+            s.store_sub_ad_rhs(152, 49, A::mul(s.ad_value(105), A::ln_one_plus_exp(A::div(A::sub(s.ad_value(49), s.ad_value(150)), s.ad_value(105)))));
         }
 
         if (!s.b[200]) {
-            s.store_sub_ad_rhs(152, 150, A::mul(s.ad_value(105), A::ln(A::offset(A::exp(A::div(A::sub(s.ad_value(150), s.ad_value(49)), s.ad_value(105))), 1.0))));
+            s.store_sub_ad_rhs(152, 150, A::mul(s.ad_value(105), A::ln_one_plus_exp(A::div(A::sub(s.ad_value(150), s.ad_value(49)), s.ad_value(105)))));
         }
 
         s.b[201] = (s.v[152] < ((-0.4) * (s.v[41] + (if (s.v[151] < (s.v[49] - s.v[152])) { s.v[151] } else { (s.v[49] - s.v[152]) }))));

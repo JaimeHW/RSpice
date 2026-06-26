@@ -2428,7 +2428,7 @@ impl Instance {
         if ((s.b[1259] && (!s.b[1260])) && (!s.b[1261])) {
             let assign10160_ad_e12710: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -2557,7 +2557,7 @@ impl Instance {
         if ((s.b[1259] && s.b[1262]) && (!s.b[1263])) {
             let assign10470_ad_e13236: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -2689,7 +2689,7 @@ impl Instance {
         if ((s.b[1259] && (!s.b[1262])) && (!s.b[1264])) {
             let assign10770_ad_e13752: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -2862,7 +2862,7 @@ impl Instance {
         if ((s.b[1267] && (!s.b[1268])) && (!s.b[1269])) {
             let assign11250_ad_e14490: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -2994,7 +2994,7 @@ impl Instance {
         if (s.b[1267] && (!s.b[1270])) {
             let assign11550_ad_e14991: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -3123,7 +3123,7 @@ impl Instance {
         if ((s.b[1267] && s.b[1271]) && (!s.b[1272])) {
             let assign11860_ad_e15463: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -3249,7 +3249,7 @@ impl Instance {
         if ((s.b[1267] && (!s.b[1271])) && (!s.b[1273])) {
             let assign12160_ad_e15979: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -3385,7 +3385,7 @@ impl Instance {
         if (s.b[1267] && (!s.b[1274])) {
             let assign12460_ad_e16480: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {
@@ -3508,7 +3508,7 @@ impl Instance {
         if (s.b[1267] && (!s.b[1275])) {
             let assign12760_ad_e16927: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
-                    A::ln(A::offset(A::exp(s.ad_value(933)), 1.0))
+                    A::ln_one_plus_exp(s.ad_value(933))
                 } else {
                     {
                         if ((!(s.v[933] > 37.0)) && (s.v[933] < (-37.0))) {

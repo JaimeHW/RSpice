@@ -1272,7 +1272,7 @@ impl Instance {
 
         s.store_mul(390, 388, 54);
 
-        s.store_exp_ad(391, A::scale(A::ln(A::offset(A::exp(A::scale(A::ln(s.ad_value(389)), p.p77)), 1.0)), 1.0 / (p.p77)));
+        s.store_exp_ad(391, A::scale(A::ln_one_plus_exp(A::scale(A::ln(s.ad_value(389)), p.p77)), 1.0 / (p.p77)));
 
         s.store_div(392, 390, 391);
 
@@ -3930,7 +3930,7 @@ impl Instance {
 
         s.store_mul(390, 388, 54);
 
-        s.store_exp_ad(391, A::scale(A::ln(A::offset(A::exp(A::scale(A::ln(s.ad_value(389)), p.p77)), 1.0)), 1.0 / (p.p77)));
+        s.store_exp_ad(391, A::scale(A::ln_one_plus_exp(A::scale(A::ln(s.ad_value(389)), p.p77)), 1.0 / (p.p77)));
 
         s.store_div(392, 390, 391);
 

@@ -274,7 +274,7 @@ impl Instance {
         s.store_scale(12, 75, p.p956);
 
         if ((!(s.v[12] > 37.0)) && (!(s.v[12] < (-37.0)))) {
-            s.store_ln_ad(13, A::offset(A::exp(s.ad_value(12)), 1.0));
+            s.store_ln_one_plus_exp(13, 12);
         } else {
             if ((!(s.v[12] > 37.0)) && (s.v[12] < (-37.0))) {
                 s.store_exp(13, 12);
@@ -294,7 +294,7 @@ impl Instance {
         s.store_scale(12, 74, p.p956);
 
         if ((!(s.v[12] > 37.0)) && (!(s.v[12] < (-37.0)))) {
-            s.store_ln_ad(13, A::offset(A::exp(s.ad_value(12)), 1.0));
+            s.store_ln_one_plus_exp(13, 12);
         } else {
             if ((!(s.v[12] > 37.0)) && (s.v[12] < (-37.0))) {
                 s.store_exp(13, 12);

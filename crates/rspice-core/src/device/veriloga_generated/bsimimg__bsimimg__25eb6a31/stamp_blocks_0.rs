@@ -1331,7 +1331,7 @@ impl Instance {
 
         s.store_div(422, 71, 81);
 
-        s.store_sub_ad_rhs(448, 448, A::ln(A::offset(A::exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))), 1.0)));
+        s.store_sub_ad_rhs(448, 448, A::ln_one_plus_exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))));
 
         s.store_min(448, 448, 424);
 
@@ -1886,7 +1886,7 @@ impl Instance {
 
         s.store_div_ad_lhs(422, A::sub(s.ad_value(71), s.ad_value(113)), 81);
 
-        s.store_sub_ad_rhs(448, 448, A::ln(A::offset(A::exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))), 1.0)));
+        s.store_sub_ad_rhs(448, 448, A::ln_one_plus_exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))));
 
         s.store_min(448, 448, 424);
 
@@ -4126,7 +4126,7 @@ impl Instance {
 
         s.store_div(422, 71, 81);
 
-        s.store_sub_ad_rhs(448, 448, A::ln(A::offset(A::exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))), 1.0)));
+        s.store_sub_ad_rhs(448, 448, A::ln_one_plus_exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))));
 
         s.store_min(448, 448, 424);
 
@@ -4679,7 +4679,7 @@ impl Instance {
 
         s.store_div_ad_lhs(422, A::sub(s.ad_value(71), s.ad_value(113)), 81);
 
-        s.store_sub_ad_rhs(448, 448, A::ln(A::offset(A::exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))), 1.0)));
+        s.store_sub_ad_rhs(448, 448, A::ln_one_plus_exp(A::sub(s.ad_value(448), A::scale(s.ad_value(424), 1.05))));
 
         s.store_min(448, 448, 424);
 

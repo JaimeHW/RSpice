@@ -469,12 +469,13 @@ impl GeneratedStaticStampCache {
             .map(|branch| num_nodes + branch - 1);
         let first_branch_axis = nodes.len();
         let branch_index_matches = match expected_first_branch {
-            Some(expected) => self
-                .axis_matrix_indices
-                .get(first_branch_axis)
-                .copied()
-                .flatten()
-                == Some(expected),
+            Some(expected) => {
+                self.axis_matrix_indices
+                    .get(first_branch_axis)
+                    .copied()
+                    .flatten()
+                    == Some(expected)
+            }
             None => true,
         };
         if self.axis_matrix_indices.len() != axis_count || !branch_index_matches {
@@ -519,7 +520,12 @@ impl GeneratedStaticStampCache {
     #[inline]
     fn node_axis(&self, node_index: usize) -> Option<usize> {
         (node_index < self.node_count
-            && self.axis_matrix_indices.get(node_index).copied().flatten().is_some())
+            && self
+                .axis_matrix_indices
+                .get(node_index)
+                .copied()
+                .flatten()
+                .is_some())
         .then_some(node_index)
     }
 
@@ -527,7 +533,12 @@ impl GeneratedStaticStampCache {
     fn branch_axis(&self, branch_index: usize) -> Option<usize> {
         let axis = self.node_count.checked_add(branch_index)?;
         (branch_index < self.branch_count
-            && self.axis_matrix_indices.get(axis).copied().flatten().is_some())
+            && self
+                .axis_matrix_indices
+                .get(axis)
+                .copied()
+                .flatten()
+                .is_some())
         .then_some(axis)
     }
 
