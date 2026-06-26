@@ -2870,6 +2870,38 @@ fn rust_backend_fuses_expression_scaled_division_operands() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_offset_division_numerators() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_offset_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression offset division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_offset_numerator(input: Self, input_scale: f64, offset: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::div_scaled_offset_numerator("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::offset("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::scale_offset("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::scaled_offset("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_pair_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_pair_division_source())
@@ -11221,6 +11253,29 @@ module compact_expression_scaled_division(p, n);
         b = exp((a * gain) / q)
           + sqrt(a / (q * gain))
           + ln((a * gain) / (q * offset));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_offset_division_source() -> &'static str {
+    r#"
+module compact_expression_offset_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = ((a + offset) / q)
+          + ((q - gain) / (a * gain))
+          + (((a * gain) + offset) / (q + gain))
+          + exp((a + gain) / (q + offset));
         I(p, n) <+ b;
     end
 endmodule

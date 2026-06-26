@@ -6451,6 +6451,21 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scaled_offset_numerator(input: Self, input_scale: f64, offset: f64, denominator: Self, denominator_scale: f64) -> Self {",
+        "        let mut value = input;",
+        "        let numerator_value = value.value * input_scale + offset;",
+        "        let denominator_value = denominator.value * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let quotient = numerator_value * reciprocal;",
+        "        let input_derivative_scale = input_scale * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * input_derivative_scale + denominator.node_derivatives[index] * denominator_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * input_derivative_scale + denominator.branch_derivatives[index] * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_scaled_inputs2(first: Self, first_scale: f64, second: Self, second_scale: f64, denominator: Self, denominator_scale: f64) -> Self {",
         "        let mut value = first;",
         "        let first_value = value.value * first_scale;",
@@ -13684,6 +13699,32 @@ fn compact_div_scaled_ad_expressions(left: &str, right: &str) -> Option<String> 
 
 fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> {
     let (denominator, denominator_scale) = compact_scaled_factor_ad_expression(right);
+    if let Some(args) = compact_ad_call_args(left, "offset") {
+        if args.len() == 2 {
+            return Some(format!(
+                "AdValue::div_scaled_offset_numerator({}, 1.0, {}, {denominator}, {denominator_scale})",
+                args[0], args[1]
+            ));
+        }
+    }
+    if let Some(args) = compact_ad_call_args(left, "scale_offset") {
+        if args.len() == 3 {
+            return Some(format!(
+                "AdValue::div_scaled_offset_numerator({}, {}, {}, {denominator}, {denominator_scale})",
+                args[0], args[1], args[2]
+            ));
+        }
+    }
+    if let Some(args) = compact_ad_call_args(left, "scaled_offset") {
+        if args.len() == 3 {
+            return Some(format!(
+                "AdValue::div_scaled_offset_numerator({}, {}, {}, {denominator}, {denominator_scale})",
+                args[0],
+                args[2],
+                compact_scalar_mul(args[1], args[2])
+            ));
+        }
+    }
     let mut terms = Vec::new();
     if compact_collect_affine_ad_terms(left, "1.0", &mut terms, 2).is_some() && terms.len() == 2 {
         return Some(format!(
@@ -14410,6 +14451,20 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             compact_scalar_mul(args[1], scale),
             args[2],
             args[3]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "div_scaled_offset_numerator") {
+        if args.len() != 5 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scaled_offset_numerator({}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            compact_scalar_mul(args[2], scale),
+            args[3],
+            args[4]
         ));
     }
 
