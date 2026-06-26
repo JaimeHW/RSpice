@@ -921,6 +921,25 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sub_div_same_denominator(&mut self, index: usize, left: usize, right: usize, denominator: usize) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let denominator_value = self.v[denominator];
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let denominator_dn = self.dn[denominator];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let denominator_db = self.db[denominator];
+        let reciprocal = 1.0 / denominator_value;
+        let delta = left_value - right_value;
+        let denominator_scale = -delta * reciprocal * reciprocal;
+        self.v[index] = delta * reciprocal;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] - right_dn[axis]) * reciprocal + denominator_dn[axis] * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] - right_db[axis]) * reciprocal + denominator_db[axis] * denominator_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         self.v[index] = left.value * right.value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * right.value + left.value * right.dn[axis]; }
@@ -10099,6 +10118,25 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left.value - right.value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] - right.dn[axis]; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] - right.db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_div_same_denominator(&mut self, index: usize, left: usize, right: usize, denominator: usize) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let denominator_value = self.v[denominator];
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let denominator_dn = self.dn[denominator];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let denominator_db = self.db[denominator];
+        let reciprocal = 1.0 / denominator_value;
+        let delta = left_value - right_value;
+        let denominator_scale = -delta * reciprocal * reciprocal;
+        self.v[index] = delta * reciprocal;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] - right_dn[axis]) * reciprocal + denominator_dn[axis] * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] - right_db[axis]) * reciprocal + denominator_db[axis] * denominator_scale; }
     }
 
     #[inline]
