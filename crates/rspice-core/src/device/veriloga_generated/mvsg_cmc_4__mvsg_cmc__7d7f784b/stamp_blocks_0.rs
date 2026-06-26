@@ -426,23 +426,15 @@ impl Instance {
         }
 
         if (!s.b[306]) {
-            let assign770_ad_e3265: A = {
-                if (p.p52 != 0.0) {
-                    let assign770_ad_e3230: A = A::add_scaled_inputs_product(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6, A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6), A::tanh_scaled_input(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6), (0.001 / p.p53)), 1.0);
-                    A::scale(assign770_ad_e3230, 0.5)
+            if (p.p52 != 0.0) {
+                s.store_scale_ad(48, A::add_scaled_inputs_product(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6, A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6), A::tanh_scaled_input(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6), (0.001 / p.p53)), 1.0), 0.5);
+            } else {
+                if (p.p52 == 0.0) {
+                    s.store_scale_ad(48, A::add_scaled_inputs3(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6, A::sqrt(A::offset(A::mul(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6), A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6)), p.p53)), 1.0), 0.5);
                 } else {
-                    let assign770_ad_e3264: A = {
-                        if (p.p52 == 0.0) {
-                            let assign770_ad_e3261: A = A::add_scaled_inputs3(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6, A::sqrt(A::offset(A::mul(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6), A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(19), Some(0)), p.p6, A::voltage(ctx, nodes, Some(19), Some(2)), p.p6)), p.p53)), 1.0);
-                            A::scale(assign770_ad_e3261, 0.5)
-                        } else {
-                            A::constant(0.0)
-                        }
-                    };
-                    assign770_ad_e3264
+                    s.store_scalar(48, 0.0);
                 }
-            };
-            s.store_ad_value(48, assign770_ad_e3265);
+            }
         }
 
         s.v[46] = (p.p55 + (1.0 / ((p.p29 * p.p56) * p.p33)));
@@ -546,23 +538,15 @@ impl Instance {
         }
 
         if (!s.b[310]) {
-            let assign1070_ad_e3575: A = {
-                if (p.p52 != 0.0) {
-                    let assign1070_ad_e3540: A = A::add_scaled_inputs_product(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6, A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), A::tanh_scaled_input(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), (0.001 / p.p53)), 1.0);
-                    A::scale(assign1070_ad_e3540, 0.5)
+            if (p.p52 != 0.0) {
+                s.store_scale_ad(49, A::add_scaled_inputs_product(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6, A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), A::tanh_scaled_input(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), (0.001 / p.p53)), 1.0), 0.5);
+            } else {
+                if (p.p52 == 0.0) {
+                    s.store_scale_ad(49, A::add_scaled_inputs3(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6, A::sqrt(A::offset(A::mul(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6)), p.p53)), 1.0), 0.5);
                 } else {
-                    let assign1070_ad_e3574: A = {
-                        if (p.p52 == 0.0) {
-                            let assign1070_ad_e3571: A = A::add_scaled_inputs3(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6, A::sqrt(A::offset(A::mul(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6)), p.p53)), 1.0);
-                            A::scale(assign1070_ad_e3571, 0.5)
-                        } else {
-                            A::constant(0.0)
-                        }
-                    };
-                    assign1070_ad_e3574
+                    s.store_scalar(49, 0.0);
                 }
-            };
-            s.store_ad_value(49, assign1070_ad_e3575);
+            }
         }
 
         s.store_offset_div_from_scalar_ad(47, 1.0, A::scale(s.ad_value(220), (p.p29 * (p.p68 * p.p33))), p.p67);

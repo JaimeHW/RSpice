@@ -652,11 +652,9 @@ impl Instance {
 
         s.store_sub_scaled_inputs(106, 104, -1.0, 105, 1.0);
 
-        let assign2910_ad_e2274: A = A::ddt(s.ad_value(102), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.ad_value(102).value));
-        s.store_ad_value(200, assign2910_ad_e2274);
+        s.store_ddt_source(200, 102, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[102]));
 
-        let assign2920_ad_e2276: A = A::ddt(s.ad_value(103), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, s.ad_value(103).value));
-        s.store_ad_value(201, assign2920_ad_e2276);
+        s.store_ddt_source(201, 103, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, s.v[103]));
 
         s.b[258] = (s.v[44] == 1.0);
         s.v[258] = if s.b[258] { 1.0 } else { 0.0 };

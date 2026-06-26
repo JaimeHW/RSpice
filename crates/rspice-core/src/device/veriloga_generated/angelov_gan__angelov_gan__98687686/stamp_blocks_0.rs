@@ -315,6 +315,7 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
+        let bi1 = ctx.branch_current(branches[1]);
         s.store_add_scaled_inputs3(35, s.ad_value(55), 1.0, s.ad_value(96), p.p31, s.ad_value(5), p.p38);
 
         s.store_offset_tanh_ad(84, s.ad_value(35), 1.0);
@@ -409,8 +410,7 @@ impl Instance {
         s.b[119] = ((p.p6 == 2.0) || (p.p6 == 4.0));
         s.v[119] = if s.b[119] { 1.0 } else { 0.0 };
 
-        let assign2090_ad_e2834: A = A::ddt(A::scale(A::branch_current(ctx, branches, 1), p.p55), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, A::scale(A::branch_current(ctx, branches, 1), p.p55).value));
-        s.store_ad_value(63, assign2090_ad_e2834);
+        s.store_ddt_scaled_branch_current(63, 1, p.p55, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, ((bi1) * (p.p55))));
 
         s.b[120] = (p.p58 > 0.0);
         s.v[120] = if s.b[120] { 1.0 } else { 0.0 };

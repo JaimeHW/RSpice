@@ -1788,6 +1788,7 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
+        let nv3 = ctx.node_voltage(nodes[3]);
         if s.b[561] {
             s.store_scale(227, 228, (1.0 - p.p94));
             s.store_add_scaled_inputs(313, 218, 1.0, 228, p.p94);
@@ -1804,8 +1805,7 @@ impl Instance {
         s.b[563] = (p.p23 == 1.0);
         s.v[563] = if s.b[563] { 1.0 } else { 0.0 };
 
-        let assign6450_ad_e6586: A = A::ddt(A::scale(A::voltage(ctx, nodes, Some(3), None), p.p134), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, A::scale(A::voltage(ctx, nodes, Some(3), None), p.p134).value));
-        s.store_scale_ad(209, assign6450_ad_e6586, p.p1);
+        s.store_ddt_scaled_voltage(209, Some(3), None, ((p.p134) * (p.p1)), ddt_scale, ((eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, ((nv3) * (p.p134)))) * (p.p1)));
 
         s.v[331] = (1.0 - p.p135);
 

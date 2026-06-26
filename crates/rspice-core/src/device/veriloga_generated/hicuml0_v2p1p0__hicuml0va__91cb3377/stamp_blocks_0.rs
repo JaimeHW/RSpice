@@ -1318,6 +1318,7 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
+        let nv4 = ctx.node_voltage(nodes[4]);
         if (s.b[327] && s.b[328]) {
             s.store_mul_ad_lhs(71, A::mul3(s.ad_value(24), A::exp_scaled_input(s.ad_value(66), (-p.p43)), s.ad_value(69)), 70);
             s.store_mul_ad_product_rhs(72, 54, A::exp(A::mul_scaled_rhs(s.ad_value(65), s.ad_value(50), -1.0)), A::sub_from_scalar(1.0, s.ad_value(70)));
@@ -1629,8 +1630,7 @@ impl Instance {
         }
 
         if (!s.b[359]) {
-            let assign7590_ad_e7671: A = A::ddt(A::scale(A::voltage(ctx, nodes, Some(4), None), p.p107), ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, A::scale(A::voltage(ctx, nodes, Some(4), None), p.p107).value));
-            s.store_ad_value(167, assign7590_ad_e7671);
+            s.store_ddt_scaled_voltage(167, Some(4), None, p.p107, ddt_scale, eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, ((nv4) * (p.p107))));
         }
 
         s.b[360] = ((p.p103 == 0.0) || (p.p104 < p.p111));

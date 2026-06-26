@@ -67,6 +67,43 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_ddt_source(&mut self, index: usize, source: usize, derivative_scale: f64, value: f64) {
+        self.v[index] = value;
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ddt_scaled_source(&mut self, index: usize, source: usize, input_scale: f64, derivative_scale: f64, value: f64) {
+        let scale = input_scale * derivative_scale;
+        self.v[index] = value;
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ddt_scaled_voltage(&mut self, index: usize, pos: Option<usize>, neg: Option<usize>, input_scale: f64, derivative_scale: f64, value: f64) {
+        let scale = input_scale * derivative_scale;
+        self.v[index] = value;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = pos { self.dn[index][node] += scale; }
+        if let Some(node) = neg { self.dn[index][node] -= scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ddt_scaled_branch_current(&mut self, index: usize, slot: usize, input_scale: f64, derivative_scale: f64, value: f64) {
+        self.v[index] = value;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        self.db[index][slot] = input_scale * derivative_scale;
+    }
+
+    #[inline]
     pub(crate) fn store_add_scaled_product(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
         let value_term = value.value * value_scale;
         let product_left_value = product_left.value;
@@ -9095,6 +9132,43 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = value.value;
         self.dn[index] = value.dn;
         self.db[index] = value.db;
+    }
+
+    #[inline]
+    pub(crate) fn store_ddt_source(&mut self, index: usize, source: usize, derivative_scale: f64, value: f64) {
+        self.v[index] = value;
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ddt_scaled_source(&mut self, index: usize, source: usize, input_scale: f64, derivative_scale: f64, value: f64) {
+        let scale = input_scale * derivative_scale;
+        self.v[index] = value;
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ddt_scaled_voltage(&mut self, index: usize, pos: Option<usize>, neg: Option<usize>, input_scale: f64, derivative_scale: f64, value: f64) {
+        let scale = input_scale * derivative_scale;
+        self.v[index] = value;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        if let Some(node) = pos { self.dn[index][node] += scale; }
+        if let Some(node) = neg { self.dn[index][node] -= scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_ddt_scaled_branch_current(&mut self, index: usize, slot: usize, input_scale: f64, derivative_scale: f64, value: f64) {
+        self.v[index] = value;
+        self.dn[index] = [0.0; NODE_COUNT];
+        self.db[index] = [0.0; BRANCH_COUNT];
+        self.db[index][slot] = input_scale * derivative_scale;
     }
 
     #[inline]
