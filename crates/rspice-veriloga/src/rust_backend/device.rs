@@ -885,6 +885,28 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_mul_scaled_lhs_voltage_ad_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_mul_scaled_voltage"), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(10, AdValue::mul_scaled_lhs(scratch.ad_value(2), params.scale, AdValue::voltage(ctx, nodes, Some(4), Some(5))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_mul_scaled_voltage(10, 2, p.scale, ctx, nodes, Some(4), Some(5));"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_offset_multiply_ad_rvalue_stores_as_direct_stores() {
         let source = r#"
 fn stamp() {
@@ -4289,6 +4311,21 @@ fn generate_scratch_operation_helpers() -> String {
         "        if let Some(node) = pos { self.node_derivatives[index][node] += value.value; }",
         "        if let Some(node) = neg { self.node_derivatives[index][node] -= value.value; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * voltage; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_scaled_voltage(&mut self, index: usize, source: usize, scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
+        "        let source_value = self.values[source] * scale;",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let voltage = pos_value - neg_value;",
+        "        self.values[index] = source_value * voltage;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * scale * voltage; }",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] += source_value; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] -= source_value; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * scale * voltage; }",
         "    }",
         "",
         "    #[inline]",
@@ -14472,6 +14509,30 @@ fn compact_fused_scaled_multiply_helper_line(
             }
             _ => {}
         }
+    }
+
+    if scaled_left {
+        if let Some(left) = left_source
+            && let Some(voltage_args) = compact_ad_call_args(right, "voltage")
+        {
+            if voltage_args.len() != 4 {
+                return None;
+            }
+            return Some(format!(
+                "scratch.store_mul_scaled_voltage({target_index}, {left}, {scale}, {}, {}, {}, {});",
+                voltage_args[0], voltage_args[1], voltage_args[2], voltage_args[3]
+            ));
+        }
+    } else if let Some(right) = right_source
+        && let Some(voltage_args) = compact_ad_call_args(left, "voltage")
+    {
+        if voltage_args.len() != 4 {
+            return None;
+        }
+        return Some(format!(
+            "scratch.store_mul_scaled_voltage({target_index}, {right}, {scale}, {}, {}, {}, {});",
+            voltage_args[0], voltage_args[1], voltage_args[2], voltage_args[3]
+        ));
     }
 
     match (left_source, right_source) {
