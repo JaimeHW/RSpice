@@ -865,6 +865,26 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_ln_scaled_negative_add_ad_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_ln_neg_add"), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(9, AdValue::ln_scaled_input(AdValue::add(scratch.ad_value(2), scratch.ad_value(3)), -1.0));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_ln_neg_add(9, 2, 3);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_offset_multiply_ad_rvalue_stores_as_direct_stores() {
         let source = r#"
 fn stamp() {
@@ -7593,6 +7613,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_ln_add(&mut self, index: usize, left: usize, right: usize) {",
         "        let raw = self.values[left] + self.values[right];",
         "        self.store_unary_add_scaled(index, left, right, raw.ln(), 1.0 / raw);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln_neg_add(&mut self, index: usize, left: usize, right: usize) {",
+        "        let raw = -(self.values[left] + self.values[right]);",
+        "        self.store_unary_add_scaled(index, left, right, raw.ln(), -1.0 / raw);",
         "    }",
         "",
         "    #[inline]",
@@ -16579,6 +16605,21 @@ fn compact_direct_binary_scratch_args(value: &str) -> Option<(&'static str, usiz
 }
 
 fn compact_unary_binary_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "ln_scaled_input")
+        && args.len() == 2
+        && args[1] == "-1.0"
+        && let Some(binary_args) = compact_ad_call_args(args[0], "add")
+    {
+        if binary_args.len() != 2 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(binary_args[0])?;
+        let right = compact_scratch_ad_value_index(binary_args[1])?;
+        return Some(format!(
+            "scratch.store_ln_neg_add({target_index}, {left}, {right});"
+        ));
+    }
+
     for (unary, helper_prefix) in [
         ("sqrt", "store_sqrt"),
         ("exp", "store_exp"),
