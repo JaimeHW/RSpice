@@ -6339,6 +6339,22 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scaled_value_by_product(input: Self, input_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {",
+        "        let mut value = input;",
+        "        let input_value = value.value;",
+        "        let denominator_left_value = denominator_left.value;",
+        "        let denominator_right_value = denominator_right.value;",
+        "        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);",
+        "        let quotient = input_value * input_scale * reciprocal;",
+        "        let input_derivative_scale = input_scale * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * input_derivative_scale + (denominator_left.node_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.node_derivatives[index]) * denominator_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * input_derivative_scale + (denominator_left.branch_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.branch_derivatives[index]) * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_scaled_product(product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {",
         "        let mut value = product_left;",
         "        let product_left_value = value.value;",
@@ -12506,7 +12522,7 @@ struct CompactProduct3<'a> {
 }
 
 struct CompactQuotient<'a> {
-    numerator: &'a str,
+    numerator: Option<&'a str>,
     numerator_scale: String,
     denominator: &'a str,
     denominator_scale: String,
@@ -12611,22 +12627,34 @@ fn compact_quotient_ad_expression(value: &str) -> Option<CompactQuotient<'_>> {
             return None;
         }
         return Some(CompactQuotient {
-            numerator: args[0],
+            numerator: Some(args[0]),
             numerator_scale: output_scale,
             denominator: args[1],
             denominator_scale: "1.0".to_string(),
         });
     }
 
-    let args = compact_ad_call_args(value, "div_scaled_inputs")?;
-    if args.len() != 4 {
+    if let Some(args) = compact_ad_call_args(value, "div_scaled_inputs") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(CompactQuotient {
+            numerator: Some(args[0]),
+            numerator_scale: compact_scalar_mul(args[1], &output_scale),
+            denominator: args[2],
+            denominator_scale: args[3].to_string(),
+        });
+    }
+
+    let args = compact_ad_call_args(value, "div_from_scalar")?;
+    if args.len() != 2 {
         return None;
     }
     Some(CompactQuotient {
-        numerator: args[0],
-        numerator_scale: compact_scalar_mul(args[1], &output_scale),
-        denominator: args[2],
-        denominator_scale: args[3].to_string(),
+        numerator: None,
+        numerator_scale: compact_scalar_mul(args[0], &output_scale),
+        denominator: args[1],
+        denominator_scale: "1.0".to_string(),
     })
 }
 
@@ -13198,39 +13226,81 @@ fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> 
     let (denominator, denominator_scale) = compact_scaled_factor_ad_expression(right);
     if let Some(product) = compact_product3_ad_expression(left) {
         if let Some(quotient) = compact_quotient_ad_expression(product.left) {
+            let product_scale = compact_scalar_mul(&product.scale, &quotient.numerator_scale);
+            let denominator_scale =
+                compact_scalar_mul(&denominator_scale, &quotient.denominator_scale);
+            if let Some(numerator) = quotient.numerator {
+                return Some(format!(
+                    "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
+                    numerator,
+                    product.middle,
+                    product.right,
+                    product_scale,
+                    quotient.denominator,
+                    denominator,
+                    denominator_scale
+                ));
+            }
             return Some(format!(
-                "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
-                quotient.numerator,
+                "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
                 product.middle,
                 product.right,
-                compact_scalar_mul(&product.scale, &quotient.numerator_scale),
+                product_scale,
                 quotient.denominator,
                 denominator,
-                compact_scalar_mul(&denominator_scale, &quotient.denominator_scale)
+                denominator_scale
             ));
         }
         if let Some(quotient) = compact_quotient_ad_expression(product.middle) {
+            let product_scale = compact_scalar_mul(&product.scale, &quotient.numerator_scale);
+            let denominator_scale =
+                compact_scalar_mul(&denominator_scale, &quotient.denominator_scale);
+            if let Some(numerator) = quotient.numerator {
+                return Some(format!(
+                    "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
+                    product.left,
+                    numerator,
+                    product.right,
+                    product_scale,
+                    quotient.denominator,
+                    denominator,
+                    denominator_scale
+                ));
+            }
             return Some(format!(
-                "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
+                "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
                 product.left,
-                quotient.numerator,
                 product.right,
-                compact_scalar_mul(&product.scale, &quotient.numerator_scale),
+                product_scale,
                 quotient.denominator,
                 denominator,
-                compact_scalar_mul(&denominator_scale, &quotient.denominator_scale)
+                denominator_scale
             ));
         }
         if let Some(quotient) = compact_quotient_ad_expression(product.right) {
+            let product_scale = compact_scalar_mul(&product.scale, &quotient.numerator_scale);
+            let denominator_scale =
+                compact_scalar_mul(&denominator_scale, &quotient.denominator_scale);
+            if let Some(numerator) = quotient.numerator {
+                return Some(format!(
+                    "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
+                    product.left,
+                    product.middle,
+                    numerator,
+                    product_scale,
+                    quotient.denominator,
+                    denominator,
+                    denominator_scale
+                ));
+            }
             return Some(format!(
-                "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
+                "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
                 product.left,
                 product.middle,
-                quotient.numerator,
-                compact_scalar_mul(&product.scale, &quotient.numerator_scale),
+                product_scale,
                 quotient.denominator,
                 denominator,
-                compact_scalar_mul(&denominator_scale, &quotient.denominator_scale)
+                denominator_scale
             ));
         }
         if let Some(denominator_product) = compact_product2_ad_expression(denominator) {
@@ -13255,25 +13325,41 @@ fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> 
 
     let product = compact_div_product2_ad_expression(left)?;
     if let Some(quotient) = compact_quotient_ad_expression(product.left.as_ref()) {
+        let product_scale = compact_scalar_mul(&product.scale, &quotient.numerator_scale);
+        let denominator_scale = compact_scalar_mul(&denominator_scale, &quotient.denominator_scale);
+        if let Some(numerator) = quotient.numerator {
+            return Some(format!(
+                "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
+                numerator,
+                product.right,
+                product_scale,
+                quotient.denominator,
+                denominator,
+                denominator_scale
+            ));
+        }
         return Some(format!(
-            "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
-            quotient.numerator,
-            product.right,
-            compact_scalar_mul(&product.scale, &quotient.numerator_scale),
-            quotient.denominator,
-            denominator,
-            compact_scalar_mul(&denominator_scale, &quotient.denominator_scale)
+            "AdValue::div_scaled_value_by_product({}, {}, {}, {}, {})",
+            product.right, product_scale, quotient.denominator, denominator, denominator_scale
         ));
     }
     if let Some(quotient) = compact_quotient_ad_expression(product.right.as_ref()) {
+        let product_scale = compact_scalar_mul(&product.scale, &quotient.numerator_scale);
+        let denominator_scale = compact_scalar_mul(&denominator_scale, &quotient.denominator_scale);
+        if let Some(numerator) = quotient.numerator {
+            return Some(format!(
+                "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
+                product.left,
+                numerator,
+                product_scale,
+                quotient.denominator,
+                denominator,
+                denominator_scale
+            ));
+        }
         return Some(format!(
-            "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
-            product.left,
-            quotient.numerator,
-            compact_scalar_mul(&product.scale, &quotient.numerator_scale),
-            quotient.denominator,
-            denominator,
-            compact_scalar_mul(&denominator_scale, &quotient.denominator_scale)
+            "AdValue::div_scaled_value_by_product({}, {}, {}, {}, {})",
+            product.left, product_scale, quotient.denominator, denominator, denominator_scale
         ));
     }
     if let Some(denominator_product) = compact_product2_ad_expression(denominator) {
@@ -13683,6 +13769,20 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             compact_scalar_mul(args[1], scale),
             args[2],
             args[3]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "div_scaled_value_by_product") {
+        if args.len() != 5 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scaled_value_by_product({}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            args[4]
         ));
     }
 
