@@ -697,7 +697,10 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
     assert!(stamp.contains("ctx.node_voltage(nodes[1])"));
     assert!(stamp.contains("p.p0"));
     assert!(stamp.contains("eq0_value"));
-    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("GeneratedDerivative::node"),
         "two-node sparse currents should use the fixed-arity stamper path instead of constructing a derivative slice:\n{stamp}"
@@ -741,7 +744,10 @@ fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     assert!(!stamp.contains("_d_n0: f64 = 0.0"), "{stamp}");
     assert!(!stamp.contains("_d_n1: f64 = 0.0"), "{stamp}");
     assert!(!stamp.contains("_d_n0: f64 = if"), "{stamp}");
-    assert!(stamp.contains("stamper.stamp_current_const_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_const_local("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("GeneratedDerivative::"),
         "constant current contributions should not construct empty derivative slices:\n{stamp}"
@@ -768,7 +774,10 @@ fn rust_backend_uses_derivative_free_stamp_for_constant_potential() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamper.stamp_potential_const_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_potential_const_local("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("GeneratedDerivative::"),
         "constant potential contributions should not construct empty derivative slices:\n{stamp}"
@@ -791,7 +800,10 @@ fn rust_backend_uses_fixed_arity_stamp_for_three_node_sparse_current() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamper.stamp_current_node3_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node3_local("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("GeneratedDerivative::node"),
         "three-node sparse currents should use the fixed-arity stamper path instead of constructing a derivative slice:\n{stamp}"
@@ -844,7 +856,10 @@ fn rust_backend_does_not_copy_scratch_derivatives_through_temporary_locals() {
         !stamp.contains("if (p.p0 > 0.0) { s.v[0] } else { s.v[0] }"),
         "{stamp}"
     );
-    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
     assert!(stamp.contains("s.dn[1][0]"), "{stamp}");
 }
 
@@ -2071,6 +2086,41 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
     assert!(stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_scaled_multiply_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_scaled_multiply_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression scaled multiply");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn mul_scaled_lhs(left: Self, scale: f64, right: Self) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn mul_scaled_rhs(left: Self, right: Self, scale: f64) -> Self"),
+        "{support}"
+    );
+    assert!(stamp.contains("A::mul_scaled_lhs("), "{stamp}");
+    assert!(stamp.contains("A::mul_scaled_rhs("), "{stamp}");
+    assert!(!stamp.contains("A::mul(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::scale(A::mul("), "{stamp}");
+    assert!(!stamp.contains("A::scale(A::mul_scaled_"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -5256,7 +5306,10 @@ fn rust_backend_borrowed_helper_arrays_compile_with_dense_stamps() {
         helper.contains("nodes: &[usize; Instance::NODE_COUNT]"),
         "{helper}"
     );
-    assert!(helper.contains("stamper.stamp_current_dense_local("), "{helper}");
+    assert!(
+        helper.contains("stamper.stamp_current_dense_local("),
+        "{helper}"
+    );
     assert!(
         helper.contains("            &eq0_node_derivatives,\n            &eq0_branch_derivatives,"),
         "{helper}"
@@ -5296,7 +5349,10 @@ fn rust_backend_lowers_runtime_loops_with_derivative_shadows() {
     assert!(state.contains("MAX_ANALOG_LOOP_ITERATIONS"), "{state}");
     assert!(stamp.contains("while"), "{stamp}");
     assert!(stamp.contains("loop_guard"), "{stamp}");
-    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
     assert!(stamp.contains("s.dn[1][0]"), "{stamp}");
     assert!(stamp.contains("s.dn[1][1]"), "{stamp}");
 }
@@ -5739,7 +5795,10 @@ fn rust_backend_lowers_intrinsic_math_with_analytic_derivatives() {
         !stamp.contains("arg.clone()"),
         "generated unary intrinsics must consume owned AdValue operands without cloning derivative arrays:\n{stamp}"
     );
-    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
     assert!(stamp.contains("if "), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
 }
@@ -6238,7 +6297,10 @@ fn rust_backend_lowers_conditional_expressions_with_selected_derivatives() {
 
     assert!(stamp.contains("if "), "{stamp}");
     assert!(stamp.contains(" > "), "{stamp}");
-    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
     assert!(stamp.contains("nodes[0]"), "{stamp}");
     assert!(stamp.contains("nodes[1]"), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
@@ -6417,7 +6479,10 @@ fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamp_current_indexed_dense_local"), "{stamp}");
+    assert!(
+        stamp.contains("stamp_current_indexed_dense_local"),
+        "{stamp}"
+    );
     assert!(
         stamp.contains("eq0_node_derivative_indices"),
         "wide derivative equations should carry static derivative lane indices:\n{stamp}"
@@ -8052,7 +8117,10 @@ fn rust_backend_lowers_potential_contribution_to_branch_unknown_stamp() {
     assert!(state.contains("set_branch_indices"), "{state}");
     assert!(stamp.contains("stamp_potential_branch_local"), "{stamp}");
     assert!(stamp.contains("stamp_potential_const_local"), "{stamp}");
-    assert!(stamp.contains("            0,\n            eq0_value,"), "{stamp}");
+    assert!(
+        stamp.contains("            0,\n            eq0_value,"),
+        "{stamp}"
+    );
 }
 
 #[test]
@@ -8094,8 +8162,14 @@ fn rust_backend_keeps_distinct_named_potential_branches_with_shared_endpoints() 
 
     assert!(state.contains("BRANCH_COUNT: usize = 2"), "{state}");
     assert!(stamp.contains("stamp_potential_branch_local"), "{stamp}");
-    assert!(stamp.contains("            0,\n            eq0_value,"), "{stamp}");
-    assert!(stamp.contains("            1,\n            eq1_value,"), "{stamp}");
+    assert!(
+        stamp.contains("            0,\n            eq0_value,"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("            1,\n            eq1_value,"),
+        "{stamp}"
+    );
 }
 
 #[test]
@@ -9489,6 +9563,29 @@ module compact_scaled_mixed_multiply_store(p, n);
         b = (a * gain) * ln(q + offset);
         c = exp(q) * (-a);
         I(p, n) <+ b + c;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_scaled_multiply_source() -> &'static str {
+    r#"
+module compact_expression_scaled_multiply(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = ((a * gain) * ln(q + offset))
+          + (exp(q) * (gain * a))
+          + ((sqrt(a + q) * ln(q + offset)) * gain)
+          + (((sqrt(a + q) * ln(q + offset)) * gain) * offset);
+        I(p, n) <+ b;
     end
 endmodule
 "#
