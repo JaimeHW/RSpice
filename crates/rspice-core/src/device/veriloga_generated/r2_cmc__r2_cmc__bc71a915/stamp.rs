@@ -388,21 +388,21 @@ impl Instance {
         s.v[80] = if s.b[80] { 1.0 } else { 0.0 };
 
         if s.b[80] {
-            s.store_div_ad_lhs(26, A::mul_scaled_lhs(s.ad_value(9), (4.0 * 1.3806505e-23), s.ad_value(21)), 29);
+            s.store_ad_value(26, A::div_scaled_product(s.ad_value(9), s.ad_value(21), (4.0 * 1.3806505e-23), s.ad_value(29), 1.0));
         }
 
         s.b[81] = (((p.p32 != 0.0) && (s.v[3] > 0.0)) && (s.v[4] > 0.0));
         s.v[81] = if s.b[81] { 1.0 } else { 0.0 };
 
         if (s.b[80] && s.b[81]) {
-            s.store_div_ad_lhs(27, A::mul3(s.ad_value(22), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(4))), p.p30), s.ad_value(4)), 3);
+            s.store_ad_value(27, A::div_scaled_product3(s.ad_value(22), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(4))), p.p30), s.ad_value(4), 1.0, s.ad_value(3), 1.0));
         }
 
         s.b[82] = ((s.v[16] > 0.0) && (s.v[17] > 0.0));
         s.v[82] = if s.b[82] { 1.0 } else { 0.0 };
 
         if ((s.b[80] && (!s.b[81])) && s.b[82]) {
-            s.store_div_ad_lhs(27, A::mul3(s.ad_value(22), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(17))), p.p30), s.ad_value(17)), 16);
+            s.store_ad_value(27, A::div_scaled_product3(s.ad_value(22), A::powf(A::abs(A::div(s.ad_value(1), s.ad_value(17))), p.p30), s.ad_value(17), 1.0, s.ad_value(16), 1.0));
         }
 
         if ((s.b[80] && (!s.b[81])) && (!s.b[82])) {

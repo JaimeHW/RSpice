@@ -364,7 +364,7 @@ impl Instance {
         s.v[116] = if s.b[116] { 1.0 } else { 0.0 };
 
         if (((s.b[108] && (!s.b[107])) && (p.p0 != 0.0)) && s.b[116]) {
-            s.store_div_ad_lhs(114, A::mul_scaled_output(A::square(s.ad_value(31)), s.ad_value(11), ((4.0 * 1.3806503e-23) * p.p71)), 115);
+            s.store_ad_value(114, A::div_scaled_product(A::square(s.ad_value(31)), s.ad_value(11), ((4.0 * 1.3806503e-23) * p.p71), s.ad_value(115), 1.0));
         }
 
         if (((s.b[108] && (!s.b[107])) && (p.p0 != 0.0)) && (!s.b[116])) {
