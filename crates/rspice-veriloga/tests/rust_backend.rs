@@ -5547,10 +5547,33 @@ fn rust_backend_fuses_offset_mixed_multiply_store_helpers() {
         support.contains("pub(crate) fn store_mul_offset_ad_rhs("),
         "{support}"
     );
+    for helper in [
+        "store_mul_offset_lhs_ad_rhs",
+        "store_mul_offset_rhs_ad_lhs",
+        "store_mul_offset_lhs_ad",
+        "store_mul_offset_rhs_ad",
+        "store_mul_offset_lhs_scaled_output",
+        "store_mul_offset_rhs_scaled_ad_rhs",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{support}"
+        );
+    }
     assert!(stamp.contains("s.store_mul_offset_lhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_offset_rhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_offset_ad_lhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_offset_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_offset_lhs_ad("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_offset_rhs_ad("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_mul_offset_lhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_offset_rhs_scaled_ad_rhs("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -14012,6 +14035,10 @@ module compact_offset_mixed_multiply_store(p, n);
     real e;
     real f;
     real g;
+    real h;
+    real i;
+    real j;
+    real k;
     analog begin
         a = V(p, n);
         b = V(n, p);
@@ -14020,7 +14047,11 @@ module compact_offset_mixed_multiply_store(p, n);
         e = c * (a + shift);
         f = (exp(a) + shift) * c;
         g = c * (exp(b) + shift);
-        I(p, n) <+ d + e + f + g;
+        h = (exp(a) + shift) * exp(b);
+        i = exp(a) * (exp(b) + shift);
+        j = 2.0 * ((a + shift) * c);
+        k = 3.0 * (c * (exp(b) + shift));
+        I(p, n) <+ d + e + f + g + h + i + j + k;
     end
 endmodule
 "#
