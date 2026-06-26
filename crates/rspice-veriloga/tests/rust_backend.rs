@@ -3184,6 +3184,60 @@ fn rust_backend_directly_stores_product_sum_expression_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_affine_division_expression_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_affine_division_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression direct affine-division stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_div_scaled_inputs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_div_scaled_inputs2(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_div_scaled_inputs3(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_div_scaled_inputs4(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_div_scaled_inputs("), "{stamp}");
+    assert!(stamp.contains("s.store_div_scaled_inputs2("), "{stamp}");
+    assert!(stamp.contains("s.store_div_scaled_inputs3("), "{stamp}");
+    assert!(stamp.contains("s.store_div_scaled_inputs4("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "direct affine-division root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
@@ -3896,7 +3950,7 @@ fn rust_backend_uses_compact_scaled_binary_operand_store_helpers() {
     assert!(stamp.contains("s.store_add_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_sub_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
-    assert!(stamp.contains("s.store_scaled_div("), "{stamp}");
+    assert!(stamp.contains("s.store_div_scaled_inputs("), "{stamp}");
     assert!(!stamp.contains("s.store_add_ad("), "{stamp}");
     assert!(!stamp.contains("s.store_sub_ad("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
@@ -3925,7 +3979,7 @@ fn rust_backend_uses_compact_scaled_output_scaled_binary_operand_store_helpers()
     assert!(stamp.contains("s.store_add_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_sub_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
-    assert!(stamp.contains("s.store_scaled_div("), "{stamp}");
+    assert!(stamp.contains("s.store_div_scaled_inputs("), "{stamp}");
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -5095,7 +5149,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_ad_value(5, A::div_scaled_inputs2(s.ad_value(0), 1.0, s.ad_value(1), 1.0, A::sub(s.ad_value(0), s.ad_value(1)), 1.0));"),
+        stamp.contains("s.store_div_scaled_inputs2(5, s.ad_value(0), 1.0, s.ad_value(1), 1.0, A::sub(s.ad_value(0), s.ad_value(1)), 1.0);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_sqrt_add(6, 0, 1);"), "{stamp}");
@@ -11708,6 +11762,38 @@ module compact_expression_direct_store_product_sum_helpers(p, n);
         product2 = (a * q) - (r * q);
         product3 = ((a * q) + (r * q)) - (a * r);
         I(p, n) <+ product2 + product3;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_affine_division_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_affine_division_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real den;
+    real div1;
+    real div2;
+    real div3;
+    real div4;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) + offset;
+        den = V(p, n) + gain;
+        div1 = (a * gain) / (q * offset);
+        div2 = (a + q) / den;
+        div3 = ((a + q) - r) / den;
+        div4 = (((a + q) + r) - t) / den;
+        I(p, n) <+ div1 + div2 + div3 + div4;
     end
 endmodule
 "#
