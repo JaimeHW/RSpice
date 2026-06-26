@@ -2658,6 +2658,66 @@ fn rust_backend_fuses_expression_product_division_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_offset_product_division_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_offset_product_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression offset product division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_product_offset_lhs(product_left: Self, product_left_offset: f64, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn div_scaled_product_offset_rhs(product_left: Self, product_right: Self, product_right_offset: f64, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn div_scaled_product_offset_denominator(product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_offset: f64, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("A::div_scaled_product_offset_lhs("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::div_scaled_product_offset_rhs("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::div_scaled_product_offset_denominator("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::div_scaled_product("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::scale(A::div_scaled_product_offset_"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_result_scaled_mixed_mul_div_store_source())
@@ -10474,6 +10534,31 @@ module compact_expression_product_division(p, n);
           + sqrt(((a * gain) * q) / r)
           + exp(((a * q) * c) / r)
           + ln((a * a) / (r * gain));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_offset_product_division_source() -> &'static str {
+    r#"
+module compact_expression_offset_product_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real offset = 3.0;
+    parameter real gain = 2.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = exp(((a + offset) * q) / r)
+          + sqrt((a * (q + offset)) / r)
+          + ln((a * q) / (r + offset))
+          + tanh((((a * q) / (r + offset)) * gain));
         I(p, n) <+ b;
     end
 endmodule
