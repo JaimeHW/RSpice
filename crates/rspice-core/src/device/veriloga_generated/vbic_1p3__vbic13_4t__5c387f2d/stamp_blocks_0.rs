@@ -717,7 +717,7 @@ impl Instance {
 
         s.store_offset_ad(79, A::add_scaled_inputs(A::sqrt(A::offset(A::square(s.ad_value(78)), 1e-8)), 0.5, s.ad_value(78), 0.5), 0.0001);
 
-        s.store_add_scaled_products(80, s.ad_value(74), s.ad_value(45), 1.0, s.ad_value(75), s.ad_value(46), 1.0);
+        s.store_add_scaled_products_indices(80, 74, 45, 1.0, 75, 46, 1.0);
 
         s.b[252] = (p.p30 < 0.5);
         s.v[252] = if s.b[252] { 1.0 } else { 0.0 };
@@ -1342,17 +1342,17 @@ impl Instance {
 
         s.store_sub(134, 132, 131);
 
-        s.store_add_scaled_product(87, s.ad_value(87), 1.0, s.ad_value(165), s.ad_value(143), 1.0);
+        s.store_add_scaled_product_indices(87, 87, 1.0, 165, 143, 1.0);
 
-        s.store_add_scaled_product(88, s.ad_value(88), 1.0, s.ad_value(165), s.ad_value(145), 1.0);
+        s.store_add_scaled_product_indices(88, 88, 1.0, 165, 145, 1.0);
 
-        s.store_add_scaled_product(91, s.ad_value(91), 1.0, s.ad_value(165), s.ad_value(146), 1.0);
+        s.store_add_scaled_product_indices(91, 91, 1.0, 165, 146, 1.0);
 
-        s.store_add_scaled_product(90, s.ad_value(90), 1.0, s.ad_value(165), s.ad_value(144), 1.0);
+        s.store_add_scaled_product_indices(90, 90, 1.0, 165, 144, 1.0);
 
-        s.store_add_scaled_product(94, s.ad_value(94), 1.0, s.ad_value(165), s.ad_value(149), 1.0);
+        s.store_add_scaled_product_indices(94, 94, 1.0, 165, 149, 1.0);
 
-        s.store_add_scaled_product(92, s.ad_value(92), 1.0, s.ad_value(165), s.ad_value(147), 1.0);
+        s.store_add_scaled_product_indices(92, 92, 1.0, 165, 147, 1.0);
 
         s.store_scaled_mul(87, 162, 87, 1.0);
 
@@ -1568,9 +1568,9 @@ impl Instance {
 
         s.store_scale(126, 104, p.p47);
 
-        s.store_add_scaled_product(127, s.ad_value(82), p.p81, s.ad_value(25), s.ad_value(117), 1.0);
+        s.store_add_scaled_product_indices(127, 82, p.p81, 25, 117, 1.0);
 
-        s.store_add_scaled_product(128, s.ad_value(147), p.p53, s.ad_value(26), s.ad_value(118), 1.0);
+        s.store_add_scaled_product_indices(128, 147, p.p53, 26, 118, 1.0);
 
         s.store_scale(129, 151, p.p35);
 
@@ -2091,7 +2091,7 @@ impl Instance {
 
         s.store_offset_ad(79, A::add_scaled_inputs(A::sqrt(A::offset(A::square(s.ad_value(78)), 1e-8)), 0.5, s.ad_value(78), 0.5), 0.0001);
 
-        s.store_add_scaled_products(80, s.ad_value(74), s.ad_value(45), 1.0, s.ad_value(75), s.ad_value(46), 1.0);
+        s.store_add_scaled_products_indices(80, 74, 45, 1.0, 75, 46, 1.0);
 
         s.b[252] = (p.p30 < 0.5);
         s.v[252] = if s.b[252] { 1.0 } else { 0.0 };
@@ -2615,9 +2615,9 @@ impl Instance {
 
         s.store_scale(126, 104, p.p47);
 
-        s.store_add_scaled_product(127, s.ad_value(82), p.p81, s.ad_value(25), s.ad_value(117), 1.0);
+        s.store_add_scaled_product_indices(127, 82, p.p81, 25, 117, 1.0);
 
-        s.store_add_scaled_product(128, s.ad_value(147), p.p53, s.ad_value(26), s.ad_value(118), 1.0);
+        s.store_add_scaled_product_indices(128, 147, p.p53, 26, 118, 1.0);
 
         s.store_scale(129, 151, p.p35);
 

@@ -78,7 +78,7 @@ impl Instance {
         if ((s.b[3332] && (!s.b[3333])) && s.b[3340]) {
             s.store_div_from_scalar(726, 1.0, 726);
             s.store_scaled_mul(780, 781, 726, 1e-25);
-            s.store_div_scaled_product(334, s.ad_value(725), s.ad_value(726), 1e-25, s.ad_value(770), 1.0);
+            s.store_div_scaled_product_indices(334, 725, 726, 1e-25, 770, 1.0);
             s.store_sub_from_scalar(613, 1e-25, 780);
         }
 
@@ -606,7 +606,7 @@ impl Instance {
         if ((s.b[3332] && (!s.b[3352])) && s.b[3377]) {
             s.store_div_from_scalar(726, 1.0, 726);
             s.store_scaled_mul(780, 781, 726, 1e-25);
-            s.store_div_scaled_product(334, s.ad_value(725), s.ad_value(726), 1e-25, s.ad_value(770), 1.0);
+            s.store_div_scaled_product_indices(334, 725, 726, 1e-25, 770, 1.0);
             s.store_sub_from_scalar(739, 1e-25, 780);
         }
 
@@ -713,7 +713,7 @@ impl Instance {
         if ((s.b[3332] && (!s.b[3352])) && s.b[3383]) {
             s.store_div_from_scalar(726, 1.0, 726);
             s.store_scaled_mul(780, 781, 726, 1000.0);
-            s.store_div_scaled_product(334, s.ad_value(725), s.ad_value(726), 1000.0, s.ad_value(770), 1.0);
+            s.store_div_scaled_product_indices(334, 725, 726, 1000.0, 770, 1.0);
             s.store_offset(4, 780, (1000000.0 - 1000.0));
         }
 

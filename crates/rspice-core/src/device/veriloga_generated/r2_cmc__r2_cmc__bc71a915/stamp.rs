@@ -388,7 +388,7 @@ impl Instance {
         s.v[80] = if s.b[80] { 1.0 } else { 0.0 };
 
         if s.b[80] {
-            s.store_div_scaled_product(26, s.ad_value(9), s.ad_value(21), (4.0 * 1.3806505e-23), s.ad_value(29), 1.0);
+            s.store_div_scaled_product_indices(26, 9, 21, (4.0 * 1.3806505e-23), 29, 1.0);
         }
 
         s.b[81] = (((p.p32 != 0.0) && (s.v[3] > 0.0)) && (s.v[4] > 0.0));

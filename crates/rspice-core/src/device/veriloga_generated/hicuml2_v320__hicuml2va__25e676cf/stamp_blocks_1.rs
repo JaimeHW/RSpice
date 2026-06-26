@@ -88,7 +88,7 @@ impl Instance {
             s.store_mul_sub_lhs(141, 137, 207, 5);
             s.store_sqrt_square_offset(142, 141, 1.921812);
             s.store_scaled_add(143, 141, 142, 0.5);
-            s.store_add_scaled_product(138, s.ad_value(137), 1.0, s.ad_value(4), s.ad_value(143), (-1.0));
+            s.store_add_scaled_product_indices(138, 137, 1.0, 4, 143, (-1.0));
             s.store_div(144, 143, 142);
             s.store_ln_ad(139, A::sub_from_scalar(1.0, A::div(s.ad_value(138), s.ad_value(39))));
             s.store_mul_ad_lhs(145, A::exp_scaled_input(s.ad_value(139), (-p.p54)), 144);
@@ -175,7 +175,7 @@ impl Instance {
             s.store_mul_sub_lhs(141, 137, 208, 5);
             s.store_sqrt_square_offset(142, 141, 1.921812);
             s.store_scaled_add(143, 141, 142, 0.5);
-            s.store_add_scaled_product(138, s.ad_value(137), 1.0, s.ad_value(4), s.ad_value(143), (-1.0));
+            s.store_add_scaled_product_indices(138, 137, 1.0, 4, 143, (-1.0));
             s.store_div(144, 143, 142);
             s.store_ln_ad(139, A::sub_from_scalar(1.0, A::div(s.ad_value(138), s.ad_value(47))));
             s.store_mul_ad_lhs(145, A::exp_scaled_input(s.ad_value(139), (-p.p59)), 144);
@@ -273,7 +273,7 @@ impl Instance {
             s.store_mul_sub_lhs(141, 137, 209, 5);
             s.store_sqrt_square_offset(142, 141, 1.921812);
             s.store_scaled_add(143, 141, 142, 0.5);
-            s.store_add_scaled_product(138, s.ad_value(137), 1.0, s.ad_value(4), s.ad_value(143), (-1.0));
+            s.store_add_scaled_product_indices(138, 137, 1.0, 4, 143, (-1.0));
             s.store_div(144, 143, 142);
             s.store_ln_ad(139, A::sub_from_scalar(1.0, A::div(s.ad_value(138), s.ad_value(50))));
             s.store_mul_ad_lhs(145, A::exp_scaled_input(s.ad_value(139), (-p.p64)), 144);

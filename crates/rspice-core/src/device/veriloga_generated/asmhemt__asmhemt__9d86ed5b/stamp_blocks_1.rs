@@ -3823,7 +3823,7 @@ impl Instance {
 
         s.store_scaled_add(137, 90, 91, 0.5);
 
-        s.store_add_scaled_product(106, s.ad_value(136), 1.0, s.ad_value(36), s.ad_value(137), (-1.0));
+        s.store_add_scaled_product_indices(106, 136, 1.0, 36, 137, (-1.0));
 
         s.store_ln_ad(192, A::sub_from_scalar(1.0, A::scale(s.ad_value(106), 1.0 / (p.p224))));
 

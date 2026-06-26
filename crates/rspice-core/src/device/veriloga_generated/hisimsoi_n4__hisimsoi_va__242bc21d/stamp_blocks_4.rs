@@ -20,7 +20,7 @@ impl Instance {
         }
 
         if (s.b[1829] && (s.v[85] != 0.0)) {
-            s.store_add_scaled_product(584, s.ad_value(473), 1.0, s.ad_value(580), s.ad_value(438), 1.0);
+            s.store_add_scaled_product_indices(584, 473, 1.0, 580, 438, 1.0);
             s.store_add_ad_lhs(585, A::mul_sub_from_scalar_rhs(s.ad_value(580), 1.0, s.ad_value(438)), 473);
             s.store_add_scaled_inputs3(586, s.ad_value(580), -1.0, s.ad_value(581), (-1.0), s.ad_value(471), 1.0);
         }

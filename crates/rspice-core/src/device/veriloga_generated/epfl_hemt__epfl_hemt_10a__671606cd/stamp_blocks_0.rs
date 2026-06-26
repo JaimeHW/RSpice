@@ -103,7 +103,7 @@ impl Instance {
 
         s.copy_ad(26, 70);
 
-        s.store_add_scaled_inputs_product(14, s.ad_value(17), 1.0, s.ad_value(13), (-1.0), s.ad_value(26), s.ad_value(62), (-1.0));
+        s.store_add_scaled_inputs_product_indices(14, 17, 1.0, 13, (-1.0), 26, 62, (-1.0));
 
         s.store_scaled_sqrt_scaled_input(71, 64, (((2.0 * s.v[39]) * s.v[52]) * p.p11), 1.0 / (s.v[47]));
 
