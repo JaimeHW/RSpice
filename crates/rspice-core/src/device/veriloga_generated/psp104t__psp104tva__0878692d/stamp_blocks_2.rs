@@ -4423,7 +4423,7 @@ impl Instance {
 
         if s.b[2771] {
             s.store_ad_value(2753, A::div_scaled_product(s.ad_value(1916), A::add(s.ad_value(1866), s.ad_value(2749)), 1.0, s.ad_value(2749), 1.0));
-            s.store_ad_value(2754, A::div_scaled_product(A::div(s.ad_value(1808), s.ad_value(1916)), s.ad_value(1866), 1.0, A::add(s.ad_value(1866), s.ad_value(2749)), 1.0));
+            s.store_ad_value(2754, A::div_scaled_product_by_product(s.ad_value(1808), s.ad_value(1866), 1.0, s.ad_value(1916), A::add(s.ad_value(1866), s.ad_value(2749)), 1.0));
             s.store_ad_value(2755, A::div_scaled_product3(s.ad_value(1916), s.ad_value(1868), s.ad_value(1865), ((-0.5) * 0.16666666666666666), s.ad_value(2753), 1.0));
             s.store_square(2756, 2755);
             s.store_scalar(2757, 0.0);

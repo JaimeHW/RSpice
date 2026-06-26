@@ -1580,7 +1580,7 @@ impl Instance {
             s.store_scalar(1534, (((10000000000.0 * s.v[327]) * s.v[327]) * s.v[1482]));
             s.store_ad_value(1535, A::add_scaled_product(A::scale_offset(s.ad_value(1524), p.p220, p.p219), 1.0, s.ad_value(1524), s.ad_value(1524), p.p221));
             s.store_mul_ad(1536, A::add(s.ad_value(1524), s.ad_value(71)), A::add(s.ad_value(1524), s.ad_value(71)));
-            s.store_ad_value(1539, A::add_scaled_product(A::div_scaled_product3(A::div(s.ad_value(1533), s.ad_value(1534)), s.ad_value(1522), s.ad_value(1535), 1.0, s.ad_value(1536), 1.0), 1.0, A::div(s.ad_value(1528), s.ad_value(1529)), A::add_scaled_inputs3(s.ad_value(1530), 1.0, s.ad_value(1531), 1.0, s.ad_value(1532), 1.0), 1.0));
+            s.store_ad_value(1539, A::add_scaled_product(A::div_scaled_product3_by_product(s.ad_value(1533), s.ad_value(1522), s.ad_value(1535), 1.0, s.ad_value(1534), s.ad_value(1536), 1.0), 1.0, A::div(s.ad_value(1528), s.ad_value(1529)), A::add_scaled_inputs3(s.ad_value(1530), 1.0, s.ad_value(1531), 1.0, s.ad_value(1532), 1.0), 1.0));
             s.store_scale(1537, 70, (p.p219 * 1.3806503e-23));
             s.store_scaled_mul(1538, 71, 71, ((s.v[1482] * s.v[327]) * 10000000000.0));
             s.store_mul_ad_product_lhs(1540, A::div(s.ad_value(1537), s.ad_value(1538)), s.ad_value(1479), 1479);

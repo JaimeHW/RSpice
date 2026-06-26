@@ -4633,7 +4633,7 @@ impl Instance {
             s.store_scale(2530, 2529, 0.01);
             s.store_sqrt_ad(781, A::add_scaled_square_product(s.ad_value(335), 1.0, s.ad_value(2530), s.ad_value(2530), 4.0));
             s.store_scaled_add(336, 335, 781, 0.5);
-            s.store_ad_value(2527, A::div_scaled_product(A::div(s.ad_value(336), s.ad_value(2529)), s.ad_value(336), 1.0, s.ad_value(2529), 1.0));
+            s.store_ad_value(2527, A::div_scaled_product_by_product(s.ad_value(336), s.ad_value(336), 1.0, s.ad_value(2529), s.ad_value(2529), 1.0));
             s.store_ad_value(994, A::add_scaled_product(s.ad_value(993), 1.0, A::sub(s.ad_value(2519), s.ad_value(993)), s.ad_value(2527), 1.0));
             s.store_ad_value(333, A::mul_sub_from_scalar_rhs(A::exp(A::mul(s.ad_value(154), A::add_scaled_inputs3(s.ad_value(994), 1.0, s.ad_value(960), -1.0, s.ad_value(1431), 1.0))), 1.0, A::exp(A::mul_scaled_lhs(s.ad_value(154), -1.0, s.ad_value(790)))));
             s.store_scalar(2523, (((((2.0 * 1.6021918e-19) * s.v[489]) * 1.034943e-10)) as f64).sqrt());

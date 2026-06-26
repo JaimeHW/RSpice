@@ -3528,7 +3528,7 @@ impl Instance {
         }
 
         if (((!s.b[3220]) && s.b[82]) && (!s.b[3227])) {
-            s.store_ad_value(303, A::div_scaled_product(A::div(s.ad_value(248), s.ad_value(238)), s.ad_value(155), 1.0, s.ad_value(162), 1.0));
+            s.store_ad_value(303, A::div_scaled_product_by_product(s.ad_value(248), s.ad_value(155), 1.0, s.ad_value(238), s.ad_value(162), 1.0));
         }
 
         s.b[3228] = (!s.b[82]);
