@@ -293,7 +293,7 @@ impl Instance {
             s.store_ad_value(72, A::cosh(s.ad_value(22)));
             s.store_ln(73, 72);
             s.store_ad_value(77, A::add_scaled_inputs3(s.ad_value(40), 1.0, s.ad_value(5), p.p37, s.ad_value(74), 1.0));
-            s.store_ad_value(20, A::add_scaled_product(s.ad_value(79), p.p24, s.ad_value(31), A::add_scaled_product(s.ad_value(79), (2.0 * p.p37), A::add_scaled_inputs3(s.ad_value(22), 1.0, s.ad_value(73), 1.0, s.ad_value(77), -1.0), s.ad_value(68), 1.0 / (p.p30)), 1.0));
+            s.store_add_scaled_product(20, s.ad_value(79), p.p24, s.ad_value(31), A::add_scaled_product(s.ad_value(79), (2.0 * p.p37), A::add_scaled_inputs3(s.ad_value(22), 1.0, s.ad_value(73), 1.0, s.ad_value(77), -1.0), s.ad_value(68), 1.0 / (p.p30)), 1.0);
             s.store_cosh_ad(71, A::sub_scaled_inputs(s.ad_value(41), 1.0, s.ad_value(5), p.p37));
         }
 
@@ -308,7 +308,7 @@ impl Instance {
             s.store_ad_value(72, A::cosh(s.ad_value(25)));
             s.store_ln(75, 72);
             s.store_ad_value(78, A::add_scaled_inputs3(s.ad_value(41), 1.0, s.ad_value(5), (-p.p37), s.ad_value(76), 1.0));
-            s.store_ad_value(21, A::add_scaled_product(s.ad_value(80), p.p26, s.ad_value(32), A::add_scaled_product(s.ad_value(80), (2.0 * p.p37), A::add_scaled_inputs3(s.ad_value(25), 1.0, s.ad_value(75), 1.0, s.ad_value(78), -1.0), s.ad_value(69), 1.0 / (p.p36)), 1.0));
+            s.store_add_scaled_product(21, s.ad_value(80), p.p26, s.ad_value(32), A::add_scaled_product(s.ad_value(80), (2.0 * p.p37), A::add_scaled_inputs3(s.ad_value(25), 1.0, s.ad_value(75), 1.0, s.ad_value(78), -1.0), s.ad_value(69), 1.0 / (p.p36)), 1.0);
             s.store_scalar(18, A::ddx_projection(&s.ad_value(20), Some(8), None));
             s.store_scalar(19, A::ddx_projection(&s.ad_value(21), Some(7), None));
         }
@@ -364,7 +364,7 @@ impl Instance {
         s.v[116] = if s.b[116] { 1.0 } else { 0.0 };
 
         if (((s.b[108] && (!s.b[107])) && (p.p0 != 0.0)) && s.b[116]) {
-            s.store_ad_value(114, A::div_scaled_product(A::square(s.ad_value(31)), s.ad_value(11), ((4.0 * 1.3806503e-23) * p.p71), s.ad_value(115), 1.0));
+            s.store_div_scaled_product(114, A::square(s.ad_value(31)), s.ad_value(11), ((4.0 * 1.3806503e-23) * p.p71), s.ad_value(115), 1.0);
         }
 
         if (((s.b[108] && (!s.b[107])) && (p.p0 != 0.0)) && (!s.b[116])) {
