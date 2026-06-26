@@ -2130,6 +2130,63 @@ fn rust_backend_fuses_expression_scaled_multiply_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_offset_multiply_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_offset_multiply_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression offset multiply");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn mul_offset_lhs(left: Self, offset: f64, right: Self) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn mul_offset_rhs(left: Self, right: Self, offset: f64) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn mul_offset_lhs_scaled_output(left: Self, offset: f64, right: Self, scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn mul_offset_rhs_scaled_output(left: Self, right: Self, offset: f64, scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::mul_offset_lhs("), "{stamp}");
+    assert!(stamp.contains("A::mul_offset_rhs("), "{stamp}");
+    assert!(
+        stamp.contains("A::mul_offset_lhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::mul_offset_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::mul(A::offset("), "{stamp}");
+    assert!(
+        !stamp.contains("A::mul_scaled_output(A::offset("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_sub_from_scalar_multiply_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_sub_from_scalar_multiply_source())
@@ -10077,6 +10134,31 @@ module compact_expression_scaled_multiply(p, n);
           + (exp(q) * (gain * a))
           + ((sqrt(a + q) * ln(q + offset)) * gain)
           + (((sqrt(a + q) * ln(q + offset)) * gain) * offset);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_offset_multiply_source() -> &'static str {
+    r#"
+module compact_expression_offset_multiply(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt((a + offset) * q)
+          + exp(q * (r + offset))
+          + pow(((a + offset) * q) * gain, 2.0)
+          + pow((q * (r + offset)) * gain, 2.0);
         I(p, n) <+ b;
     end
 endmodule

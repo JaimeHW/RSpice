@@ -1,4 +1,7 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeSet, HashMap, HashSet},
+};
 
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, EquationId, ExprId, HirAnalogOperator, HirExprKind,
@@ -6132,6 +6135,54 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn mul_offset_lhs(left: Self, offset: f64, right: Self) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value + offset;",
+        "        let right_value = right.value;",
+        "        value.value = left_value * right_value;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * right_value + left_value * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * right_value + left_value * right.branch_derivatives[index]; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_offset_rhs(left: Self, right: Self, offset: f64) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value;",
+        "        let right_value = right.value + offset;",
+        "        value.value = left_value * right_value;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * right_value + left_value * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * right_value + left_value * right.branch_derivatives[index]; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_offset_lhs_scaled_output(left: Self, offset: f64, right: Self, scale: f64) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value + offset;",
+        "        let right_value = right.value;",
+        "        let scaled_left_value = left_value * scale;",
+        "        let scaled_right_value = right_value * scale;",
+        "        value.value = scaled_left_value * right_value;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * scaled_right_value + scaled_left_value * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * scaled_right_value + scaled_left_value * right.branch_derivatives[index]; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn mul_offset_rhs_scaled_output(left: Self, right: Self, offset: f64, scale: f64) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value;",
+        "        let right_value = right.value + offset;",
+        "        let scaled_left_value = left_value * scale;",
+        "        let scaled_right_value = right_value * scale;",
+        "        value.value = left_value * scaled_right_value;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * scaled_right_value + scaled_left_value * right.node_derivatives[index]; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * scaled_right_value + scaled_left_value * right.branch_derivatives[index]; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn mul_sub_from_scalar_lhs(scalar: f64, value: Self, right: Self) -> Self {",
         "        let mut result = value;",
         "        let left_value = scalar - result.value;",
@@ -9765,6 +9816,42 @@ fn compact_offset_mixed_multiply_store_helper_call(
     target_index: usize,
     value: &str,
 ) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_lhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        let right = compact_scratch_ad_value_index(args[2])?;
+        if let Some(left) = compact_scratch_ad_value_index(args[0]) {
+            return Some(format!(
+                "scratch.store_mul_offset_lhs({target_index}, {left}, {}, {right});",
+                args[1]
+            ));
+        }
+        let left = compact_scratch_or_non_atomic_ad_arg(args[0])?;
+        return Some(format!(
+            "scratch.store_mul_offset_ad_lhs({target_index}, {left}, {}, {right});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_rhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0])?;
+        if let Some(right) = compact_scratch_ad_value_index(args[1]) {
+            return Some(format!(
+                "scratch.store_mul_offset_rhs({target_index}, {left}, {right}, {});",
+                args[2]
+            ));
+        }
+        let right = compact_scratch_or_non_atomic_ad_arg(args[1])?;
+        return Some(format!(
+            "scratch.store_mul_offset_ad_rhs({target_index}, {left}, {right}, {});",
+            args[2]
+        ));
+    }
+
     let args = compact_ad_call_args(value, "mul")?;
     if args.len() != 2 {
         return None;
@@ -12285,8 +12372,8 @@ fn compact_scaled_ad_expression(value: &str) -> Option<(&str, String)> {
 }
 
 struct CompactProduct2<'a> {
-    left: &'a str,
-    right: &'a str,
+    left: Cow<'a, str>,
+    right: Cow<'a, str>,
     scale: String,
 }
 
@@ -12303,9 +12390,53 @@ fn compact_product2_ad_expression(value: &str) -> Option<CompactProduct2<'_>> {
             return None;
         }
         return Some(CompactProduct2 {
-            left: args[0],
-            right: args[1],
+            left: args[0].into(),
+            right: args[1].into(),
             scale: "1.0".to_string(),
+        });
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_lhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        return Some(CompactProduct2 {
+            left: format!("AdValue::offset({}, {})", args[0], args[1]).into(),
+            right: args[2].into(),
+            scale: "1.0".to_string(),
+        });
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_rhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        return Some(CompactProduct2 {
+            left: args[0].into(),
+            right: format!("AdValue::offset({}, {})", args[1], args[2]).into(),
+            scale: "1.0".to_string(),
+        });
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_lhs_scaled_output") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(CompactProduct2 {
+            left: format!("AdValue::offset({}, {})", args[0], args[1]).into(),
+            right: args[2].into(),
+            scale: args[3].to_string(),
+        });
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_rhs_scaled_output") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(CompactProduct2 {
+            left: args[0].into(),
+            right: format!("AdValue::offset({}, {})", args[1], args[2]).into(),
+            scale: args[3].to_string(),
         });
     }
 
@@ -12314,8 +12445,8 @@ fn compact_product2_ad_expression(value: &str) -> Option<CompactProduct2<'_>> {
             return None;
         }
         return Some(CompactProduct2 {
-            left: args[0],
-            right: args[1],
+            left: args[0].into(),
+            right: args[1].into(),
             scale: args[2].to_string(),
         });
     }
@@ -12325,8 +12456,8 @@ fn compact_product2_ad_expression(value: &str) -> Option<CompactProduct2<'_>> {
             return None;
         }
         return Some(CompactProduct2 {
-            left: args[0],
-            right: args[2],
+            left: args[0].into(),
+            right: args[2].into(),
             scale: args[1].to_string(),
         });
     }
@@ -12336,8 +12467,8 @@ fn compact_product2_ad_expression(value: &str) -> Option<CompactProduct2<'_>> {
         return None;
     }
     Some(CompactProduct2 {
-        left: args[0],
-        right: args[1],
+        left: args[0].into(),
+        right: args[1].into(),
         scale: args[2].to_string(),
     })
 }
@@ -12390,8 +12521,8 @@ fn compact_div_product2_ad_expression(value: &str) -> Option<CompactProduct2<'_>
 
     let square = compact_square_ad_expression(value)?;
     Some(CompactProduct2 {
-        left: square,
-        right: square,
+        left: square.into(),
+        right: square.into(),
         scale: "1.0".to_string(),
     })
 }
@@ -12700,8 +12831,8 @@ fn compact_multiply_product3_ad_expressions(
             output_scale,
         );
         return Some(compact_mul3_ad_expression(
-            product.left,
-            product.right,
+            product.left.as_ref(),
+            product.right.as_ref(),
             right,
             &scale,
         ));
@@ -12715,8 +12846,8 @@ fn compact_multiply_product3_ad_expressions(
     );
     Some(compact_mul3_ad_expression(
         left,
-        product.left,
-        product.right,
+        product.left.as_ref(),
+        product.right.as_ref(),
         &scale,
     ))
 }
@@ -12751,6 +12882,11 @@ fn compact_multiply_scaled_ad_expressions(left: &str, right: &str) -> Option<Str
     {
         return Some(fused);
     }
+    if let Some(fused) =
+        compact_multiply_offset_ad_expression(left_value, right_value, &output_scale)
+    {
+        return Some(fused);
+    }
 
     match (left_scaled, right_scaled) {
         (Some((left, left_scale)), Some((right, right_scale))) => Some(format!(
@@ -12765,6 +12901,48 @@ fn compact_multiply_scaled_ad_expressions(left: &str, right: &str) -> Option<Str
         }
         (None, None) => None,
     }
+}
+
+fn compact_multiply_offset_ad_expression(
+    left: &str,
+    right: &str,
+    output_scale: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(left, "offset") {
+        if args.len() != 2 {
+            return None;
+        }
+        return if compact_scalar_same(output_scale, "1.0") {
+            Some(format!(
+                "AdValue::mul_offset_lhs({}, {}, {right})",
+                args[0], args[1]
+            ))
+        } else {
+            Some(format!(
+                "AdValue::mul_offset_lhs_scaled_output({}, {}, {right}, {output_scale})",
+                args[0], args[1]
+            ))
+        };
+    }
+
+    if let Some(args) = compact_ad_call_args(right, "offset") {
+        if args.len() != 2 {
+            return None;
+        }
+        return if compact_scalar_same(output_scale, "1.0") {
+            Some(format!(
+                "AdValue::mul_offset_rhs({left}, {}, {})",
+                args[0], args[1]
+            ))
+        } else {
+            Some(format!(
+                "AdValue::mul_offset_rhs_scaled_output({left}, {}, {}, {output_scale})",
+                args[0], args[1]
+            ))
+        };
+    }
+
+    None
 }
 
 fn compact_multiply_sub_from_scalar_ad_expression(
@@ -13041,7 +13219,7 @@ fn compact_add_scaled_product_ad_expression(
         }
     }
 
-    if let Some(args) = compact_ad_call_args(product.left, "sub_from_scalar") {
+    if let Some(args) = compact_ad_call_args(product.left.as_ref(), "sub_from_scalar") {
         if args.len() == 2 {
             return format!(
                 "AdValue::add_scaled_sub_product_lhs({value}, {value_scale}, {}, {}, {}, {})",
@@ -13050,7 +13228,7 @@ fn compact_add_scaled_product_ad_expression(
         }
     }
 
-    if let Some(args) = compact_ad_call_args(product.right, "sub_from_scalar") {
+    if let Some(args) = compact_ad_call_args(product.right.as_ref(), "sub_from_scalar") {
         if args.len() == 2 {
             return format!(
                 "AdValue::add_scaled_sub_product_rhs({value}, {value_scale}, {}, {}, {}, {})",
@@ -13361,11 +13539,14 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         if args.len() != 3 {
             return None;
         }
+        let output_scale = compact_scalar_mul(args[2], scale);
+        if let Some(fused) = compact_multiply_offset_ad_expression(args[0], args[1], &output_scale)
+        {
+            return Some(fused);
+        }
         return Some(format!(
             "AdValue::mul_scaled_output({}, {}, {})",
-            args[0],
-            args[1],
-            compact_scalar_mul(args[2], scale)
+            args[0], args[1], output_scale
         ));
     }
 
@@ -13373,11 +13554,14 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         if args.len() != 3 {
             return None;
         }
+        let output_scale = compact_scalar_mul(args[1], scale);
+        if let Some(fused) = compact_multiply_offset_ad_expression(args[0], args[2], &output_scale)
+        {
+            return Some(fused);
+        }
         return Some(format!(
             "AdValue::mul_scaled_output({}, {}, {})",
-            args[0],
-            args[2],
-            compact_scalar_mul(args[1], scale)
+            args[0], args[2], output_scale
         ));
     }
 
@@ -13385,11 +13569,60 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         if args.len() != 3 {
             return None;
         }
+        let output_scale = compact_scalar_mul(args[2], scale);
+        if let Some(fused) = compact_multiply_offset_ad_expression(args[0], args[1], &output_scale)
+        {
+            return Some(fused);
+        }
         return Some(format!(
             "AdValue::mul_scaled_output({}, {}, {})",
+            args[0], args[1], output_scale
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_lhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_offset_lhs_scaled_output({}, {}, {}, {scale})",
+            args[0], args[1], args[2]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_rhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_offset_rhs_scaled_output({}, {}, {}, {scale})",
+            args[0], args[1], args[2]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_lhs_scaled_output") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_offset_lhs_scaled_output({}, {}, {}, {})",
             args[0],
             args[1],
-            compact_scalar_mul(args[2], scale)
+            args[2],
+            compact_scalar_mul(args[3], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_offset_rhs_scaled_output") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::mul_offset_rhs_scaled_output({}, {}, {}, {})",
+            args[0],
+            args[1],
+            args[2],
+            compact_scalar_mul(args[3], scale)
         ));
     }
 
@@ -14570,6 +14803,9 @@ impl CompactAdEmitter<'_> {
                             &right,
                             &combined_scale,
                         )
+                    })
+                    .or_else(|| {
+                        compact_multiply_offset_ad_expression(&left, &right, &combined_scale)
                     })
                     .unwrap_or_else(|| {
                         format!("AdValue::mul_scaled_output({left}, {right}, {combined_scale})")
