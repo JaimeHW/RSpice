@@ -3210,6 +3210,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_lhs(&mut self, index: usize, value_source: usize, source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[value_source]);
+        self.store_mul_unary_lhs(index, value_source, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_rhs(&mut self, index: usize, source: usize, value_source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[value_source]);
+        self.store_mul_unary_rhs(index, source, value_source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_ad_lhs(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, source: usize) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_mul_unary_ad_lhs(index, value, source, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_ad_rhs(&mut self, index: usize, source: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_mul_unary_ad_rhs(index, source, value, output, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_sqrt_lhs(&mut self, index: usize, value_source: usize, source: usize) {
         let unary_value = self.v[value_source].sqrt();
         self.store_mul_unary_lhs(index, value_source, source, unary_value, 1.0 / (2.0 * unary_value));
@@ -12593,6 +12617,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_mul_ln_ad_rhs(&mut self, index: usize, source: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let raw = value.value;
         self.store_mul_unary_ad_rhs(index, source, value, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_lhs(&mut self, index: usize, value_source: usize, source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[value_source]);
+        self.store_mul_unary_lhs(index, value_source, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_rhs(&mut self, index: usize, source: usize, value_source: usize) {
+        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[value_source]);
+        self.store_mul_unary_rhs(index, source, value_source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_ad_lhs(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, source: usize) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_mul_unary_ad_lhs(index, value, source, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_ln_one_plus_exp_ad_rhs(&mut self, index: usize, source: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_mul_unary_ad_rhs(index, source, value, output, derivative_scale);
     }
 
     #[inline]
