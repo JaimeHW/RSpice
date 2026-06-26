@@ -2109,7 +2109,7 @@ impl Instance {
             s.v[2435] = if s.b[2435] { 1.0 } else { 0.0 };
             if (((!s.b[1443]) && s.b[2430]) && s.b[2435]) {
                 s.store_ad_value(225, A::mul3(A::square(s.ad_value(116)), s.ad_value(116), A::offset(A::mul(s.ad_value(116), A::scale_offset(s.ad_value(116), 0.006115288895133179, (-0.07053654284009761))), 0.29693154855771)));
-                s.store_ad_value(226, A::mul_offset_rhs(A::square(s.ad_value(116)), A::mul(s.ad_value(116), A::scale_offset(s.ad_value(116), (5.0 * 0.006115288895133179), (4.0 * (-0.07053654284009761)))), (3.0 * 0.29693154855771)));
+                s.store_mul_offset_rhs_ad(226, A::square(s.ad_value(116)), A::mul(s.ad_value(116), A::scale_offset(s.ad_value(116), (5.0 * 0.006115288895133179), (4.0 * (-0.07053654284009761)))), (3.0 * 0.29693154855771));
                 s.store_mul3_lhs(214, 222, 225, 225);
                 s.store_mul_ad_lhs(215, A::mul3_scaled_output(s.ad_value(222), s.ad_value(154), s.ad_value(225), 2.0), 226);
                 s.store_mul_offset_ad_rhs(223, 116, A::mul_offset_rhs(s.ad_value(116), A::mul_offset_rhs(s.ad_value(116), A::mul(s.ad_value(116), A::scale_offset(s.ad_value(116), 6.36964918866352e-5, (-0.00163730162779191))), 0.0178800506338833), (-0.117851130197758)), 0.707106781186548);
@@ -2402,7 +2402,7 @@ impl Instance {
             s.v[2453] = if s.b[2453] { 1.0 } else { 0.0 };
             if (((!s.b[1443]) && s.b[2430]) && s.b[2453]) {
                 s.store_ad_value(225, A::mul3(A::square(s.ad_value(116)), s.ad_value(116), A::offset(A::mul(s.ad_value(116), A::scale_offset(s.ad_value(116), 0.006115288895133179, (-0.07053654284009761))), 0.29693154855771)));
-                s.store_ad_value(226, A::mul_offset_rhs(A::square(s.ad_value(116)), A::mul(s.ad_value(116), A::scale_offset(s.ad_value(116), (5.0 * 0.006115288895133179), (4.0 * (-0.07053654284009761)))), (3.0 * 0.29693154855771)));
+                s.store_mul_offset_rhs_ad(226, A::square(s.ad_value(116)), A::mul(s.ad_value(116), A::scale_offset(s.ad_value(116), (5.0 * 0.006115288895133179), (4.0 * (-0.07053654284009761)))), (3.0 * 0.29693154855771));
                 s.store_mul(222, 210, 230);
                 s.store_mul3_lhs(218, 222, 225, 225);
                 s.store_mul_ad_lhs(219, A::mul3_scaled_output(s.ad_value(222), s.ad_value(154), s.ad_value(225), 2.0), 226);

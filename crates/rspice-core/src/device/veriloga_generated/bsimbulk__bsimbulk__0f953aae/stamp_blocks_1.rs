@@ -933,7 +933,7 @@ impl Instance {
             s.store_scaled_limited_exp_ad(707, A::mul_scaled_lhs(s.ad_value(13), -1.0, s.ad_value(14)), p.p948);
             s.store_scaled_mul(708, 14, 13, p.p949);
             s.store_scale_ad(709, A::tanh(A::limited_exp(A::mul_scaled_lhs(s.ad_value(187), p.p952, A::add_scaled_inputs3(A::voltage(ctx, nodes, Some(9), Some(11)), 1.0, s.ad_value(857), (-1.0), A::voltage(ctx, nodes, Some(7), Some(11)), -1.0)))), p.p951);
-            s.store_ad_value(706, A::mul_offset_rhs(A::mul3(A::mul3_scaled_output(s.ad_value(57), s.ad_value(707), A::limited_exp(s.ad_value(15)), (p.p2 * s.v[29])), A::limited_exp_scaled_input(s.ad_value(708), (-s.v[30])), A::limited_exp(A::div(s.ad_value(709), s.ad_value(108)))), A::limited_exp(A::div_scaled_inputs(s.ad_value(76), p.p950, s.ad_value(108), 1.0)), (-1.0)));
+            s.store_mul_offset_rhs_ad(706, A::mul3(A::mul3_scaled_output(s.ad_value(57), s.ad_value(707), A::limited_exp(s.ad_value(15)), (p.p2 * s.v[29])), A::limited_exp_scaled_input(s.ad_value(708), (-s.v[30])), A::limited_exp(A::div(s.ad_value(709), s.ad_value(108)))), A::limited_exp(A::div_scaled_inputs(s.ad_value(76), p.p950, s.ad_value(108), 1.0)), (-1.0));
         }
 
         s.store_scale(377, 108, (4.0 * 1.60219e-19));
@@ -1945,7 +1945,7 @@ impl Instance {
             s.store_mul(73, 70, 107);
             s.store_mul(58, 482, 107);
             s.store_mul_neg_ad_lhs(677, A::add_scaled_product(s.ad_value(673), 1.0, s.ad_value(617), s.ad_value(61), 1.0), 76);
-            s.store_ad_value(124, A::mul_offset_rhs(A::add_scaled_inputs_product(s.ad_value(618), 1.0, s.ad_value(619), 1.0 / (s.v[30]), s.ad_value(620), s.ad_value(61), 1.0), A::pow(s.ad_value(395), s.ad_value(621)), (-1.0)));
+            s.store_mul_offset_rhs_ad(124, A::add_scaled_inputs_product(s.ad_value(618), 1.0, s.ad_value(619), 1.0 / (s.v[30]), s.ad_value(620), s.ad_value(61), 1.0), A::pow(s.ad_value(395), s.ad_value(621)), (-1.0));
             s.store_mul_ad_rhs(679, 129, A::scale_offset(s.ad_value(61), p.p1016, 1.0));
         }
 

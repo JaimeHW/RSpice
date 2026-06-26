@@ -9511,7 +9511,7 @@ impl Instance {
 
         s.v[99] = (2.0 - p.p17);
 
-        s.store_ad_value(101, A::mul_offset_rhs(A::add_scaled_inputs(s.ad_value(87), 2.0, A::ln(s.ad_value(87)), 1.0), A::mul(s.ad_value(92), s.ad_value(97)), 1.0));
+        s.store_mul_offset_rhs_ad(101, A::add_scaled_inputs(s.ad_value(87), 2.0, A::ln(s.ad_value(87)), 1.0), A::mul(s.ad_value(92), s.ad_value(97)), 1.0);
 
         s.store_offset_scaled_mul(102, 92, 97, s.v[99], s.v[91]);
 

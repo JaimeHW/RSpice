@@ -72,7 +72,7 @@ impl Instance {
 
         if (((s.b[1155] && s.b[1172]) && (!s.b[1428])) && (!s.b[1429])) {
             s.store_scale(1198, 1191, s.v[426]);
-            s.store_ad_value(1199, A::mul_offset_lhs_scaled_output(s.ad_value(1185), (-1.0), s.ad_value(1198), s.v[387]));
+            s.store_mul_offset_lhs_scaled_output(1199, 1185, (-1.0), 1198, s.v[387]);
             s.store_scaled_mul(1193, 1199, 1197, p.p859);
         }
 
@@ -357,7 +357,7 @@ impl Instance {
 
         if (((s.b[1155] && s.b[1172]) && (!s.b[1450])) && (!s.b[1451])) {
             s.store_scale(1198, 1191, s.v[424]);
-            s.store_ad_value(1199, A::mul_offset_lhs_scaled_output(s.ad_value(1185), (-1.0), s.ad_value(1198), s.v[385]));
+            s.store_mul_offset_lhs_scaled_output(1199, 1185, (-1.0), 1198, s.v[385]);
             s.store_scaled_mul(1193, 1199, 1197, p.p857);
         }
 
@@ -585,7 +585,7 @@ impl Instance {
 
         if (((s.b[1155] && s.b[1172]) && (!s.b[1467])) && (!s.b[1468])) {
             s.store_scale(1198, 1191, s.v[425]);
-            s.store_ad_value(1199, A::mul_offset_lhs_scaled_output(s.ad_value(1185), (-1.0), s.ad_value(1198), s.v[386]));
+            s.store_mul_offset_lhs_scaled_output(1199, 1185, (-1.0), 1198, s.v[386]);
             s.store_scaled_mul(1193, 1199, 1197, p.p858);
         }
 
@@ -807,7 +807,7 @@ impl Instance {
 
         if (((s.b[1155] && s.b[1172]) && (!s.b[1484])) && (!s.b[1485])) {
             s.store_scale(1198, 1191, s.v[426]);
-            s.store_ad_value(1199, A::mul_offset_lhs_scaled_output(s.ad_value(1185), (-1.0), s.ad_value(1198), s.v[387]));
+            s.store_mul_offset_lhs_scaled_output(1199, 1185, (-1.0), 1198, s.v[387]);
             s.store_scaled_mul(1193, 1199, 1197, p.p859);
         }
 
@@ -6292,7 +6292,7 @@ impl Instance {
         }
 
         if s.b[2215] {
-            s.store_ad_value(1941, A::mul_offset_rhs_scaled_output(s.ad_value(1858), A::sqrt(A::scale_offset(s.ad_value(1940), 2.0, 1.0)), 1.0, 0.5));
+            s.store_mul_offset_rhs_scaled_ad_rhs(1941, 1858, A::sqrt(A::scale_offset(s.ad_value(1940), 2.0, 1.0)), 1.0, 0.5);
             s.store_div_from_scalar(1860, 1.0, 1941);
             s.store_mul(1929, 1858, 1860);
             s.store_mul_offset_ad_rhs(1942, 1848, A::mul3_scaled_output(s.ad_value(1940), s.ad_value(1929), s.ad_value(1929), 0.5), 1.0);

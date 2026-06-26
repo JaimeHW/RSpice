@@ -4985,7 +4985,7 @@ impl Instance {
 
         s.store_offset_ad(123, A::sub_scaled_inputs(s.ad_value(123), 0.5, A::sqrt(A::offset(A::mul(s.ad_value(123), s.ad_value(123)), ((0.25 * 0.005) * 0.005))), 0.5), (0.25 * 0.005));
 
-        s.store_ad_value(124, A::mul_offset_rhs(A::add_scaled_product(A::offset(s.ad_value(454), (p.p869 / s.v[30])), 1.0, s.ad_value(455), s.ad_value(61), 1.0), A::powf(s.ad_value(395), p.p868), (-1.0)));
+        s.store_mul_offset_rhs_ad(124, A::add_scaled_product(A::offset(s.ad_value(454), (p.p869 / s.v[30])), 1.0, s.ad_value(455), s.ad_value(61), 1.0), A::powf(s.ad_value(395), p.p868), (-1.0));
 
         s.b[1356] = (s.v[116] > 0.0);
         s.v[1356] = if s.b[1356] { 1.0 } else { 0.0 };
