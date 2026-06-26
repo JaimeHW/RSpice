@@ -2117,7 +2117,7 @@ impl Instance {
         s.v[2921] = if s.b[2921] { 1.0 } else { 0.0 };
 
         if s.b[2921] {
-            s.store_ad_value(1995, A::div_scaled_product3(s.ad_value(307), s.ad_value(1888), s.ad_value(716), 1.0, A::mul(s.ad_value(1904), s.ad_value(1906)), 1.0));
+            s.store_ad_value(1995, A::div_scaled_product3_by_product(s.ad_value(307), s.ad_value(1888), s.ad_value(716), 1.0, s.ad_value(1904), s.ad_value(1906), 1.0));
             s.store_mul_ad_product_lhs(2018, A::square(s.ad_value(1907)), s.ad_value(1888), 1888);
         }
 

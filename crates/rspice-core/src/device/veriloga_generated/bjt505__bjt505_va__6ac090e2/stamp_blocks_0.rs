@@ -1207,7 +1207,7 @@ impl Instance {
         if s.b[547] {
             s.store_mul(275, 246, 65);
             s.store_scaled_mul_ad(60, A::powf(A::sqrt(A::offset(A::square(s.ad_value(275)), 1e-30)), ((-2.0) - p.p67)), A::sub_scaled_inputs(A::sub_from_scalar((1.0 - (p.p67 * p.p67)), A::scale(s.ad_value(275), (3.0 * (p.p67 - 1.0)))), p.p67, A::mul3_scaled_output(s.ad_value(275), s.ad_value(275), A::offset(s.ad_value(275), (p.p67 - 1.0)), 6.0), 1.0), 0.16666666666666666);
-            s.store_ad_value(275, A::div_scaled_product(s.ad_value(246), s.ad_value(61), s.v[62], A::mul(s.ad_value(70), s.ad_value(60)), 1.0));
+            s.store_ad_value(275, A::div_scaled_product_by_product(s.ad_value(246), s.ad_value(61), s.v[62], s.ad_value(70), s.ad_value(60), 1.0));
         }
 
         s.b[549] = (s.v[275] < (-0.001));
@@ -1271,7 +1271,7 @@ impl Instance {
         }
 
         if s.b[551] {
-            s.store_ad_value(277, A::div_scaled_product(s.ad_value(244), s.ad_value(83), s.v[79], A::mul(s.ad_value(85), s.ad_value(80)), 1.0));
+            s.store_ad_value(277, A::div_scaled_product_by_product(s.ad_value(244), s.ad_value(83), s.v[79], s.ad_value(85), s.ad_value(80), 1.0));
         }
 
         s.b[553] = (s.v[277] < (-0.001));
@@ -3034,7 +3034,7 @@ impl Instance {
         if s.b[547] {
             s.store_mul(275, 246, 65);
             s.store_scaled_mul_ad(60, A::powf(A::sqrt(A::offset(A::square(s.ad_value(275)), 1e-30)), ((-2.0) - p.p67)), A::sub_scaled_inputs(A::sub_from_scalar((1.0 - (p.p67 * p.p67)), A::scale(s.ad_value(275), (3.0 * (p.p67 - 1.0)))), p.p67, A::mul3_scaled_output(s.ad_value(275), s.ad_value(275), A::offset(s.ad_value(275), (p.p67 - 1.0)), 6.0), 1.0), 0.16666666666666666);
-            s.store_ad_value(275, A::div_scaled_product(s.ad_value(246), s.ad_value(61), s.v[62], A::mul(s.ad_value(70), s.ad_value(60)), 1.0));
+            s.store_ad_value(275, A::div_scaled_product_by_product(s.ad_value(246), s.ad_value(61), s.v[62], s.ad_value(70), s.ad_value(60), 1.0));
         }
 
         s.b[549] = (s.v[275] < (-0.001));
@@ -3071,7 +3071,7 @@ impl Instance {
         }
 
         if s.b[551] {
-            s.store_ad_value(277, A::div_scaled_product(s.ad_value(244), s.ad_value(83), s.v[79], A::mul(s.ad_value(85), s.ad_value(80)), 1.0));
+            s.store_ad_value(277, A::div_scaled_product_by_product(s.ad_value(244), s.ad_value(83), s.v[79], s.ad_value(85), s.ad_value(80), 1.0));
         }
 
         s.b[553] = (s.v[277] < (-0.001));

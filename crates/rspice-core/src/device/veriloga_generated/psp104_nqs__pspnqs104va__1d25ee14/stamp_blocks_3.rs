@@ -3831,7 +3831,7 @@ impl Instance {
         s.v[3274] = if s.b[3274] { 1.0 } else { 0.0 };
 
         if ((s.b[3268] && s.b[3273]) && s.b[3274]) {
-            s.store_add_ad_rhs(859, 859, A::div_scaled_product(s.ad_value(3252), A::scale_offset(s.ad_value(3242), 12.0, 1.0), 1.0, A::mul_scaled_output(s.ad_value(3246), s.ad_value(3246), (12.0 * s.v[718])), 1.0));
+            s.store_add_ad_rhs(859, 859, A::div_scaled_product_by_product(s.ad_value(3252), A::scale_offset(s.ad_value(3242), 12.0, 1.0), 1.0, s.ad_value(3246), s.ad_value(3246), (12.0 * s.v[718])));
             s.store_sub_ad_rhs(3253, 3253, A::div_scaled_product3(s.ad_value(3252), s.ad_value(3241), A::offset(s.ad_value(3243), 1.0), 1.0, s.ad_value(3246), s.v[718]));
         }
 

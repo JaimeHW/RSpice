@@ -6752,6 +6752,25 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn div_scaled_product_by_product(product_left: Self, product_right: Self, product_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {
+        let mut value = product_left;
+        let product_left_value = value.value;
+        let product_right_value = product_right.value;
+        let denominator_left_value = denominator_left.value;
+        let denominator_right_value = denominator_right.value;
+        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        value.value = quotient;
+        for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_derivative_scale + (denominator_left.dn[index] * denominator_right_value + denominator_left_value * denominator_right.dn[index]) * denominator_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_derivative_scale + (denominator_left.db[index] * denominator_right_value + denominator_left_value * denominator_right.db[index]) * denominator_derivative_scale; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn div_scaled_product_offset_lhs(product_left: Self, product_left_offset: f64, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {
         let mut value = product_left;
         let product_left_value = value.value + product_left_offset;
@@ -6823,6 +6842,28 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         value.value = quotient;
         for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * middle_right_value + product_middle.dn[index] * left_right_value + product_right.dn[index] * left_middle_value) * product_derivative_scale + denominator.dn[index] * denominator_derivative_scale; }
         for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * middle_right_value + product_middle.db[index] * left_right_value + product_right.db[index] * left_middle_value) * product_derivative_scale + denominator.db[index] * denominator_derivative_scale; }
+        value
+    }
+
+    #[inline]
+    pub(crate) fn div_scaled_product3_by_product(product_left: Self, product_middle: Self, product_right: Self, product_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {
+        let mut value = product_left;
+        let product_left_value = value.value;
+        let product_middle_value = product_middle.value;
+        let product_right_value = product_right.value;
+        let denominator_left_value = denominator_left.value;
+        let denominator_right_value = denominator_right.value;
+        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);
+        let left_middle_value = product_left_value * product_middle_value;
+        let left_right_value = product_left_value * product_right_value;
+        let middle_right_value = product_middle_value * product_right_value;
+        let scaled_product_value = left_middle_value * product_right_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        value.value = quotient;
+        for index in 0..NODE_COUNT { value.dn[index] = (value.dn[index] * middle_right_value + product_middle.dn[index] * left_right_value + product_right.dn[index] * left_middle_value) * product_derivative_scale + (denominator_left.dn[index] * denominator_right_value + denominator_left_value * denominator_right.dn[index]) * denominator_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = (value.db[index] * middle_right_value + product_middle.db[index] * left_right_value + product_right.db[index] * left_middle_value) * product_derivative_scale + (denominator_left.db[index] * denominator_right_value + denominator_left_value * denominator_right.db[index]) * denominator_derivative_scale; }
         value
     }
 

@@ -4240,7 +4240,7 @@ impl Instance {
         s.v[2749] = if s.b[2749] { 1.0 } else { 0.0 };
 
         if ((s.b[2743] && s.b[2748]) && s.b[2749]) {
-            s.store_add_ad_rhs(853, 853, A::div_scaled_product(s.ad_value(2727), A::scale_offset(s.ad_value(2717), 12.0, 1.0), 1.0, A::mul_scaled_output(s.ad_value(2721), s.ad_value(2721), (12.0 * s.v[712])), 1.0));
+            s.store_add_ad_rhs(853, 853, A::div_scaled_product_by_product(s.ad_value(2727), A::scale_offset(s.ad_value(2717), 12.0, 1.0), 1.0, s.ad_value(2721), s.ad_value(2721), (12.0 * s.v[712])));
         }
 
     }
