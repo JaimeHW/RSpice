@@ -5324,6 +5324,28 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) {",
+        "        if raw > 0.0 {",
+        "            (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp()))",
+        "        } else {",
+        "            let exp = raw.exp();",
+        "            (exp.ln_1p(), exp / (1.0 + exp))",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln_one_plus_exp(&mut self, index: usize, source: usize) {",
+        "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[source]);",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_ln_one_plus_exp(&mut self, index: usize, source: usize, scale: f64) {",
+        "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[source]);",
+        "        self.store_unary_scaled(index, source, value * scale, derivative_scale * scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_scaled_sqrt(&mut self, index: usize, source: usize, scale: f64) {",
         "        let value = self.values[source].sqrt();",
         "        self.store_unary_scaled(index, source, value * scale, scale / (2.0 * value));",
@@ -5416,6 +5438,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, scale: f64) {",
+        "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[source] * scale);",
+        "        self.store_unary_scaled(index, source, value, derivative_scale * scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sin_scaled_input(&mut self, index: usize, source: usize, scale: f64) {",
         "        let raw = self.values[source] * scale;",
         "        self.store_unary_scaled(index, source, raw.sin(), raw.cos() * scale);",
@@ -5463,6 +5491,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_scaled_ln_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64) {",
         "        let raw = self.values[source] * input_scale;",
         "        self.store_unary_scaled(index, source, raw.ln() * output_scale, output_scale * input_scale / raw);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64) {",
+        "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[source] * input_scale);",
+        "        self.store_unary_scaled(index, source, value * output_scale, derivative_scale * input_scale * output_scale);",
         "    }",
         "",
         "    #[inline]",
@@ -5586,6 +5620,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_ln_neg_input(&mut self, index: usize, source: usize) {",
         "        let raw = -self.values[source];",
         "        self.store_unary_scaled(index, source, raw.ln(), -1.0 / raw);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln_one_plus_exp_neg_input(&mut self, index: usize, source: usize) {",
+        "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(-self.values[source]);",
+        "        self.store_unary_scaled(index, source, value, -derivative_scale);",
         "    }",
         "",
         "    #[inline]",
@@ -6022,6 +6062,10 @@ fn generate_ad_value_struct() -> String {
         "    fn limited_exp(arg: Self) -> Self { let raw = arg.value; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } }",
         "    #[inline]",
         "    fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }",
+        "    #[inline]",
+        "    fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) { if raw > 0.0 { (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp())) } else { let exp = raw.exp(); (exp.ln_1p(), exp / (1.0 + exp)) } }",
+        "    #[inline]",
+        "    fn ln_one_plus_exp(arg: Self) -> Self { let raw = arg.value; let (value, derivative_scale) = Self::ln_one_plus_exp_raw(raw); Self::unary_intrinsic(arg, value, derivative_scale) }",
         "    #[inline]",
         "    fn log10(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.log10(), 1.0 / (raw * std::f64::consts::LN_10)) }",
         "    #[inline]",
@@ -8835,6 +8879,7 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         ("limexp", "store_limexp"),
         ("limited_exp", "store_limited_exp"),
         ("ln", "store_ln"),
+        ("ln_one_plus_exp", "store_ln_one_plus_exp"),
         ("sin", "store_sin"),
         ("sinh", "store_sinh"),
         ("asinh", "store_asinh"),
@@ -10071,6 +10116,7 @@ fn compact_scaled_input_unary_store_helper_call(
         ("limexp", "store_limexp_scaled_input"),
         ("limited_exp", "store_limited_exp_scaled_input"),
         ("ln", "store_ln_scaled_input"),
+        ("ln_one_plus_exp", "store_ln_one_plus_exp_scaled_input"),
         ("sin", "store_sin_scaled_input"),
     ] {
         let Some(args) = compact_ad_call_args(value, name) else {
@@ -10132,6 +10178,7 @@ fn compact_negated_input_unary_store_helper_call(
         ("limexp", "store_limexp_neg_input"),
         ("limited_exp", "store_limited_exp_neg_input"),
         ("ln", "store_ln_neg_input"),
+        ("ln_one_plus_exp", "store_ln_one_plus_exp_neg_input"),
     ] {
         let Some(args) = compact_ad_call_args(value, name) else {
             continue;
@@ -10761,6 +10808,10 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
         ("limexp", "store_scaled_limexp_scaled_input"),
         ("limited_exp", "store_scaled_limited_exp_scaled_input"),
         ("ln", "store_scaled_ln_scaled_input"),
+        (
+            "ln_one_plus_exp",
+            "store_scaled_ln_one_plus_exp_scaled_input",
+        ),
         ("sin", "store_scaled_sin_scaled_input"),
     ] {
         if let Some(inner_args) = compact_ad_call_args(inner, name) {
@@ -10785,6 +10836,7 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
         ("exp", "store_scaled_exp"),
         ("sqrt", "store_scaled_sqrt"),
         ("ln", "store_scaled_ln"),
+        ("ln_one_plus_exp", "store_scaled_ln_one_plus_exp"),
         ("limexp", "store_scaled_limexp"),
         ("limited_exp", "store_scaled_limited_exp"),
         ("square", "store_scaled_square"),
@@ -11717,6 +11769,13 @@ impl CompactAdEmitter<'_> {
             .unwrap_or(false))
     }
 
+    fn is_numeric_one(&self, id: ExprId) -> Result<bool, RustBackendError> {
+        Ok(self
+            .numeric_literal(id)?
+            .map(|value| value == 1.0)
+            .unwrap_or(false))
+    }
+
     fn scalar_constant(&self, id: ExprId) -> Result<Option<String>, RustBackendError> {
         let kind = self.expression(id)?.kind.clone();
         match kind {
@@ -12379,6 +12438,14 @@ impl CompactAdEmitter<'_> {
 
     fn lower_intrinsic(&mut self, name: &str, args: &[ExprId]) -> Result<String, RustBackendError> {
         let normalized = name.to_ascii_lowercase();
+        if (normalized == "ln" || normalized == "log")
+            && let Some(operand) = self.softplus_operand(args)?
+        {
+            return Ok(format!(
+                "AdValue::ln_one_plus_exp({})",
+                self.lower(operand)?
+            ));
+        }
         if normalized == "pow" {
             let base = args
                 .first()
@@ -12462,6 +12529,38 @@ impl CompactAdEmitter<'_> {
             "hypot" => format!("AdValue::hypot({}, {})", lower_arg(0)?, lower_arg(1)?),
             "atan2" => format!("AdValue::atan2({}, {})", lower_arg(0)?, lower_arg(1)?),
             _ => return Err(self.unsupported(format!("intrinsic function '{name}'"))),
+        })
+    }
+
+    fn softplus_operand(&self, args: &[ExprId]) -> Result<Option<ExprId>, RustBackendError> {
+        let [arg] = args else {
+            return Ok(None);
+        };
+        let HirExprKind::Binary { op, left, right } = self.expression(*arg)?.kind.clone() else {
+            return Ok(None);
+        };
+        if op.as_str() != "Add" {
+            return Ok(None);
+        }
+        if self.is_numeric_one(left)? {
+            return self.exp_intrinsic_operand(right);
+        }
+        if self.is_numeric_one(right)? {
+            return self.exp_intrinsic_operand(left);
+        }
+        Ok(None)
+    }
+
+    fn exp_intrinsic_operand(&self, id: ExprId) -> Result<Option<ExprId>, RustBackendError> {
+        let HirExprKind::Call { name, args } = self.expression(id)?.kind.clone() else {
+            return Ok(None);
+        };
+        if !name.eq_ignore_ascii_case("exp") {
+            return Ok(None);
+        }
+        Ok(match args.as_slice() {
+            [operand] => Some(*operand),
+            _ => None,
         })
     }
 

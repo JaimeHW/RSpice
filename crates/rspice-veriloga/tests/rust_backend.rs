@@ -1722,6 +1722,76 @@ fn rust_backend_uses_compact_negated_input_unary_store_helpers() {
 }
 
 #[test]
+fn rust_backend_fuses_softplus_ad_operation_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_softplus_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact softplus operation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn ln_one_plus_exp(arg: Self) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_ln_one_plus_exp(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(
+        support
+            .contains("fn store_ln_one_plus_exp_neg_input(&mut self, index: usize, source: usize)"),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_ln_one_plus_exp(&mut self, index: usize, source: usize, scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn store_scaled_ln_one_plus_exp_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, output_scale: f64)"
+        ),
+        "{support}"
+    );
+
+    assert!(stamp.contains("s.store_ln_one_plus_exp("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_ln_one_plus_exp_neg_input("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_ln_one_plus_exp_scaled_input("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("s.store_scaled_ln_one_plus_exp("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_scaled_ln_one_plus_exp_scaled_input("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("A::ln_one_plus_exp("), "{stamp}");
+    assert!(!stamp.contains("A::ln(A::offset(A::exp("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_output_scaled_and_offset_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_output_scaled_and_offset_unary_store_source())
@@ -9129,6 +9199,33 @@ module compact_negated_input_unary_store(p, n);
         e = lexp(-a);
         f = ln(-a);
         I(p, n) <+ b + c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_softplus_store_source() -> &'static str {
+    r#"
+module compact_softplus_store(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    analog begin
+        a = V(p, n);
+        b = ln(1.0 + exp(a));
+        c = ln(1.0 + exp(-a));
+        d = ln(1.0 + exp(a * gain));
+        e = ln(1.0 + exp(a)) * gain;
+        f = ln(1.0 + exp(a + gain));
+        g = ln(1.0 + exp(a * gain)) * gain;
+        I(p, n) <+ b + c + d + e + (f * gain) + g;
     end
 endmodule
 "#
