@@ -1381,6 +1381,40 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_sub_from_scalar_scaled_input_ad_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sub_from_scalar_scaled_input"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(13, AdValue::sub_from_scalar(params.scalar, AdValue::scale(scratch.ad_value(2), params.scale)));
+    let assign20_ad_e30: AdValue = AdValue::sub_from_scalar(params.bias, AdValue::scale(scratch.ad_value(3), 0.5));
+    scratch.store_ad_value(14, assign20_ad_e30);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_sub_from_scalar_scaled_input(13, p.scalar, 2, p.scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_from_scalar_scaled_input(14, p.bias, 3, 0.5);"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_sub_from_scalar_ad("),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::scale(s.ad_value("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_scaled_add_sub_sqrt_square_offset_rhs_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -8034,6 +8068,11 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_sub_from_scalar_scaled_input(&mut self, index: usize, scalar: f64, source: usize, scale: f64) {",
+        "        self.store_unary_scaled(index, source, scalar - self.values[source] * scale, -scale);",
+        "    }",
+        "",
+        "    #[inline]",
     "    fn store_div_from_scalar(&mut self, index: usize, scalar: f64, source: usize) {",
     "        let reciprocal = 1.0 / self.values[source];",
     "        let quotient = scalar * reciprocal;",
@@ -13370,6 +13409,10 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_mixed_scratch_ad_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_sub_from_scalar_affine_input_store_helper_call(target_index, value)
+    {
+        return Some(line);
+    }
     if let Some(line) = compact_div_from_scalar_affine_input_store_helper_call(target_index, value)
     {
         return Some(line);
@@ -17250,6 +17293,32 @@ fn compact_div_from_scalar_affine_input_store_helper_call(
             "scratch.store_div_from_scalar_powf_ad({target_index}, {scalar}, {value}, {});",
             denominator_args[1]
         ));
+    }
+
+    None
+}
+
+fn compact_sub_from_scalar_affine_input_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "sub_from_scalar")?;
+    if args.len() != 2 {
+        return None;
+    }
+    let scalar = args[0];
+    let value = args[1];
+
+    if let Some(scale_args) = compact_ad_call_args(value, "scale") {
+        if scale_args.len() != 2 {
+            return None;
+        }
+        if let Some(source) = compact_scratch_ad_value_index(scale_args[0]) {
+            return Some(format!(
+                "scratch.store_sub_from_scalar_scaled_input({target_index}, {scalar}, {source}, {});",
+                scale_args[1]
+            ));
+        }
     }
 
     None
