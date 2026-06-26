@@ -307,6 +307,7 @@ fn compact_generated_stamp_helper_surface(mut source: String) -> String {
 }
 
 fn compact_generated_stamp_surface(mut source: String) -> String {
+    source = compact_conditional_ad_rvalue_stores(source);
     for (from, to) in [
         ("scratch.reactive_node_derivatives", "scratch.rdn"),
         ("scratch.reactive_branch_derivatives", "scratch.rdb"),
@@ -337,6 +338,255 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
         source = source.replace(from, to);
     }
     merge_adjacent_simple_if_blocks(cache_context_reads(source))
+}
+
+fn compact_conditional_ad_rvalue_stores(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_ad_value(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + "scratch.store_ad_value".len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_conditional_ad_rvalue_store_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + "scratch.store_ad_value".len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_conditional_ad_rvalue_store_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    let open_paren = call_start + "scratch.store_ad_value".len();
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 2 {
+        return None;
+    }
+    let target_index = args[0].trim().parse().ok()?;
+    let conditional = parse_compact_if_block(args[1])?;
+    let then_store = compact_conditional_ad_branch_store(target_index, conditional.then_expr)?;
+    let else_store = compact_conditional_ad_branch_store(target_index, conditional.else_expr)?;
+
+    let mut statement_end = close_paren + 1;
+    while matches!(source.as_bytes().get(statement_end), Some(b' ' | b'\t')) {
+        statement_end += 1;
+    }
+    if source.as_bytes().get(statement_end) != Some(&b';') {
+        return None;
+    }
+    statement_end += 1;
+    if source.as_bytes().get(statement_end) == Some(&b'\r')
+        && source.as_bytes().get(statement_end + 1) == Some(&b'\n')
+    {
+        statement_end += 2;
+    } else if source.as_bytes().get(statement_end) == Some(&b'\n') {
+        statement_end += 1;
+    }
+
+    if then_store.is_none() && else_store.is_none() {
+        return Some((statement_end, String::new()));
+    }
+
+    let mut replacement = String::new();
+    replacement.push_str(indent);
+    replacement.push_str("if ");
+    replacement.push_str(conditional.condition.trim());
+    replacement.push_str(" {\n");
+    let branch_indent = format!("{indent}    ");
+    if let Some(line) = then_store {
+        push_indented_compact_line(&mut replacement, &branch_indent, &line);
+    }
+    replacement.push_str(indent);
+    replacement.push_str("} else {\n");
+    if let Some(line) = else_store {
+        push_indented_compact_line(&mut replacement, &branch_indent, &line);
+    }
+    replacement.push_str(indent);
+    replacement.push_str("}\n");
+    Some((statement_end, replacement))
+}
+
+#[derive(Debug)]
+struct CompactIfBlock<'a> {
+    condition: &'a str,
+    then_expr: &'a str,
+    else_expr: &'a str,
+}
+
+fn parse_compact_if_block(value: &str) -> Option<CompactIfBlock<'_>> {
+    let value = value.trim();
+    let outer_close = find_matching_ascii_delimiter(value, 0, b'{', b'}')?;
+    if !value[(outer_close + 1)..].trim().is_empty() {
+        return None;
+    }
+
+    let inner = value[1..outer_close].trim();
+    let after_if = inner.strip_prefix("if ")?;
+    let then_open_relative = find_top_level_ascii_byte(after_if, b'{')?;
+    let condition = after_if[..then_open_relative].trim();
+    let then_open = inner.len() - after_if.len() + then_open_relative;
+    let then_close = find_matching_ascii_delimiter(inner, then_open, b'{', b'}')?;
+    let then_expr = compact_single_expression_branch(&inner[(then_open + 1)..then_close])?;
+
+    let after_then = inner[(then_close + 1)..].trim_start();
+    let after_else = after_then.strip_prefix("else")?.trim_start();
+    if !after_else.starts_with('{') {
+        return None;
+    }
+    let else_close = find_matching_ascii_delimiter(after_else, 0, b'{', b'}')?;
+    if !after_else[(else_close + 1)..].trim().is_empty() {
+        return None;
+    }
+    let else_expr = compact_single_expression_branch(&after_else[1..else_close])?;
+
+    Some(CompactIfBlock {
+        condition,
+        then_expr,
+        else_expr,
+    })
+}
+
+fn compact_single_expression_branch(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if value.is_empty() || value.contains(';') {
+        return None;
+    }
+    Some(value)
+}
+
+fn compact_conditional_ad_branch_store(target_index: usize, value: &str) -> Option<Option<String>> {
+    if let Some(args) = compact_ad_call_args(value, "constant") {
+        if args.len() != 1 {
+            return None;
+        }
+        return Some(Some(format!(
+            "scratch.store_scalar({target_index}, {});",
+            args[0]
+        )));
+    }
+
+    if let Some(source_index) = compact_scratch_ad_value_index(value) {
+        if source_index == target_index {
+            return Some(None);
+        }
+        return Some(Some(format!(
+            "scratch.copy_ad({target_index}, {source_index});"
+        )));
+    }
+
+    compact_scratch_store_helper_call(target_index, value).map(Some)
+}
+
+fn find_matching_ascii_delimiter(
+    source: &str,
+    open_index: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if bytes.get(open_index) != Some(&open) {
+        return None;
+    }
+
+    let mut depth = 1usize;
+    for (offset, byte) in bytes[(open_index + 1)..].iter().enumerate() {
+        if *byte == open {
+            depth = depth.checked_add(1)?;
+        } else if *byte == close {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(open_index + 1 + offset);
+            }
+        }
+    }
+    None
+}
+
+fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+
+    for (index, byte) in source.as_bytes().iter().enumerate() {
+        match *byte {
+            b'(' => paren_depth = paren_depth.checked_add(1)?,
+            b')' => paren_depth = paren_depth.checked_sub(1)?,
+            b'[' => bracket_depth = bracket_depth.checked_add(1)?,
+            b']' => bracket_depth = bracket_depth.checked_sub(1)?,
+            b'{' => {
+                if target == b'{' && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+                    return Some(index);
+                }
+                brace_depth = brace_depth.checked_add(1)?;
+            }
+            b'}' => brace_depth = brace_depth.checked_sub(1)?,
+            byte if byte == target
+                && paren_depth == 0
+                && bracket_depth == 0
+                && brace_depth == 0 =>
+            {
+                return Some(index);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod compact_generated_stamp_surface_tests {
+    use super::compact_generated_stamp_surface;
+
+    #[test]
+    fn rewrites_conditional_ad_rvalue_store_as_direct_branch_stores() {
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(7, {
+        if (scratch.values[2] == 0.0) {
+            AdValue::constant(0.0)
+        } else {
+            AdValue::powf(scratch.ad_value(2), params.alpha)
+        }
+    });
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(compact.contains("if (s.v[2] == 0.0) {"), "{compact}");
+        assert!(compact.contains("s.store_scalar(7, 0.0);"), "{compact}");
+        assert!(
+            compact.contains("s.store_powf(7, 2, p.alpha);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value(7, {"), "{compact}");
+    }
 }
 
 #[derive(Debug)]
