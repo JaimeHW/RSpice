@@ -3385,6 +3385,90 @@ fn rust_backend_directly_stores_scaled_sub_from_scalar_multiply_helpers() {
 }
 
 #[test]
+fn rust_backend_directly_stores_mixed_scaled_affine_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_direct_store_mixed_scaled_affine_helpers_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact direct store mixed scaled affine helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_add_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64)",
+        "fn store_add_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64)",
+        "fn store_sub_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64)",
+        "fn store_sub_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64)",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
+    for helper in [
+        "s.store_add_scaled_inputs_ad_lhs(",
+        "s.store_add_scaled_inputs_ad_rhs(",
+        "s.store_sub_scaled_inputs_ad_lhs(",
+        "s.store_sub_scaled_inputs_ad_rhs(",
+    ] {
+        assert!(stamp.contains(helper), "{helper}\n{stamp}");
+    }
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "mixed scaled affine root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_mixed_scaled_sub_from_scalar_multiply_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            compact_expression_direct_store_mixed_sub_scaled_multiply_helpers_source(),
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact direct store mixed sub-from-scalar multiply helpers");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn store_mul_sub_from_scalar_ad_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_sub_from_scalar_ad_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value("),
+        "mixed scaled sub-from-scalar multiply root assignments should not materialize returned AD temporaries:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::mul_sub_from_scalar_rhs_scaled_output("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_directly_stores_offset_product_add_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_offset_product_helpers_source())
@@ -12397,6 +12481,53 @@ module compact_expression_direct_store_sub_scaled_multiply_helpers(p, n);
         a = V(p, n);
         q = V(p);
         shaped = a * (limit - (q * gain)) * output_gain;
+        I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_mixed_scaled_affine_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_mixed_scaled_affine_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real output_gain = 0.5;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real add_lhs;
+    real add_rhs;
+    real sub_lhs;
+    real sub_rhs;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        add_lhs = (ln(q + offset) * gain) + (a * output_gain);
+        add_rhs = (a * gain) + (ln(q + offset) * output_gain);
+        sub_lhs = (ln(q + offset) * gain) - (a * output_gain);
+        sub_rhs = (a * gain) - (ln(q + offset) * output_gain);
+        I(p, n) <+ add_lhs + add_rhs + sub_lhs + sub_rhs;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_mixed_sub_scaled_multiply_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_mixed_sub_scaled_multiply_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 1.0;
+    parameter real output_gain = 0.5;
+    real a;
+    real q;
+    real shaped;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        shaped = a * (limit - exp(q)) * output_gain;
         I(p, n) <+ shaped;
     end
 endmodule
