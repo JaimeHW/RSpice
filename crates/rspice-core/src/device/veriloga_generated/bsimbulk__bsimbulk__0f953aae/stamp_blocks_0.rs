@@ -5006,7 +5006,7 @@ impl Instance {
         }
 
         if s.b[1356] {
-            s.store_offset_ad(15, A::mul_offset_rhs(s.ad_value(116), s.ad_value(14), 1.0), s.v[30]);
+            s.store_offset_mul_offset_rhs(15, 116, 14, 1.0, s.v[30]);
             s.store_mul_scaled_ad_rhs(115, 106, -1.0, A::ln(A::max_with_scalar(A::div_from_scalar(s.v[30], s.ad_value(15)), 1e-38)));
         }
 

@@ -3269,6 +3269,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_offset_mul_offset_rhs(&mut self, index: usize, left: usize, right: usize, rhs_offset: f64, output_offset: f64) {
+        let left_value = self.v[left];
+        let right_value = self.v[right] + rhs_offset;
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        self.v[index] = left_value * right_value + output_offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_mul_offset_rhs_ad_rhs(&mut self, index: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, rhs_offset: f64, output_offset: f64) {
+        let left_value = self.v[left];
+        let right_value = right.value + rhs_offset;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.v[index] = left_value * right_value + output_offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right.db[axis]; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_offset_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, right: usize) {
         let left_value = left.value + offset;
         let right_value = self.v[right];
@@ -12466,6 +12490,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value * right_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis]; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_mul_offset_rhs(&mut self, index: usize, left: usize, right: usize, rhs_offset: f64, output_offset: f64) {
+        let left_value = self.v[left];
+        let right_value = self.v[right] + rhs_offset;
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        self.v[index] = left_value * right_value + output_offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_mul_offset_rhs_ad_rhs(&mut self, index: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, rhs_offset: f64, output_offset: f64) {
+        let left_value = self.v[left];
+        let right_value = right.value + rhs_offset;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.v[index] = left_value * right_value + output_offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right.db[axis]; }
     }
 
     #[inline]

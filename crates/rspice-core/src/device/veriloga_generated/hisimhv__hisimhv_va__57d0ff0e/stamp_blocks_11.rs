@@ -4645,7 +4645,7 @@ impl Instance {
 
         if (s.b[3311] && s.b[3312]) {
             s.store_offset(283, 283, 1e-25);
-            s.store_offset_ad(958, A::mul_offset_rhs(s.ad_value(957), s.ad_value(387), (-s.v[764])), 1.0);
+            s.store_offset_mul_offset_rhs(958, 957, 387, (-s.v[764]), 1.0);
         }
 
         if (s.b[3311] && s.b[3312]) {

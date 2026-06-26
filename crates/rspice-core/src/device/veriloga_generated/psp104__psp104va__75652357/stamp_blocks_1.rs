@@ -6375,7 +6375,7 @@ impl Instance {
         s.v[2207] = if s.b[2207] { 1.0 } else { 0.0 };
 
         if ((s.b[2204] && s.b[2205]) && s.b[2207]) {
-            s.store_offset_ad(1937, A::mul_offset_rhs(s.ad_value(1919), A::mul_scaled_output(s.ad_value(1919), A::scale_offset(s.ad_value(1919), 0.3333333333333333, 1.0), 0.5), 1.0), 1.0);
+            s.store_offset_mul_offset_rhs_ad_rhs(1937, 1919, A::mul_scaled_output(s.ad_value(1919), A::scale_offset(s.ad_value(1919), 0.3333333333333333, 1.0), 0.5), 1.0, 1.0);
         }
 
         s.b[2208] = (s.v[1919] > (-230.25850929940458));

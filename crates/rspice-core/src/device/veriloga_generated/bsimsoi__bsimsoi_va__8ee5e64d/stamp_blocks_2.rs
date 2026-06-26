@@ -303,7 +303,7 @@ impl Instance {
         }
 
         if s.b[1567] {
-            s.store_offset_ad(1182, A::mul_offset_rhs(s.ad_value(739), s.ad_value(1181), 1.0), s.v[1227]);
+            s.store_offset_mul_offset_rhs(1182, 739, 1181, 1.0, s.v[1227]);
         }
 
         if s.b[1567] {
@@ -478,7 +478,7 @@ impl Instance {
         }
 
         if s.b[1575] {
-            s.store_offset_ad(1182, A::mul_offset_rhs(s.ad_value(739), s.ad_value(1181), 1.0), s.v[1227]);
+            s.store_offset_mul_offset_rhs(1182, 739, 1181, 1.0, s.v[1227]);
         }
 
         if s.b[1575] {

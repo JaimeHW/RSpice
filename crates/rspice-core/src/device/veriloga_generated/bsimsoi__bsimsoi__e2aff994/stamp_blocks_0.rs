@@ -4349,7 +4349,7 @@ impl Instance {
         }
 
         if s.b[1618] {
-            s.store_offset_ad(170, A::mul_offset_rhs(s.ad_value(279), s.ad_value(169), 1.0), s.v[184]);
+            s.store_offset_mul_offset_rhs(170, 279, 169, 1.0, s.v[184]);
             s.store_mul_scaled_ad_rhs(278, 269, -1.0, A::ln(A::max_with_scalar(A::div_from_scalar(s.v[184], s.ad_value(170)), 1e-38)));
         }
 
