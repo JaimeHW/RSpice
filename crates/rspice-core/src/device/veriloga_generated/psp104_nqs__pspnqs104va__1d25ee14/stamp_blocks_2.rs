@@ -232,7 +232,7 @@ impl Instance {
             s.store_scaled_div(2059, 1860, 2058, 0.5);
             s.store_div(2060, 2058, 1877);
             s.store_mul_sub_from_scalar_scaled_rhs_scaled_output(2061, 2060, 1.0, 2060, 1.0, 0.5);
-            s.store_sub_from_scalar_ad(2062, 0.5, A::scale(s.ad_value(2061), 3.0));
+            s.store_sub_from_scalar_scaled_input(2062, 0.5, 2061, 3.0);
         }
 
         s.b[2332] = (s.v[2059] < 0.001);

@@ -165,7 +165,7 @@ impl Instance {
             s.store_scaled_div(1951, 1848, 1950, 0.5);
             s.store_div(1952, 1950, 1865);
             s.store_mul_sub_from_scalar_scaled_rhs_scaled_output(1953, 1952, 1.0, 1952, 1.0, 0.5);
-            s.store_sub_from_scalar_ad(1954, 0.5, A::scale(s.ad_value(1953), 3.0));
+            s.store_sub_from_scalar_scaled_input(1954, 0.5, 1953, 3.0);
         }
 
         s.b[2224] = (s.v[1951] < 0.001);

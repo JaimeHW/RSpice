@@ -324,7 +324,7 @@ impl Instance {
 
         s.store_offset_tanh_ad(85, s.ad_value(36), 1.0);
 
-        s.store_sub_from_scalar_ad(37, p.p34, A::scale(s.ad_value(5), p.p35));
+        s.store_sub_from_scalar_scaled_input(37, p.p34, 5, p.p35);
 
         s.store_offset_tanh_ad(86, s.ad_value(37), ((1.0) + ((-p.p38))));
 
@@ -785,7 +785,7 @@ impl Instance {
 
         s.store_offset_tanh_ad(85, s.ad_value(36), 1.0);
 
-        s.store_sub_from_scalar_ad(37, p.p34, A::scale(s.ad_value(5), p.p35));
+        s.store_sub_from_scalar_scaled_input(37, p.p34, 5, p.p35);
 
         s.store_offset_tanh_ad(86, s.ad_value(37), ((1.0) + ((-p.p38))));
 

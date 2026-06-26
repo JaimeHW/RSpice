@@ -4176,7 +4176,7 @@ impl Instance {
 
         if ((!s.b[1251]) && (!s.b[1253])) {
             s.store_scalar(854, (1.0 / ((2.0 * (1.0 - 0.5)) * (((1.0 - 0.5)) as f64).sqrt())));
-            s.store_sub_from_scalar_ad(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), A::scale(s.ad_value(854), 0.5));
+            s.store_sub_from_scalar_scaled_input(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), 854, 0.5);
             s.store_add_scaled_product_indices(965, 855, 1.0, 854, 964, 1.0);
         }
 
@@ -4263,7 +4263,7 @@ impl Instance {
 
         if ((!s.b[1256]) && (!s.b[1258])) {
             s.store_scalar(854, (1.0 / ((2.0 * (1.0 - 0.5)) * (((1.0 - 0.5)) as f64).sqrt())));
-            s.store_sub_from_scalar_ad(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), A::scale(s.ad_value(854), 0.5));
+            s.store_sub_from_scalar_scaled_input(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), 854, 0.5);
             s.store_add_scaled_product_indices(965, 855, 1.0, 854, 964, 1.0);
         }
 
@@ -5551,7 +5551,7 @@ impl Instance {
         s.v[1344] = if s.b[1344] { 1.0 } else { 0.0 };
 
         if (s.b[1341] && s.b[1344]) {
-            s.store_sub_from_scalar_ad(843, 1.0, A::scale(s.ad_value(1076), 1.0 / (p.p386)));
+            s.store_sub_from_scalar_scaled_input(843, 1.0, 1076, 1.0 / (p.p386));
         }
 
         if (s.b[1341] && (!s.b[1344])) {
@@ -5628,7 +5628,7 @@ impl Instance {
         s.v[1350] = if s.b[1350] { 1.0 } else { 0.0 };
 
         if (s.b[1341] && s.b[1350]) {
-            s.store_sub_from_scalar_ad(843, 1.0, A::scale(s.ad_value(1076), 1.0 / (p.p391)));
+            s.store_sub_from_scalar_scaled_input(843, 1.0, 1076, 1.0 / (p.p391));
         }
 
         if (s.b[1341] && (!s.b[1350])) {

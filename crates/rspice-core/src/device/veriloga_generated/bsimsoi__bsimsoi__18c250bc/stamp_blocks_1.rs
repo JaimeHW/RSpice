@@ -5812,7 +5812,7 @@ impl Instance {
 
         if ((!s.b[1251]) && (!s.b[1253])) {
             s.store_scalar(854, (1.0 / ((2.0 * (1.0 - 0.5)) * (((1.0 - 0.5)) as f64).sqrt())));
-            s.store_sub_from_scalar_ad(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), A::scale(s.ad_value(854), 0.5));
+            s.store_sub_from_scalar_scaled_input(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), 854, 0.5);
             s.store_add_scaled_product_indices(965, 855, 1.0, 854, 964, 1.0);
         }
 
@@ -5890,7 +5890,7 @@ impl Instance {
 
         if ((!s.b[1256]) && (!s.b[1258])) {
             s.store_scalar(854, (1.0 / ((2.0 * (1.0 - 0.5)) * (((1.0 - 0.5)) as f64).sqrt())));
-            s.store_sub_from_scalar_ad(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), A::scale(s.ad_value(854), 0.5));
+            s.store_sub_from_scalar_scaled_input(855, (1.0 / (((1.0 - 0.5)) as f64).sqrt()), 854, 0.5);
             s.store_add_scaled_product_indices(965, 855, 1.0, 854, 964, 1.0);
         }
 

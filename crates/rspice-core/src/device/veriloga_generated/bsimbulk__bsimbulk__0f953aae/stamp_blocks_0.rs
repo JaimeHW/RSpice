@@ -5897,7 +5897,7 @@ impl Instance {
         }
 
         if s.b[1400] {
-            s.store_sub_from_scalar_ad(16, 1.0, A::scale(s.ad_value(50), p.p1113));
+            s.store_sub_from_scalar_scaled_input(16, 1.0, 50, p.p1113);
         }
 
         s.b[1402] = ((0.0 == 0.0) && (s.v[16] < ((-2500.0) * 0.001)));

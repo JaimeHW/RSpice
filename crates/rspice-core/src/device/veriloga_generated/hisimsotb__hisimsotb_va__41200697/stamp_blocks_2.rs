@@ -162,7 +162,7 @@ impl Instance {
                 s.store_scaled_mul(344, 439, 120, (-1.0 / (((2.0) as f64).sqrt())));
             }
             s.store_add_scaled_inputs4(309, s.ad_value(310), 1.0, s.ad_value(314), (-1.0 / (s.v[294])), s.ad_value(50), 1.0, s.ad_value(298), 1.0);
-            s.store_sub_from_scalar_ad(582, 1.0, A::scale(s.ad_value(344), 1.0 / (s.v[294])));
+            s.store_sub_from_scalar_scaled_input(582, 1.0, 344, 1.0 / (s.v[294]));
             s.store_sub(279, 308, 584);
             s.store_mul(297, 120, 279);
             s.b[857] = ((-s.v[297]) >= 80.0);
@@ -1066,7 +1066,7 @@ impl Instance {
             s.store_scalar(284, p.p159);
             s.store_add_scaled_product_indices(279, 282, 1.0, 284, 71, 1.0);
             s.store_mul(98, 81, 279);
-            s.store_sub_from_scalar_ad(279, p.p160, A::scale(s.ad_value(51), p.p161));
+            s.store_sub_from_scalar_scaled_input(279, p.p160, 51, p.p161);
             s.store_add_scaled_inputs4(99, s.ad_value(72), 1.0, s.ad_value(138), (-1.0), s.ad_value(279), 1.0, s.ad_value(98), 1.0);
             s.store_mul3_lhs(102, 119, 271, 271);
             s.store_scaled_mul(103, 102, 120, 0.5);

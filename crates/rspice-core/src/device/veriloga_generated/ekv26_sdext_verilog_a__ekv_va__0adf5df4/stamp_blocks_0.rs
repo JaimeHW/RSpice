@@ -84,7 +84,7 @@ impl Instance {
 
         s.store_div(54, 49, 55);
 
-        s.store_sub_from_scalar_ad(56, p.p15, A::scale(s.ad_value(53), p.p16));
+        s.store_sub_from_scalar_scaled_input(56, p.p15, 53, p.p16);
 
         s.store_scale_ad(58, A::powf(s.ad_value(54), p.p20), p.p19);
 
@@ -716,11 +716,11 @@ impl Instance {
 
         s.store_scale(212, 208, p.p46);
 
-        s.store_sub_from_scalar_ad(213, p.p50, A::scale(s.ad_value(53), p.p69));
+        s.store_sub_from_scalar_scaled_input(213, p.p50, 53, p.p69);
 
-        s.store_sub_from_scalar_ad(214, p.p51, A::scale(s.ad_value(53), p.p70));
+        s.store_sub_from_scalar_scaled_input(214, p.p51, 53, p.p70);
 
-        s.store_sub_from_scalar_ad(215, p.p52, A::scale(s.ad_value(53), p.p71));
+        s.store_sub_from_scalar_scaled_input(215, p.p52, 53, p.p71);
 
         s.store_offset_scaled(216, 53, ((p.p66) * (p.p53)), p.p53);
 
@@ -911,7 +911,7 @@ impl Instance {
 
         s.store_div(54, 49, 55);
 
-        s.store_sub_from_scalar_ad(56, p.p15, A::scale(s.ad_value(53), p.p16));
+        s.store_sub_from_scalar_scaled_input(56, p.p15, 53, p.p16);
 
         s.store_scale_ad(58, A::powf(s.ad_value(54), p.p20), p.p19);
 
@@ -1472,11 +1472,11 @@ impl Instance {
             s.store_scalar(205, p.p12);
         }
 
-        s.store_sub_from_scalar_ad(213, p.p50, A::scale(s.ad_value(53), p.p69));
+        s.store_sub_from_scalar_scaled_input(213, p.p50, 53, p.p69);
 
-        s.store_sub_from_scalar_ad(214, p.p51, A::scale(s.ad_value(53), p.p70));
+        s.store_sub_from_scalar_scaled_input(214, p.p51, 53, p.p70);
 
-        s.store_sub_from_scalar_ad(215, p.p52, A::scale(s.ad_value(53), p.p71));
+        s.store_sub_from_scalar_scaled_input(215, p.p52, 53, p.p71);
 
         s.store_offset_scaled(216, 53, ((p.p66) * (p.p53)), p.p53);
 

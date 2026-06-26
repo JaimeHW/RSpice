@@ -39,7 +39,7 @@ impl Instance {
         s.v[1688] = if s.b[1688] { 1.0 } else { 0.0 };
 
         if (s.b[1679] && s.b[1688]) {
-            s.store_sub_from_scalar_ad(1179, 1.0, A::scale(s.ad_value(1410), 1.0 / (s.v[370])));
+            s.store_sub_from_scalar_scaled_input(1179, 1.0, 1410, 1.0 / (s.v[370]));
         }
 
         if (s.b[1679] && (!s.b[1688])) {

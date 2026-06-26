@@ -3911,7 +3911,7 @@ impl Instance {
             s.store_scalar(340, s.v[497]);
             s.store_add_scaled_product_indices(335, 338, 1.0, 340, 1439, 1.0);
             s.store_mul(137, 121, 335);
-            s.store_sub_from_scalar_ad(335, s.v[498], A::scale(s.ad_value(790), p.p213));
+            s.store_sub_from_scalar_scaled_input(335, s.v[498], 790, p.p213);
             s.store_add_scaled_inputs3_offset(138, s.ad_value(1440), 1.0, s.ad_value(335), 1.0, s.ad_value(137), 1.0, (-s.v[160]));
             s.store_mul3_lhs(141, 694, 186, 186);
             s.store_scaled_mul(142, 141, 154, 0.5);

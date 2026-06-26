@@ -306,7 +306,7 @@ impl Instance {
 
         s.store_offset_tanh_ad(68, s.ad_value(23), 1.0);
 
-        s.store_sub_from_scalar_ad(24, p.p33, A::scale(s.ad_value(5), p.p34));
+        s.store_sub_from_scalar_scaled_input(24, p.p33, 5, p.p34);
 
         s.store_offset_tanh_ad(69, s.ad_value(24), ((1.0) + ((-p.p37))));
 

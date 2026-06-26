@@ -1197,7 +1197,7 @@ impl Instance {
         s.v[1344] = if s.b[1344] { 1.0 } else { 0.0 };
 
         if (s.b[1341] && s.b[1344]) {
-            s.store_sub_from_scalar_ad(843, 1.0, A::scale(s.ad_value(1076), 1.0 / (p.p386)));
+            s.store_sub_from_scalar_scaled_input(843, 1.0, 1076, 1.0 / (p.p386));
         }
 
         if (s.b[1341] && (!s.b[1344])) {
@@ -1273,7 +1273,7 @@ impl Instance {
         s.v[1350] = if s.b[1350] { 1.0 } else { 0.0 };
 
         if (s.b[1341] && s.b[1350]) {
-            s.store_sub_from_scalar_ad(843, 1.0, A::scale(s.ad_value(1076), 1.0 / (p.p391)));
+            s.store_sub_from_scalar_scaled_input(843, 1.0, 1076, 1.0 / (p.p391));
         }
 
         if (s.b[1341] && (!s.b[1350])) {

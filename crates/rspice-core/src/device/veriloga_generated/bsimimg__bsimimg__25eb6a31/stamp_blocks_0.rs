@@ -75,7 +75,7 @@ impl Instance {
 
         s.store_add_scaled_ad_lhs(13, A::scale_offset(s.ad_value(11), p.p33, (p.p31 + (p.p32 * s.v[10]))), 12, p.p34);
 
-        s.store_sub_from_scalar_ad(2, s.v[0], A::scale(s.ad_value(9), 2.0));
+        s.store_sub_from_scalar_scaled_input(2, s.v[0], 9, 2.0);
 
         s.store_sub_scaled_inputs(3, 5, 1.0, 13, 2.0);
 
@@ -83,7 +83,7 @@ impl Instance {
 
         s.store_add_scaled_ad_lhs(15, A::scale_offset(s.ad_value(11), p.p43, (p.p41 + (p.p42 * s.v[10]))), 12, p.p44);
 
-        s.store_sub_from_scalar_ad(1, s.v[0], A::scale(s.ad_value(14), 2.0));
+        s.store_sub_from_scalar_scaled_input(1, s.v[0], 14, 2.0);
 
         s.store_sub_scaled_inputs(4, 5, 1.0, 15, 2.0);
 
@@ -2970,7 +2970,7 @@ impl Instance {
 
         s.store_add_scaled_ad_lhs(13, A::scale_offset(s.ad_value(11), p.p33, (p.p31 + (p.p32 * s.v[10]))), 12, p.p34);
 
-        s.store_sub_from_scalar_ad(2, s.v[0], A::scale(s.ad_value(9), 2.0));
+        s.store_sub_from_scalar_scaled_input(2, s.v[0], 9, 2.0);
 
         s.store_sub_scaled_inputs(3, 5, 1.0, 13, 2.0);
 
@@ -2978,7 +2978,7 @@ impl Instance {
 
         s.store_add_scaled_ad_lhs(15, A::scale_offset(s.ad_value(11), p.p43, (p.p41 + (p.p42 * s.v[10]))), 12, p.p44);
 
-        s.store_sub_from_scalar_ad(1, s.v[0], A::scale(s.ad_value(14), 2.0));
+        s.store_sub_from_scalar_scaled_input(1, s.v[0], 14, 2.0);
 
         s.store_sub_scaled_inputs(4, 5, 1.0, 15, 2.0);
 

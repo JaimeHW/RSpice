@@ -823,7 +823,7 @@ impl Instance {
             s.copy_ad(128, 242);
             s.store_scale(129, 17, 0.1);
             s.copy_ad(130, 111);
-            s.store_sub_from_scalar_ad(202, 1.0, A::scale(s.ad_value(130), 1.0 / (p.p61)));
+            s.store_sub_from_scalar_scaled_input(202, 1.0, 130, 1.0 / (p.p61));
         }
 
         s.store_scale(132, 14, (1.0 - ((3.0) as f64).powf(((-1.0) / p.p66))));
@@ -1445,7 +1445,7 @@ impl Instance {
         }
 
         if ((((s.b[531] && (!s.b[532])) && s.b[536]) && s.b[537]) && (!s.b[538])) {
-            s.store_sub_from_scalar_ad(119, 1.0, A::scale(s.ad_value(118), 0.5));
+            s.store_sub_from_scalar_scaled_input(119, 1.0, 118, 0.5);
             s.store_scaled_mul(190, 119, 119, p.p44);
         }
 
@@ -2678,7 +2678,7 @@ impl Instance {
             s.copy_ad(128, 242);
             s.store_scale(129, 17, 0.1);
             s.copy_ad(130, 111);
-            s.store_sub_from_scalar_ad(202, 1.0, A::scale(s.ad_value(130), 1.0 / (p.p61)));
+            s.store_sub_from_scalar_scaled_input(202, 1.0, 130, 1.0 / (p.p61));
         }
 
         s.store_scale(132, 14, (1.0 - ((3.0) as f64).powf(((-1.0) / p.p66))));
@@ -3135,7 +3135,7 @@ impl Instance {
         }
 
         if ((((s.b[531] && (!s.b[532])) && s.b[536]) && s.b[537]) && (!s.b[538])) {
-            s.store_sub_from_scalar_ad(119, 1.0, A::scale(s.ad_value(118), 0.5));
+            s.store_sub_from_scalar_scaled_input(119, 1.0, 118, 0.5);
             s.store_scaled_mul(190, 119, 119, p.p44);
         }
 

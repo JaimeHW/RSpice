@@ -3772,6 +3772,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_input(&mut self, index: usize, scalar: f64, source: usize, scale: f64) {
+        self.store_unary_scaled(index, source, scalar - self.v[source] * scale, -scale);
+    }
+
+    #[inline]
     pub(crate) fn store_div_from_scalar(&mut self, index: usize, scalar: f64, source: usize) {
         let reciprocal = 1.0 / self.v[source];
         let quotient = scalar * reciprocal;
@@ -12891,6 +12896,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_sub_from_scalar(&mut self, index: usize, scalar: f64, source: usize) {
         self.store_unary_scaled(index, source, scalar - self.v[source], -1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_input(&mut self, index: usize, scalar: f64, source: usize, scale: f64) {
+        self.store_unary_scaled(index, source, scalar - self.v[source] * scale, -scale);
     }
 
     #[inline]

@@ -2410,7 +2410,7 @@ impl Instance {
             s.store_offset_scaled_add(280, 638, 639, 0.5, p.p38);
         }
 
-        s.store_sub_from_scalar_ad(123, p.p0, A::scale(s.ad_value(280), 2.0));
+        s.store_sub_from_scalar_scaled_input(123, p.p0, 280, 2.0);
 
         s.v[279] = ((-p.p49) * (1.0 + (p.p50 / ((s.v[375]) as f64).powf(p.p51))));
 
@@ -4459,7 +4459,7 @@ impl Instance {
                 s.store_scaled_mul(343, 439, 120, (-1.0 / (((2.0) as f64).sqrt())));
             }
             s.store_add_scaled_inputs4(306, s.ad_value(307), 1.0, s.ad_value(312), (-1.0 / (s.v[294])), s.ad_value(50), 1.0, s.ad_value(298), 1.0);
-            s.store_sub_from_scalar_ad(583, 1.0, A::scale(s.ad_value(343), 1.0 / (s.v[294])));
+            s.store_sub_from_scalar_scaled_input(583, 1.0, 343, 1.0 / (s.v[294]));
             s.store_sub(279, 305, 522);
             s.store_mul(297, 120, 279);
             s.b[812] = ((-s.v[297]) >= 80.0);

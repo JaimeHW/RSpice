@@ -783,7 +783,7 @@ impl Instance {
         }
 
         if ((s.v[9] - (0.5 * s.v[305])) > 1e-9) {
-            s.store_sub_from_scalar_ad(324, s.v[9], A::scale(s.ad_value(305), 0.5));
+            s.store_sub_from_scalar_scaled_input(324, s.v[9], 305, 0.5);
         } else {
             s.store_scalar(324, 1e-9);
         }
