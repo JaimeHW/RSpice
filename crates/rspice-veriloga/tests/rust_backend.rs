@@ -2116,8 +2116,13 @@ fn rust_backend_fuses_expression_scaled_multiply_chains() {
         support.contains("fn mul_scaled_rhs(left: Self, right: Self, scale: f64) -> Self"),
         "{support}"
     );
-    assert!(stamp.contains("A::mul_scaled_lhs("), "{stamp}");
-    assert!(stamp.contains("A::mul_scaled_rhs("), "{stamp}");
+    assert!(
+        stamp.contains("A::mul_scaled_lhs(")
+            || stamp.contains("A::mul_scaled_rhs(")
+            || stamp.contains("A::add_scaled_product(")
+            || stamp.contains("A::add_scaled_products("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("A::mul(A::scale("), "{stamp}");
     assert!(!stamp.contains("A::scale(A::mul("), "{stamp}");
     assert!(!stamp.contains("A::scale(A::mul_scaled_"), "{stamp}");
@@ -2158,6 +2163,46 @@ fn rust_backend_fuses_expression_nested_multiply_chains() {
     assert!(!stamp.contains("A::mul(A::mul("), "{stamp}");
     assert!(!stamp.contains("A::mul_scaled_lhs(A::mul("), "{stamp}");
     assert!(!stamp.contains("A::mul(A::mul_scaled_"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_fuses_expression_product_add_sub_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_product_add_sub_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression product add/sub");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn add_scaled_products(left_product_left: Self, left_product_right: Self, left_scale: f64, right_product_left: Self, right_product_right: Self, right_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_product("), "{stamp}");
+    assert!(stamp.contains("A::add_scaled_products("), "{stamp}");
+    assert!(!stamp.contains("A::add(A::mul("), "{stamp}");
+    assert!(!stamp.contains("A::sub(A::mul("), "{stamp}");
+    assert!(!stamp.contains("A::add_scaled_inputs(A::mul("), "{stamp}");
+    assert!(!stamp.contains("A::sub_scaled_inputs(A::mul("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -9701,6 +9746,31 @@ module compact_expression_nested_multiply(p, n);
         b = sqrt((a * q) * r)
           + exp(((a * gain) * q) * r)
           + ln(((a * q) * (r * gain)) + 3.0);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_product_add_sub_source() -> &'static str {
+    r#"
+module compact_expression_product_add_sub(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        b = sqrt((a * q) + r)
+          + exp(r - (a * q))
+          + ln(((a * q) + (r * q)) + offset)
+          + tanh(((a * gain) * q) + r);
         I(p, n) <+ b;
     end
 endmodule

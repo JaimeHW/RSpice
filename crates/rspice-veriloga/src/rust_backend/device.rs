@@ -5969,6 +5969,34 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn add_scaled_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {",
+        "        let mut result = value;",
+        "        let value_term = result.value * value_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        result.value = value_term + product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * value_scale + (product_left.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * value_scale + (product_left.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn add_scaled_products(left_product_left: Self, left_product_right: Self, left_scale: f64, right_product_left: Self, right_product_right: Self, right_scale: f64) -> Self {",
+        "        let mut result = left_product_left;",
+        "        let left_product_left_value = result.value;",
+        "        let left_product_right_value = left_product_right.value;",
+        "        let right_product_left_value = right_product_left.value;",
+        "        let right_product_right_value = right_product_right.value;",
+        "        let left_product_term = left_product_left_value * left_product_right_value * left_scale;",
+        "        let right_product_term = right_product_left_value * right_product_right_value * right_scale;",
+        "        result.value = left_product_term + right_product_term;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = (result.node_derivatives[index] * left_product_right_value + left_product_left_value * left_product_right.node_derivatives[index]) * left_scale + (right_product_left.node_derivatives[index] * right_product_right_value + right_product_left_value * right_product_right.node_derivatives[index]) * right_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = (result.branch_derivatives[index] * left_product_right_value + left_product_left_value * left_product_right.branch_derivatives[index]) * left_scale + (right_product_left.branch_derivatives[index] * right_product_right_value + right_product_left_value * right_product_right.branch_derivatives[index]) * right_scale; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn mul(left: Self, right: Self) -> Self {",
         "        let mut value = left;",
         "        let left_value = value.value;",
@@ -12110,7 +12138,60 @@ fn compact_multiply_scaled_ad_expressions(left: &str, right: &str) -> Option<Str
     }
 }
 
+fn compact_add_sub_product_ad_expressions(helper: &str, left: &str, right: &str) -> Option<String> {
+    let subtract = helper == "sub";
+    let left_product = compact_product2_ad_expression(left);
+    let right_product = compact_product2_ad_expression(right);
+    match (left_product, right_product) {
+        (Some(left_product), Some(right_product)) => {
+            let right_scale = if subtract {
+                compact_scalar_negate(&right_product.scale)
+            } else {
+                right_product.scale
+            };
+            Some(format!(
+                "AdValue::add_scaled_products({}, {}, {}, {}, {}, {})",
+                left_product.left,
+                left_product.right,
+                left_product.scale,
+                right_product.left,
+                right_product.right,
+                right_scale
+            ))
+        }
+        (Some(product), None) => {
+            let (value, value_scale) = compact_scaled_factor_ad_expression(right);
+            let value_scale = if subtract {
+                compact_scalar_negate(&value_scale)
+            } else {
+                value_scale
+            };
+            Some(format!(
+                "AdValue::add_scaled_product({value}, {value_scale}, {}, {}, {})",
+                product.left, product.right, product.scale
+            ))
+        }
+        (None, Some(product)) => {
+            let (value, value_scale) = compact_scaled_factor_ad_expression(left);
+            let product_scale = if subtract {
+                compact_scalar_negate(&product.scale)
+            } else {
+                product.scale
+            };
+            Some(format!(
+                "AdValue::add_scaled_product({value}, {value_scale}, {}, {}, {product_scale})",
+                product.left, product.right
+            ))
+        }
+        (None, None) => None,
+    }
+}
+
 fn compact_add_sub_scaled_ad_expressions(helper: &str, left: &str, right: &str) -> Option<String> {
+    if let Some(fused) = compact_add_sub_product_ad_expressions(helper, left, right) {
+        return Some(fused);
+    }
+
     let left_scaled = compact_scaled_ad_expression(left);
     let right_scaled = compact_scaled_ad_expression(right);
     if left_scaled.is_none() && right_scaled.is_none() {
@@ -12212,6 +12293,35 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             compact_scalar_mul(args[1], scale),
             args[2],
             compact_scalar_mul(args[3], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_product") {
+        if args.len() != 5 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_product({}, {}, {}, {}, {})",
+            args[0],
+            compact_scalar_mul(args[1], scale),
+            args[2],
+            args[3],
+            compact_scalar_mul(args[4], scale)
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_products") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::add_scaled_products({}, {}, {}, {}, {}, {})",
+            args[0],
+            args[1],
+            compact_scalar_mul(args[2], scale),
+            args[3],
+            args[4],
+            compact_scalar_mul(args[5], scale)
         ));
     }
 
