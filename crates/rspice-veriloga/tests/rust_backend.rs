@@ -2209,6 +2209,58 @@ fn rust_backend_uses_compact_scaled_mixed_add_sub_store_helpers() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_scaled_add_sub_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_scaled_add_sub_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression scaled add/sub");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn add_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn sub_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn scale_offset(mut value: Self, scale: f64, offset: f64) -> Self"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn scaled_offset(mut value: Self, offset: f64, scale: f64) -> Self"),
+        "{support}"
+    );
+    assert!(stamp.contains("A::add_scaled_inputs("), "{stamp}");
+    assert!(stamp.contains("A::sub_scaled_inputs("), "{stamp}");
+    assert!(stamp.contains("A::scale_offset("), "{stamp}");
+    assert!(stamp.contains("A::scaled_offset("), "{stamp}");
+    assert!(!stamp.contains("A::scale(A::add("), "{stamp}");
+    assert!(!stamp.contains("A::scale(A::sub("), "{stamp}");
+    assert!(!stamp.contains("A::add(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::sub(A::scale("), "{stamp}");
+    assert!(!stamp.contains("A::scale(A::offset("), "{stamp}");
+    assert!(!stamp.contains("A::offset(A::scale("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_scaled_general_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_general_ad_store_source())
@@ -9639,6 +9691,33 @@ module compact_scaled_mixed_add_sub_store(p, n);
         d = (a - ln(q + offset)) * output_gain;
         e = (exp(q) - a) * output_gain;
         I(p, n) <+ b + c + d + e;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_scaled_add_sub_source() -> &'static str {
+    r#"
+module compact_expression_scaled_add_sub(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        b = ((a + q) * gain)
+          + ((a - q) * offset)
+          + ((gain * a) + q)
+          + (a + (offset * q))
+          + ((gain * a) - q)
+          + (a - (offset * q))
+          + ((a + offset) * gain)
+          + ((a * gain) + offset);
+        I(p, n) <+ b;
     end
 endmodule
 "#
