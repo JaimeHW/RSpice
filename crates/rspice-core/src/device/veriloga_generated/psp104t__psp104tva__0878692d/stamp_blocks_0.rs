@@ -1135,7 +1135,7 @@ impl Instance {
         }
 
         if s.b[1016] {
-            s.store_mul_ad_rhs(45, 336, A::sub_scaled_inputs(A::sub_from_scalar(1.0, A::scale(s.ad_value(314), p.p219)), 1.0, s.ad_value(315), p.p220));
+            s.store_mul_sub_scaled_inputs_rhs(45, 336, A::sub_from_scalar(1.0, A::scale(s.ad_value(314), p.p219)), 1.0, s.ad_value(315), p.p220);
             s.store_add_scaled_inputs3_offset(46, A::powf(s.ad_value(314), p.p223), p.p222, s.ad_value(316), p.p224, s.ad_value(318), p.p225, p.p221);
             s.store_scalar(47, p.p226);
             s.store_scalar(48, p.p227);

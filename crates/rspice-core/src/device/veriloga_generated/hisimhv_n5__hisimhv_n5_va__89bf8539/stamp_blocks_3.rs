@@ -2331,7 +2331,7 @@ impl Instance {
         s.v[2448] = if s.b[2448] { 1.0 } else { 0.0 };
 
         if (((((!s.b[1441]) && s.b[2428]) && s.b[2446]) && s.b[2447]) && s.b[2448]) {
-            s.store_offset_ad(781, A::sub_scaled_inputs(s.ad_value(96), (1.0 + 0.3), s.ad_value(790), 1.0), (-0.03));
+            s.store_offset_sub_scaled_inputs(781, s.ad_value(96), (1.0 + 0.3), s.ad_value(790), 1.0, (-0.03));
             s.store_scale(782, 96, ((1.0 + 0.3) * (4.0 * 0.03)));
         }
 

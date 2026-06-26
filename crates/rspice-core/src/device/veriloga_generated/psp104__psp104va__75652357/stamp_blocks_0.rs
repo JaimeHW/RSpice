@@ -1153,7 +1153,7 @@ impl Instance {
         }
 
         if s.b[1019] {
-            s.store_mul_ad_rhs(45, 330, A::sub_scaled_inputs(A::sub_from_scalar(1.0, A::scale(s.ad_value(308), p.p216)), 1.0, s.ad_value(309), p.p217));
+            s.store_mul_sub_scaled_inputs_rhs(45, 330, A::sub_from_scalar(1.0, A::scale(s.ad_value(308), p.p216)), 1.0, s.ad_value(309), p.p217);
         }
 
     }

@@ -6250,7 +6250,7 @@ impl Instance {
             s.store_div_scaled_value_offset_denominator(2027, s.ad_value(2217), 1.0, s.ad_value(2217), 1.0, 1.0);
             s.store_mul_ad_rhs(2221, 730, A::mul3(A::square(s.ad_value(2027)), s.ad_value(2115), s.ad_value(2214)));
             s.store_add_scaled_inputs_product_right_ad(2222, 2216, 2.0, 2221, (-2.0), 2115, A::add(A::sub_from_scalar(1.0, s.ad_value(2212)), s.ad_value(2214)), 1.0);
-            s.store_mul_ad_rhs(2223, 2221, A::sub_scaled_inputs(s.ad_value(2221), 1.0, s.ad_value(2216), 2.0));
+            s.store_mul_sub_scaled_inputs_rhs(2223, 2221, s.ad_value(2221), 1.0, s.ad_value(2216), 2.0);
             s.store_sub_from_scalar_ad(2224, 1.0, A::mul_scaled_output(s.ad_value(2115), A::add(s.ad_value(2212), s.ad_value(2214)), 0.5));
             s.store_div_scaled_product_denominator_ad(2225, 2223, 2222, 1.0, A::add_scaled_square_product(s.ad_value(2222), 1.0, s.ad_value(2224), s.ad_value(2223), (-1.0)), 1.0);
             s.store_add(2211, 2211, 2225);

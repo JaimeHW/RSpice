@@ -49,7 +49,7 @@ impl Instance {
                 s.store_scalar(285, 0.0);
             }
             if (((!s.b[837]) && (!s.b[838])) && (!s.b[845])) {
-                s.store_offset_ad(638, A::sub_scaled_inputs(s.ad_value(296), -1.0, s.ad_value(284), 1.0), (-1e-9));
+                s.store_offset_sub_scaled_inputs(638, s.ad_value(296), -1.0, s.ad_value(284), 1.0, (-1e-9));
                 s.store_scale(639, 296, (-(4.0 * 1e-9)));
             }
             if (((!s.b[837]) && (!s.b[838])) && (!s.b[845])) {

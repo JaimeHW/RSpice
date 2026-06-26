@@ -1459,7 +1459,7 @@ impl Instance {
             s.store_div_scaled_value_offset_denominator(2027, s.ad_value(2501), 1.0, s.ad_value(2501), 1.0, 1.0);
             s.store_mul_ad_rhs(2505, 730, A::mul3(A::square(s.ad_value(2027)), s.ad_value(2399), s.ad_value(2498)));
             s.store_add_scaled_inputs_product_right_ad(2506, 2500, 2.0, 2505, (-2.0), 2399, A::add(A::sub_from_scalar(1.0, s.ad_value(2496)), s.ad_value(2498)), 1.0);
-            s.store_mul_ad_rhs(2507, 2505, A::sub_scaled_inputs(s.ad_value(2505), 1.0, s.ad_value(2500), 2.0));
+            s.store_mul_sub_scaled_inputs_rhs(2507, 2505, s.ad_value(2505), 1.0, s.ad_value(2500), 2.0);
             s.store_sub_from_scalar_ad(2508, 1.0, A::mul_scaled_output(s.ad_value(2399), A::add(s.ad_value(2496), s.ad_value(2498)), 0.5));
         }
 

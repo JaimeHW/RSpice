@@ -842,7 +842,7 @@ impl Instance {
         s.v[1257] = if s.b[1257] { 1.0 } else { 0.0 };
 
         if (((((s.b[1220] && s.b[1250]) && s.b[1254]) && (!s.b[1255])) && s.b[1256]) && s.b[1257]) {
-            s.store_offset_ad(44, A::sub_scaled_inputs(s.ad_value(376), 1.0, s.ad_value(377), 0.98), 0.4);
+            s.store_offset_sub_scaled_inputs(44, s.ad_value(376), 1.0, s.ad_value(377), 0.98, 0.4);
             s.store_square(49, 44);
             s.store_scalar(50, (0.4 * 0.4));
             s.store_scalar(51, 1.0);
