@@ -697,7 +697,7 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
     assert!(stamp.contains("ctx.node_voltage(nodes[1])"));
     assert!(stamp.contains("p.p0"));
     assert!(stamp.contains("eq0_value"));
-    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
     assert!(
         !stamp.contains("GeneratedDerivative::node"),
         "two-node sparse currents should use the fixed-arity stamper path instead of constructing a derivative slice:\n{stamp}"
@@ -741,7 +741,7 @@ fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     assert!(!stamp.contains("_d_n0: f64 = 0.0"), "{stamp}");
     assert!(!stamp.contains("_d_n1: f64 = 0.0"), "{stamp}");
     assert!(!stamp.contains("_d_n0: f64 = if"), "{stamp}");
-    assert!(stamp.contains("stamper.stamp_current_const("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_const_local("), "{stamp}");
     assert!(
         !stamp.contains("GeneratedDerivative::"),
         "constant current contributions should not construct empty derivative slices:\n{stamp}"
@@ -768,7 +768,7 @@ fn rust_backend_uses_derivative_free_stamp_for_constant_potential() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamper.stamp_potential_const("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_potential_const_local("), "{stamp}");
     assert!(
         !stamp.contains("GeneratedDerivative::"),
         "constant potential contributions should not construct empty derivative slices:\n{stamp}"
@@ -791,7 +791,7 @@ fn rust_backend_uses_fixed_arity_stamp_for_three_node_sparse_current() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("stamper.stamp_current_node3("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_node3_local("), "{stamp}");
     assert!(
         !stamp.contains("GeneratedDerivative::node"),
         "three-node sparse currents should use the fixed-arity stamper path instead of constructing a derivative slice:\n{stamp}"
@@ -844,7 +844,7 @@ fn rust_backend_does_not_copy_scratch_derivatives_through_temporary_locals() {
         !stamp.contains("if (p.p0 > 0.0) { s.v[0] } else { s.v[0] }"),
         "{stamp}"
     );
-    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
     assert!(stamp.contains("s.dn[1][0]"), "{stamp}");
 }
 
@@ -4874,7 +4874,7 @@ fn rust_backend_splits_large_equation_bodies_into_helper_blocks() {
 
     assert!(stamp.contains("#[path = \"stamp_blocks_0.rs\"]"), "{stamp}");
     assert!(
-        stamp.contains("Self::stamp_transient_equations_block_0(stamper, s, nodes, multiplicity)"),
+        stamp.contains("Self::stamp_transient_equations_block_0(stamper, s, multiplicity)"),
         "{stamp}"
     );
     let equation_helper_calls = stamp
@@ -4966,7 +4966,7 @@ fn rust_backend_hoists_dynamic_operator_scales_across_helper_blocks() {
     );
     assert!(
         stamp.contains(
-            "Self::stamp_transient_equations_block_0(stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current"
+            "Self::stamp_transient_equations_block_0(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current"
         ),
         "{stamp}"
     );
@@ -5138,18 +5138,15 @@ fn rust_backend_borrowed_helper_arrays_compile_with_dense_stamps() {
         helper.contains("nodes: &[usize; Instance::NODE_COUNT]"),
         "{helper}"
     );
-    assert!(helper.contains("stamper.stamp_current_dense("), "{helper}");
+    assert!(helper.contains("stamper.stamp_current_dense_local("), "{helper}");
     assert!(
-        helper.contains(
-            "            nodes,\n            &eq0_node_derivatives,\n            branches,"
-        ),
+        helper.contains("            &eq0_node_derivatives,\n            &eq0_branch_derivatives,"),
         "{helper}"
     );
     assert!(
-        !helper.contains(
-            "            &nodes,\n            &eq0_node_derivatives,\n            &branches,"
-        ),
-        "borrowed helper nodes and branches should not be borrowed again:\n{helper}"
+        !helper.contains("            nodes,\n            &eq0_node_derivatives,")
+            && !helper.contains("            branches,\n            &eq0_branch_derivatives,"),
+        "local dense stamps should not pass global node or branch arrays:\n{helper}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -5181,7 +5178,7 @@ fn rust_backend_lowers_runtime_loops_with_derivative_shadows() {
     assert!(state.contains("MAX_ANALOG_LOOP_ITERATIONS"), "{state}");
     assert!(stamp.contains("while"), "{stamp}");
     assert!(stamp.contains("loop_guard"), "{stamp}");
-    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
     assert!(stamp.contains("s.dn[1][0]"), "{stamp}");
     assert!(stamp.contains("s.dn[1][1]"), "{stamp}");
 }
@@ -5349,7 +5346,7 @@ fn rust_backend_uses_single_ddt_derivative_scale_per_stamp_body() {
     );
     assert!(stamp.contains("let eq0_e"), "{stamp}");
     assert!(
-        stamp.contains("stamper.stamp_current_node2(")
+        stamp.contains("stamper.stamp_current_node2_local(")
             && stamp.contains("multiplicity * (ddt_scale)"),
         "{stamp}"
     );
@@ -5624,7 +5621,7 @@ fn rust_backend_lowers_intrinsic_math_with_analytic_derivatives() {
         !stamp.contains("arg.clone()"),
         "generated unary intrinsics must consume owned AdValue operands without cloning derivative arrays:\n{stamp}"
     );
-    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
     assert!(stamp.contains("if "), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
 }
@@ -6123,7 +6120,7 @@ fn rust_backend_lowers_conditional_expressions_with_selected_derivatives() {
 
     assert!(stamp.contains("if "), "{stamp}");
     assert!(stamp.contains(" > "), "{stamp}");
-    assert!(stamp.contains("stamper.stamp_current_node2("), "{stamp}");
+    assert!(stamp.contains("stamper.stamp_current_node2_local("), "{stamp}");
     assert!(stamp.contains("nodes[0]"), "{stamp}");
     assert!(stamp.contains("nodes[1]"), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
@@ -6297,7 +6294,7 @@ fn rust_backend_uses_fixed_mixed_sparse_current_stamp() {
         .as_str();
 
     assert!(
-        stamp.contains("stamper.stamp_current_node2_branch1("),
+        stamp.contains("stamper.stamp_current_node2_branch1_local("),
         "{stamp}"
     );
     assert!(
@@ -6324,7 +6321,7 @@ fn rust_backend_uses_fixed_mixed_sparse_potential_stamp() {
         .as_str();
 
     assert!(
-        stamp.contains("stamper.stamp_potential_node2_branch1("),
+        stamp.contains("stamper.stamp_potential_node2_branch1_local("),
         "{stamp}"
     );
     assert!(
@@ -6872,7 +6869,7 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedStamper<'a> {{
-        pub fn stamp_current_const(
+        pub fn stamp_current_const_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6881,7 +6878,7 @@ pub mod runtime {{
             *self.touched += value;
         }}
 
-        pub fn stamp_current_node1(
+        pub fn stamp_current_node1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6892,7 +6889,7 @@ pub mod runtime {{
             *self.touched += value + derivative0;
         }}
 
-        pub fn stamp_current_node2(
+        pub fn stamp_current_node2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6905,7 +6902,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1;
         }}
 
-        pub fn stamp_current_node3(
+        pub fn stamp_current_node3_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6920,7 +6917,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1 + derivative2;
         }}
 
-        pub fn stamp_current_branch1(
+        pub fn stamp_current_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6931,7 +6928,7 @@ pub mod runtime {{
             *self.touched += value + derivative0;
         }}
 
-        pub fn stamp_current_branch2(
+        pub fn stamp_current_branch2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6944,7 +6941,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1;
         }}
 
-        pub fn stamp_current_node1_branch1(
+        pub fn stamp_current_node1_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6957,7 +6954,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1;
         }}
 
-        pub fn stamp_current_node2_branch1(
+        pub fn stamp_current_node2_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6972,7 +6969,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1 + derivative2;
         }}
 
-        pub fn stamp_current(
+        pub fn stamp_current_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -6982,14 +6979,12 @@ pub mod runtime {{
             *self.touched += value + derivatives.iter().map(|derivative| derivative.value).sum::<f64>();
         }}
 
-        pub fn stamp_current_dense(
+        pub fn stamp_current_dense_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
             value: f64,
-            _nodes: &[usize],
             node_derivatives: &[f64],
-            _branches: &[usize],
             branch_derivatives: &[f64],
             derivative_scale: f64,
         ) {{
@@ -6999,7 +6994,7 @@ pub mod runtime {{
                         + branch_derivatives.iter().copied().sum::<f64>());
         }}
 
-        pub fn stamp_potential_branch(
+        pub fn stamp_potential_branch_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7009,11 +7004,11 @@ pub mod runtime {{
             *self.touched += multiplicity;
         }}
 
-        pub fn stamp_potential_const(&mut self, _branch: usize, value: f64) {{
+        pub fn stamp_potential_const_local(&mut self, _branch: usize, value: f64) {{
             *self.touched += value;
         }}
 
-        pub fn stamp_potential_node1(
+        pub fn stamp_potential_node1_local(
             &mut self,
             _branch: usize,
             value: f64,
@@ -7023,7 +7018,7 @@ pub mod runtime {{
             *self.touched += value + derivative0;
         }}
 
-        pub fn stamp_potential_node2(
+        pub fn stamp_potential_node2_local(
             &mut self,
             _branch: usize,
             value: f64,
@@ -7035,7 +7030,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1;
         }}
 
-        pub fn stamp_potential_branch1(
+        pub fn stamp_potential_branch1_local(
             &mut self,
             _branch: usize,
             value: f64,
@@ -7045,7 +7040,7 @@ pub mod runtime {{
             *self.touched += value + derivative0;
         }}
 
-        pub fn stamp_potential_branch2(
+        pub fn stamp_potential_branch2_local(
             &mut self,
             _branch: usize,
             value: f64,
@@ -7057,7 +7052,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1;
         }}
 
-        pub fn stamp_potential_node1_branch1(
+        pub fn stamp_potential_node1_branch1_local(
             &mut self,
             _branch: usize,
             value: f64,
@@ -7069,7 +7064,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1;
         }}
 
-        pub fn stamp_potential_node2_branch1(
+        pub fn stamp_potential_node2_branch1_local(
             &mut self,
             _branch: usize,
             value: f64,
@@ -7083,7 +7078,7 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1 + derivative2;
         }}
 
-        pub fn stamp_potential(
+        pub fn stamp_potential_local(
             &mut self,
             _branch: usize,
             value: f64,
@@ -7092,13 +7087,11 @@ pub mod runtime {{
             *self.touched += value + derivatives.iter().map(|derivative| derivative.value).sum::<f64>();
         }}
 
-        pub fn stamp_potential_dense(
+        pub fn stamp_potential_dense_local(
             &mut self,
             _branch: usize,
             value: f64,
-            _nodes: &[usize],
             node_derivatives: &[f64],
-            _branches: &[usize],
             branch_derivatives: &[f64],
         ) {{
             *self.touched += value
@@ -7406,7 +7399,7 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedStamper<'a> {{
-        pub fn stamp_current_const(
+        pub fn stamp_current_const_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7415,7 +7408,7 @@ pub mod runtime {{
             *self.current += value;
         }}
 
-        pub fn stamp_current_node1(
+        pub fn stamp_current_node1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7427,7 +7420,7 @@ pub mod runtime {{
             self.node_derivatives[node0] += derivative0;
         }}
 
-        pub fn stamp_current_node2(
+        pub fn stamp_current_node2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7442,7 +7435,7 @@ pub mod runtime {{
             self.node_derivatives[node1] += derivative1;
         }}
 
-        pub fn stamp_current_node3(
+        pub fn stamp_current_node3_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7460,7 +7453,7 @@ pub mod runtime {{
             self.node_derivatives[node2] += derivative2;
         }}
 
-        pub fn stamp_current_branch1(
+        pub fn stamp_current_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7471,7 +7464,7 @@ pub mod runtime {{
             *self.current += value;
         }}
 
-        pub fn stamp_current_branch2(
+        pub fn stamp_current_branch2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7484,7 +7477,7 @@ pub mod runtime {{
             *self.current += value;
         }}
 
-        pub fn stamp_current_node1_branch1(
+        pub fn stamp_current_node1_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7498,7 +7491,7 @@ pub mod runtime {{
             self.node_derivatives[node0] += derivative0;
         }}
 
-        pub fn stamp_current_node2_branch1(
+        pub fn stamp_current_node2_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7515,7 +7508,7 @@ pub mod runtime {{
             self.node_derivatives[node1] += derivative1;
         }}
 
-        pub fn stamp_current(
+        pub fn stamp_current_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7530,7 +7523,7 @@ pub mod runtime {{
             }}
         }}
 
-        pub fn stamp_potential_branch(
+        pub fn stamp_potential_branch_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -7539,10 +7532,10 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_const(&mut self, _branch: usize, _value: f64) {{
+        pub fn stamp_potential_const_local(&mut self, _branch: usize, _value: f64) {{
         }}
 
-        pub fn stamp_potential_node1(
+        pub fn stamp_potential_node1_local(
             &mut self,
             _branch: usize,
             _value: f64,
@@ -7551,7 +7544,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_node2(
+        pub fn stamp_potential_node2_local(
             &mut self,
             _branch: usize,
             _value: f64,
@@ -7562,7 +7555,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_branch1(
+        pub fn stamp_potential_branch1_local(
             &mut self,
             _branch: usize,
             _value: f64,
@@ -7571,7 +7564,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_branch2(
+        pub fn stamp_potential_branch2_local(
             &mut self,
             _branch: usize,
             _value: f64,
@@ -7582,7 +7575,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential(
+        pub fn stamp_potential_local(
             &mut self,
             _branch: usize,
             _value: f64,
@@ -7864,8 +7857,9 @@ fn rust_backend_lowers_potential_contribution_to_branch_unknown_stamp() {
 
     assert!(state.contains("BRANCH_COUNT: usize = 1"), "{state}");
     assert!(state.contains("set_branch_indices"), "{state}");
-    assert!(stamp.contains("stamp_potential"), "{stamp}");
-    assert!(stamp.contains("branches[0]"), "{stamp}");
+    assert!(stamp.contains("stamp_potential_branch_local"), "{stamp}");
+    assert!(stamp.contains("stamp_potential_const_local"), "{stamp}");
+    assert!(stamp.contains("            0,\n            eq0_value,"), "{stamp}");
 }
 
 #[test]
@@ -7906,8 +7900,9 @@ fn rust_backend_keeps_distinct_named_potential_branches_with_shared_endpoints() 
         .as_str();
 
     assert!(state.contains("BRANCH_COUNT: usize = 2"), "{state}");
-    assert!(stamp.contains("branches[0]"), "{stamp}");
-    assert!(stamp.contains("branches[1]"), "{stamp}");
+    assert!(stamp.contains("stamp_potential_branch_local"), "{stamp}");
+    assert!(stamp.contains("            0,\n            eq0_value,"), "{stamp}");
+    assert!(stamp.contains("            1,\n            eq1_value,"), "{stamp}");
 }
 
 #[test]
@@ -7975,7 +7970,7 @@ fn rust_backend_lowers_sparse_named_branch_current_axis() {
         .as_str();
 
     assert!(
-        stamp.contains("stamper.stamp_potential_branch1("),
+        stamp.contains("stamper.stamp_potential_branch1_local("),
         "{stamp}"
     );
     assert!(
@@ -8272,7 +8267,7 @@ fn rust_backend_lowers_potential_branch_current_axis_derivative() {
         .as_str();
 
     assert!(
-        stamp.contains("stamper.stamp_potential_branch1("),
+        stamp.contains("stamper.stamp_potential_branch1_local("),
         "{stamp}"
     );
     assert!(stamp.contains("p.p0"), "{stamp}");
@@ -8327,7 +8322,7 @@ fn rust_backend_propagates_branch_current_axis_through_assignment() {
         .as_str();
 
     assert!(
-        stamp.contains("stamper.stamp_potential_node2_branch1("),
+        stamp.contains("stamper.stamp_potential_node2_branch1_local("),
         "{stamp}"
     );
     assert!(
