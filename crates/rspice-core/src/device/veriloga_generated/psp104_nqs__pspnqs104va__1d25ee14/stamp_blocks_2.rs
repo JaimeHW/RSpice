@@ -1793,7 +1793,7 @@ impl Instance {
         s.v[2608] = if s.b[2608] { 1.0 } else { 0.0 };
 
         if s.b[2608] {
-            s.store_mul_ad_rhs(2027, 266, A::add_scaled_inputs(s.ad_value(1819), 0.5, s.ad_value(787), 1.0));
+            s.store_mul_add_scaled_inputs_rhs(2027, 266, s.ad_value(1819), 0.5, s.ad_value(787), 1.0);
         }
 
         s.b[2609] = (s.v[2027] < 230.25850929940458);
@@ -1840,7 +1840,7 @@ impl Instance {
         s.v[2612] = if s.b[2612] { 1.0 } else { 0.0 };
 
         if s.b[2612] {
-            s.store_mul_ad_rhs(2027, 266, A::add_scaled_inputs(s.ad_value(1819), 0.5, s.ad_value(788), 1.0));
+            s.store_mul_add_scaled_inputs_rhs(2027, 266, s.ad_value(1819), 0.5, s.ad_value(788), 1.0);
         }
 
         s.b[2613] = (s.v[2027] < 230.25850929940458);

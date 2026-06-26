@@ -1243,7 +1243,7 @@ impl Instance {
 
         s.store_offset(14, 13, ((1.0) + ((-0.001))));
 
-        s.store_offset_ad(15, A::add_scaled_inputs(s.ad_value(14), 0.5, A::sqrt(A::offset(A::square(s.ad_value(14)), 0.004)), 0.5), (-1.0));
+        s.store_offset_add_scaled_inputs(15, s.ad_value(14), 0.5, A::sqrt(A::offset(A::square(s.ad_value(14)), 0.004)), 0.5, (-1.0));
 
         s.store_scaled_offset_ad(154, A::sqrt(A::offset(s.ad_value(15), 1.0)), 1.0, 0.5);
 

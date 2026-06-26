@@ -4233,7 +4233,7 @@ impl Instance {
 
         if ((((s.b[199] && s.b[528]) && s.b[531]) && s.b[532]) && s.b[533]) {
             s.store_scalar(167, 1.0);
-            s.store_mul_ad_rhs(165, 120, A::add_scaled_inputs(A::div_from_scalar(1.0, s.ad_value(125)), 1.0, s.ad_value(166), (0.5 * s.v[9])));
+            s.store_mul_add_scaled_inputs_rhs(165, 120, A::div_from_scalar(1.0, s.ad_value(125)), 1.0, s.ad_value(166), (0.5 * s.v[9]));
             s.store_div_scaled_product_indices(166, 120, 166, ((-0.5) * s.v[9]), 125, 1.0);
         }
 
