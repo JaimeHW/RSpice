@@ -353,19 +353,15 @@ impl Instance {
         }
 
         if s.b[987] {
-            s.store_ad_value(623, {
-                if ((if ((s.v[514] * s.v[549]) > 0.05) { (s.v[514] * s.v[549]) } else { 0.05 }) < 0.95) {
-                    {
-                        if ((s.v[514] * s.v[549]) > 0.05) {
-                            A::mul(s.ad_value(514), s.ad_value(549))
-                        } else {
-                            A::constant(0.05)
-                        }
-                    }
+            if ((if ((s.v[514] * s.v[549]) > 0.05) { (s.v[514] * s.v[549]) } else { 0.05 }) < 0.95) {
+                if ((s.v[514] * s.v[549]) > 0.05) {
+                    s.store_mul(623, 514, 549);
                 } else {
-                    A::constant(0.95)
+                    s.store_scalar(623, 0.05);
                 }
-            });
+            } else {
+                s.store_scalar(623, 0.95);
+            }
         }
 
         if s.b[987] {

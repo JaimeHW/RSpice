@@ -25,19 +25,15 @@ impl Instance {
         }
 
         if (s.b[1467] && (!s.b[1468])) {
-            s.store_ad_value(13, {
-                if (!(s.v[13] < ((-10000.0) * 0.01))) {
-                    A::add_scaled_inputs(s.ad_value(13), 0.5, A::sqrt(A::offset(A::square(s.ad_value(13)), ((4.0 * 0.01) * 0.01))), 0.5)
+            if (!(s.v[13] < ((-10000.0) * 0.01))) {
+                s.store_scaled_add_ad_rhs(13, 13, A::sqrt(A::offset(A::square(s.ad_value(13)), ((4.0 * 0.01) * 0.01))), 0.5);
+            } else {
+                if (s.v[13] < ((-10000.0) * 0.01)) {
+                    s.store_div_from_scalar(13, ((-0.01) * 0.01), 13);
                 } else {
-                    {
-                        if (s.v[13] < ((-10000.0) * 0.01)) {
-                            A::div_from_scalar(((-0.01) * 0.01), s.ad_value(13))
-                        } else {
-                            A::constant(0.0)
-                        }
-                    }
+                    s.store_scalar(13, 0.0);
                 }
-            });
+            }
         }
 
         if (s.b[1467] && (!s.b[1468])) {
@@ -93,19 +89,15 @@ impl Instance {
         }
 
         if (s.b[1467] && (!s.b[1470])) {
-            s.store_ad_value(13, {
-                if (!(s.v[13] < ((-10000.0) * 0.01))) {
-                    A::add_scaled_inputs(s.ad_value(13), 0.5, A::sqrt(A::offset(A::square(s.ad_value(13)), ((4.0 * 0.01) * 0.01))), 0.5)
+            if (!(s.v[13] < ((-10000.0) * 0.01))) {
+                s.store_scaled_add_ad_rhs(13, 13, A::sqrt(A::offset(A::square(s.ad_value(13)), ((4.0 * 0.01) * 0.01))), 0.5);
+            } else {
+                if (s.v[13] < ((-10000.0) * 0.01)) {
+                    s.store_div_from_scalar(13, ((-0.01) * 0.01), 13);
                 } else {
-                    {
-                        if (s.v[13] < ((-10000.0) * 0.01)) {
-                            A::div_from_scalar(((-0.01) * 0.01), s.ad_value(13))
-                        } else {
-                            A::constant(0.0)
-                        }
-                    }
+                    s.store_scalar(13, 0.0);
                 }
-            });
+            }
         }
 
         if (s.b[1467] && (!s.b[1470])) {
