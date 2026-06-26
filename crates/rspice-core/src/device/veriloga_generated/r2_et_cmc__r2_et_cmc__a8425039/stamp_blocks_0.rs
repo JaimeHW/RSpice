@@ -285,7 +285,7 @@ impl Instance {
 
         s.store_offset(15, 12, (-s.v[11]));
 
-        s.store_offset_mul_ad(16, s.ad_value(15), A::add(s.ad_value(37), A::mul(s.ad_value(15), s.ad_value(38))), 1.0);
+        s.store_offset_mul_ad(16, s.ad_value(15), A::add_scaled_product(s.ad_value(37), 1.0, s.ad_value(15), s.ad_value(38), 1.0), 1.0);
 
         s.b[90] = (s.v[16] < (0.01 + 0.1));
         s.v[90] = if s.b[90] { 1.0 } else { 0.0 };

@@ -344,7 +344,7 @@ impl Instance {
             s.store_add_ad_rhs(35, 35, A::div_from_scalar(p.p41, s.ad_value(4)));
         }
 
-        s.store_offset_mul_ad(13, s.ad_value(12), A::add(s.ad_value(34), A::mul(s.ad_value(12), s.ad_value(35))), 1.0);
+        s.store_offset_mul_ad(13, s.ad_value(12), A::add_scaled_product(s.ad_value(34), 1.0, s.ad_value(12), s.ad_value(35), 1.0), 1.0);
 
         s.b[76] = (s.v[13] < (0.01 + 0.1));
         s.v[76] = if s.b[76] { 1.0 } else { 0.0 };

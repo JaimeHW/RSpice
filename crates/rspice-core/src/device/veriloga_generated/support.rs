@@ -6367,6 +6367,34 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn add_scaled_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64) -> Self {
+        let mut result = value;
+        let value_term = result.value * value_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        result.value = value_term + product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * value_scale + (product_left.dn[index] * product_right_value + product_left_value * product_right.dn[index]) * product_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * value_scale + (product_left.db[index] * product_right_value + product_left_value * product_right.db[index]) * product_scale; }
+        result
+    }
+
+    #[inline]
+    pub(crate) fn add_scaled_products(left_product_left: Self, left_product_right: Self, left_scale: f64, right_product_left: Self, right_product_right: Self, right_scale: f64) -> Self {
+        let mut result = left_product_left;
+        let left_product_left_value = result.value;
+        let left_product_right_value = left_product_right.value;
+        let right_product_left_value = right_product_left.value;
+        let right_product_right_value = right_product_right.value;
+        let left_product_term = left_product_left_value * left_product_right_value * left_scale;
+        let right_product_term = right_product_left_value * right_product_right_value * right_scale;
+        result.value = left_product_term + right_product_term;
+        for index in 0..NODE_COUNT { result.dn[index] = (result.dn[index] * left_product_right_value + left_product_left_value * left_product_right.dn[index]) * left_scale + (right_product_left.dn[index] * right_product_right_value + right_product_left_value * right_product_right.dn[index]) * right_scale; }
+        for index in 0..BRANCH_COUNT { result.db[index] = (result.db[index] * left_product_right_value + left_product_left_value * left_product_right.db[index]) * left_scale + (right_product_left.db[index] * right_product_right_value + right_product_left_value * right_product_right.db[index]) * right_scale; }
+        result
+    }
+
+    #[inline]
     pub(crate) fn mul(left: Self, right: Self) -> Self {
         let mut value = left;
         let left_value = value.value;
