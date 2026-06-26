@@ -3907,6 +3907,276 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.store_div_scaled_product_components(index, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
     }
 
+
+    #[inline]
+    pub(crate) fn store_add_scaled_product_mixed_iaa(&mut self, index: usize, value: usize, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let value_value = self.v[value];
+        let value_dn = self.dn[value];
+        let value_db = self.db[value];
+        self.store_add_scaled_product_components(index, value_value, value_dn, value_db, value_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_scaled_product_mixed_iaa(&mut self, index: usize, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_div_scaled_product_components(index, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_product_mixed_aia(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_scaled_product_mixed_aia(&mut self, index: usize, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_div_scaled_product_components(index, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_product_mixed_aai(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_scaled_product_mixed_aai(&mut self, index: usize, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64, denominator: usize, denominator_scale: f64) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_div_scaled_product_components(index, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iaaa(&mut self, index: usize, left_product_left: usize, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aiaa(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: usize, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aaia(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: usize, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aaai(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: usize, right_scale: f64) {
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iiaa(&mut self, index: usize, left_product_left: usize, left_product_right: usize, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iaia(&mut self, index: usize, left_product_left: usize, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: usize, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iaai(&mut self, index: usize, left_product_left: usize, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: usize, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aiia(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: usize, left_scale: f64, right_product_left: usize, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aiai(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: usize, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: usize, right_scale: f64) {
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aaii(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: usize, right_product_right: usize, right_scale: f64) {
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
 }
 
 
@@ -7817,6 +8087,276 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let product_left_db = self.db[product_left];
         let product_right_db = self.db[product_right];
         self.store_div_scaled_product_components(index, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_product_mixed_iaa(&mut self, index: usize, value: usize, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let value_value = self.v[value];
+        let value_dn = self.dn[value];
+        let value_db = self.db[value];
+        self.store_add_scaled_product_components(index, value_value, value_dn, value_db, value_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_scaled_product_mixed_iaa(&mut self, index: usize, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_div_scaled_product_components(index, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_product_mixed_aia(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_scaled_product_mixed_aia(&mut self, index: usize, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_div_scaled_product_components(index, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_product_mixed_aai(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_scaled_product_mixed_aai(&mut self, index: usize, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64, denominator: usize, denominator_scale: f64) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_div_scaled_product_components(index, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iaaa(&mut self, index: usize, left_product_left: usize, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aiaa(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: usize, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aaia(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: usize, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aaai(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: usize, right_scale: f64) {
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iiaa(&mut self, index: usize, left_product_left: usize, left_product_right: usize, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iaia(&mut self, index: usize, left_product_left: usize, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: usize, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_iaai(&mut self, index: usize, left_product_left: usize, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: usize, right_scale: f64) {
+        let left_product_left_value = self.v[left_product_left];
+        let left_product_left_dn = self.dn[left_product_left];
+        let left_product_left_db = self.db[left_product_left];
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left_value, left_product_left_dn, left_product_left_db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aiia(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: usize, left_scale: f64, right_product_left: usize, right_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right.value, right_product_right.dn, right_product_right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aiai(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: usize, left_scale: f64, right_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, right_product_right: usize, right_scale: f64) {
+        let left_product_right_value = self.v[left_product_right];
+        let left_product_right_dn = self.dn[left_product_right];
+        let left_product_right_db = self.db[left_product_right];
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right_value, left_product_right_dn, left_product_right_db, left_scale, right_product_left.value, right_product_left.dn, right_product_left.db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs_product_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        let product_right_value = self.v[product_right];
+        let product_right_dn = self.dn[product_right];
+        let product_right_db = self.db[product_right];
+        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_products_mixed_aaii(&mut self, index: usize, left_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right_product_left: usize, right_product_right: usize, right_scale: f64) {
+        let right_product_left_value = self.v[right_product_left];
+        let right_product_left_dn = self.dn[right_product_left];
+        let right_product_left_db = self.db[right_product_left];
+        let right_product_right_value = self.v[right_product_right];
+        let right_product_right_dn = self.dn[right_product_right];
+        let right_product_right_db = self.db[right_product_right];
+        self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
     }
 
 }

@@ -475,7 +475,7 @@ impl Instance {
             s.store_mul(443, 405, 229);
             s.store_mul(334, 156, 213);
             s.store_mul(444, 154, 442);
-            s.store_add_scaled_inputs_product(447, A::ln(A::add_scaled_square_product(s.ad_value(444), 1.0, s.ad_value(443), s.ad_value(334), 1.0)), 1.0, A::ln(A::mul(s.ad_value(405), s.ad_value(334))), (-1.0), s.ad_value(154), s.ad_value(397), 1.0);
+            s.store_add_scaled_inputs_product_mixed_aaii(447, A::ln(A::add_scaled_square_product(s.ad_value(444), 1.0, s.ad_value(443), s.ad_value(334), 1.0)), 1.0, A::ln(A::mul(s.ad_value(405), s.ad_value(334))), (-1.0), 154, 397, 1.0);
         }
 
         s.b[2670] = (p.p33 == 2.0);
@@ -2064,7 +2064,7 @@ impl Instance {
             s.store_mul(443, 405, 229);
             s.store_mul(334, 156, 213);
             s.store_mul(444, 154, 442);
-            s.store_add_scaled_inputs_product(447, A::ln(A::add_scaled_square_product(s.ad_value(444), 1.0, s.ad_value(443), s.ad_value(334), 1.0)), 1.0, A::ln(A::mul(s.ad_value(405), s.ad_value(334))), (-1.0), s.ad_value(154), s.ad_value(397), 1.0);
+            s.store_add_scaled_inputs_product_mixed_aaii(447, A::ln(A::add_scaled_square_product(s.ad_value(444), 1.0, s.ad_value(443), s.ad_value(334), 1.0)), 1.0, A::ln(A::mul(s.ad_value(405), s.ad_value(334))), (-1.0), 154, 397, 1.0);
         }
 
         s.b[2791] = (p.p33 == 2.0);
@@ -3656,7 +3656,7 @@ impl Instance {
             s.store_mul(443, 405, 229);
             s.store_mul(334, 156, 213);
             s.store_mul(444, 154, 442);
-            s.store_add_scaled_inputs_product(447, A::ln(A::add_scaled_square_product(s.ad_value(444), 1.0, s.ad_value(443), s.ad_value(334), 1.0)), 1.0, A::ln(A::mul(s.ad_value(405), s.ad_value(334))), (-1.0), s.ad_value(154), s.ad_value(397), 1.0);
+            s.store_add_scaled_inputs_product_mixed_aaii(447, A::ln(A::add_scaled_square_product(s.ad_value(444), 1.0, s.ad_value(443), s.ad_value(334), 1.0)), 1.0, A::ln(A::mul(s.ad_value(405), s.ad_value(334))), (-1.0), 154, 397, 1.0);
         }
 
         s.b[2912] = (p.p33 == 2.0);
