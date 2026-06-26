@@ -2658,6 +2658,52 @@ fn rust_backend_fuses_expression_product_division_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_product_ratio_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_product_ratio_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression product ratio");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scaled_product_by_product(product_left: Self, product_right: Self, product_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains(
+            "fn div_scaled_product3_by_product(product_left: Self, product_middle: Self, product_right: Self, product_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("A::div_scaled_product_by_product("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("A::div_scaled_product3_by_product("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::div_scaled_product("), "{stamp}");
+    assert!(!stamp.contains("A::div_scaled_product3("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::mul("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::mul3("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_offset_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_product_division_source())
@@ -10534,6 +10580,35 @@ module compact_expression_product_division(p, n);
           + sqrt(((a * gain) * q) / r)
           + exp(((a * q) * c) / r)
           + ln((a * a) / (r * gain));
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_product_ratio_source() -> &'static str {
+    r#"
+module compact_expression_product_ratio(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real c;
+    real d;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n) + offset;
+        c = V(p) + gain;
+        d = V(n) + gain;
+        b = exp((a * q) / (r * c))
+          + sqrt(((a * gain) * q) / (r * c))
+          + tanh(((a * q) * c) / (r * d))
+          + ln((a * a) / (r * c));
         I(p, n) <+ b;
     end
 endmodule

@@ -6357,6 +6357,25 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scaled_product_by_product(product_left: Self, product_right: Self, product_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {",
+        "        let mut value = product_left;",
+        "        let product_left_value = value.value;",
+        "        let product_right_value = product_right.value;",
+        "        let denominator_left_value = denominator_left.value;",
+        "        let denominator_right_value = denominator_right.value;",
+        "        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);",
+        "        let product_value = product_left_value * product_right_value;",
+        "        let scaled_product_value = product_value * product_scale;",
+        "        let quotient = scaled_product_value * reciprocal;",
+        "        let product_derivative_scale = product_scale * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * product_right_value + product_left_value * product_right.node_derivatives[index]) * product_derivative_scale + (denominator_left.node_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.node_derivatives[index]) * denominator_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * product_right_value + product_left_value * product_right.branch_derivatives[index]) * product_derivative_scale + (denominator_left.branch_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.branch_derivatives[index]) * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_scaled_product_offset_lhs(product_left: Self, product_left_offset: f64, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {",
         "        let mut value = product_left;",
         "        let product_left_value = value.value + product_left_offset;",
@@ -6428,6 +6447,28 @@ fn generate_ad_value_struct() -> String {
         "        value.value = quotient;",
         "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * middle_right_value + product_middle.node_derivatives[index] * left_right_value + product_right.node_derivatives[index] * left_middle_value) * product_derivative_scale + denominator.node_derivatives[index] * denominator_derivative_scale; }",
         "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * middle_right_value + product_middle.branch_derivatives[index] * left_right_value + product_right.branch_derivatives[index] * left_middle_value) * product_derivative_scale + denominator.branch_derivatives[index] * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn div_scaled_product3_by_product(product_left: Self, product_middle: Self, product_right: Self, product_scale: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {",
+        "        let mut value = product_left;",
+        "        let product_left_value = value.value;",
+        "        let product_middle_value = product_middle.value;",
+        "        let product_right_value = product_right.value;",
+        "        let denominator_left_value = denominator_left.value;",
+        "        let denominator_right_value = denominator_right.value;",
+        "        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);",
+        "        let left_middle_value = product_left_value * product_middle_value;",
+        "        let left_right_value = product_left_value * product_right_value;",
+        "        let middle_right_value = product_middle_value * product_right_value;",
+        "        let scaled_product_value = left_middle_value * product_right_value * product_scale;",
+        "        let quotient = scaled_product_value * reciprocal;",
+        "        let product_derivative_scale = product_scale * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * middle_right_value + product_middle.node_derivatives[index] * left_right_value + product_right.node_derivatives[index] * left_middle_value) * product_derivative_scale + (denominator_left.node_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.node_derivatives[index]) * denominator_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * middle_right_value + product_middle.branch_derivatives[index] * left_right_value + product_right.branch_derivatives[index] * left_middle_value) * product_derivative_scale + (denominator_left.branch_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.branch_derivatives[index]) * denominator_derivative_scale; }",
         "        value",
         "    }",
         "",
@@ -13120,6 +13161,20 @@ fn compact_div_scaled_ad_expressions(left: &str, right: &str) -> Option<String> 
 fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> {
     let (denominator, denominator_scale) = compact_scaled_factor_ad_expression(right);
     if let Some(product) = compact_product3_ad_expression(left) {
+        if let Some(denominator_product) = compact_product2_ad_expression(denominator) {
+            let denominator_product_scale =
+                compact_scalar_mul(&denominator_product.scale, &denominator_scale);
+            return Some(format!(
+                "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
+                product.left,
+                product.middle,
+                product.right,
+                product.scale,
+                denominator_product.left,
+                denominator_product.right,
+                denominator_product_scale
+            ));
+        }
         return Some(format!(
             "AdValue::div_scaled_product3({}, {}, {}, {}, {denominator}, {denominator_scale})",
             product.left, product.middle, product.right, product.scale
@@ -13127,6 +13182,19 @@ fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> 
     }
 
     let product = compact_div_product2_ad_expression(left)?;
+    if let Some(denominator_product) = compact_product2_ad_expression(denominator) {
+        let denominator_product_scale =
+            compact_scalar_mul(&denominator_product.scale, &denominator_scale);
+        return Some(format!(
+            "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
+            product.left,
+            product.right,
+            product.scale,
+            denominator_product.left,
+            denominator_product.right,
+            denominator_product_scale
+        ));
+    }
     if let Some(args) = compact_ad_call_args(denominator, "offset") {
         if args.len() == 2 {
             return Some(format!(
@@ -13538,6 +13606,21 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
         ));
     }
 
+    if let Some(args) = compact_ad_call_args(value, "div_scaled_product_by_product") {
+        if args.len() != 6 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {}, {})",
+            args[0],
+            args[1],
+            compact_scalar_mul(args[2], scale),
+            args[3],
+            args[4],
+            args[5]
+        ));
+    }
+
     if let Some(args) = compact_ad_call_args(value, "div_scaled_product_offset_lhs") {
         if args.len() != 6 {
             return None;
@@ -13580,6 +13663,22 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             args[3],
             args[4],
             args[5]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "div_scaled_product3_by_product") {
+        if args.len() != 7 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {}, {})",
+            args[0],
+            args[1],
+            args[2],
+            compact_scalar_mul(args[3], scale),
+            args[4],
+            args[5],
+            args[6]
         ));
     }
 
