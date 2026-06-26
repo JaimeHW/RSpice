@@ -4120,7 +4120,7 @@ impl Instance {
             s.store_scaled_mul(169, 597, 597, 3.0);
             s.store_scaled_mul(170, 598, 598, 7.5);
             s.store_scale(171, 599, 2.5298);
-            s.store_ad_value(601, A::mul_sub_from_scalar_rhs(A::div(s.ad_value(393), s.ad_value(392)), 1.0, A::div(s.ad_value(390), s.ad_value(210))));
+            s.store_mul_sub_from_scalar_rhs_ad(601, A::div(s.ad_value(393), s.ad_value(392)), 1.0, A::div(s.ad_value(390), s.ad_value(210)));
             s.store_mul_square_lhs(604, 209, 209);
             s.store_div_ad_rhs(602, 339, A::add(s.ad_value(339), s.ad_value(399)));
             s.store_div_ad_rhs(172, 236, A::add_scaled_product(s.ad_value(181), 2.0, A::max_from_scalar(0.0, s.ad_value(237)), s.ad_value(392), 1.0));

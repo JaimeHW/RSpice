@@ -4388,7 +4388,7 @@ impl Instance {
             if ((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[1937])) {
                 s.store_add_ad_rhs(1839, 1853, A::div_scaled_add_product(s.ad_value(1903), 1.0, s.ad_value(1830), A::sub_scaled_inputs(s.ad_value(1830), 1.0, s.ad_value(965), 2.0), 1.0, s.ad_value(1908), 1.0));
                 s.store_scalar(1840, 1.0);
-                s.store_ad_value(1841, A::mul_sub_from_scalar_rhs(A::add_scaled_product(s.ad_value(334), 1.0, A::div(s.ad_value(965), s.ad_value(1830)), s.ad_value(334), (-1.0)), 1.0, s.ad_value(1842)));
+                s.store_mul_sub_from_scalar_rhs_ad_lhs(1841, A::add_scaled_product(s.ad_value(334), 1.0, A::div(s.ad_value(965), s.ad_value(1830)), s.ad_value(334), (-1.0)), 1.0, 1842);
             }
             s.b[1938] = ((s.v[1839] > (s.v[1851] - s.v[1850])) && (s.v[1850] >= 0.0));
             s.v[1938] = if s.b[1938] { 1.0 } else { 0.0 };

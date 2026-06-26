@@ -4693,7 +4693,7 @@ impl Instance {
 
         if s.b[1585] {
             s.store_div_from_scalar_sub_from_scalar_ad(1179, 1.0, 6e-8, A::scale(s.ad_value(1228), 2.0));
-            s.store_ad_value(1228, A::mul_sub_from_scalar_lhs_scaled_output(4e-8, s.ad_value(1228), s.ad_value(1179), 2e-8));
+            s.store_mul_sub_from_scalar_lhs_scaled_output(1228, 4e-8, 1228, 1179, 2e-8);
         }
 
         s.b[1586] = (s.v[403] == 1.0);

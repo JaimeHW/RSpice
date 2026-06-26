@@ -18933,9 +18933,9 @@ impl Instance {
 
         s.v[116] = ((s.v[39] * s.v[113]) * s.v[11]);
 
-        s.store_ad_value(117, A::mul_sub_from_scalar_rhs(A::div_from_scalar(p.p1, A::scale(s.ad_value(115), s.v[116])), 1.0, A::scaled_offset(s.ad_value(135), (-1.0), p.p44)));
+        s.store_mul_sub_from_scalar_rhs_ad(117, A::div_from_scalar(p.p1, A::scale(s.ad_value(115), s.v[116])), 1.0, A::scaled_offset(s.ad_value(135), (-1.0), p.p44));
 
-        s.store_ad_value(118, A::mul_sub_from_scalar_rhs(A::div_from_scalar(p.p2, A::scale(s.ad_value(115), s.v[116])), 1.0, A::scaled_offset(s.ad_value(135), (-1.0), p.p44)));
+        s.store_mul_sub_from_scalar_rhs_ad(118, A::div_from_scalar(p.p2, A::scale(s.ad_value(115), s.v[116])), 1.0, A::scaled_offset(s.ad_value(135), (-1.0), p.p44));
 
         s.store_scale(123, 114, s.v[116]);
 
