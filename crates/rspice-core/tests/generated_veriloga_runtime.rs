@@ -1,8 +1,8 @@
 #![cfg(feature = "veriloga-builtins")]
 
 use rspice_core::device::veriloga_generated::{
-    GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper,
-    builtins, instantiate_builtin,
+    GeneratedAnalysisKind, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper,
+    GeneratedStamper, builtins, instantiate_builtin,
 };
 use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 use rspice_core::{CircuitData, netlist::ParamContext};
@@ -109,6 +109,7 @@ fn generated_runtime_restores_snapshots_without_discarding_scratch_storage() {
         .unwrap_or_else(|error| panic!("read {}: {error}", registry_path.display()));
     let nonlinear = std::fs::read_to_string(&nonlinear_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", nonlinear_path.display()));
+    let nonlinear_lf = nonlinear.replace("\r\n", "\n");
 
     assert!(
         runtime.contains("pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self)"),
@@ -123,7 +124,11 @@ fn generated_runtime_restores_snapshots_without_discarding_scratch_storage() {
         "generated registry should dispatch variant-matched restores in place:\n{registry}"
     );
     assert!(
-        nonlinear.contains(
+        registry.contains("active.restore_from_snapshot(*snapshot)"),
+        "boxed generated registry variants should restore from the boxed snapshot value:\n{registry}"
+    );
+    assert!(
+        nonlinear_lf.contains(
             "self.generated_veriloga_devices\n                .restore_from_snapshot(snapshot.generated_veriloga_devices);"
         ),
         "nonlinear restore should not replace generated devices wholesale:\n{nonlinear}"
@@ -170,6 +175,23 @@ fn generated_stamper_linearizes_current_contribution() {
     let equivalent = 0.2 - (0.01 * 1.0 + -0.01 * 0.5);
     assert_eq!(rhs[0], -equivalent);
     assert_eq!(rhs[1], equivalent);
+}
+
+#[test]
+fn generated_eval_context_reports_analysis_mode() {
+    let voltages = [1.0, 0.5];
+    let dc = GeneratedEvalContext::new(&voltages, 300.15, 2);
+    assert!(dc.analysis("dc"));
+    assert!(dc.analysis("op"));
+    assert!(dc.analysis("static"));
+    assert!(!dc.analysis("ac"));
+    assert!(!dc.analysis("smallsig"));
+
+    let ac = GeneratedEvalContext::with_analysis(&voltages, 300.15, 2, GeneratedAnalysisKind::Ac);
+    assert!(ac.analysis("ac"));
+    assert!(ac.analysis("smallsig"));
+    assert!(!ac.analysis("dc"));
+    assert!(!ac.analysis("noise"));
 }
 
 #[test]

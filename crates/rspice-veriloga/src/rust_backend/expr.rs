@@ -61,6 +61,34 @@ impl DdtSlots {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BranchCurrentSlot {
+    pub slot: usize,
+    pub sign: f64,
+}
+
+impl BranchCurrentSlot {
+    pub(crate) const fn forward(slot: usize) -> Self {
+        Self { slot, sign: 1.0 }
+    }
+
+    pub(crate) const fn reverse(slot: usize) -> Self {
+        Self { slot, sign: -1.0 }
+    }
+
+    pub(crate) fn signed_value(self, value: String) -> String {
+        if self.sign < 0.0 {
+            format!("-({value})")
+        } else {
+            value
+        }
+    }
+}
+
+pub(crate) fn branch_pair_key(pos: Option<usize>, neg: Option<usize>) -> String {
+    format!("\u{0}branch-pair:{pos:?}:{neg:?}")
+}
+
 pub(crate) fn lower_equation_expr_with_branch_currents(
     artifact: &CanonicalIrArtifact,
     expr: ExprId,
@@ -69,7 +97,7 @@ pub(crate) fn lower_equation_expr_with_branch_currents(
     variables: &HashMap<String, LoweredVariable>,
     ddt_slots: &DdtSlots,
     branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
 ) -> Result<LoweredExpr, RustBackendError> {
     lower_expr_with_variables(
         artifact,
@@ -93,7 +121,7 @@ pub(crate) fn lower_assignment_expr_with_branch_currents(
     variables: &HashMap<String, LoweredVariable>,
     ddt_slots: &DdtSlots,
     branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
 ) -> Result<LoweredExpr, RustBackendError> {
     lower_expr_with_variables(
         artifact,
@@ -117,7 +145,7 @@ pub(crate) fn lower_value_assignment_expr_with_branch_currents(
     variables: &HashMap<String, LoweredVariable>,
     ddt_slots: &DdtSlots,
     branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
 ) -> Result<LoweredExpr, RustBackendError> {
     lower_expr_with_variables(
         artifact,
@@ -141,7 +169,7 @@ pub(crate) fn lower_reactive_expr_with_branch_currents(
     variables: &HashMap<String, LoweredVariable>,
     ddt_slots: &DdtSlots,
     branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
 ) -> Result<LoweredExpr, RustBackendError> {
     lower_expr_with_variables(
         artifact,
@@ -165,7 +193,7 @@ pub(crate) fn lower_reactive_assignment_expr_with_branch_currents(
     variables: &HashMap<String, LoweredVariable>,
     ddt_slots: &DdtSlots,
     branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
 ) -> Result<LoweredExpr, RustBackendError> {
     lower_expr_with_variables(
         artifact,
@@ -189,7 +217,7 @@ fn lower_expr_with_variables(
     variables: &HashMap<String, LoweredVariable>,
     ddt_slots: &DdtSlots,
     branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     mode: ExprMode,
     derivative_emission: DerivativeEmission,
 ) -> Result<LoweredExpr, RustBackendError> {
@@ -250,7 +278,7 @@ struct ExprEmitter<'a> {
     variables: &'a HashMap<String, LoweredVariable>,
     ddt_slots: &'a DdtSlots,
     branch_currents: &'a HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &'a HashMap<String, usize>,
+    branch_current_unknowns: &'a HashMap<String, BranchCurrentSlot>,
     mode: ExprMode,
     derivative_emission: DerivativeEmission,
     emitted: HashMap<ExprId, ExprValue>,
@@ -354,6 +382,9 @@ impl ExprEmitter<'_> {
             HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
                 let (expr, ic) = self.idt_operands(args.as_slice())?;
                 self.lower_idt_value(id, expr, ic, &base)?
+            }
+            HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
+                self.lower_analysis_value(args.as_slice(), &base)?
             }
             HirExprKind::Call { name, args } if is_ddx_name(name.as_str()) => {
                 let (expr, probe) = self.ddx_operands(args.as_slice())?;
@@ -493,7 +524,7 @@ impl ExprEmitter<'_> {
                         .emitted
                         .get(right)
                         .expect("right operand must be emitted before binary derivative");
-                    binary_derivatives(op.as_str(), left, right)
+                    binary_derivatives(op.as_str(), &value_expr, left, right)
                         .map_err(|_| self.unsupported(format!("binary operator {op}")))?
                 }
             }
@@ -529,6 +560,9 @@ impl ExprEmitter<'_> {
             HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
                 let (expr, _) = self.idt_operands(args.as_slice())?;
                 self.idt_derivatives(expr)?
+            }
+            HirExprKind::Call { name, .. } if is_analysis_name(name.as_str()) => {
+                zero_derivatives(node_count)
             }
             HirExprKind::Call { name, .. } if is_ddx_name(name.as_str()) => {
                 zero_derivatives(node_count)
@@ -591,9 +625,21 @@ impl ExprEmitter<'_> {
             }
             HirExprKind::BranchAccess { access, .. } => {
                 if access == "I" {
-                    return Err(self.unsupported(format!("branch access '{access}' in expression")));
+                    if let HirExprKind::BranchAccess { pos, neg, .. } = &expression.kind
+                        && let Some(slot) =
+                            self.branch_current_slot_for_nodes(pos.as_str(), neg.as_deref())?
+                    {
+                        let mut derivatives = zero_derivatives(branch_axis_count);
+                        derivatives[slot.slot] = format_f64(slot.sign);
+                        derivatives
+                    } else {
+                        return Err(
+                            self.unsupported(format!("branch access '{access}' in expression"))
+                        );
+                    }
+                } else {
+                    zero_derivatives(branch_axis_count)
                 }
-                zero_derivatives(branch_axis_count)
             }
             HirExprKind::NamedBranchAccess { access, name } => {
                 if access.as_str() == "I" {
@@ -601,7 +647,7 @@ impl ExprEmitter<'_> {
                         current.branch_derivatives.clone()
                     } else if let Some(slot) = self.branch_current_unknowns.get(name.as_str()) {
                         let mut derivatives = zero_derivatives(branch_axis_count);
-                        derivatives[*slot] = "1.0".to_string();
+                        derivatives[slot.slot] = format_f64(slot.sign);
                         derivatives
                     } else if matches!(self.mode, ExprMode::Reactive) {
                         zero_derivatives(branch_axis_count)
@@ -649,6 +695,7 @@ impl ExprEmitter<'_> {
                         .expect("right operand must be emitted before binary branch derivative");
                     binary_derivatives_for(
                         op.as_str(),
+                        &value_expr,
                         &left.value,
                         &right.value,
                         &left.branch_derivatives,
@@ -689,6 +736,9 @@ impl ExprEmitter<'_> {
             HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
                 let (expr, _) = self.idt_operands(args.as_slice())?;
                 self.idt_branch_derivatives(expr)?
+            }
+            HirExprKind::Call { name, .. } if is_analysis_name(name.as_str()) => {
+                zero_derivatives(branch_axis_count)
             }
             HirExprKind::Call { name, .. } if is_ddx_name(name.as_str()) => {
                 zero_derivatives(branch_axis_count)
@@ -878,6 +928,9 @@ impl ExprEmitter<'_> {
                 HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
                     ReactiveValue::none(zero_derivatives(node_count))
                 }
+                HirExprKind::Call { name, .. } if is_analysis_name(name.as_str()) => {
+                    ReactiveValue::none(zero_derivatives(node_count))
+                }
                 HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
                     self.intrinsic_reactive_value(args.as_slice())?
                 }
@@ -1015,6 +1068,12 @@ impl ExprEmitter<'_> {
         neg: Option<&str>,
     ) -> Result<String, RustBackendError> {
         if access == "I" {
+            if let Some(slot) = self.branch_current_slot_for_nodes(pos, neg)? {
+                return Ok(slot.signed_value(format!(
+                    "ctx.branch_current(self.branches[{}])",
+                    slot.slot
+                )));
+            }
             return Err(self.unsupported(format!("branch access '{access}' in expression")));
         }
 
@@ -1036,7 +1095,10 @@ impl ExprEmitter<'_> {
                 return Ok(current.value.clone());
             }
             if let Some(slot) = self.branch_current_unknowns.get(name) {
-                return Ok(format!("ctx.branch_current(self.branches[{slot}])"));
+                return Ok(slot.signed_value(format!(
+                    "ctx.branch_current(self.branches[{}])",
+                    slot.slot
+                )));
             }
             if matches!(self.mode, ExprMode::Reactive) {
                 return Ok("0.0".to_string());
@@ -1063,6 +1125,19 @@ impl ExprEmitter<'_> {
         Ok(format!("({pos} - {neg})"))
     }
 
+    fn branch_current_slot_for_nodes(
+        &self,
+        pos: &str,
+        neg: Option<&str>,
+    ) -> Result<Option<BranchCurrentSlot>, RustBackendError> {
+        let pos = self.node_index(pos)?;
+        let neg = neg.map(|node| self.node_index(node)).transpose()?.flatten();
+        Ok(self
+            .branch_current_unknowns
+            .get(&branch_pair_key(pos, neg))
+            .copied())
+    }
+
     fn node_voltage_expr(&self, name: &str) -> Result<String, RustBackendError> {
         if self.is_ground(name) {
             return Ok("0.0".to_string());
@@ -1084,6 +1159,9 @@ impl ExprEmitter<'_> {
         neg: Option<&str>,
     ) -> Result<Vec<String>, RustBackendError> {
         if access == "I" {
+            if self.branch_current_slot_for_nodes(pos, neg)?.is_some() {
+                return Ok(zero_derivatives(self.artifact.mir.nodes.len()));
+            }
             return Err(self.unsupported(format!("branch access '{access}' in expression")));
         }
 
@@ -1369,6 +1447,9 @@ impl ExprEmitter<'_> {
                 self.expect_system_arity("$port_connected", args.as_slice(), 1)?;
                 Some("true".to_string())
             }
+            HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
+                Some(self.analysis_condition(args.as_slice())?)
+            }
             _ => None,
         })
     }
@@ -1644,6 +1725,44 @@ impl ExprEmitter<'_> {
                 args.len()
             ))),
         }
+    }
+
+    fn lower_analysis_value(
+        &mut self,
+        args: &[ExprId],
+        base: &str,
+    ) -> Result<String, RustBackendError> {
+        let condition = self.analysis_condition(args)?;
+        Ok(self.emit_value(
+            base,
+            format!("if {condition} {{ 1.0 }} else {{ 0.0 }}"),
+        ))
+    }
+
+    fn analysis_condition(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
+        let query = self.analysis_query(args)?;
+        Ok(format!("ctx.analysis({query:?})"))
+    }
+
+    fn analysis_query(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
+        let [name] = args else {
+            return Err(self.unsupported(format!(
+                "analysis expects one argument, found {}",
+                args.len()
+            )));
+        };
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(*name))
+            .ok_or_else(|| self.internal(format!("analysis query {name} is outside MIR arena")))?;
+        let HirExprKind::StringLiteral { value } = &expression.kind else {
+            return Err(self.unsupported("analysis expects a string literal argument"));
+        };
+        normalize_analysis_query(value).ok_or_else(|| {
+            self.unsupported(format!("analysis() unknown analysis name '{value}'"))
+        })
     }
 
     fn simparam_default(&self, name: ExprId) -> Result<f64, RustBackendError> {
@@ -2167,10 +2286,12 @@ fn zero_derivatives(count: usize) -> Vec<String> {
     vec!["0.0".to_string(); count]
 }
 
-fn branch_derivative_axis_count(branch_current_unknowns: &HashMap<String, usize>) -> usize {
+fn branch_derivative_axis_count(
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+) -> usize {
     branch_current_unknowns
         .values()
-        .copied()
+        .map(|slot| slot.slot)
         .max()
         .map(|slot| slot + 1)
         .unwrap_or(0)
@@ -2320,6 +2441,7 @@ fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackend
         "Mul" => Ok(mul_expr(left, right)),
         "Div" => Ok(div_expr(left, right)),
         "Mod" => Ok(mod_expr(left, right)),
+        "Pow" => Ok(format!("({left}).powf({right})")),
         _ => Err(RustBackendError::unsupported(
             "<generated>",
             "<expr>",
@@ -2430,11 +2552,13 @@ fn mod_derivative_expr(
 
 fn binary_derivatives(
     op: &str,
+    value: &str,
     left: &ExprValue,
     right: &ExprValue,
 ) -> Result<Vec<String>, RustBackendError> {
     binary_derivatives_for(
         op,
+        value,
         &left.value,
         &right.value,
         &left.derivatives,
@@ -2444,6 +2568,7 @@ fn binary_derivatives(
 
 fn binary_derivatives_for(
     op: &str,
+    value: &str,
     left_value: &str,
     right_value: &str,
     left_derivatives: &[String],
@@ -2466,6 +2591,13 @@ fn binary_derivatives_for(
                 right_derivative,
             )),
             "Mod" => Ok(mod_derivative_expr(
+                left_value,
+                right_value,
+                left_derivative,
+                right_derivative,
+            )),
+            "Pow" => Ok(pow_derivative_expr(
+                value,
                 left_value,
                 right_value,
                 left_derivative,
@@ -3038,6 +3170,24 @@ fn is_noise_name(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "white_noise" | "$white_noise" | "flicker_noise" | "$flicker_noise"
     )
+}
+
+pub(crate) fn is_analysis_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("analysis")
+}
+
+pub(crate) fn normalize_analysis_query(name: &str) -> Option<String> {
+    let normalized = name.to_ascii_lowercase();
+    match normalized.as_str() {
+        "dc" | "op" => Some("dc".to_string()),
+        "ac" => Some("ac".to_string()),
+        "tran" | "transient" => Some("tran".to_string()),
+        "noise" => Some("noise".to_string()),
+        "ic" => Some("ic".to_string()),
+        "static" => Some("static".to_string()),
+        "smallsig" | "smallsignal" | "small_signal" => Some("smallsig".to_string()),
+        _ => None,
+    }
 }
 
 pub(crate) fn is_intrinsic_name(name: &str) -> bool {

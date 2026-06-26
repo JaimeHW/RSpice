@@ -6,10 +6,11 @@ use crate::canonical_ir::{
 };
 
 use super::expr::{
-    DdtSlots, LoweredExpr, LoweredVariable, comparison_operator,
-    is_intrinsic_name as expr_is_intrinsic_name, lower_assignment_expr_with_branch_currents,
-    lower_equation_expr_with_branch_currents, lower_reactive_assignment_expr_with_branch_currents,
-    lower_reactive_expr_with_branch_currents, lower_value_assignment_expr_with_branch_currents,
+    BranchCurrentSlot, DdtSlots, LoweredExpr, LoweredVariable, branch_pair_key,
+    comparison_operator, is_analysis_name, is_intrinsic_name as expr_is_intrinsic_name,
+    lower_assignment_expr_with_branch_currents, lower_equation_expr_with_branch_currents,
+    lower_reactive_assignment_expr_with_branch_currents, lower_reactive_expr_with_branch_currents,
+    lower_value_assignment_expr_with_branch_currents, normalize_analysis_query,
     parameter_field_names, unique_identifiers,
 };
 use super::{
@@ -566,7 +567,7 @@ fn collect_indexed_calls(segment: &str, prefix: &str, suffix: &str) -> BTreeSet<
 #[derive(Debug, Clone, Default)]
 struct PotentialBranchSlots {
     equation_slots: HashMap<EquationId, usize>,
-    declared_slots: HashMap<String, usize>,
+    current_slots: HashMap<String, BranchCurrentSlot>,
     branches: Vec<MirBranchRef>,
 }
 
@@ -583,9 +584,10 @@ impl PotentialBranchSlots {
         &self.branches
     }
 
-    fn declared_slots(&self) -> &HashMap<String, usize> {
-        &self.declared_slots
+    fn current_slots(&self) -> &HashMap<String, BranchCurrentSlot> {
+        &self.current_slots
     }
+
 }
 
 fn reject_unsupported_model_shape(artifact: &CanonicalIrArtifact) -> Result<(), RustBackendError> {
@@ -778,11 +780,24 @@ fn collect_potential_branch_slots(
                         unknown.id, unknown.equation
                     ),
                 )
-            })?;
+        })?;
         slots.equation_slots.insert(unknown.equation, slot);
         if let Some(name) = unknown.declared_name.as_deref() {
-            slots.declared_slots.entry(name.to_string()).or_insert(slot);
+            slots
+                .current_slots
+                .entry(name.to_string())
+                .or_insert(BranchCurrentSlot::forward(slot));
         }
+        let pos = unknown.pos_node.map(usize::from);
+        let neg = unknown.neg_node.map(usize::from);
+        slots
+            .current_slots
+            .entry(branch_pair_key(pos, neg))
+            .or_insert(BranchCurrentSlot::forward(slot));
+        slots
+            .current_slots
+            .entry(branch_pair_key(neg, pos))
+            .or_insert(BranchCurrentSlot::reverse(slot));
         slots.branches.push(MirBranchRef {
             label: equation.branch.label.clone(),
             declared_name: unknown.declared_name.clone(),
@@ -1717,18 +1732,22 @@ fn generate_state_file(
     out.push_str("    fn clone(&self) -> Self { *self }\n");
     out.push_str("}\n\n");
 
-    out.push_str("impl Default for Parameters {\n");
-    out.push_str("    fn default() -> Self {\n");
+    out.push_str("impl Parameters {\n");
+    out.push_str("    fn new_box() -> Box<Self> {\n");
     if artifact.mir.parameters.is_empty() {
-        out.push_str("        Self {\n");
-        out.push_str("        }\n");
+        out.push_str("        Box::new(Self {\n");
+        out.push_str("        })\n");
     } else {
         out.push_str("        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.\n");
-        out.push_str("        let mut params: Self = unsafe { std::mem::zeroed::<Self>() };\n");
+        out.push_str("        let mut boxed = Box::<Self>::new_uninit();\n");
+        out.push_str("        unsafe {\n");
+        out.push_str("            let ptr = boxed.as_mut_ptr();\n");
+        out.push_str("            std::ptr::write_bytes(ptr, 0, 1);\n");
+        out.push_str("            let params = &mut *ptr;\n");
         for parameter in &artifact.mir.parameters {
             let field = &parameter_fields[parameter.name.as_str()];
             let default = parameter_default_rust_expr(artifact, parameter, parameter_fields)?;
-            out.push_str(&format!("        params.{field} = {default};\n"));
+            out.push_str(&format!("            params.{field} = {default};\n"));
             if parameter_default_requires_runtime_validation(parameter) {
                 let validation = parameter_validation_call(
                     parameter.name.as_str(),
@@ -1736,12 +1755,19 @@ fn generate_state_file(
                     parameter.range.as_ref(),
                 )?;
                 out.push_str(&format!(
-                    "        {validation}.expect(\"generated Verilog-A parameter default must satisfy declared range\");\n"
+                    "            {validation}.expect(\"generated Verilog-A parameter default must satisfy declared range\");\n"
                 ));
             }
         }
-        out.push_str("        params\n");
+        out.push_str("            boxed.assume_init()\n");
+        out.push_str("        }\n");
     }
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    out.push_str("impl Default for Parameters {\n");
+    out.push_str("    fn default() -> Self {\n");
+    out.push_str("        *Self::new_box()\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
 
@@ -1749,6 +1775,21 @@ fn generate_state_file(
         out.push_str(&generate_shared_parameter_validator());
         out.push('\n');
     }
+
+    out.push_str("fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {\n");
+    out.push_str("    let mut boxed = Box::<[f64; N]>::new_uninit();\n");
+    out.push_str("    unsafe {\n");
+    out.push_str("        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n");
+    out.push_str("        boxed.assume_init()\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {\n");
+    out.push_str("    let mut boxed = Box::<[bool; N]>::new_uninit();\n");
+    out.push_str("    unsafe {\n");
+    out.push_str("        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n");
+    out.push_str("        boxed.assume_init()\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
 
     let node_count = artifact.mir.nodes.len();
     let terminal_count = artifact
@@ -1770,28 +1811,28 @@ fn generate_state_file(
     out.push_str("pub struct Instance {\n");
     out.push_str(&format!("    pub nodes: [usize; {node_count}],\n"));
     out.push_str(&format!("    pub branches: [usize; {branch_count}],\n"));
-    out.push_str("    pub params: Parameters,\n");
+    out.push_str("    pub params: Box<Parameters>,\n");
     out.push_str(&format!(
-        "    pub(crate) param_given: [bool; {parameter_count}],\n"
+        "    pub(crate) param_given: Box<[bool; {parameter_count}]>,\n"
     ));
     out.push_str("    pub(crate) multiplicity: f64,\n");
     out.push_str(&format!(
-        "    pub(crate) ddt_state_current: [f64; {ddt_state_count}],\n"
+        "    pub(crate) ddt_state_current: Box<[f64; {ddt_state_count}]>,\n"
     ));
     out.push_str(&format!(
-        "    pub(crate) ddt_state_previous: [f64; {ddt_state_count}],\n"
+        "    pub(crate) ddt_state_previous: Box<[f64; {ddt_state_count}]>,\n"
     ));
     out.push_str(&format!(
-        "    pub(crate) ddt_state_initialized: [bool; {ddt_state_count}],\n"
+        "    pub(crate) ddt_state_initialized: Box<[bool; {ddt_state_count}]>,\n"
     ));
     out.push_str(&format!(
-        "    pub(crate) idt_state_current: [f64; {idt_state_count}],\n"
+        "    pub(crate) idt_state_current: Box<[f64; {idt_state_count}]>,\n"
     ));
     out.push_str(&format!(
-        "    pub(crate) idt_state_previous: [f64; {idt_state_count}],\n"
+        "    pub(crate) idt_state_previous: Box<[f64; {idt_state_count}]>,\n"
     ));
     out.push_str(&format!(
-        "    pub(crate) idt_state_initialized: [bool; {idt_state_count}],\n"
+        "    pub(crate) idt_state_initialized: Box<[bool; {idt_state_count}]>,\n"
     ));
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
@@ -1808,15 +1849,15 @@ fn generate_state_file(
     out.push_str("        Self {\n");
     out.push_str("            nodes: self.nodes,\n");
     out.push_str("            branches: self.branches,\n");
-    out.push_str("            params: self.params,\n");
-    out.push_str("            param_given: self.param_given,\n");
+    out.push_str("            params: self.params.clone(),\n");
+    out.push_str("            param_given: self.param_given.clone(),\n");
     out.push_str("            multiplicity: self.multiplicity,\n");
-    out.push_str("            ddt_state_current: self.ddt_state_current,\n");
-    out.push_str("            ddt_state_previous: self.ddt_state_previous,\n");
-    out.push_str("            ddt_state_initialized: self.ddt_state_initialized,\n");
-    out.push_str("            idt_state_current: self.idt_state_current,\n");
-    out.push_str("            idt_state_previous: self.idt_state_previous,\n");
-    out.push_str("            idt_state_initialized: self.idt_state_initialized,\n");
+    out.push_str("            ddt_state_current: self.ddt_state_current.clone(),\n");
+    out.push_str("            ddt_state_previous: self.ddt_state_previous.clone(),\n");
+    out.push_str("            ddt_state_initialized: self.ddt_state_initialized.clone(),\n");
+    out.push_str("            idt_state_current: self.idt_state_current.clone(),\n");
+    out.push_str("            idt_state_previous: self.idt_state_previous.clone(),\n");
+    out.push_str("            idt_state_initialized: self.idt_state_initialized.clone(),\n");
     out.push_str("            time: self.time,\n");
     out.push_str("            timestep: self.timestep,\n");
     out.push_str("            scratch: None,\n");
@@ -1868,19 +1909,19 @@ fn generate_state_file(
     out.push_str("        Self {\n");
     out.push_str("            nodes: mapped,\n");
     out.push_str("            branches: [0usize; Self::BRANCH_COUNT],\n");
-    out.push_str("            params: Parameters::default(),\n");
-    out.push_str("            param_given: [false; Self::PARAMETER_COUNT],\n");
+    out.push_str("            params: Parameters::new_box(),\n");
+    out.push_str("            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),\n");
     out.push_str("            multiplicity: 1.0,\n");
-    out.push_str("            ddt_state_current: [0.0; Self::DDT_STATE_COUNT],\n");
-    out.push_str("            ddt_state_previous: [0.0; Self::DDT_STATE_COUNT],\n");
-    out.push_str("            ddt_state_initialized: [false; Self::DDT_STATE_COUNT],\n");
-    out.push_str("            idt_state_current: [0.0; Self::IDT_STATE_COUNT],\n");
-    out.push_str("            idt_state_previous: [0.0; Self::IDT_STATE_COUNT],\n");
-    out.push_str("            idt_state_initialized: [false; Self::IDT_STATE_COUNT],\n");
+    out.push_str("            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n");
+    out.push_str("            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n");
+    out.push_str("            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),\n");
+    out.push_str("            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n");
+    out.push_str("            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n");
+    out.push_str("            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),\n");
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
-    out.push_str("            scratch: Some(Box::new(GenericScratch::new())),\n");
-    out.push_str("            reactive_scratch: Some(Box::new(GenericReactiveScratch::new())),\n");
+    out.push_str("            scratch: Some(GenericScratch::new_box()),\n");
+    out.push_str("            reactive_scratch: Some(GenericReactiveScratch::new_box()),\n");
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
@@ -2407,11 +2448,11 @@ fn emit_stamp_common_bindings(
     common_usage: StampCommonUsage,
     needs_timestep: bool,
 ) {
-    out.push_str("        let p = &self.params;\n");
+    out.push_str("        let p = Box::as_ref(&self.params);\n");
     out.push_str("        let nodes = &(*self).nodes;\n");
     out.push_str("        let branches = &(*self).branches;\n");
     if common_usage.param_given {
-        out.push_str("        let param_given = &self.param_given;\n");
+        out.push_str("        let param_given = self.param_given.as_ref();\n");
     }
     out.push_str("        let multiplicity = (*self).multiplicity;\n");
     if common_usage.time {
@@ -2631,6 +2672,18 @@ fn generate_scratch_struct() -> String {
         "",
         "impl Scratch {",
         "    fn new() -> Self {",
+        "        *Self::new_box()",
+        "    }",
+        "",
+        "    fn new_box() -> Box<Self> {",
+        "        let mut boxed = Box::<Self>::new_uninit();",
+        "        unsafe {",
+        "            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);",
+        "            boxed.assume_init()",
+        "        }",
+        "    }",
+        "",
+        "    fn new_value() -> Self {",
         "        Self {",
         "            values: [0.0; Instance::VARIABLE_COUNT],",
         "            bool_values: [false; Instance::VARIABLE_COUNT],",
@@ -2683,6 +2736,18 @@ fn generate_scratch_struct() -> String {
         "",
         "impl ReactiveScratch {",
         "    fn new() -> Self {",
+        "        *Self::new_box()",
+        "    }",
+        "",
+        "    fn new_box() -> Box<Self> {",
+        "        let mut boxed = Box::<Self>::new_uninit();",
+        "        unsafe {",
+        "            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);",
+        "            boxed.assume_init()",
+        "        }",
+        "    }",
+        "",
+        "    fn new_value() -> Self {",
         "        Self {",
         "            values: [0.0; Instance::VARIABLE_COUNT],",
         "            bool_values: [false; Instance::VARIABLE_COUNT],",
@@ -6227,14 +6292,14 @@ fn emit_stamp_body(
         StampOperatorUsage::transient(ddt_slots)
     };
     if operator_usage.ddt {
-        out.push_str("        let ddt_state_current = &mut self.ddt_state_current;\n");
-        out.push_str("        let ddt_state_previous = &mut self.ddt_state_previous;\n");
-        out.push_str("        let ddt_state_initialized = &mut self.ddt_state_initialized;\n");
+        out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
+        out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
+        out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
     }
     if operator_usage.idt {
-        out.push_str("        let idt_state_current = &mut self.idt_state_current;\n");
-        out.push_str("        let idt_state_previous = &mut self.idt_state_previous;\n");
-        out.push_str("        let idt_state_initialized = &mut self.idt_state_initialized;\n");
+        out.push_str("        let idt_state_current = self.idt_state_current.as_mut();\n");
+        out.push_str("        let idt_state_previous = self.idt_state_previous.as_mut();\n");
+        out.push_str("        let idt_state_initialized = self.idt_state_initialized.as_mut();\n");
     }
     if operator_usage.has_any() {
         out.push_str("        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;\n");
@@ -6263,15 +6328,15 @@ fn emit_stamp_body(
         ));
         out.push_str("            Some(buf) => buf.as_mut(),\n");
         out.push_str(&format!(
-            "            slot @ None => slot.insert(Box::new({scratch_type}::new())).as_mut(),\n"
+            "            slot @ None => slot.insert({scratch_type}::new_box()).as_mut(),\n"
         ));
         out.push_str("        };\n");
     }
-    let mut variables = if uses_scratch {
+        let mut variables = if uses_scratch {
         emit_variable_initializers(
             artifact,
             variable_fields,
-            potential_branch_slots.declared_slots().len(),
+            potential_branch_slots.current_slots().len(),
             reactive,
             reactive_liveness,
             out,
@@ -6285,7 +6350,7 @@ fn emit_stamp_body(
         variable_fields,
         &mut variables,
         ddt_slots,
-        potential_branch_slots.declared_slots(),
+        potential_branch_slots.current_slots(),
         transient_liveness,
         reactive,
         reactive_liveness,
@@ -6334,7 +6399,7 @@ fn emit_stamp_body(
             && should_emit_compact_equation_stamp(
                 artifact,
                 equation,
-                potential_branch_slots.declared_slots(),
+                potential_branch_slots.current_slots(),
                 equation_inline[index],
             )?
         {
@@ -6367,7 +6432,7 @@ fn emit_stamp_body(
                 &variables,
                 ddt_slots,
                 &branch_currents,
-                potential_branch_slots.declared_slots(),
+                potential_branch_slots.current_slots(),
             )?
         } else {
             lower_equation_expr_with_branch_currents(
@@ -6378,7 +6443,7 @@ fn emit_stamp_body(
                 &variables,
                 ddt_slots,
                 &branch_currents,
-                potential_branch_slots.declared_slots(),
+                potential_branch_slots.current_slots(),
             )?
         };
         if reactive {
@@ -6839,6 +6904,30 @@ fn emit_fixed_sparse_current_stamp(
         out.push_str("        );\n");
         return true;
     }
+    if branch_terms.len() == 1 && (1..=2).contains(&node_terms.len()) {
+        out.push_str(&format!(
+            "        stamper.stamp_current_node{}_branch1(\n",
+            node_terms.len()
+        ));
+        out.push_str(&format!("            {},\n", optional_node_expr(pos_node)));
+        out.push_str(&format!("            {},\n", optional_node_expr(neg_node)));
+        out.push_str(&format!("            {value_expr},\n"));
+        for term in node_terms {
+            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_scale, term.derivative)
+            ));
+        }
+        let term = branch_terms[0];
+        out.push_str(&format!("            self.branches[{}],\n", term.index));
+        out.push_str(&format!(
+            "            {},\n",
+            scaled_derivative_expr(derivative_scale, term.derivative)
+        ));
+        out.push_str("        );\n");
+        return true;
+    }
     false
 }
 
@@ -6893,6 +6982,29 @@ fn emit_fixed_sparse_potential_stamp(
         out.push_str("        );\n");
         return true;
     }
+    if branch_terms.len() == 1 && (1..=2).contains(&node_terms.len()) {
+        out.push_str(&format!(
+            "        stamper.stamp_potential_node{}_branch1(\n",
+            node_terms.len()
+        ));
+        out.push_str(&format!("            {branch_expr},\n"));
+        out.push_str(&format!("            {value_expr},\n"));
+        for term in node_terms {
+            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_scale, term.derivative)
+            ));
+        }
+        let term = branch_terms[0];
+        out.push_str(&format!("            self.branches[{}],\n", term.index));
+        out.push_str(&format!(
+            "            {},\n",
+            scaled_derivative_expr(derivative_scale, term.derivative)
+        ));
+        out.push_str("        );\n");
+        return true;
+    }
     false
 }
 
@@ -6943,6 +7055,29 @@ fn emit_fixed_sparse_reactive_current_stamp(
         out.push_str("        );\n");
         return true;
     }
+    if branch_terms.len() == 1 && (1..=2).contains(&node_terms.len()) {
+        out.push_str(&format!(
+            "        stamper.stamp_current_reactive_node{}_branch1(\n",
+            node_terms.len()
+        ));
+        out.push_str(&format!("            {},\n", optional_node_expr(pos_node)));
+        out.push_str(&format!("            {},\n", optional_node_expr(neg_node)));
+        for term in node_terms {
+            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_scale, term.derivative)
+            ));
+        }
+        let term = branch_terms[0];
+        out.push_str(&format!("            self.branches[{}],\n", term.index));
+        out.push_str(&format!(
+            "            {},\n",
+            scaled_derivative_expr(derivative_scale, term.derivative)
+        ));
+        out.push_str("        );\n");
+        return true;
+    }
     false
 }
 
@@ -6990,13 +7125,35 @@ fn emit_fixed_sparse_reactive_potential_stamp(
         out.push_str("        );\n");
         return true;
     }
+    if branch_terms.len() == 1 && (1..=2).contains(&node_terms.len()) {
+        out.push_str(&format!(
+            "        stamper.stamp_potential_reactive_node{}_branch1(\n",
+            node_terms.len()
+        ));
+        out.push_str(&format!("            {branch_expr},\n"));
+        for term in node_terms {
+            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!(
+                "            {},\n",
+                scaled_derivative_expr(derivative_scale, term.derivative)
+            ));
+        }
+        let term = branch_terms[0];
+        out.push_str(&format!("            self.branches[{}],\n", term.index));
+        out.push_str(&format!(
+            "            {},\n",
+            scaled_derivative_expr(derivative_scale, term.derivative)
+        ));
+        out.push_str("        );\n");
+        return true;
+    }
     false
 }
 
 fn should_emit_compact_equation_stamp(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     force_inline: bool,
 ) -> Result<bool, RustBackendError> {
     if force_inline || equation.kind == MirEquationKind::Indirect {
@@ -7028,7 +7185,7 @@ fn emit_compact_equation_stamp(
         parameter_fields,
         variables,
         ddt_slots,
-        branch_current_unknowns: potential_branch_slots.declared_slots(),
+        branch_current_unknowns: potential_branch_slots.current_slots(),
         emitted: HashMap::new(),
         lines: Vec::new(),
     };
@@ -7293,7 +7450,7 @@ fn emit_assignment_statement_chunks(
     variable_fields: &HashMap<String, String>,
     variables: &mut HashMap<String, LoweredVariable>,
     ddt_slots: &DdtSlots,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     transient_liveness: &TransientLiveness,
     reactive: bool,
     reactive_liveness: &ReactiveLiveness,
@@ -7672,7 +7829,7 @@ fn emit_statement_list(
     variables: &mut HashMap<String, LoweredVariable>,
     out: &mut String,
     ddt_slots: &DdtSlots,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     transient_liveness: &TransientLiveness,
     reactive: bool,
     reactive_liveness: &ReactiveLiveness,
@@ -7726,7 +7883,7 @@ fn emit_assignment_statement(
     variables: &mut HashMap<String, LoweredVariable>,
     out: &mut String,
     ddt_slots: &DdtSlots,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     transient_liveness: &TransientLiveness,
     reactive: bool,
     reactive_liveness: &ReactiveLiveness,
@@ -7934,7 +8091,7 @@ fn emit_compact_assignment_statement(
     variables: &mut HashMap<String, LoweredVariable>,
     out: &mut String,
     ddt_slots: &DdtSlots,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     indent: &str,
     prefix: &str,
 ) -> Result<(), RustBackendError> {
@@ -10986,7 +11143,7 @@ struct CompactAdEmitter<'a> {
     parameter_fields: &'a HashMap<String, String>,
     variables: &'a HashMap<String, LoweredVariable>,
     ddt_slots: &'a DdtSlots,
-    branch_current_unknowns: &'a HashMap<String, usize>,
+    branch_current_unknowns: &'a HashMap<String, BranchCurrentSlot>,
     emitted: HashMap<ExprId, String>,
     lines: Vec<String>,
 }
@@ -11008,18 +11165,35 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Identifier { name } => self.lower_identifier(name.as_str())?,
             HirExprKind::BranchAccess { access, pos, neg } => {
                 if access == "I" {
-                    return Err(self.unsupported(format!("branch access '{access}' in expression")));
-                }
-                format!(
-                    "AdValue::voltage(ctx, &self.nodes, {}, {})",
-                    compact_optional_node(self.node_index(pos.as_str())?),
-                    compact_optional_node(
-                        neg.as_deref()
-                            .map(|node| self.node_index(node))
-                            .transpose()?
-                            .flatten()
+                    if let Some(slot) =
+                        self.branch_current_slot_for_nodes(pos.as_str(), neg.as_deref())?
+                    {
+                        let value = format!(
+                            "AdValue::branch_current(ctx, &self.branches, {})",
+                            slot.slot
+                        );
+                        if slot.sign < 0.0 {
+                            format!("AdValue::neg({value})")
+                        } else {
+                            value
+                        }
+                    } else {
+                        return Err(
+                            self.unsupported(format!("branch access '{access}' in expression"))
+                        );
+                    }
+                } else {
+                    format!(
+                        "AdValue::voltage(ctx, &self.nodes, {}, {})",
+                        compact_optional_node(self.node_index(pos.as_str())?),
+                        compact_optional_node(
+                            neg.as_deref()
+                                .map(|node| self.node_index(node))
+                                .transpose()?
+                                .flatten()
+                        )
                     )
-                )
+                }
             }
             HirExprKind::NamedBranchAccess { access, name } => {
                 self.lower_named_branch_access(access.as_str(), name.as_str())?
@@ -11145,6 +11319,19 @@ impl CompactAdEmitter<'_> {
                                 format!("AdValue::rem({left}, {right})")
                             }
                         }
+                        "Pow" => {
+                            if let Some(exponent) = self.scalar_constant(*right)? {
+                                let left = self.lower(*left)?;
+                                format!("AdValue::powf({left}, {exponent})")
+                            } else if let Some(base) = self.scalar_constant(*left)? {
+                                let right = self.lower(*right)?;
+                                format!("AdValue::pow_from_scalar({base}, {right})")
+                            } else {
+                                let left = self.lower(*left)?;
+                                let right = self.lower(*right)?;
+                                format!("AdValue::pow({left}, {right})")
+                            }
+                        }
                         _ => return Err(self.unsupported(format!("binary operator {op}"))),
                     }
                 }
@@ -11163,6 +11350,10 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
                 let (expr, ic) = compact_idt_operands(args.as_slice(), self)?;
                 self.lower_idt(id, expr, ic)?
+            }
+            HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
+                let condition = self.analysis_condition(args.as_slice())?;
+                format!("AdValue::constant(if {condition} {{ 1.0 }} else {{ 0.0 }})")
             }
             HirExprKind::Call { name, args } if is_ddx_name(name.as_str()) => {
                 let (expr, probe) = compact_ddx_operands(args.as_slice(), self)?;
@@ -11429,6 +11620,7 @@ impl CompactAdEmitter<'_> {
                     "Mul" => compact_scalar_mul(&left, &right),
                     "Div" => compact_scalar_div(&left, &right),
                     "Mod" => compact_scalar_mod(&left, &right),
+                    "Pow" => compact_scalar_pow(&left, &right),
                     _ => return Ok(None),
                 };
                 Ok(Some(value))
@@ -11463,6 +11655,7 @@ impl CompactAdEmitter<'_> {
             "Mul" => compact_scalar_mul(&left, &right),
             "Div" => compact_scalar_div(&left, &right),
             "Mod" => compact_scalar_mod(&left, &right),
+            "Pow" => compact_scalar_pow(&left, &right),
             _ => return Ok(None),
         };
         Ok(Some(value))
@@ -11518,6 +11711,7 @@ impl CompactAdEmitter<'_> {
                     "Mul" => Some(compact_scalar_mul(&left, &right)),
                     "Div" => Some(compact_scalar_div(&left, &right)),
                     "Mod" => Some(compact_scalar_mod(&left, &right)),
+                    "Pow" => Some(compact_scalar_pow(&left, &right)),
                     _ => None,
                 })
             }
@@ -11541,6 +11735,12 @@ impl CompactAdEmitter<'_> {
             }
             HirExprKind::SystemFunction { name, args } => {
                 self.zero_derivative_system_function_value_expr(name.as_str(), args.as_slice())
+            }
+            HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
+                Ok(Some(format!(
+                    "if {} {{ 1.0 }} else {{ 0.0 }}",
+                    self.analysis_condition(args.as_slice())?
+                )))
             }
             HirExprKind::Call { name, args } if expr_is_intrinsic_name(name.as_str()) => {
                 self.zero_derivative_intrinsic_value_expr(name.as_str(), args.as_slice())
@@ -11862,9 +12062,15 @@ impl CompactAdEmitter<'_> {
     ) -> Result<String, RustBackendError> {
         if access == "I" {
             if let Some(slot) = self.branch_current_unknowns.get(name) {
-                return Ok(format!(
-                    "AdValue::branch_current(ctx, &self.branches, {slot})"
-                ));
+                let value = format!(
+                    "AdValue::branch_current(ctx, &self.branches, {})",
+                    slot.slot
+                );
+                return Ok(if slot.sign < 0.0 {
+                    format!("AdValue::neg({value})")
+                } else {
+                    value
+                });
             }
             return Err(self.unsupported(format!(
                 "named branch current access '{name}' before a current contribution is available"
@@ -11942,6 +12148,9 @@ impl CompactAdEmitter<'_> {
             {
                 self.expect_system_arity("$port_connected", args.as_slice(), 1)?;
                 Some("true".to_string())
+            }
+            HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
+                Some(self.analysis_condition(args.as_slice())?)
             }
             _ => None,
         })
@@ -12279,6 +12488,19 @@ impl CompactAdEmitter<'_> {
             .ok_or_else(|| self.unsupported(format!("unknown branch access node '{name}'")))
     }
 
+    fn branch_current_slot_for_nodes(
+        &self,
+        pos: &str,
+        neg: Option<&str>,
+    ) -> Result<Option<BranchCurrentSlot>, RustBackendError> {
+        let pos = self.node_index(pos)?;
+        let neg = neg.map(|node| self.node_index(node)).transpose()?.flatten();
+        Ok(self
+            .branch_current_unknowns
+            .get(&branch_pair_key(pos, neg))
+            .copied())
+    }
+
     fn simparam_default(&self, name: ExprId) -> Result<f64, RustBackendError> {
         let expression = self.expression(name)?;
         let HirExprKind::StringLiteral { value } = &expression.kind else {
@@ -12289,6 +12511,27 @@ impl CompactAdEmitter<'_> {
             "tnom" => 300.15,
             "simulatorVersion" => 1.0,
             _ => 0.0,
+        })
+    }
+
+    fn analysis_condition(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
+        let query = self.analysis_query(args)?;
+        Ok(format!("ctx.analysis({query:?})"))
+    }
+
+    fn analysis_query(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
+        let [name] = args else {
+            return Err(self.unsupported(format!(
+                "analysis expects one argument, found {}",
+                args.len()
+            )));
+        };
+        let expression = self.expression(*name)?;
+        let HirExprKind::StringLiteral { value } = &expression.kind else {
+            return Err(self.unsupported("analysis expects a string literal argument"));
+        };
+        normalize_analysis_query(value).ok_or_else(|| {
+            self.unsupported(format!("analysis() unknown analysis name '{value}'"))
         })
     }
 
@@ -12324,14 +12567,30 @@ impl CompactAdEmitter<'_> {
                     Ok(None)
                 }
             }
-            HirExprKind::BranchAccess { access, pos, neg } if access.as_str() != "I" => Ok(Some(
-                self.branch_voltage_value(pos.as_str(), neg.as_deref())?,
-            )),
+            HirExprKind::BranchAccess { access, pos, neg } => {
+                if access.as_str() == "I" {
+                    Ok(self
+                        .branch_current_slot_for_nodes(pos.as_str(), neg.as_deref())?
+                        .map(|slot| {
+                            slot.signed_value(format!(
+                                "ctx.branch_current(self.branches[{}])",
+                                slot.slot
+                            ))
+                        }))
+                } else {
+                    Ok(Some(self.branch_voltage_value(pos.as_str(), neg.as_deref())?))
+                }
+            }
             HirExprKind::NamedBranchAccess { access, name } => match access.as_str() {
                 "I" => Ok(self
                     .branch_current_unknowns
                     .get(name.as_str())
-                    .map(|slot| format!("ctx.branch_current(self.branches[{slot}])"))),
+                    .map(|slot| {
+                        slot.signed_value(format!(
+                            "ctx.branch_current(self.branches[{}])",
+                            slot.slot
+                        ))
+                    })),
                 _ => {
                     let branch = self
                         .artifact
@@ -12381,6 +12640,7 @@ impl CompactAdEmitter<'_> {
                     "Mul" => Some(compact_scalar_mul(&left, &right)),
                     "Div" => Some(compact_scalar_div(&left, &right)),
                     "Mod" => Some(compact_scalar_mod(&left, &right)),
+                    "Pow" => Some(compact_scalar_pow(&left, &right)),
                     _ => None,
                 })
             }
@@ -12404,6 +12664,12 @@ impl CompactAdEmitter<'_> {
             }
             HirExprKind::SystemFunction { name, args } => {
                 self.system_function_value_expr(name.as_str(), args.as_slice())
+            }
+            HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
+                Ok(Some(format!(
+                    "if {} {{ 1.0 }} else {{ 0.0 }}",
+                    self.analysis_condition(args.as_slice())?
+                )))
             }
             HirExprKind::Call { name, args } if expr_is_intrinsic_name(name.as_str()) => {
                 self.intrinsic_value_expr(name.as_str(), args.as_slice())
@@ -12746,6 +13012,16 @@ fn compact_scalar_mod(left: &str, right: &str) -> String {
     }
 }
 
+fn compact_scalar_pow(left: &str, right: &str) -> String {
+    if right == "0.0" {
+        "1.0".to_string()
+    } else if right == "1.0" {
+        left.to_string()
+    } else {
+        format!("{}.powf({right})", compact_f64_receiver(left))
+    }
+}
+
 fn compact_scalar_limexp(value: String) -> String {
     format!(
         "{{ let limexp_arg = {value}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) }} }}"
@@ -12970,7 +13246,7 @@ fn emit_loop_statement(
     variables: &mut HashMap<String, LoweredVariable>,
     out: &mut String,
     ddt_slots: &DdtSlots,
-    branch_current_unknowns: &HashMap<String, usize>,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
     transient_liveness: &TransientLiveness,
     reactive: bool,
     reactive_liveness: &ReactiveLiveness,
@@ -13123,10 +13399,12 @@ fn zero_derivative_vec(count: usize) -> Vec<String> {
     (0..count).map(|_| "0.0".to_string()).collect()
 }
 
-fn branch_derivative_axis_count(branch_current_unknowns: &HashMap<String, usize>) -> usize {
+fn branch_derivative_axis_count(
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+) -> usize {
     branch_current_unknowns
         .values()
-        .copied()
+        .map(|slot| slot.slot)
         .max()
         .map(|slot| slot + 1)
         .unwrap_or(0)

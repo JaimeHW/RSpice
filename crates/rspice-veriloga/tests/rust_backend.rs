@@ -1,8 +1,9 @@
 use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::rust_backend::{
     GeneratedBuiltinManifest, GeneratedRustDevice, GeneratedRustFile, RustBackendError,
-    RustDeviceNames, RustTranspileOptions, RustTranspiler, cleanup_stale_generated_device_folders,
-    discover_veriloga_sources, parse_generated_builtin_manifest, render_generated_builtin_manifest,
+    RustDeviceNames, RustTranspileOptions, RustTranspiler, VERILOGA_DISCOVERY_SKIP_MARKER,
+    cleanup_stale_generated_device_folders, discover_veriloga_sources,
+    parse_generated_builtin_manifest, render_generated_builtin_manifest,
     render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
     write_text_file_if_changed,
 };
@@ -535,6 +536,36 @@ fn discovery_accepts_case_insensitive_veriloga_extensions() {
         .collect();
 
     assert_eq!(names, vec!["upper_case_source".to_string()]);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn discovery_skips_marked_candidate_archives() {
+    let dir = temp_dir("rspice-va-discovery-skip-marker");
+    let skipped = dir.join("public_archive");
+    std::fs::create_dir_all(&skipped).expect("create skipped archive");
+    std::fs::write(skipped.join(VERILOGA_DISCOVERY_SKIP_MARKER), "")
+        .expect("write discovery skip marker");
+    std::fs::write(
+        skipped.join("candidate.va"),
+        "module skipped_candidate(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\n",
+    )
+    .expect("write skipped source");
+    std::fs::write(
+        dir.join("active.va"),
+        "module active_model(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\n",
+    )
+    .expect("write active source");
+
+    let found = discover_veriloga_sources(&dir).expect("discover active sources");
+    let names: Vec<_> = found
+        .iter()
+        .flat_map(|source| source.modules.iter().cloned())
+        .collect();
+
+    assert_eq!(names, vec!["active_model".to_string()]);
+    assert_eq!(found.len(), 1);
 
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -4447,7 +4478,7 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
     );
     assert!(stamp.contains("#[path = \"stamp_blocks_0.rs\"]"), "{stamp}");
     assert!(stamp.contains("mod stamp_blocks_0;"), "{stamp}");
-    assert!(stamp.contains("let p = &self.params;"), "{stamp}");
+    assert!(stamp.contains("let p = Box::as_ref(&self.params);"), "{stamp}");
     assert!(stamp.contains("let nodes = &(*self).nodes;"), "{stamp}");
     assert!(
         stamp.contains("let branches = &(*self).branches;"),
@@ -4466,6 +4497,7 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
         "plain algebraic stamps should not bind unused timestep:\n{stamp}"
     );
     assert!(!stamp.contains("let p = self.params;"), "{stamp}");
+    assert!(!stamp.contains("let p = self.p.as_ref();"), "{stamp}");
     assert!(!stamp.contains("let nodes = self.nodes;"), "{stamp}");
     assert!(!stamp.contains("let branches = self.branches;"), "{stamp}");
     assert!(
@@ -4731,7 +4763,7 @@ fn rust_backend_keeps_used_common_stamp_helper_arguments() {
         .as_str();
 
     assert!(
-        param_given_stamp.contains("let param_given = &self.param_given;"),
+        param_given_stamp.contains("let param_given = self.param_given.as_ref();"),
         "{param_given_stamp}"
     );
     assert!(
@@ -5454,8 +5486,9 @@ fn generated_ddt_followed_by_parameter_use_rust_compiles_with_runtime_stub() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("let p = &self.params;"), "{stamp}");
+    assert!(stamp.contains("let p = Box::as_ref(&self.params);"), "{stamp}");
     assert!(!stamp.contains("let p = self.params;"), "{stamp}");
+    assert!(!stamp.contains("let p = self.p.as_ref();"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -6241,6 +6274,54 @@ fn rust_backend_uses_dense_stamp_calls_for_wide_derivative_equations() {
 }
 
 #[test]
+fn rust_backend_uses_fixed_mixed_sparse_current_stamp() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(mixed_sparse_current_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile mixed sparse current device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("stamper.stamp_current_node2_branch1("), "{stamp}");
+    assert!(
+        !stamp.contains("GeneratedDerivative::"),
+        "mixed sparse current stamps should avoid generic derivative slice construction:\n{stamp}"
+    );
+}
+
+#[test]
+fn rust_backend_uses_fixed_mixed_sparse_potential_stamp() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(mixed_sparse_potential_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile mixed sparse potential device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("stamper.stamp_potential_node2_branch1("), "{stamp}");
+    assert!(
+        !stamp.contains("GeneratedDerivative::"),
+        "mixed sparse potential stamps should avoid generic derivative slice construction:\n{stamp}"
+    );
+}
+
+#[test]
 fn generated_dense_derivative_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(dense_derivative_source())
@@ -6390,7 +6471,7 @@ fn rust_backend_lowers_param_given_conditions_as_direct_boolean_reads() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("let param_given = &self.param_given;"),
+        stamp.contains("let param_given = self.param_given.as_ref();"),
         "{stamp}"
     );
     assert!(
@@ -6479,8 +6560,8 @@ fn rust_backend_uses_compact_parameter_state_initialization_and_validation() {
         .as_str();
 
     assert!(
-        state.contains("std::mem::zeroed::<Self>()"),
-        "parameter defaults should avoid a generated all-field zero initializer:\n{state}"
+        state.contains("std::ptr::write_bytes(ptr, 0, 1);"),
+        "parameter defaults should zero the heap allocation without emitting an all-field initializer:\n{state}"
     );
     assert!(
         state.starts_with("#![allow(dead_code, unused_parens, unused_variables)]"),
@@ -6550,8 +6631,9 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
 
     assert!(state.contains("pub p0: f64"), "{state}");
     assert!(state.contains("pub p1: f64"), "{state}");
-    assert!(stamp.contains("let p = &self.params;"), "{stamp}");
+    assert!(stamp.contains("let p = Box::as_ref(&self.params);"), "{stamp}");
     assert!(!stamp.contains("let p = self.params;"), "{stamp}");
+    assert!(!stamp.contains("let p = self.p.as_ref();"), "{stamp}");
     assert!(stamp.contains("let nodes = &(*self).nodes;"), "{stamp}");
     assert!(!stamp.contains("let nodes = self.nodes;"), "{stamp}");
     assert!(stamp.contains("p.p0"), "{stamp}");
@@ -6601,6 +6683,15 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         "{state}"
     );
     assert!(!state.contains("impl Copy for Instance {}"), "{state}");
+    assert!(state.contains("pub params: Box<Parameters>"), "{state}");
+    assert!(
+        state.contains("pub(crate) param_given: Box<[bool; 3]>"),
+        "{state}"
+    );
+    assert!(
+        state.contains("pub(crate) ddt_state_current: Box<[f64; 0]>"),
+        "{state}"
+    );
     assert!(
         state.contains("pub(crate) scratch: Option<Box<GenericScratch<"),
         "{state}"
@@ -6610,13 +6701,34 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         "{state}"
     );
     assert!(
-        state.contains("scratch: Some(Box::new(GenericScratch::new()))"),
+        state.contains("params: Parameters::new_box()"),
         "{state}"
     );
     assert!(
-        state.contains("reactive_scratch: Some(Box::new(GenericReactiveScratch::new()))"),
+        state.contains("fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]>"),
         "{state}"
     );
+    assert!(
+        state.contains("fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]>"),
+        "{state}"
+    );
+    assert!(
+        state.contains("param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>()"),
+        "{state}"
+    );
+    assert!(
+        state.contains("ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>()"),
+        "{state}"
+    );
+    assert!(
+        state.contains("scratch: Some(GenericScratch::new_box())"),
+        "{state}"
+    );
+    assert!(
+        state.contains("reactive_scratch: Some(GenericReactiveScratch::new_box())"),
+        "{state}"
+    );
+    assert!(state.contains("params: self.params.clone()"), "{state}");
     assert!(state.contains("scratch: None"), "{state}");
     assert!(state.contains("reactive_scratch: None"), "{state}");
     assert!(
@@ -6723,6 +6835,10 @@ pub mod runtime {{
         pub fn branch_current(&self, branch_ordinal: usize) -> f64 {{
             self.voltages.get(branch_ordinal).copied().unwrap_or(0.0)
         }}
+
+        pub fn analysis(&self, query: &str) -> bool {{
+            matches!(query, "dc" | "static")
+        }}
     }}
 
     pub struct GeneratedStamper<'a> {{
@@ -6816,6 +6932,34 @@ pub mod runtime {{
             *self.touched += value + derivative0 + derivative1;
         }}
 
+        pub fn stamp_current_node1_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+            _branch0: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1;
+        }}
+
+        pub fn stamp_current_node2_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+            _branch0: usize,
+            derivative2: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1 + derivative2;
+        }}
+
         pub fn stamp_current(
             &mut self,
             _pos: Option<usize>,
@@ -6899,6 +7043,32 @@ pub mod runtime {{
             derivative1: f64,
         ) {{
             *self.touched += value + derivative0 + derivative1;
+        }}
+
+        pub fn stamp_potential_node1_branch1(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+            _branch0: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1;
+        }}
+
+        pub fn stamp_potential_node2_branch1(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+            _branch0: usize,
+            derivative2: f64,
+        ) {{
+            *self.touched += value + derivative0 + derivative1 + derivative2;
         }}
 
         pub fn stamp_potential(
@@ -6988,6 +7158,32 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1;
         }}
 
+        pub fn stamp_current_reactive_node1_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            derivative0: f64,
+            _branch0: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1;
+        }}
+
+        pub fn stamp_current_reactive_node2_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+            _branch0: usize,
+            derivative2: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1 + derivative2;
+        }}
+
         pub fn stamp_current_reactive(
             &mut self,
             _pos: Option<usize>,
@@ -7058,6 +7254,30 @@ pub mod runtime {{
             derivative1: f64,
         ) {{
             *self.touched += derivative0 + derivative1;
+        }}
+
+        pub fn stamp_potential_reactive_node1_branch1(
+            &mut self,
+            _branch: usize,
+            _node0: usize,
+            derivative0: f64,
+            _branch0: usize,
+            derivative1: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1;
+        }}
+
+        pub fn stamp_potential_reactive_node2_branch1(
+            &mut self,
+            _branch: usize,
+            _node0: usize,
+            derivative0: f64,
+            _node1: usize,
+            derivative1: f64,
+            _branch0: usize,
+            derivative2: f64,
+        ) {{
+            *self.touched += derivative0 + derivative1 + derivative2;
         }}
 
         pub fn stamp_potential_reactive_dense(
@@ -7146,6 +7366,10 @@ pub mod runtime {{
 
         pub fn branch_current(&self, branch_ordinal: usize) -> f64 {{
             self.voltages.get(branch_ordinal).copied().unwrap_or(0.0)
+        }}
+
+        pub fn analysis(&self, query: &str) -> bool {{
+            matches!(query, "dc" | "static")
         }}
     }}
 
@@ -7246,6 +7470,37 @@ pub mod runtime {{
             _derivative1: f64,
         ) {{
             *self.current += value;
+        }}
+
+        pub fn stamp_current_node1_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node0: usize,
+            derivative0: f64,
+            _branch0: usize,
+            _derivative1: f64,
+        ) {{
+            *self.current += value;
+            self.node_derivatives[node0] += derivative0;
+        }}
+
+        pub fn stamp_current_node2_branch1(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node0: usize,
+            derivative0: f64,
+            node1: usize,
+            derivative1: f64,
+            _branch0: usize,
+            _derivative2: f64,
+        ) {{
+            *self.current += value;
+            self.node_derivatives[node0] += derivative0;
+            self.node_derivatives[node1] += derivative1;
         }}
 
         pub fn stamp_current(
@@ -7936,6 +8191,40 @@ fn generated_simparam_parameter_default_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
+fn rust_backend_lowers_analysis_call() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(analysis_call_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile analysis call");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("ctx.analysis(\"dc\")"), "{stamp}");
+    assert!(stamp.contains("ctx.analysis(\"smallsig\")"), "{stamp}");
+}
+
+#[test]
+fn generated_analysis_call_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(analysis_call_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile analysis call");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_lowers_forward_potential_branch_current_probe() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(forward_potential_branch_current_probe())
@@ -8026,7 +8315,11 @@ fn rust_backend_propagates_branch_current_axis_through_assignment() {
         .as_str();
 
     assert!(
-        stamp.contains("GeneratedDerivative::branch(branches[0]"),
+        stamp.contains("stamper.stamp_potential_node2_branch1("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("GeneratedDerivative::branch(branches[0]"),
         "{stamp}"
     );
     assert!(stamp.contains("A::branch_current"), "{stamp}");
@@ -8048,25 +8341,66 @@ fn generated_forward_potential_branch_current_probe_rust_compiles_with_runtime_s
 }
 
 #[test]
-fn rust_backend_reports_real_module_for_expression_lowering_failures() {
+fn rust_backend_lowers_anonymous_potential_branch_current_probe() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(anonymous_potential_branch_current_probe())
+        .expect("canonical IR");
+    let generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile anonymous branch current probe");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("ctx.branch_current(branches[0])"), "{stamp}");
+    assert!(stamp.contains("stamp_potential_branch1"), "{stamp}");
+}
+
+#[test]
+fn generated_anonymous_potential_branch_current_probe_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(anonymous_potential_branch_current_probe())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile anonymous branch current probe");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_lowers_binary_power_operator() {
     let src = r#"
 module pow_res(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ V(p, n) ** 2.0;
+    analog I(p, n) <+ V(p, n) ** (1.0 + V(p, n));
 endmodule
 "#;
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(src)
         .expect("canonical IR");
-    let err = RustTranspiler::default()
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
         .transpile(&artifact)
-        .expect_err("pow unsupported in first slice");
-    let rendered = err.to_string();
+        .expect("transpile binary power operator");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
 
-    assert!(rendered.contains("<input>"));
-    assert!(rendered.contains("pow_res"));
-    assert!(rendered.contains("binary operator Pow"));
+    assert!(stamp.contains(".powf("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
 }
 
 fn temp_dir(prefix: &str) -> std::path::PathBuf {
@@ -10650,6 +10984,45 @@ endmodule
 "#
 }
 
+fn mixed_sparse_current_source() -> &'static str {
+    r#"
+module mixed_sparse_current(p, n);
+    inout p, n;
+    electrical p, n;
+    branch (p, n) sense;
+    analog begin
+        V(sense) <+ 0.0;
+        I(p, n) <+ V(p, n) + 2.0 * I(sense);
+    end
+endmodule
+"#
+}
+
+fn mixed_sparse_potential_source() -> &'static str {
+    r#"
+module mixed_sparse_potential(p, n);
+    inout p, n;
+    electrical p, n;
+    branch (p, n) sense;
+    analog V(sense) <+ V(p, n) + 2.0 * I(sense);
+endmodule
+"#
+}
+
+fn analysis_call_source() -> &'static str {
+    r#"
+module analysis_call(p, n);
+    inout p, n;
+    electrical p, n;
+    real scale;
+    analog begin
+        scale = analysis("dc") ? 1.0 : 2.0;
+        I(p, n) <+ (scale + analysis("smallsig")) * V(p, n);
+    end
+endmodule
+"#
+}
+
 fn forward_potential_branch_current_probe() -> &'static str {
     r#"
 module forward_branch_probe(p, n);
@@ -10662,6 +11035,17 @@ module forward_branch_probe(p, n);
         V(probe) <+ 0.0;
         I(p, n) <+ 0.0 * seen;
     end
+endmodule
+"#
+}
+
+fn anonymous_potential_branch_current_probe() -> &'static str {
+    r#"
+module anonymous_branch_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 10.0 from [0:inf);
+    analog V(p, n) <+ r * I(p, n);
 endmodule
 "#
 }

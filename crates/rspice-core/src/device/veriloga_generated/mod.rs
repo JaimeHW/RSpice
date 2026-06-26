@@ -184,7 +184,12 @@ impl BuiltinVerilogAInstance {
         voltages: &[Value],
         num_nodes: usize,
     ) {
-        let ctx = GeneratedEvalContext::new(voltages, self.temperature, num_nodes);
+        let ctx = GeneratedEvalContext::with_analysis(
+            voltages,
+            self.temperature,
+            num_nodes,
+            GeneratedAnalysisKind::Ac,
+        );
         let mut stamper = GeneratedStamper::new_ac_real(matrix, voltages, num_nodes);
         self.kind.stamp(&ctx, &mut stamper);
     }
@@ -197,7 +202,12 @@ impl BuiltinVerilogAInstance {
         num_nodes: usize,
         omega: Value,
     ) {
-        let ctx = GeneratedEvalContext::new(voltages, self.temperature, num_nodes);
+        let ctx = GeneratedEvalContext::with_analysis(
+            voltages,
+            self.temperature,
+            num_nodes,
+            GeneratedAnalysisKind::Ac,
+        );
         let mut stamper = GeneratedReactiveStamper::new(matrix, num_nodes, omega);
         self.kind.stamp_reactive(&ctx, &mut stamper);
     }
@@ -296,19 +306,56 @@ pub fn instantiate_builtin(
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum GeneratedAnalysisKind {
+    Dc,
+    Ac,
+    Tran,
+    Noise,
+    Ic,
+}
+
+impl GeneratedAnalysisKind {
+    #[inline]
+    fn matches_query(self, query: &str) -> bool {
+        match query {
+            "dc" | "op" => matches!(self, Self::Dc),
+            "ac" => matches!(self, Self::Ac),
+            "tran" => matches!(self, Self::Tran),
+            "noise" => matches!(self, Self::Noise),
+            "ic" => matches!(self, Self::Ic),
+            "static" => matches!(self, Self::Dc | Self::Ic),
+            "smallsig" => matches!(self, Self::Ac | Self::Noise),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct GeneratedEvalContext<'a> {
     voltages: &'a [Value],
     temperature: Value,
     num_nodes: usize,
+    analysis: GeneratedAnalysisKind,
 }
 
 impl<'a> GeneratedEvalContext<'a> {
     #[inline]
     pub fn new(voltages: &'a [Value], temperature: Value, num_nodes: usize) -> Self {
+        Self::with_analysis(voltages, temperature, num_nodes, GeneratedAnalysisKind::Dc)
+    }
+
+    #[inline]
+    pub fn with_analysis(
+        voltages: &'a [Value],
+        temperature: Value,
+        num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
+    ) -> Self {
         Self {
             voltages,
             temperature,
             num_nodes,
+            analysis,
         }
     }
 
@@ -341,6 +388,11 @@ impl<'a> GeneratedEvalContext<'a> {
                 .copied()
                 .unwrap_or(0.0)
         }
+    }
+
+    #[inline]
+    pub fn analysis(&self, query: &str) -> bool {
+        self.analysis.matches_query(query)
     }
 }
 
@@ -592,6 +644,80 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
+    pub fn stamp_current_node1_branch1(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        value: Value,
+        node0: usize,
+        derivative0: Value,
+        branch0: usize,
+        derivative1: Value,
+    ) {
+        let pos_row = pos.and_then(Self::node_matrix_index);
+        let neg_row = neg.and_then(Self::node_matrix_index);
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        let needs_rhs = self.rhs.is_some();
+        let equivalent = if needs_rhs {
+            value - derivative0 * self.node_value(node0) - derivative1 * self.branch_value(branch0)
+        } else {
+            0.0
+        };
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.add_current_derivative_pair(pos_row, neg_row, col, derivative0);
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.add_current_derivative_pair(pos_row, neg_row, col, derivative1);
+        }
+        if needs_rhs {
+            self.add_current_rhs_pair(pos_row, neg_row, equivalent);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_node2_branch1(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        value: Value,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+        branch0: usize,
+        derivative2: Value,
+    ) {
+        let pos_row = pos.and_then(Self::node_matrix_index);
+        let neg_row = neg.and_then(Self::node_matrix_index);
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        let needs_rhs = self.rhs.is_some();
+        let equivalent = if needs_rhs {
+            value
+                - derivative0 * self.node_value(node0)
+                - derivative1 * self.node_value(node1)
+                - derivative2 * self.branch_value(branch0)
+        } else {
+            0.0
+        };
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.add_current_derivative_pair(pos_row, neg_row, col, derivative0);
+        }
+        if let Some(col) = Self::node_matrix_index(node1) {
+            self.add_current_derivative_pair(pos_row, neg_row, col, derivative1);
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.add_current_derivative_pair(pos_row, neg_row, col, derivative2);
+        }
+        if needs_rhs {
+            self.add_current_rhs_pair(pos_row, neg_row, equivalent);
+        }
+    }
+
+    #[inline]
     pub fn stamp_current(
         &mut self,
         pos: Option<usize>,
@@ -834,6 +960,61 @@ impl<'a> GeneratedStamper<'a> {
         }
         if let Some(col) = self.branch_matrix_index(branch1) {
             self.add_real(row, col, -derivative1);
+        }
+        self.add_potential_rhs(row, equivalent);
+    }
+
+    #[inline]
+    pub fn stamp_potential_node1_branch1(
+        &mut self,
+        branch_ordinal: usize,
+        value: Value,
+        node0: usize,
+        derivative0: Value,
+        branch0: usize,
+        derivative1: Value,
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        let equivalent =
+            value - derivative0 * self.node_value(node0) - derivative1 * self.branch_value(branch0);
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.add_real(row, col, -derivative0);
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.add_real(row, col, -derivative1);
+        }
+        self.add_potential_rhs(row, equivalent);
+    }
+
+    #[inline]
+    pub fn stamp_potential_node2_branch1(
+        &mut self,
+        branch_ordinal: usize,
+        value: Value,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+        branch0: usize,
+        derivative2: Value,
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        let equivalent = value
+            - derivative0 * self.node_value(node0)
+            - derivative1 * self.node_value(node1)
+            - derivative2 * self.branch_value(branch0);
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.add_real(row, col, -derivative0);
+        }
+        if let Some(col) = Self::node_matrix_index(node1) {
+            self.add_real(row, col, -derivative1);
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.add_real(row, col, -derivative2);
         }
         self.add_potential_rhs(row, equivalent);
     }
@@ -1211,6 +1392,82 @@ impl<'a> GeneratedReactiveStamper<'a> {
     }
 
     #[inline]
+    pub fn stamp_current_reactive_node1_branch1(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node0: usize,
+        derivative0: Value,
+        branch0: usize,
+        derivative1: Value,
+    ) {
+        let pos_row = pos.and_then(Self::node_matrix_index);
+        let neg_row = neg.and_then(Self::node_matrix_index);
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative1,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_node2_branch1(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+        branch0: usize,
+        derivative2: Value,
+    ) {
+        let pos_row = pos.and_then(Self::node_matrix_index);
+        let neg_row = neg.and_then(Self::node_matrix_index);
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+        if let Some(col) = Self::node_matrix_index(node1) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative1,
+            );
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative2,
+            );
+        }
+    }
+
+    #[inline]
     fn add_current_reactive_derivative_pair(
         &mut self,
         pos_row: Option<usize>,
@@ -1293,6 +1550,51 @@ impl<'a> GeneratedReactiveStamper<'a> {
         }
         if let Some(col) = self.branch_matrix_index(branch1) {
             self.matrix.add_imag(row, col, -self.omega * derivative1);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_node1_branch1(
+        &mut self,
+        branch_ordinal: usize,
+        node0: usize,
+        derivative0: Value,
+        branch0: usize,
+        derivative1: Value,
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.matrix.add_imag(row, col, -self.omega * derivative0);
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.matrix.add_imag(row, col, -self.omega * derivative1);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_node2_branch1(
+        &mut self,
+        branch_ordinal: usize,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+        branch0: usize,
+        derivative2: Value,
+    ) {
+        let Some(row) = self.branch_matrix_index(branch_ordinal) else {
+            return;
+        };
+        if let Some(col) = Self::node_matrix_index(node0) {
+            self.matrix.add_imag(row, col, -self.omega * derivative0);
+        }
+        if let Some(col) = Self::node_matrix_index(node1) {
+            self.matrix.add_imag(row, col, -self.omega * derivative1);
+        }
+        if let Some(col) = self.branch_matrix_index(branch0) {
+            self.matrix.add_imag(row, col, -self.omega * derivative2);
         }
     }
 
