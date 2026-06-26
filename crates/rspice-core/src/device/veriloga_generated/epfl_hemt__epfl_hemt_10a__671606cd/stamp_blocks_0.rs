@@ -18884,7 +18884,7 @@ impl Instance {
 
         s.store_mul_ad_rhs(85, 3, A::add_scaled_inputs_product(s.ad_value(80), 1.0, s.ad_value(90), 2.0, A::add_scaled_inputs(A::scale_offset(s.ad_value(80), 1.2, 1.0), 1.0, s.ad_value(90), 0.8), s.ad_value(4), 0.5));
 
-        s.store_add_scaled_product(28, A::sqrt(A::offset(A::mul3(s.ad_value(61), s.ad_value(83), A::mul(s.ad_value(61), s.ad_value(83))), ((0.25 * 0.1) * 0.1))), 0.5, s.ad_value(61), s.ad_value(83), 0.5);
+        s.store_add_scaled_product_value_ad(28, A::sqrt(A::offset(A::mul3(s.ad_value(61), s.ad_value(83), A::mul(s.ad_value(61), s.ad_value(83))), ((0.25 * 0.1) * 0.1))), 0.5, 61, 83, 0.5);
 
         s.store_mul_add_rhs(27, 61, 84, 85);
 

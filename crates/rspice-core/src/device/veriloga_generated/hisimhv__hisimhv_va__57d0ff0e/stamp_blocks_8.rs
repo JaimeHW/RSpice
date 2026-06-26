@@ -27,7 +27,7 @@ impl Instance {
             s.store_sqrt_square_add(782, 781, 782);
             s.store_offset_scaled_div(334, 781, 782, 0.5, 0.5);
             s.store_add_scaled_inputs4(1860, s.ad_value(1887), 1.0, s.ad_value(1855), (-1.0), s.ad_value(781), 0.5, s.ad_value(782), 0.5);
-            s.store_div_scaled_product(1888, s.ad_value(1855), s.ad_value(622), -1.0, A::add(s.ad_value(622), s.ad_value(964)), 1.0);
+            s.store_div_scaled_product_denominator_ad(1888, 1855, 622, -1.0, A::add(s.ad_value(622), s.ad_value(964)), 1.0);
             s.store_offset_sub(1834, 965, 1835, 1e-15);
             s.store_scalar(79, 0.0);
             s.store_scalar(1850, 0.2);
@@ -508,7 +508,7 @@ impl Instance {
 
         if (((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[1954])) && (!s.b[1955])) {
             s.store_mul_sqrt_ad_rhs(337, 209, A::sub(A::mul(s.ad_value(210), A::sub(A::exp(A::mul_scaled_lhs(s.ad_value(154), -1.0, A::sub(s.ad_value(1853), s.ad_value(1887)))), A::exp(A::mul_scaled_lhs(s.ad_value(154), -1.0, A::sub(s.ad_value(1856), s.ad_value(1887)))))), s.ad_value(335)));
-            s.store_add_scaled_product(1864, s.ad_value(337), 1.0, s.ad_value(209), A::sqrt_scaled_input(s.ad_value(335), -1.0), (-1.0));
+            s.store_add_scaled_product_right_ad(1864, 337, 1.0, 209, A::sqrt_scaled_input(s.ad_value(335), -1.0), (-1.0));
         }
 
         s.b[1956] = (((s.v[1853] - s.v[1851]) < s.v[1911]) && (s.v[1911] >= 0.0));
@@ -1412,7 +1412,7 @@ impl Instance {
 
         if ((((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[1975])) && (!s.b[2005])) && (!s.b[2006])) {
             s.store_mul_sqrt_ad_rhs(337, 209, A::sub(A::mul(s.ad_value(210), A::sub(A::exp(A::mul_scaled_lhs(s.ad_value(154), -1.0, A::sub(s.ad_value(1854), s.ad_value(1887)))), A::exp(A::mul_scaled_lhs(s.ad_value(154), -1.0, A::sub(s.ad_value(1857), s.ad_value(1887)))))), s.ad_value(335)));
-            s.store_add_scaled_product(1865, s.ad_value(337), 1.0, s.ad_value(209), A::sqrt_scaled_input(s.ad_value(335), -1.0), (-1.0));
+            s.store_add_scaled_product_right_ad(1865, 337, 1.0, 209, A::sqrt_scaled_input(s.ad_value(335), -1.0), (-1.0));
         }
 
         s.b[2007] = (((s.v[1854] - s.v[1852]) < s.v[1911]) && (s.v[1911] >= 0.0));
@@ -2002,7 +2002,7 @@ impl Instance {
                 s.store_scalar(97, (150.0 + 1.0));
             }
             if (((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[2030])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product(1870, s.ad_value(2028), 1.0, s.ad_value(185), A::sub(s.ad_value(1915), s.ad_value(983)), 1.0);
+                s.store_add_scaled_product_right_ad(1870, 2028, 1.0, 185, A::sub(s.ad_value(1915), s.ad_value(983)), 1.0);
                 s.store_sub(1871, 2029, 185);
                 s.store_div_scaled_inputs(1882, s.ad_value(1870), -1.0, s.ad_value(1871), 1.0);
             }
@@ -3768,7 +3768,7 @@ impl Instance {
                 s.store_scalar(97, (150.0 + 1.0));
             }
             if ((s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product(2100, s.ad_value(2098), 1.0, s.ad_value(185), A::sub(s.ad_value(85), s.ad_value(2089)), 1.0);
+                s.store_add_scaled_product_right_ad(2100, 2098, 1.0, 185, A::sub(s.ad_value(85), s.ad_value(2089)), 1.0);
                 s.store_sub(2101, 2125, 185);
                 s.copy_ad(2102, 2127);
                 s.store_sub(2103, 2092, 2137);
@@ -4663,7 +4663,7 @@ impl Instance {
                 s.store_scalar(98, (150.0 + 1.0));
             }
             if (((s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) && (!s.b[2252])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product(2100, s.ad_value(2099), 1.0, s.ad_value(185), A::sub(s.ad_value(85), s.ad_value(2090)), 1.0);
+                s.store_add_scaled_product_right_ad(2100, 2099, 1.0, 185, A::sub(s.ad_value(85), s.ad_value(2090)), 1.0);
                 s.store_sub(2101, 2126, 185);
                 s.copy_ad(2102, 2128);
                 s.store_sub(2103, 2093, 2137);

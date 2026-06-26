@@ -517,7 +517,7 @@ impl Instance {
 
         s.store_mul(44, 35, 43);
 
-        s.store_add_scaled_product(46, A::mul3_scaled_output(s.ad_value(35), s.ad_value(43), s.ad_value(102), p.p84), 1.0, s.ad_value(35), s.ad_value(43), (1.0 - p.p84));
+        s.store_add_scaled_product_value_ad(46, A::mul3_scaled_output(s.ad_value(35), s.ad_value(43), s.ad_value(102), p.p84), 1.0, 35, 43, (1.0 - p.p84));
 
         s.store_offset_powf_ad(99, A::abs_scaled_input(s.ad_value(79), 1.0 / (p.p48)), p.p49, 1.0);
 
