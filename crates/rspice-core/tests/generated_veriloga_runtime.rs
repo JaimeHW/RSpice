@@ -96,6 +96,37 @@ fn generated_dense_stamper_abi_is_slice_based() {
 }
 
 #[test]
+fn generated_stamper_uses_linked_static_stamp_slots() {
+    let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let generated_root = manifest_root.join("src/device/veriloga_generated");
+    let runtime_path = generated_root.join("mod.rs");
+    let introspection_path = manifest_root.join("src/circuit/introspection.rs");
+
+    let runtime = std::fs::read_to_string(&runtime_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
+    let introspection = std::fs::read_to_string(&introspection_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", introspection_path.display()));
+
+    assert!(
+        runtime.contains("pub struct GeneratedStaticStampCache"),
+        "generated runtime should expose a per-instance static stamp cache:\n{runtime}"
+    );
+    assert!(
+        runtime.contains("pub fn stamp_current_dense_local(")
+            && runtime.contains("pub fn stamp_potential_dense_local("),
+        "generated runtime should provide local-axis stamp entry points:\n{runtime}"
+    );
+    assert!(
+        runtime.contains("matrix.stamp_direct"),
+        "generated static stamps should use precomputed CSC slots instead of StaticMatrix::add:\n{runtime}"
+    );
+    assert!(
+        introspection.contains(".link_static_stamps(matrix, num_nodes);"),
+        "CircuitData::link_indices should link generated Verilog-A static slots:\n{introspection}"
+    );
+}
+
+#[test]
 fn generated_runtime_restores_snapshots_without_discarding_scratch_storage() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let generated_root = manifest_root.join("src/device/veriloga_generated");

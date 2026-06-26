@@ -386,6 +386,12 @@ impl CircuitData {
         self.diodes.link_all(matrix);
         self.bjts.link_all(matrix);
         self.mosfets.link_all(matrix);
+        #[cfg(feature = "veriloga-builtins")]
+        {
+            let num_nodes = self.num_nodes;
+            self.generated_veriloga_devices_mut()
+                .link_static_stamps(matrix, num_nodes);
+        }
         for jfet in &mut self.jfets {
             jfet.link(matrix);
         }
