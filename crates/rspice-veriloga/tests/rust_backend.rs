@@ -1564,6 +1564,67 @@ fn rust_backend_uses_compact_limited_exp_store_helpers_for_scratch_sources() {
 }
 
 #[test]
+fn rust_backend_uses_compact_scaled_input_unary_ad_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_scaled_input_unary_ad_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact scaled-input unary AD operation stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_sqrt_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64)",
+        "fn store_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64)",
+        "fn store_limexp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64)",
+        "fn store_limited_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64)",
+        "fn store_ln_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64)",
+        "fn store_ln_one_plus_exp_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64)",
+        "fn store_ln_one_plus_exp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>)",
+        "fn store_sin_scaled_input_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64)",
+    ] {
+        assert!(
+            support.contains(helper),
+            "missing helper {helper}:\n{support}"
+        );
+    }
+
+    for helper in [
+        "s.store_sqrt_scaled_input_ad(",
+        "s.store_exp_scaled_input_ad(",
+        "s.store_limexp_scaled_input_ad(",
+        "s.store_limited_exp_scaled_input_ad(",
+        "s.store_ln_scaled_input_ad(",
+        "s.store_ln_one_plus_exp_ad(",
+        "s.store_sin_ad(",
+    ] {
+        assert!(stamp.contains(helper), "missing helper {helper}:\n{stamp}");
+    }
+
+    for old_call in [
+        "A::sqrt_scaled_input(",
+        "A::exp_scaled_input(",
+        "A::limexp_scaled_input(",
+        "A::limited_exp_scaled_input(",
+        "A::ln_scaled_input(",
+        "A::ln_one_plus_exp(",
+    ] {
+        assert!(!stamp.contains(old_call), "{stamp}");
+    }
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_scaled_output_scaled_input_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_output_scaled_input_unary_store_source())
@@ -1786,6 +1847,12 @@ fn rust_backend_fuses_softplus_ad_operation_chains() {
         ),
         "{support}"
     );
+    assert!(
+        support.contains(
+            "fn store_ln_one_plus_exp_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>)"
+        ),
+        "{support}"
+    );
 
     assert!(stamp.contains("s.store_ln_one_plus_exp("), "{stamp}");
     assert!(
@@ -1801,7 +1868,8 @@ fn rust_backend_fuses_softplus_ad_operation_chains() {
         stamp.contains("s.store_scaled_ln_one_plus_exp_scaled_input("),
         "{stamp}"
     );
-    assert!(stamp.contains("A::ln_one_plus_exp("), "{stamp}");
+    assert!(stamp.contains("s.store_ln_one_plus_exp_ad("), "{stamp}");
+    assert!(!stamp.contains("A::ln_one_plus_exp("), "{stamp}");
     assert!(!stamp.contains("A::ln(A::offset(A::exp("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -5086,6 +5154,7 @@ fn rust_backend_uses_compact_sqrt_general_ad_store_helpers() {
     for helper in [
         "fn store_sqrt_offset_ad(&mut self, index: usize, value: AdValue",
         "fn store_sqrt_scaled_ad(&mut self, index: usize, value: AdValue",
+        "fn store_sqrt_scaled_input_ad(&mut self, index: usize, value: AdValue",
         "fn store_sqrt_add_ad(&mut self, index: usize, left: AdValue",
         "fn store_sqrt_sub_ad(&mut self, index: usize, left: AdValue",
         "fn store_sqrt_mul_ad(&mut self, index: usize, left: AdValue",
@@ -5099,7 +5168,7 @@ fn rust_backend_uses_compact_sqrt_general_ad_store_helpers() {
 
     for call in [
         "s.store_sqrt_offset_ad(",
-        "s.store_sqrt_scaled_ad(",
+        "s.store_sqrt_scaled_input_ad(",
         "s.store_sqrt_add_ad(",
         "s.store_sqrt_sub_ad(",
         "s.store_sqrt_mul_ad(",
@@ -11486,6 +11555,49 @@ module compact_scaled_input_unary_store(p, n);
         e = sin(a * gain);
         f = ln(a * gain);
         I(p, n) <+ b + c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_scaled_input_unary_ad_store_source() -> &'static str {
+    r#"
+module compact_scaled_input_unary_ad_store(p, n, x);
+    inout p, n, x;
+    electrical p, n, x;
+    parameter real gain = 2.0;
+    analog function real lexp;
+        input x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real a;
+    real z;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    analog begin
+        a = V(p, n);
+        z = V(p, x);
+        b = sqrt((a + z) * gain);
+        c = exp((a + z) * gain);
+        d = limexp((a + z) * gain);
+        e = lexp((a + z) * gain);
+        f = ln((a + z) * gain);
+        g = ln(1.0 + exp((a + z) * gain));
+        h = sin((a + z) * gain);
+        I(p, n) <+ b + c + d + e + f + g + h;
     end
 endmodule
 "#
