@@ -1495,6 +1495,46 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_add_scaled_product_consumers_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_mul_add_scaled_product_rhs",
+            "fn store_offset_add_scaled_product",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(50, AdValue::mul(scratch.ad_value(2), AdValue::add_scaled_product(scratch.ad_value(3), params.value_scale, scratch.ad_value(4), scratch.ad_value(5), params.product_scale)));
+    let assign51_ad_e20: AdValue = AdValue::mul(AdValue::add_scaled_product(AdValue::sub(scratch.ad_value(7), scratch.ad_value(8)), 1.0, scratch.ad_value(9), scratch.ad_value(10), (-1.0)), scratch.ad_value(6));
+    scratch.store_ad_value(51, assign51_ad_e20);
+    scratch.store_ad_value(52, AdValue::offset(AdValue::add_scaled_product(scratch.ad_value(11), params.value_scale, scratch.ad_value(12), AdValue::sub(scratch.ad_value(13), scratch.ad_value(14)), params.product_scale), params.bias));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_add_scaled_product_rhs(50, 2, s.ad_value(3), p.value_scale, s.ad_value(4), s.ad_value(5), p.product_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_mul_add_scaled_product_rhs(51, 6, A::sub(s.ad_value(7), s.ad_value(8)), 1.0, s.ad_value(9), s.ad_value(10), (-1.0));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_offset_add_scaled_product(52, s.ad_value(11), p.value_scale, s.ad_value(12), A::sub(s.ad_value(13), s.ad_value(14)), p.product_scale, p.bias);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::add_scaled_product("), "{compact}");
+        assert!(!compact.contains("s.store_mul_ad_rhs("), "{compact}");
+        assert!(!compact.contains("s.store_mul_ad_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_offset_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sub_div_same_denominator_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -4559,6 +4599,17 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_offset_add_scaled_product(&mut self, index: usize, value: AdValue, value_scale: f64, product_left: AdValue, product_right: AdValue, product_scale: f64, offset: f64) {",
+        "        let value_term = value.value * value_scale;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        self.values[index] = value_term + product_term + offset;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * value_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_add_scaled_sub_value_product(&mut self, index: usize, scalar: f64, subtrahend: AdValue, value_scale: f64, product_left: AdValue, product_right: AdValue, product_scale: f64) {",
         "        let value_term = (scalar - subtrahend.value) * value_scale;",
         "        let product_left_value = product_left.value;",
@@ -6694,6 +6745,19 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = left.value * right_value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value + left.value * right_node_derivatives[axis]; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value + left.value * right_branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_add_scaled_product_rhs(&mut self, index: usize, left: usize, value: AdValue, value_scale: f64, product_left: AdValue, product_right: AdValue, product_scale: f64) {",
+    "        let left_value = self.values[left];",
+    "        let left_node_derivatives = self.node_derivatives[left];",
+    "        let left_branch_derivatives = self.branch_derivatives[left];",
+    "        let product_left_value = product_left.value;",
+    "        let product_right_value = product_right.value;",
+    "        let right_value = value.value * value_scale + product_left_value * product_right_value * product_scale;",
+    "        self.values[index] = left_value * right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * (value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * (value.branch_derivatives[axis] * value_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale); }",
     "    }",
     "",
     "    #[inline]",
@@ -13593,6 +13657,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_nested_scale_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_offset_add_scaled_product_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_nested_offset_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -13612,6 +13679,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         return Some(line);
     }
     if let Some(line) = compact_scaled_binary_operand_store_helper_call(target_index, value) {
+        return Some(line);
+    }
+    if let Some(line) = compact_mul_add_scaled_product_store_helper_call(target_index, value) {
         return Some(line);
     }
     if let Some(line) = compact_add_sub_mixed_multiply_store_helper_call(target_index, value) {
@@ -16470,6 +16540,53 @@ fn compact_scaled_mul_scale_offset_helper_line(
     None
 }
 
+fn compact_offset_add_scaled_product_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "offset")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    let (base, base_scale, product_left, product_right, product_scale) =
+        compact_add_scaled_product_args(args[0])?;
+    Some(format!(
+        "scratch.store_offset_add_scaled_product({target_index}, {base}, {base_scale}, {product_left}, {product_right}, {product_scale}, {});",
+        args[1]
+    ))
+}
+
+fn compact_mul_add_scaled_product_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "mul")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    if let Some(left) = compact_scratch_ad_value_index(args[0])
+        && let Some((base, base_scale, product_left, product_right, product_scale)) =
+            compact_add_scaled_product_args(args[1])
+    {
+        return Some(format!(
+            "scratch.store_mul_add_scaled_product_rhs({target_index}, {left}, {base}, {base_scale}, {product_left}, {product_right}, {product_scale});"
+        ));
+    }
+
+    if let Some(right) = compact_scratch_ad_value_index(args[1])
+        && let Some((base, base_scale, product_left, product_right, product_scale)) =
+            compact_add_scaled_product_args(args[0])
+    {
+        return Some(format!(
+            "scratch.store_mul_add_scaled_product_rhs({target_index}, {right}, {base}, {base_scale}, {product_left}, {product_right}, {product_scale});"
+        ));
+    }
+
+    None
+}
+
 fn compact_mul_scale_offset_store_helper_call(target_index: usize, value: &str) -> Option<String> {
     let args = compact_ad_call_args(value, "mul")?;
     if args.len() != 2 {
@@ -16493,6 +16610,14 @@ fn compact_mul_scale_offset_store_helper_call(target_index: usize, value: &str) 
     }
 
     None
+}
+
+fn compact_add_scaled_product_args(value: &str) -> Option<(&str, &str, &str, &str, &str)> {
+    let args = compact_ad_call_args(value, "add_scaled_product")?;
+    if args.len() != 5 {
+        return None;
+    }
+    Some((args[0], args[1], args[2], args[3], args[4]))
 }
 
 fn compact_scale_offset_scratch_arg(value: &str) -> Option<(usize, &str, &str)> {
