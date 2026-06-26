@@ -3222,7 +3222,7 @@ fn rust_backend_directly_stores_affine_product_expression_helpers() {
     );
     assert!(
         support.contains(
-            "fn store_add_scaled_square_product(&mut self, index: usize, square_value: AdValue<NODE_COUNT, BRANCH_COUNT>, square_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64)"
+            "fn store_add_scaled_square_product_indices(&mut self, index: usize, square_value: usize, square_scale: f64, product_left: usize, product_right: usize, product_scale: f64)"
         ),
         "{support}"
     );
@@ -3231,8 +3231,12 @@ fn rust_backend_directly_stores_affine_product_expression_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_add_scaled_square_product("),
+        stamp.contains("s.store_add_scaled_square_product_indices("),
         "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_square_product("),
+        "direct affine-product root assignments should avoid by-value square-product stores:\n{stamp}"
     );
     assert!(
         !stamp.contains("s.store_ad_value("),
@@ -3315,16 +3319,23 @@ fn rust_backend_directly_stores_product_division_expression_helpers() {
     let support = render_runtime_support_module();
 
     assert!(
-        support.contains("fn store_div_scaled_product3(&mut self, index: usize")
-            && support.contains("product_middle: AdValue")
-            && support.contains("denominator_scale: f64"),
+        support.contains(
+            "fn store_div_scaled_product3_indices(&mut self, index: usize, product_left: usize, product_middle: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64)"
+        ),
         "{support}"
     );
     assert!(
         stamp.contains("s.store_div_scaled_product_indices("),
         "{stamp}"
     );
-    assert!(stamp.contains("s.store_div_scaled_product3("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_div_scaled_product3_indices("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_div_scaled_product3("),
+        "direct product-division root assignments should avoid by-value product3 stores:\n{stamp}"
+    );
     assert!(
         !stamp.contains("s.store_ad_value("),
         "direct product-division root assignments should not materialize returned AD temporaries:\n{stamp}"
@@ -3691,6 +3702,72 @@ fn rust_backend_directly_stores_mixed_index_product_helpers() {
     assert!(
         !stamp.contains("s.store_div_scaled_product("),
         "mixed product-division root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_directly_stores_square_product_and_product3_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            compact_expression_direct_store_square_product_and_product3_helpers_source(),
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact square-product and product3 direct stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_add_scaled_square_product_indices(",
+        "fn store_add_scaled_square_product_mixed_iia(",
+        "fn store_add_scaled_square_product_mixed_iai(",
+        "fn store_div_scaled_product3_indices(",
+        "fn store_div_scaled_product3_mixed_iiia(",
+        "fn store_div_scaled_product3_mixed_iiaa(",
+        "fn store_div_scaled_product3_mixed_iiai(",
+        "fn store_div_scaled_product3_mixed_aiii(",
+        "fn store_div_scaled_product3_mixed_iaii(",
+        "fn store_div_scaled_product3_mixed_aiia(",
+        "fn store_div_scaled_product3_mixed_aaii(",
+        "fn store_div_scaled_product3_mixed_iaaa(",
+    ] {
+        assert!(support.contains(helper), "missing {helper}\n{support}");
+    }
+
+    for helper in [
+        "s.store_add_scaled_square_product_indices(",
+        "s.store_add_scaled_square_product_mixed_iia(",
+        "s.store_add_scaled_square_product_mixed_iai(",
+        "s.store_div_scaled_product3_indices(",
+        "s.store_div_scaled_product3_mixed_iiia(",
+        "s.store_div_scaled_product3_mixed_iiaa(",
+        "s.store_div_scaled_product3_mixed_iiai(",
+        "s.store_div_scaled_product3_mixed_aiii(",
+        "s.store_div_scaled_product3_mixed_iaii(",
+        "s.store_div_scaled_product3_mixed_aiia(",
+        "s.store_div_scaled_product3_mixed_aaii(",
+        "s.store_div_scaled_product3_mixed_iaaa(",
+    ] {
+        assert!(stamp.contains(helper), "missing {helper}\n{stamp}");
+    }
+
+    assert!(
+        !stamp.contains("s.store_add_scaled_square_product("),
+        "square-product root assignments should avoid by-value stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_div_scaled_product3("),
+        "product3 division root assignments should avoid by-value stores:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -12519,6 +12596,55 @@ module compact_expression_direct_store_mixed_index_product_helpers(p, n);
                  + products_iiaa + products_iaia + products_iaai
                  + products_aiia + products_aiai + products_aaii
                  + div_iaa + div_aia + div_aai;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_direct_store_square_product_and_product3_helpers_source() -> &'static str {
+    r#"
+module compact_expression_direct_store_square_product_and_product3_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real square_scale = 2.0;
+    parameter real product_scale = 3.0;
+    parameter real denominator_scale = 4.0;
+    real a;
+    real q;
+    real r;
+    real t;
+    real sq_iii;
+    real sq_iia;
+    real sq_iai;
+    real div3_iiii;
+    real div3_iiia;
+    real div3_iiaa;
+    real div3_iiai;
+    real div3_aiii;
+    real div3_iaii;
+    real div3_aiia;
+    real div3_aaii;
+    real div3_iaaa;
+    analog begin
+        a = V(p, n);
+        q = V(p);
+        r = V(n);
+        t = V(p) - V(n);
+        sq_iii = (a * a * square_scale) + ((q * r) * product_scale);
+        sq_iia = (a * a * square_scale) + ((q * (r + t)) * product_scale);
+        sq_iai = (a * a * square_scale) + (((q + t) * r) * product_scale);
+        div3_iiii = (a * q * r * product_scale) / (t * denominator_scale);
+        div3_iiia = (a * q * r * product_scale) / ((t + q) * denominator_scale);
+        div3_iiaa = (a * q * (r + t) * product_scale) / ((t + q) * denominator_scale);
+        div3_iiai = (a * q * (r + t) * product_scale) / (t * denominator_scale);
+        div3_aiii = ((a + t) * q * r * product_scale) / (t * denominator_scale);
+        div3_iaii = (a * (q + t) * r * product_scale) / (t * denominator_scale);
+        div3_aiia = ((a + t) * q * r * product_scale) / ((t + q) * denominator_scale);
+        div3_aaii = ((a + t) * (q + t) * r * product_scale) / (t * denominator_scale);
+        div3_iaaa = (a * (q + t) * (r + t) * product_scale) / ((t + q) * denominator_scale);
+        I(p, n) <+ sq_iii + sq_iia + sq_iai
+                 + div3_iiii + div3_iiia + div3_iiaa + div3_iiai
+                 + div3_aiii + div3_iaii + div3_aiia + div3_aaii + div3_iaaa;
     end
 endmodule
 "#
