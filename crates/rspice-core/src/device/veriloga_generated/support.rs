@@ -6451,15 +6451,27 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     #[inline]
     pub(crate) fn abs(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 }) }
     #[inline]
+    pub(crate) fn abs_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; Self::unary_intrinsic(arg, raw.abs(), if raw >= 0.0 { scale } else { -scale }) }
+    #[inline]
     pub(crate) fn sqrt(arg: Self) -> Self { let value = arg.value.sqrt(); Self::unary_intrinsic(arg, value, 1.0 / (2.0 * value)) }
+    #[inline]
+    pub(crate) fn sqrt_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.sqrt(); Self::unary_intrinsic(arg, value, scale / (2.0 * value)) }
     #[inline]
     pub(crate) fn exp(arg: Self) -> Self { let value = arg.value.exp(); Self::unary_intrinsic(arg, value, value) }
     #[inline]
+    pub(crate) fn exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) }
+    #[inline]
     pub(crate) fn limexp(arg: Self) -> Self { let raw = arg.value; if raw < 80.0 { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } else { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX) } }
+    #[inline]
+    pub(crate) fn limexp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; if raw < 80.0 { let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) } else { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX * scale) } }
     #[inline]
     pub(crate) fn limited_exp(arg: Self) -> Self { let raw = arg.value; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } }
     #[inline]
+    pub(crate) fn limited_exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX * scale) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) } }
+    #[inline]
     pub(crate) fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }
+    #[inline]
+    pub(crate) fn ln_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; Self::unary_intrinsic(arg, raw.ln(), scale / raw) }
     #[inline]
     pub(crate) fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) { if raw > 0.0 { (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp())) } else { let exp = raw.exp(); (exp.ln_1p(), exp / (1.0 + exp)) } }
     #[inline]
@@ -6480,6 +6492,8 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     pub(crate) fn cosh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.cosh(), raw.sinh()) }
     #[inline]
     pub(crate) fn tanh(arg: Self) -> Self { let raw = arg.value; let cosh = raw.cosh(); Self::unary_intrinsic(arg, raw.tanh(), 1.0 / (cosh * cosh)) }
+    #[inline]
+    pub(crate) fn tanh_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let cosh = raw.cosh(); Self::unary_intrinsic(arg, raw.tanh(), scale / (cosh * cosh)) }
     #[inline]
     pub(crate) fn asinh(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.asinh(), 1.0 / ((raw * raw) + 1.0).sqrt()) }
     #[inline]

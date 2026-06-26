@@ -1041,7 +1041,7 @@ impl Instance {
 
         if (((s.b[1439] && s.b[1440]) && (!s.b[1619])) && (!s.b[1626])) {
             s.store_mul_sqrt_ad_rhs(337, 209, A::sub(A::mul(s.ad_value(210), A::sub(A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1457), s.ad_value(1431)))), A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1479), s.ad_value(1431)))))), s.ad_value(335)));
-            s.store_sub_ad_rhs(1473, 337, A::mul(s.ad_value(209), A::sqrt(A::neg(s.ad_value(335)))));
+            s.store_sub_ad_rhs(1473, 337, A::mul(s.ad_value(209), A::sqrt_scaled_input(s.ad_value(335), -1.0)));
             s.store_mul_sqrt_ad_rhs(1513, 209, A::offset(A::sub(A::offset(s.ad_value(336), (-1.0)), s.ad_value(335)), 1e-15));
         }
 
@@ -1962,7 +1962,7 @@ impl Instance {
         if (s.b[1439] && s.b[1440]) {
             s.store_offset_sub_ad(338, A::offset(A::exp(A::mul(s.ad_value(154), s.ad_value(336))), (-1.0)), A::mul(s.ad_value(154), s.ad_value(336)), (10.0 * 2.220446049250313e-16));
             s.store_mul_scaled_ad_rhs(1511, 209, -1.0, A::sqrt(s.ad_value(338)));
-            s.store_sub_scaled_ad_lhs(338, A::offset(A::exp(A::scale(s.ad_value(154), 0.1)), (-1.0)), 154, 0.1);
+            s.store_sub_scaled_ad_lhs(338, A::offset(A::exp_scaled_input(s.ad_value(154), 0.1), (-1.0)), 154, 0.1);
             s.store_mul_sqrt_rhs(1536, 209, 338);
             s.copy_ad(349, 790);
         }
@@ -3440,7 +3440,7 @@ impl Instance {
 
         if ((((s.b[1439] && s.b[1440]) && (!s.b[1707])) && (!s.b[1768])) && (!s.b[1775])) {
             s.store_mul_sqrt_ad_rhs(337, 209, A::sub(A::mul(s.ad_value(210), A::sub(A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1458), s.ad_value(1431)))), A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1480), s.ad_value(1431)))))), s.ad_value(335)));
-            s.store_sub_ad_rhs(1474, 337, A::mul(s.ad_value(209), A::sqrt(A::neg(s.ad_value(335)))));
+            s.store_sub_ad_rhs(1474, 337, A::mul(s.ad_value(209), A::sqrt_scaled_input(s.ad_value(335), -1.0)));
             s.store_mul_sqrt_ad_rhs(1514, 209, A::offset(A::sub(A::offset(s.ad_value(336), (-1.0)), s.ad_value(335)), 1e-15));
         }
 

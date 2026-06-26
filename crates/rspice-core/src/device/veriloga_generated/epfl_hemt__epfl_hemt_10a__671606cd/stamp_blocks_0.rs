@@ -9535,7 +9535,7 @@ impl Instance {
 
         s.v[110] = (p.p32 / (s.v[12] - (2.0 * p.p32)));
 
-        s.store_scale_ad(111, A::ln(A::scale(A::add(A::offset(s.ad_value(109), s.v[110]), A::sqrt(A::offset(A::add(A::square(s.ad_value(109)), A::scale(s.ad_value(109), (2.0 * s.v[110]))), 1.0))), 1.0 / ((s.v[110] + 1.0)))), (p.p33 * p.p32));
+        s.store_scale_ad(111, A::ln_scaled_input(A::add(A::offset(s.ad_value(109), s.v[110]), A::sqrt(A::offset(A::add(A::square(s.ad_value(109)), A::scale(s.ad_value(109), (2.0 * s.v[110]))), 1.0))), 1.0 / ((s.v[110] + 1.0))), (p.p33 * p.p32));
 
     }
 

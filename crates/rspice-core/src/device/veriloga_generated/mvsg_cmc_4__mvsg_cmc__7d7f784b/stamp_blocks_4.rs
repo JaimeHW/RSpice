@@ -24,7 +24,7 @@ impl Instance {
             } else {
                 let eq19_ad_e630: A = {
                     if ((!(((nv26 - nv27) / s.v[113]) > 50.0)) && (((nv26 - nv27) / s.v[113]) < (-50.0))) {
-                        A::exp(A::neg(A::constant(50.0)))
+                        A::exp_scaled_input(A::constant(50.0), -1.0)
                     } else {
                         {
                             if (((nv26 - nv27) / s.v[113]) > 50.0) {

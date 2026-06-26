@@ -1606,7 +1606,7 @@ impl Instance {
 
         if (s.b[1391] && s.b[1392]) {
             s.store_mul_ad(810, A::exp(s.ad_value(809)), A::exp(s.ad_value(809)));
-            s.store_mul_exp_ad_rhs(810, 810, A::neg(A::div(s.ad_value(324), s.ad_value(1016))));
+            s.store_mul_ad_rhs(810, 810, A::exp_scaled_input(A::div(s.ad_value(324), s.ad_value(1016)), -1.0));
         }
 
         if (s.b[1391] && s.b[1392]) {
@@ -1644,7 +1644,7 @@ impl Instance {
 
         if (((!s.b[1391]) && s.b[1394]) && s.b[1395]) {
             s.store_exp_ad(810, A::div(s.ad_value(809), A::mul(s.ad_value(384), s.ad_value(363))));
-            s.store_mul_exp_ad_rhs(810, 810, A::neg(A::div(s.ad_value(324), s.ad_value(1016))));
+            s.store_mul_ad_rhs(810, 810, A::exp_scaled_input(A::div(s.ad_value(324), s.ad_value(1016)), -1.0));
         }
 
         if (((!s.b[1391]) && s.b[1394]) && s.b[1395]) {
@@ -2325,7 +2325,7 @@ impl Instance {
         }
 
         if ((!s.b[1402]) && s.b[1420]) {
-            s.store_exp_ad(859, A::scale({
+            s.store_ad_value(859, A::exp_scaled_input({
                 if (s.v[843] > 1e-38) {
                     A::ln(s.ad_value(843))
                 } else {
@@ -2355,7 +2355,7 @@ impl Instance {
         }
 
         if (((!s.b[1402]) && s.b[1420]) && s.b[1445]) {
-            s.store_exp_ad(859, A::scale({
+            s.store_ad_value(859, A::exp_scaled_input({
                 if (s.v[843] > 1e-38) {
                     A::ln(s.ad_value(843))
                 } else {

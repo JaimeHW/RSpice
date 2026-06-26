@@ -36,7 +36,7 @@ impl Instance {
 
         if (((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[1954])) && (!s.b[1955])) {
             s.store_mul_sqrt_ad_rhs(337, 209, A::sub(A::mul(s.ad_value(210), A::sub(A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1853), s.ad_value(1887)))), A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1856), s.ad_value(1887)))))), s.ad_value(335)));
-            s.store_sub_ad_rhs(1864, 337, A::mul(s.ad_value(209), A::sqrt(A::neg(s.ad_value(335)))));
+            s.store_sub_ad_rhs(1864, 337, A::mul(s.ad_value(209), A::sqrt_scaled_input(s.ad_value(335), -1.0)));
         }
 
         s.b[1956] = (((s.v[1853] - s.v[1851]) < s.v[1911]) && (s.v[1911] >= 0.0));
@@ -940,7 +940,7 @@ impl Instance {
 
         if ((((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[1975])) && (!s.b[2005])) && (!s.b[2006])) {
             s.store_mul_sqrt_ad_rhs(337, 209, A::sub(A::mul(s.ad_value(210), A::sub(A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1854), s.ad_value(1887)))), A::exp(A::mul(A::neg(s.ad_value(154)), A::sub(s.ad_value(1857), s.ad_value(1887)))))), s.ad_value(335)));
-            s.store_sub_ad_rhs(1865, 337, A::mul(s.ad_value(209), A::sqrt(A::neg(s.ad_value(335)))));
+            s.store_sub_ad_rhs(1865, 337, A::mul(s.ad_value(209), A::sqrt_scaled_input(s.ad_value(335), -1.0)));
         }
 
         s.b[2007] = (((s.v[1854] - s.v[1852]) < s.v[1911]) && (s.v[1911] >= 0.0));
@@ -1561,7 +1561,7 @@ impl Instance {
             s.store_neg(983, 983);
             s.store_scale_ad(2026, A::scale(A::mul(A::mul(s.ad_value(1905), s.ad_value(1834)), s.ad_value(1834)), 0.5), 9662367879.197212);
             s.store_scaled_sqrt_ad(334, A::mul(A::scale(s.ad_value(154), 2.0), s.ad_value(2026)), p.p394);
-            s.store_scaled_add_ad(335, A::exp(s.ad_value(334)), A::exp(A::neg(s.ad_value(334))), 0.5);
+            s.store_scaled_add_ad(335, A::exp(s.ad_value(334)), A::exp_scaled_input(s.ad_value(334), -1.0), 0.5);
             s.store_div_ad_lhs(2027, A::ln(s.ad_value(335)), 2026);
             s.store_mul(332, 2027, 983);
             s.store_exp_ad(334, A::mul(A::neg(s.ad_value(2027)), s.ad_value(2026)));
@@ -3500,7 +3500,7 @@ impl Instance {
                 if (s.v[338] > 0.0) {
                     A::sqrt(s.ad_value(338))
                 } else {
-                    A::neg(A::sqrt(A::neg(s.ad_value(338))))
+                    A::neg(A::sqrt_scaled_input(s.ad_value(338), -1.0))
                 }
             });
         }
