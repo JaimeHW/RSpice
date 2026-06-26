@@ -803,6 +803,52 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_log_division_conditionals_as_direct_branch_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_ln_div_scaled_input_square_denominator"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(30, {
+        if (((1e20 * scratch.values[2]) / (scratch.values[3] * scratch.values[3])) > 1e-38) {
+            AdValue::ln(AdValue::div_scaled_inputs(scratch.ad_value(2), 1e20, AdValue::square(scratch.ad_value(3)), 1.0))
+        } else {
+            AdValue::neg(AdValue::constant(87.49823353377374))
+        }
+    });
+    scratch.store_ad_value(31, {
+        if ((scratch.values[2] / scratch.values[4]) > 1e-38) {
+            AdValue::ln(AdValue::div(scratch.ad_value(2), scratch.ad_value(4)))
+        } else {
+            AdValue::neg(AdValue::constant(87.49823353377374))
+        }
+    });
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact
+                .contains("s.store_ln_div_scaled_input_square_denominator(30, 2, 1e20, 3, 1.0);"),
+            "{compact}"
+        );
+        assert!(compact.contains("s.store_ln_div(31, 2, 4);"), "{compact}");
+        assert!(
+            compact.contains("s.store_scalar(30, -(87.49823353377374));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_scalar(31, -(87.49823353377374));"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_nested_conditional_generated_ad_local_store_as_direct_branch_stores() {
         let source = r#"
 fn stamp() {
@@ -952,6 +998,64 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_voltage_operand_ad_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_scaled_offset_voltage",
+            "fn store_add_scaled_input_voltage_rhs",
+            "fn store_add_scaled_voltages",
+            "fn store_sub_scaled_voltage_input",
+            "fn store_limited_exp_scaled_voltage",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(20, AdValue::scaled_offset(AdValue::voltage(ctx, nodes, Some(4), Some(5)), params.offset, params.scale));
+    scratch.store_ad_value(21, AdValue::add_scaled_inputs(scratch.ad_value(2), params.left_scale, AdValue::voltage(ctx, nodes, Some(6), None), params.right_scale));
+    scratch.store_ad_value(22, AdValue::add_scaled_inputs(AdValue::voltage(ctx, nodes, Some(1), Some(2)), params.left_scale, AdValue::voltage(ctx, nodes, Some(1), Some(3)), params.right_scale));
+    scratch.store_ad_value(23, AdValue::sub_scaled_inputs(AdValue::voltage(ctx, nodes, Some(4), Some(1)), params.left_scale, scratch.ad_value(3), params.right_scale));
+    scratch.store_ad_value(24, AdValue::limited_exp_scaled_input(AdValue::voltage(ctx, nodes, Some(1), Some(2)), params.scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_scaled_offset_voltage(20, ctx, nodes, Some(4), Some(5), p.offset, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_add_scaled_input_voltage_rhs(21, 2, p.left_scale, ctx, nodes, Some(6), None, p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_add_scaled_voltages(22, ctx, nodes, Some(1), Some(2), p.left_scale, Some(1), Some(3), p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_sub_scaled_voltage_input(23, ctx, nodes, Some(4), Some(1), p.left_scale, 3, p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_limited_exp_scaled_voltage(24, ctx, nodes, Some(1), Some(2), p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_cosh_ad_rvalue_stores_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         assert!(support.contains("fn store_cosh"), "{support}");
@@ -965,6 +1069,26 @@ fn stamp() {
         let compact = compact_generated_stamp_surface(source.to_string());
 
         assert!(compact.contains("s.store_cosh(11, 2);"), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_abs_scaled_input_ad_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_abs_scaled_input"), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(12, AdValue::abs_scaled_input(scratch.ad_value(2), params.scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_abs_scaled_input(12, 2, p.scale);"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -4437,6 +4561,128 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_scaled_offset_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>, offset: f64, scale: f64) {",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        self.values[index] = (pos_value - neg_value + offset) * scale;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] += scale; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] -= scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_input_voltage_rhs(&mut self, index: usize, source: usize, source_scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64) {",
+        "        let source_value = self.values[source];",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        self.values[index] = source_value * source_scale + (pos_value - neg_value) * voltage_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * source_scale; }",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] += voltage_scale; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] -= voltage_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * source_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_voltage_input_lhs(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64, source: usize, source_scale: f64) {",
+        "        let source_value = self.values[source];",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        self.values[index] = (pos_value - neg_value) * voltage_scale + source_value * source_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * source_scale; }",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] += voltage_scale; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] -= voltage_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * source_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_scaled_input_voltage(&mut self, index: usize, source: usize, source_scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64) {",
+        "        let source_value = self.values[source];",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        self.values[index] = source_value * source_scale - (pos_value - neg_value) * voltage_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * source_scale; }",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] -= voltage_scale; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] += voltage_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * source_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_scaled_voltage_input(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64, source: usize, source_scale: f64) {",
+        "        let source_value = self.values[source];",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        self.values[index] = (pos_value - neg_value) * voltage_scale - source_value * source_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -source_node_derivatives[axis] * source_scale; }",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] += voltage_scale; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] -= voltage_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -source_branch_derivatives[axis] * source_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_voltages(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], left_pos: Option<usize>, left_neg: Option<usize>, left_scale: f64, right_pos: Option<usize>, right_neg: Option<usize>, right_scale: f64) {",
+        "        let left_pos_value = left_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let left_neg_value = left_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let right_pos_value = right_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let right_neg_value = right_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        self.values[index] = (left_pos_value - left_neg_value) * left_scale + (right_pos_value - right_neg_value) * right_scale;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        if let Some(node) = left_pos { self.node_derivatives[index][node] += left_scale; }",
+        "        if let Some(node) = left_neg { self.node_derivatives[index][node] -= left_scale; }",
+        "        if let Some(node) = right_pos { self.node_derivatives[index][node] += right_scale; }",
+        "        if let Some(node) = right_neg { self.node_derivatives[index][node] -= right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_scaled_voltages(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], left_pos: Option<usize>, left_neg: Option<usize>, left_scale: f64, right_pos: Option<usize>, right_neg: Option<usize>, right_scale: f64) {",
+        "        let left_pos_value = left_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let left_neg_value = left_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let right_pos_value = right_pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let right_neg_value = right_neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        self.values[index] = (left_pos_value - left_neg_value) * left_scale - (right_pos_value - right_neg_value) * right_scale;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        if let Some(node) = left_pos { self.node_derivatives[index][node] += left_scale; }",
+        "        if let Some(node) = left_neg { self.node_derivatives[index][node] -= left_scale; }",
+        "        if let Some(node) = right_pos { self.node_derivatives[index][node] -= right_scale; }",
+        "        if let Some(node) = right_neg { self.node_derivatives[index][node] += right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limited_exp_scaled_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>, scale: f64) {",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let raw = (pos_value - neg_value) * scale;",
+        "        if raw > 80.0 {",
+        "            self.values[index] = LIMEXP_MAX * (1.0 + raw - 80.0);",
+        "            self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "            self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "            let derivative_scale = LIMEXP_MAX * scale;",
+        "            if let Some(node) = pos { self.node_derivatives[index][node] += derivative_scale; }",
+        "            if let Some(node) = neg { self.node_derivatives[index][node] -= derivative_scale; }",
+        "        } else if raw < -80.0 {",
+        "            self.store_scalar(index, 1.804851387e-35);",
+        "        } else {",
+        "            let output = raw.exp();",
+        "            self.values[index] = output;",
+        "            self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "            self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "            let derivative_scale = output * scale;",
+        "            if let Some(node) = pos { self.node_derivatives[index][node] += derivative_scale; }",
+        "            if let Some(node) = neg { self.node_derivatives[index][node] -= derivative_scale; }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_abs_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
         "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
         "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
@@ -5056,6 +5302,12 @@ fn generate_scratch_operation_helpers() -> String {
         "            let output = raw.exp();",
         "            self.store_unary_ad_scaled(index, value, output, output * scale);",
         "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_abs_scaled_input_ad(&mut self, index: usize, value: AdValue, scale: f64) {",
+        "        let raw = value.value * scale;",
+        "        self.store_unary_ad_scaled(index, value, raw.abs(), if raw >= 0.0 { scale } else { -scale });",
         "    }",
         "",
         "    #[inline]",
@@ -7279,6 +7531,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_abs_scaled_input(&mut self, index: usize, source: usize, scale: f64) {",
+        "        let raw = self.values[source] * scale;",
+        "        self.store_unary_scaled(index, source, raw.abs(), if raw >= 0.0 { scale } else { -scale });",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_min_with_scalar(&mut self, index: usize, source: usize, scalar: f64) {",
         "        if self.values[source] <= scalar {",
         "            self.copy_ad(index, source);",
@@ -7895,6 +8153,21 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_ln_div(&mut self, index: usize, left: usize, right: usize) {",
         "        let raw = self.values[left] / self.values[right];",
         "        self.store_unary_div_scaled(index, left, right, raw.ln(), 1.0 / raw);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln_div_scaled_input_square_denominator(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64) {",
+        "        let numerator_value = self.values[numerator];",
+        "        let denominator_value = self.values[denominator];",
+        "        let numerator_node_derivatives = self.node_derivatives[numerator];",
+        "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+        "        let numerator_branch_derivatives = self.branch_derivatives[numerator];",
+        "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+        "        self.values[index] = ((numerator_value * numerator_scale) / (denominator_value * denominator_value * denominator_scale)).ln();",
+        "        let numerator_derivative_scale = 1.0 / numerator_value;",
+        "        let denominator_derivative_scale = -2.0 / denominator_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = numerator_node_derivatives[axis] * numerator_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = numerator_branch_derivatives[axis] * numerator_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -12532,6 +12805,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_div_voltage_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_scaled_add_sub_voltage_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_sub_voltage_abs_voltage_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -13706,6 +13982,14 @@ fn compact_constant_ad_scalar_expr(value: &str) -> Option<String> {
         return Some(args[0].trim().to_string());
     }
 
+    if let Some(args) = compact_ad_call_args(value, "neg") {
+        if args.len() != 1 {
+            return None;
+        }
+        let value = compact_constant_ad_scalar_expr(args[0])?;
+        return Some(format!("-({value})"));
+    }
+
     if let Some(args) = compact_ad_call_args(value, "scale") {
         if args.len() != 2 {
             return None;
@@ -13827,6 +14111,31 @@ fn compact_voltage_store_helper_call(target_index: usize, value: &str) -> Option
         return compact_offset_voltage_store_helper_line(target_index, &voltage_args, args[1]);
     }
 
+    if let Some(args) = compact_ad_call_args(value, "scaled_offset") {
+        if args.len() != 3 {
+            return None;
+        }
+        let voltage_args = compact_ad_call_args(args[0], "voltage")?;
+        return compact_scaled_offset_voltage_store_helper_line(
+            target_index,
+            &voltage_args,
+            args[1],
+            args[2],
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "limited_exp_scaled_input") {
+        if args.len() != 2 {
+            return None;
+        }
+        let voltage_args = compact_ad_call_args(args[0], "voltage")?;
+        return compact_limited_exp_scaled_voltage_store_helper_line(
+            target_index,
+            &voltage_args,
+            args[1],
+        );
+    }
+
     if let Some(args) = compact_ad_call_args(value, "abs") {
         if args.len() != 1 {
             return None;
@@ -13874,12 +14183,41 @@ fn compact_offset_voltage_store_helper_line(
     ))
 }
 
+fn compact_scaled_offset_voltage_store_helper_line(
+    target_index: usize,
+    args: &[&str],
+    offset: &str,
+    scale: &str,
+) -> Option<String> {
+    if args.len() != 4 {
+        return None;
+    }
+    Some(format!(
+        "scratch.store_scaled_offset_voltage({target_index}, {}, {}, {}, {}, {offset}, {scale});",
+        args[0], args[1], args[2], args[3]
+    ))
+}
+
 fn compact_abs_voltage_store_helper_line(target_index: usize, args: &[&str]) -> Option<String> {
     if args.len() != 4 {
         return None;
     }
     Some(format!(
         "scratch.store_abs_voltage({target_index}, {}, {}, {}, {});",
+        args[0], args[1], args[2], args[3]
+    ))
+}
+
+fn compact_limited_exp_scaled_voltage_store_helper_line(
+    target_index: usize,
+    args: &[&str],
+    scale: &str,
+) -> Option<String> {
+    if args.len() != 4 {
+        return None;
+    }
+    Some(format!(
+        "scratch.store_limited_exp_scaled_voltage({target_index}, {}, {}, {}, {}, {scale});",
         args[0], args[1], args[2], args[3]
     ))
 }
@@ -13899,6 +14237,94 @@ fn compact_div_voltage_store_helper_call(target_index: usize, value: &str) -> Op
         "scratch.store_div_voltage_by_ad({target_index}, {}, {}, {}, {}, {right});",
         voltage_args[0], voltage_args[1], voltage_args[2], voltage_args[3]
     ))
+}
+
+fn compact_scaled_add_sub_voltage_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs") {
+        if args.len() != 4 {
+            return None;
+        }
+        return compact_scaled_add_sub_voltage_store_helper_line(
+            target_index,
+            "add",
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+        );
+    }
+
+    let args = compact_ad_call_args(value, "sub_scaled_inputs")?;
+    if args.len() != 4 {
+        return None;
+    }
+    compact_scaled_add_sub_voltage_store_helper_line(
+        target_index,
+        "sub",
+        args[0],
+        args[1],
+        args[2],
+        args[3],
+    )
+}
+
+fn compact_scaled_add_sub_voltage_store_helper_line(
+    target_index: usize,
+    op: &str,
+    left: &str,
+    left_scale: &str,
+    right: &str,
+    right_scale: &str,
+) -> Option<String> {
+    let left_source = compact_scratch_ad_value_index(left);
+    let right_source = compact_scratch_ad_value_index(right);
+    let left_voltage = compact_ad_call_args(left, "voltage");
+    let right_voltage = compact_ad_call_args(right, "voltage");
+
+    match (left_source, right_source, left_voltage, right_voltage) {
+        (Some(left), None, None, Some(right_voltage)) if right_voltage.len() == 4 => {
+            let helper = if op == "add" {
+                "store_add_scaled_input_voltage_rhs"
+            } else {
+                "store_sub_scaled_input_voltage"
+            };
+            Some(format!(
+                "scratch.{helper}({target_index}, {left}, {left_scale}, {}, {}, {}, {}, {right_scale});",
+                right_voltage[0], right_voltage[1], right_voltage[2], right_voltage[3]
+            ))
+        }
+        (None, Some(right), Some(left_voltage), None) if left_voltage.len() == 4 => {
+            let helper = if op == "add" {
+                "store_add_scaled_voltage_input_lhs"
+            } else {
+                "store_sub_scaled_voltage_input"
+            };
+            Some(format!(
+                "scratch.{helper}({target_index}, {}, {}, {}, {}, {left_scale}, {right}, {right_scale});",
+                left_voltage[0], left_voltage[1], left_voltage[2], left_voltage[3]
+            ))
+        }
+        (None, None, Some(left_voltage), Some(right_voltage))
+            if left_voltage.len() == 4
+                && right_voltage.len() == 4
+                && left_voltage[0] == right_voltage[0]
+                && left_voltage[1] == right_voltage[1] =>
+        {
+            Some(format!(
+                "scratch.store_{op}_scaled_voltages({target_index}, {}, {}, {}, {}, {left_scale}, {}, {}, {right_scale});",
+                left_voltage[0],
+                left_voltage[1],
+                left_voltage[2],
+                left_voltage[3],
+                right_voltage[2],
+                right_voltage[3]
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn compact_sub_voltage_abs_voltage_store_helper_call(
@@ -15648,6 +16074,12 @@ fn compact_scaled_input_unary_store_helper_call(
             "store_limited_exp_scaled_input_ad",
         ),
         (
+            "abs",
+            "abs_scaled_input",
+            "store_abs_scaled_input",
+            "store_abs_scaled_input_ad",
+        ),
+        (
             "ln",
             "ln_scaled_input",
             "store_ln_scaled_input",
@@ -15670,7 +16102,7 @@ fn compact_scaled_input_unary_store_helper_call(
             if args.len() != 2 {
                 return None;
             }
-            if args[1] == "-1.0" {
+            if args[1] == "-1.0" && name != "abs" {
                 continue;
             }
             if let Some(source) = compact_scratch_ad_value_index(args[0]) {
@@ -17153,6 +17585,25 @@ fn compact_unary_binary_store_helper_call(target_index: usize, value: &str) -> O
         let right = compact_scratch_ad_value_index(binary_args[1])?;
         return Some(format!(
             "scratch.store_ln_neg_add({target_index}, {left}, {right});"
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "ln")
+        && args.len() == 1
+        && let Some(div_args) = compact_ad_call_args(args[0], "div_scaled_inputs")
+    {
+        if div_args.len() != 4 {
+            return None;
+        }
+        let numerator = compact_scratch_ad_value_index(div_args[0])?;
+        let square_args = compact_ad_call_args(div_args[2], "square")?;
+        if square_args.len() != 1 {
+            return None;
+        }
+        let denominator = compact_scratch_ad_value_index(square_args[0])?;
+        return Some(format!(
+            "scratch.store_ln_div_scaled_input_square_denominator({target_index}, {numerator}, {}, {denominator}, {});",
+            div_args[1], div_args[3]
         ));
     }
 
