@@ -3217,6 +3217,44 @@ fn rust_backend_fuses_expression_scalar_divided_product_division_chains() {
 }
 
 #[test]
+fn rust_backend_fuses_expression_nested_quotient_division_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_expression_nested_quotient_division_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact expression nested quotient division");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains(
+            "fn div_scalar_by_product(scalar: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self"
+        ),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("A::div_scaled_product_by_product("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("A::div_scaled_value_by_product("), "{stamp}");
+    assert!(stamp.contains("A::div_scalar_by_product("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::div("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::div_scaled_inputs("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::div_scaled_product("), "{stamp}");
+    assert!(!stamp.contains("A::div(A::div_from_scalar("), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_fuses_expression_offset_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_product_division_source())
@@ -11497,6 +11535,34 @@ module compact_expression_scalar_divided_product_division(p, n);
           + sqrt((a * (offset / q)) / c)
           + tanh((((gain / q) * r) * c) / d)
           + ln((r * (offset / q)) / d);
+        I(p, n) <+ b;
+    end
+endmodule
+"#
+}
+
+fn compact_expression_nested_quotient_division_source() -> &'static str {
+    r#"
+module compact_expression_nested_quotient_division(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 3.0;
+    real a;
+    real q;
+    real r;
+    real c;
+    real b;
+    analog begin
+        a = V(p, n);
+        q = V(p) + offset;
+        r = V(n) + gain;
+        c = V(p) - V(n) + gain;
+        b = (((a * q) / r) / c)
+          + (((a * gain) / r) / c)
+          + ((gain / r) / c)
+          + ((a / r) / c)
+          + exp((((q * offset) / r) / c));
         I(p, n) <+ b;
     end
 endmodule

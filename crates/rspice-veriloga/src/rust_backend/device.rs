@@ -6552,6 +6552,20 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scalar_by_product(scalar: f64, denominator_left: Self, denominator_right: Self, denominator_scale: f64) -> Self {",
+        "        let mut value = denominator_left;",
+        "        let denominator_left_value = value.value;",
+        "        let denominator_right_value = denominator_right.value;",
+        "        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.node_derivatives[index]) * denominator_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * denominator_right_value + denominator_left_value * denominator_right.branch_derivatives[index]) * denominator_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_scaled_add_product(value: Self, value_scale: f64, product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {",
         "        let mut result = value;",
         "        let value_term = result.value * value_scale;",
@@ -13699,6 +13713,44 @@ fn compact_div_scaled_ad_expressions(left: &str, right: &str) -> Option<String> 
 
 fn compact_div_product_ad_expression(left: &str, right: &str) -> Option<String> {
     let (denominator, denominator_scale) = compact_scaled_factor_ad_expression(right);
+    if let Some(args) = compact_ad_call_args(left, "div_scaled_product") {
+        if args.len() == 5 {
+            return Some(format!(
+                "AdValue::div_scaled_product_by_product({}, {}, {}, {}, {denominator}, {})",
+                args[0],
+                args[1],
+                args[2],
+                args[3],
+                compact_scalar_mul(args[4], &denominator_scale)
+            ));
+        }
+    }
+    if let Some(args) = compact_ad_call_args(left, "div_scaled_product3") {
+        if args.len() == 6 {
+            return Some(format!(
+                "AdValue::div_scaled_product3_by_product({}, {}, {}, {}, {}, {denominator}, {})",
+                args[0],
+                args[1],
+                args[2],
+                args[3],
+                args[4],
+                compact_scalar_mul(args[5], &denominator_scale)
+            ));
+        }
+    }
+    if let Some(quotient) = compact_quotient_ad_expression(left) {
+        let denominator_scale = compact_scalar_mul(&denominator_scale, &quotient.denominator_scale);
+        if let Some(numerator) = quotient.numerator {
+            return Some(format!(
+                "AdValue::div_scaled_value_by_product({}, {}, {}, {denominator}, {denominator_scale})",
+                numerator, quotient.numerator_scale, quotient.denominator
+            ));
+        }
+        return Some(format!(
+            "AdValue::div_scalar_by_product({}, {}, {denominator}, {denominator_scale})",
+            quotient.numerator_scale, quotient.denominator
+        ));
+    }
     if let Some(args) = compact_ad_call_args(left, "offset") {
         if args.len() == 2 {
             return Some(format!(
@@ -14479,6 +14531,19 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             args[2],
             args[3],
             args[4]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "div_scalar_by_product") {
+        if args.len() != 4 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scalar_by_product({}, {}, {}, {})",
+            compact_scalar_mul(args[0], scale),
+            args[1],
+            args[2],
+            args[3]
         ));
     }
 
