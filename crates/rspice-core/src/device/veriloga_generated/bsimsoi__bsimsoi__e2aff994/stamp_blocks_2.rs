@@ -3344,7 +3344,7 @@ impl Instance {
             s.store_sqrt(274, 273);
             s.store_mul(275, 277, 274);
             s.store_div_from_scalar(260, s.v[180], 275);
-            s.store_ad_value(276, A::add_scaled_inputs_products(s.ad_value(836), 1.0, s.ad_value(941), 1.0, s.ad_value(838), s.ad_value(227), 1.0, s.ad_value(840), s.ad_value(218), (-1.0)));
+            s.store_add_scaled_inputs_products_indices(276, 836, 1.0, 941, 1.0, 838, 227, 1.0, 840, 218, (-1.0));
             s.store_offset_scaled(168, 276, 1.0 / (s.v[199]), 1.0);
             s.store_scaled_add_ad(267, A::offset(s.ad_value(168), 1.0), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(168), (-1.0), A::offset(s.ad_value(168), (-1.0))), ((0.25 * 0.05) * 0.05))), 0.5);
             s.store_mul(269, 267, 271);

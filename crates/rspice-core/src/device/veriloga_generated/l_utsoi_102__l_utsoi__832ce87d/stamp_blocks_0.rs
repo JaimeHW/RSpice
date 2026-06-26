@@ -674,7 +674,7 @@ impl Instance {
 
         if ((!s.b[607]) && s.b[622]) {
             s.store_div_scaled_product_offset_denominator(0, s.ad_value(122), A::pow(s.ad_value(575), s.ad_value(123)), 1.0, A::mul(s.ad_value(126), A::pow(s.ad_value(575), s.ad_value(127))), 1.0, 1.0);
-            s.store_ad_value(181, A::add_scaled_inputs_products(s.ad_value(121), 1.0, s.ad_value(0), 1.0, s.ad_value(124), s.ad_value(576), 1.0, s.ad_value(125), s.ad_value(577), 1.0));
+            s.store_add_scaled_inputs_products_indices(181, 121, 1.0, 0, 1.0, 124, 576, 1.0, 125, 577, 1.0);
             s.store_scalar(128, p.p214);
         }
 

@@ -4762,7 +4762,7 @@ impl Instance {
                 s.store_div_scaled_add_product(491, s.ad_value(489), 0.5, s.ad_value(443), s.ad_value(242), (2.0 * 0.5), s.ad_value(490), 1.0);
             }
             if (!s.b[737]) {
-                s.store_ad_value(492, A::add_scaled_inputs_products(s.ad_value(349), 1.0, s.ad_value(159), (-1.0), s.ad_value(240), s.ad_value(490), 1.0, s.ad_value(324), s.ad_value(393), (-1.0)));
+                s.store_add_scaled_inputs_products_indices(492, 349, 1.0, 159, (-1.0), 240, 490, 1.0, 324, 393, (-1.0));
                 s.store_offset_mul(493, 240, 491, 1.0);
             }
             s.b[1085] = (s.v[430] == 1.0);

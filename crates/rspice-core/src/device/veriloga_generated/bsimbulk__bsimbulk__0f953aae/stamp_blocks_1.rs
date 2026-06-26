@@ -1923,7 +1923,7 @@ impl Instance {
             s.store_sqrt(111, 110);
             s.store_mul(112, 114, 111);
             s.store_div_from_scalar(97, s.v[26], 112);
-            s.store_ad_value(113, A::add_scaled_inputs_products(s.ad_value(613), 1.0, s.ad_value(674), 1.0, s.ad_value(614), s.ad_value(76), 1.0, s.ad_value(615), s.ad_value(61), (-1.0)));
+            s.store_add_scaled_inputs_products_indices(113, 613, 1.0, 674, 1.0, 614, 76, 1.0, 615, 61, (-1.0));
             s.store_offset_scaled(13, 113, 1.0 / (s.v[46]), 1.0);
         }
 
