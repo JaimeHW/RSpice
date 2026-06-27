@@ -460,6 +460,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_exp_div_scaled_inputs_helper_calls(source);
     source = compact_add_sub_div_lhs_helper_calls(source);
     source = compact_div_ln_lhs_helper_calls(source);
+    source = compact_add_sub_ln_lhs_helper_calls(source);
     source = compact_mul_div_from_scalar_lhs_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
@@ -1227,6 +1228,97 @@ fn compact_div_ln_lhs_helper_call_replacement(
             "scratch.store_div_ln_offset_lhs({target_index}, {left_index}, {}, {right_index});",
             offset_args[1]
         )
+    };
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_add_sub_ln_lhs_helper_calls(source: String) -> String {
+    let source =
+        compact_add_sub_ln_lhs_helper_calls_for(source, "scratch.store_add_ad_lhs(", "add");
+    compact_add_sub_ln_lhs_helper_calls_for(source, "scratch.store_sub_ad_lhs(", "sub")
+}
+
+fn compact_add_sub_ln_lhs_helper_calls_for(source: String, needle: &str, kind: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(needle) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + needle.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) = compact_add_sub_ln_lhs_helper_call_replacement(
+            &source, call_start, indent, needle, kind,
+        ) else {
+            let skip_to = call_start + needle.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_add_sub_ln_lhs_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+    needle: &str,
+    kind: &str,
+) -> Option<(usize, String)> {
+    let open_paren = call_start + needle.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let right_index = args[2].trim().parse::<usize>().ok()?;
+    let ln_args = compact_ad_call_args(args[1].trim(), "ln")?;
+    if ln_args.len() != 1 {
+        return None;
+    }
+
+    let line = if let Some(left_index) = compact_scratch_ad_value_index(ln_args[0]) {
+        format!("scratch.store_{kind}_ln_lhs({target_index}, {left_index}, {right_index});")
+    } else if let Some(div_args) = compact_ad_call_args(ln_args[0], "div") {
+        if div_args.len() != 2 {
+            return None;
+        }
+        let left_index = compact_scratch_ad_value_index(div_args[0])?;
+        let denominator_index = compact_scratch_ad_value_index(div_args[1])?;
+        format!(
+            "scratch.store_{kind}_ln_div_lhs({target_index}, {left_index}, {denominator_index}, {right_index});"
+        )
+    } else if let Some(mul_args) = compact_ad_call_args(ln_args[0], "mul") {
+        if mul_args.len() != 2 {
+            return None;
+        }
+        let left_index = compact_scratch_ad_value_index(mul_args[0])?;
+        let right_product_index = compact_scratch_ad_value_index(mul_args[1])?;
+        format!(
+            "scratch.store_{kind}_ln_mul_lhs({target_index}, {left_index}, {right_product_index}, {right_index});"
+        )
+    } else {
+        return None;
     };
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
@@ -3896,6 +3988,48 @@ fn stamp() {
         );
         assert!(!compact.contains("A::ln("), "{compact}");
         assert!(!compact.contains("s.store_div_ad_lhs("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_add_sub_ln_lhs_helper_calls_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_add_ln_lhs(",
+            "fn store_sub_ln_lhs(",
+            "fn store_add_ln_div_lhs(",
+            "fn store_sub_ln_div_lhs(",
+            "fn store_add_ln_mul_lhs(",
+            "fn store_sub_ln_mul_lhs(",
+        ] {
+            assert!(support.contains(helper), "{helper}\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_sub_ad_lhs(100, AdValue::ln(scratch.ad_value(2)), 3);
+    scratch.store_add_ad_lhs(101, AdValue::ln(scratch.ad_value(4)), 5);
+    scratch.store_sub_ad_lhs(102, AdValue::ln(AdValue::div(scratch.ad_value(6), scratch.ad_value(7))), 8);
+    scratch.store_add_ad_lhs(103, AdValue::ln(AdValue::div(scratch.ad_value(9), scratch.ad_value(10))), 11);
+    scratch.store_sub_ad_lhs(104, AdValue::ln(AdValue::mul(scratch.ad_value(12), scratch.ad_value(13))), 14);
+    scratch.store_add_ad_lhs(105, AdValue::ln(AdValue::mul(scratch.ad_value(15), scratch.ad_value(16))), 17);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        for expected in [
+            "s.store_sub_ln_lhs(100, 2, 3);",
+            "s.store_add_ln_lhs(101, 4, 5);",
+            "s.store_sub_ln_div_lhs(102, 6, 7, 8);",
+            "s.store_add_ln_div_lhs(103, 9, 10, 11);",
+            "s.store_sub_ln_mul_lhs(104, 12, 13, 14);",
+            "s.store_add_ln_mul_lhs(105, 15, 16, 17);",
+        ] {
+            assert!(compact.contains(expected), "{expected}\n{compact}");
+        }
+        assert!(!compact.contains("A::ln("), "{compact}");
+        assert!(!compact.contains("s.store_add_ad_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_sub_ad_lhs("), "{compact}");
     }
 
     #[test]
@@ -10068,6 +10202,118 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left.value + right_value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] + right_node_derivatives[axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_ln_lhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_raw = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let left_value = left_raw.ln();",
+        "        let left_scale = 1.0 / left_raw;",
+        "        self.values[index] = left_value + right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_ln_lhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_raw = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let left_value = left_raw.ln();",
+        "        let left_scale = 1.0 / left_raw;",
+        "        self.values[index] = left_value - right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale - right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_ln_div_lhs(&mut self, index: usize, numerator: usize, denominator: usize, right: usize) {",
+        "        let numerator_raw = self.values[numerator];",
+        "        let numerator_node_derivatives = self.node_derivatives[numerator];",
+        "        let numerator_branch_derivatives = self.branch_derivatives[numerator];",
+        "        let denominator_raw = self.values[denominator];",
+        "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+        "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let denominator_reciprocal = 1.0 / denominator_raw;",
+        "        let quotient = numerator_raw * denominator_reciprocal;",
+        "        let ln_scale = 1.0 / quotient;",
+        "        let numerator_scale = denominator_reciprocal * ln_scale;",
+        "        let denominator_scale = (-quotient * denominator_reciprocal) * ln_scale;",
+        "        self.values[index] = quotient.ln() + right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = numerator_node_derivatives[axis] * numerator_scale + denominator_node_derivatives[axis] * denominator_scale + right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = numerator_branch_derivatives[axis] * numerator_scale + denominator_branch_derivatives[axis] * denominator_scale + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_ln_div_lhs(&mut self, index: usize, numerator: usize, denominator: usize, right: usize) {",
+        "        let numerator_raw = self.values[numerator];",
+        "        let numerator_node_derivatives = self.node_derivatives[numerator];",
+        "        let numerator_branch_derivatives = self.branch_derivatives[numerator];",
+        "        let denominator_raw = self.values[denominator];",
+        "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+        "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let denominator_reciprocal = 1.0 / denominator_raw;",
+        "        let quotient = numerator_raw * denominator_reciprocal;",
+        "        let ln_scale = 1.0 / quotient;",
+        "        let numerator_scale = denominator_reciprocal * ln_scale;",
+        "        let denominator_scale = (-quotient * denominator_reciprocal) * ln_scale;",
+        "        self.values[index] = quotient.ln() - right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = numerator_node_derivatives[axis] * numerator_scale + denominator_node_derivatives[axis] * denominator_scale - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = numerator_branch_derivatives[axis] * numerator_scale + denominator_branch_derivatives[axis] * denominator_scale - right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_ln_mul_lhs(&mut self, index: usize, left: usize, product_right: usize, right: usize) {",
+        "        let left_raw = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let product_right_raw = self.values[product_right];",
+        "        let product_right_node_derivatives = self.node_derivatives[product_right];",
+        "        let product_right_branch_derivatives = self.branch_derivatives[product_right];",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let product = left_raw * product_right_raw;",
+        "        let ln_scale = 1.0 / product;",
+        "        let left_scale = product_right_raw * ln_scale;",
+        "        let product_right_scale = left_raw * ln_scale;",
+        "        self.values[index] = product.ln() + right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + product_right_node_derivatives[axis] * product_right_scale + right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + product_right_branch_derivatives[axis] * product_right_scale + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_ln_mul_lhs(&mut self, index: usize, left: usize, product_right: usize, right: usize) {",
+        "        let left_raw = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let product_right_raw = self.values[product_right];",
+        "        let product_right_node_derivatives = self.node_derivatives[product_right];",
+        "        let product_right_branch_derivatives = self.branch_derivatives[product_right];",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let product = left_raw * product_right_raw;",
+        "        let ln_scale = 1.0 / product;",
+        "        let left_scale = product_right_raw * ln_scale;",
+        "        let product_right_scale = left_raw * ln_scale;",
+        "        self.values[index] = product.ln() - right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + product_right_node_derivatives[axis] * product_right_scale - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + product_right_branch_derivatives[axis] * product_right_scale - right_branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
