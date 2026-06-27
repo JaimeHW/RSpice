@@ -186,7 +186,7 @@ impl Instance {
             s.store_add_scaled_inputs3(368, s.ad_value(367), 1.0, s.ad_value(126), (-0.5), s.ad_value(127), (-(-0.5)));
             s.store_scale(369, 689, 0.95);
             s.store_offset_sub(170, 369, 368, (-0.001));
-            s.store_add_scaled_inputs3(370, s.ad_value(369), 1.0, s.ad_value(170), (-0.5), A::sqrt(A::add_scaled_inputs(A::square(s.ad_value(170)), 1.0, s.ad_value(369), 0.004)), (-0.5));
+            s.store_add_scaled_inputs3_sqrt_third_mixed_iia(370, 369, 1.0, 170, (-0.5), A::add_scaled_inputs(A::square(s.ad_value(170)), 1.0, s.ad_value(369), 0.004), (-0.5));
         }
 
         s.store_tanh_ad(168, A::div_scaled_inputs(s.ad_value(135), 0.6, s.ad_value(179), 1.0));

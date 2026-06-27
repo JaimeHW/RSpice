@@ -5464,7 +5464,7 @@ impl Instance {
         }
 
         if (!s.b[1380]) {
-            s.store_add_scaled_inputs3(140, s.ad_value(136), 0.5, s.ad_value(70), ((-1.0) * 0.5), A::sqrt(A::offset(A::mul(A::sub(s.ad_value(136), s.ad_value(70)), A::sub(s.ad_value(136), s.ad_value(70))), ((0.25 * 0.001) * 0.001))), 0.5);
+            s.store_add_scaled_inputs3_sqrt_third_mixed_iia(140, 136, 0.5, 70, ((-1.0) * 0.5), A::offset(A::mul(A::sub(s.ad_value(136), s.ad_value(70)), A::sub(s.ad_value(136), s.ad_value(70))), ((0.25 * 0.001) * 0.001)), 0.5);
         }
 
         s.store_div(140, 140, 782);

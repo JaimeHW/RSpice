@@ -1120,7 +1120,7 @@ impl Instance {
 
         s.store_sub(34, 35, 36);
 
-        s.store_add_scaled_inputs3(241, s.ad_value(36), 1.0, s.ad_value(34), 0.5, A::sqrt(A::offset(A::square(s.ad_value(34)), 0.0001)), 0.5);
+        s.store_add_scaled_inputs3_sqrt_third_mixed_iia(241, 36, 1.0, 34, 0.5, A::offset(A::square(s.ad_value(34)), 0.0001), 0.5);
 
         s.v[244] = (((1.60219e-19 * p.p52) * s.v[16]) / ((2.0 * s.v[19]) * s.v[19]));
 
@@ -3904,7 +3904,7 @@ impl Instance {
     ) {
         s.store_sub(34, 35, 36);
 
-        s.store_add_scaled_inputs3(241, s.ad_value(36), 1.0, s.ad_value(34), 0.5, A::sqrt(A::offset(A::square(s.ad_value(34)), 0.0001)), 0.5);
+        s.store_add_scaled_inputs3_sqrt_third_mixed_iia(241, 36, 1.0, 34, 0.5, A::offset(A::square(s.ad_value(34)), 0.0001), 0.5);
 
         s.v[244] = (((1.60219e-19 * p.p52) * s.v[16]) / ((2.0 * s.v[19]) * s.v[19]));
 

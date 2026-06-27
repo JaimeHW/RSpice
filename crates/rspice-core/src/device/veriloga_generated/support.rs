@@ -706,6 +706,34 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, sqrt_raw: f64, sqrt_dn: [f64; NODE_COUNT], sqrt_db: [f64; BRANCH_COUNT], sqrt_scale: f64) {
+        let root = sqrt_raw.sqrt();
+        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);
+        self.v[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + sqrt_dn[axis] * sqrt_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + sqrt_db[axis] * sqrt_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_components(&mut self, index: usize, sqrt_raw: f64, sqrt_dn: [f64; NODE_COUNT], sqrt_db: [f64; BRANCH_COUNT], sqrt_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, third_raw: f64, third_dn: [f64; NODE_COUNT], third_db: [f64; BRANCH_COUNT], third_scale: f64) {
+        let root = sqrt_raw.sqrt();
+        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);
+        self.v[index] = (root * sqrt_scale + second_raw * second_scale) + third_raw * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (sqrt_dn[axis] * sqrt_derivative_scale + second_dn[axis] * second_scale) + third_dn[axis] * third_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (sqrt_db[axis] * sqrt_derivative_scale + second_db[axis] * second_scale) + third_db[axis] * third_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_ad(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second.value, second.dn, second.db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_add_scaled_inputs3_offset(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, offset: f64) {
         let first_value = first.value * first_scale;
         let second_value = second.value * second_scale;
@@ -8751,6 +8779,162 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let third_product_right_dn = self.dn[third_product_right];
         let third_product_right_db = self.db[third_product_right];
         self.store_add_scaled_value_products3_components(index, value_value, value_dn, value_db, value_scale, first_product_left_value, first_product_left_dn, first_product_left_db, first_product_right_value, first_product_right_dn, first_product_right_db, first_product_scale, second_product_left_value, second_product_left_dn, second_product_left_db, second_product_right_value, second_product_right_dn, second_product_right_db, second_product_scale, third_product_left_value, third_product_left_dn, third_product_left_db, third_product_right_value, third_product_right_dn, third_product_right_db, third_product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_aai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_aai(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64) {
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second.value, second.dn, second.db, second_scale, third_value, third_dn, third_db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_aia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_aia(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second_value, second_dn, second_db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_aii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_aii(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second_value, second_dn, second_db, second_scale, third_value, third_dn, third_db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_iaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_iaa(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second.value, second.dn, second.db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_iai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_iai(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second.value, second.dn, second.db, second_scale, third_value, third_dn, third_db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_iia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_iia(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second_value, second_dn, second_db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_indices(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second_value, second_dn, second_db, second_scale, third_value, third_dn, third_db, third_scale);
     }
 
 
@@ -10259,6 +10443,34 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, sqrt_raw: f64, sqrt_dn: [f64; NODE_COUNT], sqrt_db: [f64; BRANCH_COUNT], sqrt_scale: f64) {
+        let root = sqrt_raw.sqrt();
+        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);
+        self.v[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + sqrt_dn[axis] * sqrt_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + sqrt_db[axis] * sqrt_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_components(&mut self, index: usize, sqrt_raw: f64, sqrt_dn: [f64; NODE_COUNT], sqrt_db: [f64; BRANCH_COUNT], sqrt_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, third_raw: f64, third_dn: [f64; NODE_COUNT], third_db: [f64; BRANCH_COUNT], third_scale: f64) {
+        let root = sqrt_raw.sqrt();
+        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);
+        self.v[index] = (root * sqrt_scale + second_raw * second_scale) + third_raw * third_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (sqrt_dn[axis] * sqrt_derivative_scale + second_dn[axis] * second_scale) + third_dn[axis] * third_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (sqrt_db[axis] * sqrt_derivative_scale + second_db[axis] * second_scale) + third_db[axis] * third_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_ad(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second.value, second.dn, second.db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_add_scaled_inputs3_offset(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, offset: f64) {
         let first_value = first.value * first_scale;
         let second_value = second.value * second_scale;
@@ -18304,6 +18516,162 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let third_product_right_dn = self.dn[third_product_right];
         let third_product_right_db = self.db[third_product_right];
         self.store_add_scaled_value_products3_components(index, value_value, value_dn, value_db, value_scale, first_product_left_value, first_product_left_dn, first_product_left_db, first_product_right_value, first_product_right_dn, first_product_right_db, first_product_scale, second_product_left_value, second_product_left_dn, second_product_left_db, second_product_right_value, second_product_right_dn, second_product_right_db, second_product_scale, third_product_left_value, third_product_left_dn, third_product_left_db, third_product_right_value, third_product_right_dn, third_product_right_db, third_product_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_aai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_aai(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64) {
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second.value, second.dn, second.db, second_scale, third_value, third_dn, third_db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_aia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_aia(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second_value, second_dn, second_db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_aii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_aii(&mut self, index: usize, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64) {
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale, second_value, second_dn, second_db, second_scale, third_value, third_dn, third_db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_iaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_iaa(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second.value, second.dn, second.db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_iai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_iai(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: usize, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second.value, second.dn, second.db, second_scale, third_value, third_dn, third_db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_mixed_iia(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_mixed_iia(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: usize, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second_value, second_dn, second_db, second_scale, third.value, third.dn, third.db, third_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, sqrt_value: usize, sqrt_scale: f64) {
+        let first_value = self.v[first];
+        let first_dn = self.dn[first];
+        let first_db = self.db[first];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        self.store_add_scaled_inputs3_sqrt_third_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_first_indices(&mut self, index: usize, sqrt_value: usize, sqrt_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64) {
+        let sqrt_value_value = self.v[sqrt_value];
+        let sqrt_value_dn = self.dn[sqrt_value];
+        let sqrt_value_db = self.db[sqrt_value];
+        let second_value = self.v[second];
+        let second_dn = self.dn[second];
+        let second_db = self.db[second];
+        let third_value = self.v[third];
+        let third_dn = self.dn[third];
+        let third_db = self.db[third];
+        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value_value, sqrt_value_dn, sqrt_value_db, sqrt_scale, second_value, second_dn, second_db, second_scale, third_value, third_dn, third_db, third_scale);
     }
 
 

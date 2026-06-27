@@ -4050,7 +4050,7 @@ impl Instance {
 
         if (s.b[388] && (!s.b[387])) {
             s.store_voltage(186, ctx, nodes, Some(5), None);
-            s.store_add_scaled_inputs3(186, s.ad_value(186), 0.5, s.ad_value(36), 0.5, A::sqrt(A::offset(A::mul(A::sub(s.ad_value(186), s.ad_value(36)), A::sub(s.ad_value(186), s.ad_value(36))), ((0.25 * p.p128) * p.p128))), 0.5);
+            s.store_add_scaled_inputs3_sqrt_third_mixed_iia(186, 186, 0.5, 36, 0.5, A::offset(A::mul(A::sub(s.ad_value(186), s.ad_value(36)), A::sub(s.ad_value(186), s.ad_value(36))), ((0.25 * p.p128) * p.p128)), 0.5);
             s.store_offset_scaled_ad(213, A::limited_exp(A::div_from_scalar((-1.0), s.ad_value(186))), p.p101, p.p100);
             s.store_offset_scaled_ad(216, A::limited_exp(A::div_from_scalar((-1.0), s.ad_value(186))), p.p103, p.p102);
         }
