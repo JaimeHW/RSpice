@@ -626,6 +626,33 @@ impl<'a> ScalarGraphBuilder<'a> {
                 }
                 (value_type, OptValueKind::Binary { op, left, right })
             }
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                if let Some(condition) = self.boolean_constant(condition) {
+                    return if condition {
+                        (
+                            self.values[usize::from(then_value)].value_type,
+                            self.values[usize::from(then_value)].kind.clone(),
+                        )
+                    } else {
+                        (
+                            self.values[usize::from(else_value)].value_type,
+                            self.values[usize::from(else_value)].kind.clone(),
+                        )
+                    };
+                }
+                (
+                    value_type,
+                    OptValueKind::Select {
+                        condition,
+                        then_value,
+                        else_value,
+                    },
+                )
+            }
             other => (value_type, other),
         }
     }
@@ -1346,26 +1373,56 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_call(&mut self, name: &SmolStr, args: &[ExprId]) -> Option<ValueId> {
-        if args.len() != 1 {
-            return None;
+        if args.len() == 2 {
+            return self.lower_binary_intrinsic_call(name, args[0], args[1]);
+        }
+        if args.len() == 1 {
+            let op = match name.as_str() {
+                "exp" => OptUnaryOp::Exp,
+                "ln" | "log" => OptUnaryOp::Ln,
+                "sqrt" => OptUnaryOp::Sqrt,
+                "abs" => OptUnaryOp::Abs,
+                "sin" => OptUnaryOp::Sin,
+                "cos" => OptUnaryOp::Cos,
+                "tan" => OptUnaryOp::Tan,
+                "sinh" => OptUnaryOp::Sinh,
+                "cosh" => OptUnaryOp::Cosh,
+                "tanh" => OptUnaryOp::Tanh,
+                "atan" => OptUnaryOp::Atan,
+                "asinh" => OptUnaryOp::Asinh,
+                _ => return None,
+            };
+            return self.lower_intrinsic_unary(op, args[0]);
         }
 
+        None
+    }
+
+    fn lower_binary_intrinsic_call(
+        &mut self,
+        name: &SmolStr,
+        left: ExprId,
+        right: ExprId,
+    ) -> Option<ValueId> {
         let op = match name.as_str() {
-            "exp" => OptUnaryOp::Exp,
-            "ln" | "log" => OptUnaryOp::Ln,
-            "sqrt" => OptUnaryOp::Sqrt,
-            "abs" => OptUnaryOp::Abs,
-            "sin" => OptUnaryOp::Sin,
-            "cos" => OptUnaryOp::Cos,
-            "tan" => OptUnaryOp::Tan,
-            "sinh" => OptUnaryOp::Sinh,
-            "cosh" => OptUnaryOp::Cosh,
-            "tanh" => OptUnaryOp::Tanh,
-            "atan" => OptUnaryOp::Atan,
-            "asinh" => OptUnaryOp::Asinh,
+            "min" => OptBinaryOp::Lt,
+            "max" => OptBinaryOp::Gt,
             _ => return None,
         };
-        self.lower_intrinsic_unary(op, args[0])
+        let left = self.lower_expression(left)?;
+        let right = self.lower_expression(right)?;
+        let condition = self.push_value(
+            OptValueType::Boolean,
+            OptValueKind::Binary { op, left, right },
+        );
+        Some(self.push_value(
+            OptValueType::Real,
+            OptValueKind::Select {
+                condition,
+                then_value: left,
+                else_value: right,
+            },
+        ))
     }
 }
 
