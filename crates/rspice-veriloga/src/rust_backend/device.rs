@@ -457,6 +457,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_scaled_add_offset_sqrt_square_offset_helper_calls(source);
     source = compact_div_scaled_product_sqrt_square_sum_denominator_helper_calls(source);
     source = compact_div_scaled_product_add_scaled_denominator_helper_calls(source);
+    source = compact_exp_div_scaled_inputs_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
         ("scratch.reactive_node_derivatives", "scratch.rdn"),
@@ -978,6 +979,73 @@ fn compact_scaled_add_offset_sqrt_square_offset_helper_call_replacement(
             "scratch.store_scaled_{op}_offset_sqrt_square_offset_ad({target_index}, {left_source}, {left_offset}, {square_offset}, {sqrt_offset}, {scale});"
         )
     };
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_exp_div_scaled_inputs_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_exp_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_exp_div_scaled_inputs_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_exp_div_scaled_inputs_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_exp_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 2 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let div_args = compact_ad_call_args(args[1].trim(), "div_scaled_inputs")?;
+    if div_args.len() != 4 {
+        return None;
+    }
+    let line = compact_index_or_mixed_scaled_inputs_helper_line(
+        target_index,
+        "store_exp_div_scaled_inputs",
+        &[div_args[0], div_args[2]],
+        &[div_args[1], div_args[3]],
+        &[],
+    )?;
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -3442,6 +3510,57 @@ fn stamp() {
         assert!(!compact.contains("A::mul_scaled_lhs("), "{compact}");
         assert!(!compact.contains("s.store_exp_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_exp_div_scaled_inputs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_exp_div_scaled_inputs(",
+            "fn store_exp_div_scaled_inputs_indices",
+            "fn store_exp_div_scaled_inputs_mixed_ai",
+            "fn store_exp_div_scaled_inputs_mixed_ia",
+        ] {
+            assert!(support.contains(helper), "{helper}\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_exp_ad(84, AdValue::div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale));
+    scratch.store_exp_ad(85, AdValue::div_scaled_inputs(AdValue::sub(scratch.ad_value(4), scratch.ad_value(5)), params.left_scale, scratch.ad_value(6), params.right_scale));
+    scratch.store_exp_ad(86, AdValue::div_scaled_inputs(scratch.ad_value(7), params.left_scale, AdValue::powf(scratch.ad_value(8), params.power), params.right_scale));
+    scratch.store_exp_ad(87, AdValue::div_scaled_inputs(AdValue::sqrt(scratch.ad_value(9)), params.left_scale, AdValue::neg(scratch.ad_value(10)), params.right_scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_exp_div_scaled_inputs_indices(84, 2, p.left_scale, 3, p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_exp_div_scaled_inputs_mixed_ai(85, A::sub(s.ad_value(4), s.ad_value(5)), p.left_scale, 6, p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_exp_div_scaled_inputs_mixed_ia(86, 7, p.left_scale, A::powf(s.ad_value(8), p.power), p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_exp_div_scaled_inputs(87, A::sqrt(s.ad_value(9)), p.left_scale, A::neg(s.ad_value(10)), p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
+        assert!(!compact.contains("s.store_exp_ad("), "{compact}");
     }
 
     #[test]
@@ -8994,6 +9113,27 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
+        "        let left_value = left_raw * left_scale;",
+        "        let right_value = right_raw * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let left_quotient_derivative_scale = left_scale * reciprocal;",
+        "        let right_quotient_derivative_scale = -quotient * reciprocal * right_scale;",
+        "        let output = quotient.exp();",
+        "        let left_derivative_scale = left_quotient_derivative_scale * output;",
+        "        let right_derivative_scale = right_quotient_derivative_scale * output;",
+        "        self.values[index] = output;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
+        "        self.store_exp_div_scaled_inputs_components(index, left.value, left.node_derivatives, left.branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_exp_mul_scaled_lhs_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], scale: f64, right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
         "        let scaled_left_value = left_value * scale;",
         "        let output = (scaled_left_value * right_value).exp();",
@@ -13263,6 +13403,7 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     }
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_exp_mul_scaled_lhs_helper(&mask));
+        out.push_str(&generate_index_or_mixed_exp_div_scaled_inputs_helper(&mask));
     }
     for mask in index_or_mixed_masks(5) {
         out.push_str(&generate_index_or_mixed_add_scaled_offset_product_lhs_product_helper(&mask));
@@ -14009,6 +14150,25 @@ fn generate_index_or_mixed_exp_mul_scaled_lhs_helper(mask: &str) -> String {
     #[inline]
     fn {helper}(&mut self, index: usize, left: {left_ty}, scale: f64, right: {right_ty}) {{
 {locals}        self.store_exp_mul_scaled_lhs_components(index, {left}, scale, {right});
+    }}
+"#,
+        left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_exp_div_scaled_inputs_helper(mask: &str) -> String {
+    let operands = ["left", "right"];
+    let helper = index_or_mixed_helper_name("store_exp_div_scaled_inputs", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let left = mixed_helper_component_args(mask, 0, "left");
+    let right = mixed_helper_component_args(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64) {{
+{locals}        self.store_exp_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale);
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
