@@ -312,7 +312,7 @@ impl Instance {
         let assign990_e1230: f64 = (1.0 / s.v[19]);
         s.v[67] = assign990_e1230;
 
-        s.store_powf_ad(73, A::scale(s.ad_value(65), p.p65), p.p66);
+        s.store_powf_scaled_input(73, 65, p.p65, p.p66);
 
         let assign1010_e1238: f64 = (s.v[75] * s.v[67]);
         let assign1010_e1240: f64 = (assign1010_e1238).powf(s.v[76]);
@@ -433,7 +433,7 @@ impl Instance {
 
         s.v[43] = ((p.p28 * (((s.v[254] * ((4.0 - p.p102) + p.p120))) as f64).exp()) * ((((-p.p111) * s.v[10])) as f64).exp());
 
-        s.store_powf_ad(255, A::scale(s.ad_value(70), s.v[72]), (-0.5));
+        s.store_powf_scaled_input(255, 70, s.v[72], (-0.5));
 
         s.store_div_from_scalar(256, 1.0, 73);
 
@@ -1902,9 +1902,9 @@ impl Instance {
 
         s.store_div_from_scalar(67, 1.0, 19);
 
-        s.store_powf_ad(73, A::scale(s.ad_value(65), p.p65), p.p66);
+        s.store_powf_scaled_input(73, 65, p.p65, p.p66);
 
-        s.store_powf_ad(90, A::scale(s.ad_value(67), s.v[75]), s.v[76]);
+        s.store_powf_scaled_input(90, 67, s.v[75], s.v[76]);
 
         s.store_scale(23, 73, p.p64);
 
@@ -2021,7 +2021,7 @@ impl Instance {
 
         s.v[43] = ((p.p28 * (((s.v[254] * ((4.0 - p.p102) + p.p120))) as f64).exp()) * ((((-p.p111) * s.v[10])) as f64).exp());
 
-        s.store_powf_ad(255, A::scale(s.ad_value(70), s.v[72]), (-0.5));
+        s.store_powf_scaled_input(255, 70, s.v[72], (-0.5));
 
         s.store_div_from_scalar(256, 1.0, 73);
 
@@ -2029,7 +2029,7 @@ impl Instance {
 
         s.store_div_from_scalar(67, 1.0, 19);
 
-        s.store_powf_ad(257, A::scale(s.ad_value(85), s.v[86]), (-0.5));
+        s.store_powf_scaled_input(257, 85, s.v[86], (-0.5));
 
         s.store_div_from_scalar(258, 1.0, 90);
 

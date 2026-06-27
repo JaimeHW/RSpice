@@ -6113,6 +6113,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powf_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: f64) {
+        let base = self.v[source] * input_scale;
+        let value = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, input_scale, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_powf_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: f64) {
+        let base = self.v[source] + offset;
+        let value = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, 1.0, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_powf_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: f64) {
+        let base = self.v[source] * input_scale + offset;
+        let value = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, input_scale, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_unary_scaled(&mut self, index: usize, source: usize, value: f64, derivative_scale: f64) {
         let dn = self.dn[source];
         let db = self.db[source];
@@ -18585,6 +18609,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let base = self.v[source];
         let value = base.powf(exponent);
         let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, 1.0, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_powf_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: f64) {
+        let base = self.v[source] * input_scale;
+        let value = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, input_scale, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_powf_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: f64) {
+        let base = self.v[source] + offset;
+        let value = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, 1.0, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_powf_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: f64) {
+        let base = self.v[source] * input_scale + offset;
+        let value = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, input_scale, 0.0);
         self.store_unary_scaled(index, source, value, derivative_scale);
     }
 

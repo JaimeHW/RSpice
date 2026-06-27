@@ -25,7 +25,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1427])) && (!s.b[1428])) && (!s.b[1430])) {
-            s.store_powf_ad(1207, A::scale(s.ad_value(1210), s.v[430]), p.p832);
+            s.store_powf_scaled_input(1207, 1210, s.v[430], p.p832);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1427])) && (!s.b[1428])) {
@@ -138,7 +138,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1427])) && (!s.b[1437])) && (!s.b[1438])) {
-            s.store_powf_ad(1207, A::scale_offset(s.ad_value(1205), (-s.v[430]), ((p.p829) * (s.v[430]))), p.p832);
+            s.store_powf_scale_offset_input(1207, 1205, (-s.v[430]), ((p.p829) * (s.v[430])), p.p832);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1427])) && (!s.b[1437])) {
@@ -247,7 +247,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1444])) && (!s.b[1445])) && (!s.b[1447])) {
-            s.store_powf_ad(1207, A::scale(s.ad_value(1210), s.v[431]), p.p833);
+            s.store_powf_scaled_input(1207, 1210, s.v[431], p.p833);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1444])) && (!s.b[1445])) {
@@ -360,7 +360,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1444])) && (!s.b[1454])) && (!s.b[1455])) {
-            s.store_powf_ad(1207, A::scale_offset(s.ad_value(1205), (-s.v[431]), ((p.p830) * (s.v[431]))), p.p833);
+            s.store_powf_scale_offset_input(1207, 1205, (-s.v[431]), ((p.p830) * (s.v[431])), p.p833);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1444])) && (!s.b[1454])) {
@@ -538,7 +538,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1466])) && (!s.b[1467])) && (!s.b[1469])) {
-            s.store_powf_ad(1207, A::scale(s.ad_value(1210), s.v[429]), p.p831);
+            s.store_powf_scaled_input(1207, 1210, s.v[429], p.p831);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1466])) && (!s.b[1467])) {
@@ -651,7 +651,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1466])) && (!s.b[1476])) && (!s.b[1477])) {
-            s.store_powf_ad(1207, A::scale_offset(s.ad_value(1205), (-s.v[429]), ((p.p828) * (s.v[429]))), p.p831);
+            s.store_powf_scale_offset_input(1207, 1205, (-s.v[429]), ((p.p828) * (s.v[429])), p.p831);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1466])) && (!s.b[1476])) {
@@ -760,7 +760,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1483])) && (!s.b[1484])) && (!s.b[1486])) {
-            s.store_powf_ad(1207, A::scale(s.ad_value(1210), s.v[430]), p.p832);
+            s.store_powf_scaled_input(1207, 1210, s.v[430], p.p832);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1483])) && (!s.b[1484])) {
@@ -879,7 +879,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1483])) && (!s.b[1493])) && (!s.b[1494])) {
-            s.store_powf_ad(1207, A::scale_offset(s.ad_value(1205), (-s.v[430]), ((p.p829) * (s.v[430]))), p.p832);
+            s.store_powf_scale_offset_input(1207, 1205, (-s.v[430]), ((p.p829) * (s.v[430])), p.p832);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1483])) && (!s.b[1493])) {
@@ -988,7 +988,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1500])) && (!s.b[1501])) && (!s.b[1503])) {
-            s.store_powf_ad(1207, A::scale(s.ad_value(1210), s.v[431]), p.p833);
+            s.store_powf_scaled_input(1207, 1210, s.v[431], p.p833);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1500])) && (!s.b[1501])) {
@@ -1101,7 +1101,7 @@ impl Instance {
         }
 
         if ((((s.b[1171] && s.b[1188]) && (!s.b[1500])) && (!s.b[1510])) && (!s.b[1511])) {
-            s.store_powf_ad(1207, A::scale_offset(s.ad_value(1205), (-s.v[431]), ((p.p830) * (s.v[431]))), p.p833);
+            s.store_powf_scale_offset_input(1207, 1205, (-s.v[431]), ((p.p830) * (s.v[431])), p.p833);
         }
 
         if (((s.b[1171] && s.b[1188]) && (!s.b[1500])) && (!s.b[1510])) {

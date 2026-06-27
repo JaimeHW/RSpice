@@ -2283,7 +2283,7 @@ impl Instance {
         s.v[1947] = if s.b[1947] { 1.0 } else { 0.0 };
 
         if ((!s.b[1620]) && s.b[1947]) {
-            s.store_powf_ad(168, A::scale(s.ad_value(706), 1.0000000000000001e-23), p.p1144);
+            s.store_powf_scaled_input(168, 706, 1.0000000000000001e-23, p.p1144);
             s.store_powf_ad(169, A::div_from_scalar(300.0, s.ad_value(635)), p.p1145);
             s.store_div_scaled_product_right_ad(170, 379, A::voltage(ctx, nodes, Some(10), Some(7)), p.p1143, 271, 1.0);
             s.store_scaled_limited_exp_ad(975, A::mul_scaled_lhs(s.ad_value(168), -1.0, s.ad_value(169)), p.p1138);

@@ -190,7 +190,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2594])) && (!s.b[2595])) && (!s.b[2597])) {
-            s.store_powf_ad(2540, A::scale(s.ad_value(2543), s.v[430]), p.p848);
+            s.store_powf_scaled_input(2540, 2543, s.v[430], p.p848);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2594])) && (!s.b[2595])) {
@@ -250,7 +250,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2594])) && (!s.b[2604])) && (!s.b[2605])) {
-            s.store_powf_ad(2540, A::scale_offset(s.ad_value(2538), (-s.v[430]), ((p.p845) * (s.v[430]))), p.p848);
+            s.store_powf_scale_offset_input(2540, 2538, (-s.v[430]), ((p.p845) * (s.v[430])), p.p848);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2594])) && (!s.b[2604])) {
@@ -330,7 +330,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2612])) && (!s.b[2613])) && (!s.b[2615])) {
-            s.store_powf_ad(2540, A::scale(s.ad_value(2543), s.v[431]), p.p849);
+            s.store_powf_scaled_input(2540, 2543, s.v[431], p.p849);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2612])) && (!s.b[2613])) {
@@ -396,7 +396,7 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2612])) && (!s.b[2622])) && (!s.b[2623])) {
-            s.store_powf_ad(2540, A::scale_offset(s.ad_value(2538), (-s.v[431]), ((p.p846) * (s.v[431]))), p.p849);
+            s.store_powf_scale_offset_input(2540, 2538, (-s.v[431]), ((p.p846) * (s.v[431])), p.p849);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2612])) && (!s.b[2622])) {
@@ -476,7 +476,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2630])) && (!s.b[2631])) && (!s.b[2633])) {
-            s.store_powf_ad(2540, A::scale(s.ad_value(2543), s.v[432]), p.p850);
+            s.store_powf_scaled_input(2540, 2543, s.v[432], p.p850);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2630])) && (!s.b[2631])) {
@@ -536,7 +536,7 @@ impl Instance {
         }
 
         if ((((s.b[2569] && (!s.b[2570])) && (!s.b[2630])) && (!s.b[2640])) && (!s.b[2641])) {
-            s.store_powf_ad(2540, A::scale_offset(s.ad_value(2538), (-s.v[432]), ((p.p847) * (s.v[432]))), p.p850);
+            s.store_powf_scale_offset_input(2540, 2538, (-s.v[432]), ((p.p847) * (s.v[432])), p.p850);
         }
 
         if (((s.b[2569] && (!s.b[2570])) && (!s.b[2630])) && (!s.b[2640])) {

@@ -1002,7 +1002,7 @@ impl Instance {
 
         s.v[662] = (s.v[661] * (1.0 + (s.v[664] * s.v[665])));
 
-        s.store_powf_ad(663, A::scale(s.ad_value(429), 1.0 / (s.v[81])), p.p112);
+        s.store_powf_scaled_input(663, 429, 1.0 / (s.v[81]), p.p112);
 
         s.store_scale(543, 663, 1.0 / (s.v[662]));
 

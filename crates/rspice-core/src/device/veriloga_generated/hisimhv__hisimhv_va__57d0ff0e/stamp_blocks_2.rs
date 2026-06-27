@@ -4052,7 +4052,7 @@ impl Instance {
         }
 
         if (((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && s.b[2080]) && (!s.b[2083])) {
-            s.store_powf_ad(335, A::offset(s.ad_value(369), 1e-12), p.p297);
+            s.store_powf_offset_input(335, 369, 1e-12, p.p297);
         }
 
     }
@@ -4063,7 +4063,7 @@ impl Instance {
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
         if ((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && s.b[2080]) {
-            s.store_powf_ad(343, A::offset(s.ad_value(369), 1e-12), p.p299);
+            s.store_powf_offset_input(343, 369, 1e-12, p.p299);
             s.store_add_scaled_products_indices(368, 341, 335, 1.0 / (s.v[632]), 797, 343, (s.v[531] * 1.0 / (s.v[632])));
             s.store_mul(334, 368, 135);
             s.store_offset(335, 790, 1e-12);

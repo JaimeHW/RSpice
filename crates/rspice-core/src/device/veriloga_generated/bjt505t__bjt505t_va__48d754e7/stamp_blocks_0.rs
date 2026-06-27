@@ -314,9 +314,9 @@ impl Instance {
 
         s.store_div_from_scalar(67, 1.0, 19);
 
-        s.store_powf_ad(73, A::scale(s.ad_value(65), p.p66), p.p67);
+        s.store_powf_scaled_input(73, 65, p.p66, p.p67);
 
-        s.store_powf_ad(90, A::scale(s.ad_value(67), s.v[75]), s.v[76]);
+        s.store_powf_scaled_input(90, 67, s.v[75], s.v[76]);
 
         s.store_scale(23, 73, p.p65);
 
@@ -460,7 +460,7 @@ impl Instance {
 
         s.store_scaled_mul_ad(357, A::sqrt(s.ad_value(4)), A::exp_scaled_input(s.ad_value(12), p.p157), p.p155);
 
-        s.store_powf_ad(281, A::scale(s.ad_value(70), s.v[72]), (-0.5));
+        s.store_powf_scaled_input(281, 70, s.v[72], (-0.5));
 
         s.store_div_from_scalar(282, 1.0, 73);
 
@@ -470,7 +470,7 @@ impl Instance {
 
         s.store_div_from_scalar(67, 1.0, 19);
 
-        s.store_powf_ad(283, A::scale(s.ad_value(85), s.v[86]), (-0.5));
+        s.store_powf_scaled_input(283, 85, s.v[86], (-0.5));
 
         s.store_div_from_scalar(284, 1.0, 90);
 
@@ -2276,9 +2276,9 @@ impl Instance {
 
         s.store_div_from_scalar(67, 1.0, 19);
 
-        s.store_powf_ad(73, A::scale(s.ad_value(65), p.p66), p.p67);
+        s.store_powf_scaled_input(73, 65, p.p66, p.p67);
 
-        s.store_powf_ad(90, A::scale(s.ad_value(67), s.v[75]), s.v[76]);
+        s.store_powf_scaled_input(90, 67, s.v[75], s.v[76]);
 
         s.store_scale(23, 73, p.p65);
 
@@ -2397,7 +2397,7 @@ impl Instance {
 
         s.store_scaled_mul_ad(43, A::exp_scaled_input(s.ad_value(280), ((4.0 - p.p103) + p.p121)), A::exp_scaled_input(s.ad_value(10), (-p.p112)), p.p29);
 
-        s.store_powf_ad(281, A::scale(s.ad_value(70), s.v[72]), (-0.5));
+        s.store_powf_scaled_input(281, 70, s.v[72], (-0.5));
 
         s.store_div_from_scalar(282, 1.0, 73);
 
@@ -2405,7 +2405,7 @@ impl Instance {
 
         s.store_div_from_scalar(67, 1.0, 19);
 
-        s.store_powf_ad(283, A::scale(s.ad_value(85), s.v[86]), (-0.5));
+        s.store_powf_scaled_input(283, 85, s.v[86], (-0.5));
 
         s.store_div_from_scalar(284, 1.0, 90);
 

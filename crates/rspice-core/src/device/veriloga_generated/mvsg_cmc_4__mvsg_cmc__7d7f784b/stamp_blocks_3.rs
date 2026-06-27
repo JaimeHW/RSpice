@@ -3773,7 +3773,7 @@ impl Instance {
 
         s.store_offset_scaled(1834, 1803, s.v[1823], (((((-s.v[1804])) * (s.v[1823]))) + (s.v[1812])));
 
-        s.store_powf_ad(1852, A::scale(s.ad_value(1803), 1.0 / (s.v[1804])), s.v[1825]);
+        s.store_powf_scaled_input(1852, 1803, 1.0 / (s.v[1804]), s.v[1825]);
 
         s.b[1900] = (s.v[1824] != 0.0);
         s.v[1900] = if s.b[1900] { 1.0 } else { 0.0 };

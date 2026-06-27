@@ -919,7 +919,7 @@ impl Instance {
         s.v[1538] = if s.b[1538] { 1.0 } else { 0.0 };
 
         if s.b[1538] {
-            s.store_powf_ad(13, A::scale(s.ad_value(481), 1.0000000000000001e-23), p.p954);
+            s.store_powf_scaled_input(13, 481, 1.0000000000000001e-23, p.p954);
             s.store_powf_ad(14, A::div_from_scalar(300.0, s.ad_value(391)), p.p955);
             s.store_div_scaled_product_right_ad(15, 187, A::voltage(ctx, nodes, Some(11), Some(7)), p.p953, 108, 1.0);
             s.store_scaled_limited_exp_ad(707, A::mul_scaled_lhs(s.ad_value(13), -1.0, s.ad_value(14)), p.p948);
