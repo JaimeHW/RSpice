@@ -2702,9 +2702,6 @@ impl Instance {
         s.b[515] = (p.p99 > 0.0);
         s.v[515] = if s.b[515] { 1.0 } else { 0.0 };
 
-        s.b[516] = (p.p0 >= 310.0);
-        s.v[516] = if s.b[516] { 1.0 } else { 0.0 };
-
         s.b[517] = ((p.p102 >= p.p149) && (p.p102 > 0.0));
         s.v[517] = if s.b[517] { 1.0 } else { 0.0 };
 
@@ -2744,7 +2741,10 @@ impl Instance {
 
         if s.b[531] {
             s.store_div_voltage_by_ad(524, ctx, nodes, Some(6), Some(2), s.ad_value(73));
+            s.store_scaled_powf_ad(523, A::abs(s.ad_value(524)), p.p114, p.p113);
         }
+
+        s.store_scale(522, 0, 2.0);
 
     }
 
@@ -2752,12 +2752,6 @@ impl Instance {
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        if s.b[531] {
-            s.store_scaled_powf_ad(523, A::abs(s.ad_value(524)), p.p114, p.p113);
-        }
-
-        s.store_scale(522, 0, 2.0);
-
         s.b[532] = (p.p0 >= 320.0);
         s.v[532] = if s.b[532] { 1.0 } else { 0.0 };
 

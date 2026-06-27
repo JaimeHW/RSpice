@@ -18,7 +18,6 @@ impl Instance {
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv0 = ctx.node_voltage(nodes[0]);
-        let nv1 = ctx.node_voltage(nodes[1]);
         let nv2 = ctx.node_voltage(nodes[2]);
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
@@ -439,39 +438,6 @@ impl Instance {
             3,
             eq27_value,
         );
-        let (eq28_e954, eq28_e954_d_n0, eq28_e954_d_n1, eq28_e954_d_n2, eq28_e954_d_n3, eq28_e954_d_n4, eq28_e954_d_n5, eq28_e954_d_n6, eq28_e954_d_n7, eq28_e954_d_n8, eq28_e954_d_b0, eq28_e954_d_b1, eq28_e954_d_b2, eq28_e954_d_b3, eq28_e954_d_b4,) = {
-    if (!s.b[665]) {
-        let eq28_e952: f64 = ((nv1 - nv7) * s.v[666]);
-        let eq28_e952_d_n0: f64 = ((nv1 - nv7) * s.dn[666][0]);
-        let eq28_e952_d_n1: f64 = (s.v[666] + ((nv1 - nv7) * s.dn[666][1]));
-        let eq28_e952_d_n2: f64 = ((nv1 - nv7) * s.dn[666][2]);
-        let eq28_e952_d_n3: f64 = ((nv1 - nv7) * s.dn[666][3]);
-        let eq28_e952_d_n4: f64 = ((nv1 - nv7) * s.dn[666][4]);
-        let eq28_e952_d_n5: f64 = ((nv1 - nv7) * s.dn[666][5]);
-        let eq28_e952_d_n6: f64 = ((nv1 - nv7) * s.dn[666][6]);
-        let eq28_e952_d_n7: f64 = ((-s.v[666]) + ((nv1 - nv7) * s.dn[666][7]));
-        let eq28_e952_d_n8: f64 = ((nv1 - nv7) * s.dn[666][8]);
-        let eq28_e952_d_b0: f64 = ((nv1 - nv7) * s.db[666][0]);
-        let eq28_e952_d_b1: f64 = ((nv1 - nv7) * s.db[666][1]);
-        let eq28_e952_d_b2: f64 = ((nv1 - nv7) * s.db[666][2]);
-        let eq28_e952_d_b3: f64 = ((nv1 - nv7) * s.db[666][3]);
-        let eq28_e952_d_b4: f64 = ((nv1 - nv7) * s.db[666][4]);
-        (eq28_e952, eq28_e952_d_n0, eq28_e952_d_n1, eq28_e952_d_n2, eq28_e952_d_n3, eq28_e952_d_n4, eq28_e952_d_n5, eq28_e952_d_n6, eq28_e952_d_n7, eq28_e952_d_n8, eq28_e952_d_b0, eq28_e952_d_b1, eq28_e952_d_b2, eq28_e952_d_b3, eq28_e952_d_b4,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq28_value: f64 = eq28_e954;
-        let eq28_node_derivatives: [f64; 9] = [eq28_e954_d_n0, eq28_e954_d_n1, eq28_e954_d_n2, eq28_e954_d_n3, eq28_e954_d_n4, eq28_e954_d_n5, eq28_e954_d_n6, eq28_e954_d_n7, eq28_e954_d_n8];
-        let eq28_branch_derivatives: [f64; 5] = [eq28_e954_d_b0, eq28_e954_d_b1, eq28_e954_d_b2, eq28_e954_d_b3, eq28_e954_d_b4];
-        stamper.stamp_current_dense_local(
-            Some(1),
-            Some(7),
-            multiplicity * (eq28_value),
-            &eq28_node_derivatives,
-            &eq28_branch_derivatives,
-            multiplicity,
-        );
         let (eq29_e963,) = {
     if (!s.b[665]) {
         (0.0,)
@@ -536,25 +502,6 @@ impl Instance {
             Some(5),
             multiplicity * (eq34_value),
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_2(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv4 = ctx.node_voltage(nodes[4]);
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv6 = ctx.node_voltage(nodes[6]);
         let (eq35_e1032,) = {
     if (s.b[668] && (!s.b[669])) {
         (0.0,)
@@ -581,6 +528,25 @@ impl Instance {
             Some(6),
             multiplicity * (eq36_value),
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_2(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
+        let nv0 = ctx.node_voltage(nodes[0]);
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv4 = ctx.node_voltage(nodes[4]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv6 = ctx.node_voltage(nodes[6]);
         let (eq37_e1054,) = {
     if s.b[670] {
         (0.0,)

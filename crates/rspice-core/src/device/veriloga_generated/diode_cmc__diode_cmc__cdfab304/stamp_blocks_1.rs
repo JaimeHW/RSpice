@@ -3845,8 +3845,6 @@ impl Instance {
 
         s.store_add_scaled_inputs3(275, s.ad_value(269), s.v[256], s.ad_value(271), s.v[257], s.ad_value(273), s.v[258]);
 
-        s.store_voltage(284, ctx, nodes, Some(2), Some(1));
-
         s.b[945] = (p.p84 > 0.0);
         s.v[945] = if s.b[945] { 1.0 } else { 0.0 };
 
@@ -3982,6 +3980,7 @@ impl Instance {
 
         if (s.b[945] && s.b[951]) {
             s.store_scale(334, 331, (1e-23 / s.v[333]));
+            s.store_voltage(336, ctx, nodes, Some(3), None);
         }
 
     }
@@ -3993,7 +3992,6 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
         if (s.b[945] && s.b[951]) {
-            s.store_voltage(336, ctx, nodes, Some(3), None);
             s.store_scaled_sub(338, 336, 334, 1.0 / (p.p92));
             s.store_scale(340, 336, 1.0 / ((1e-23 / s.v[333])));
         }

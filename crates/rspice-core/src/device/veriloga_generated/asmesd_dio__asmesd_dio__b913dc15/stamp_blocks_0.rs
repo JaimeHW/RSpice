@@ -21,8 +21,6 @@ impl Instance {
         let nv0 = ctx.node_voltage(nodes[0]);
         let nv1 = ctx.node_voltage(nodes[1]);
         let nv2 = ctx.node_voltage(nodes[2]);
-        let nv3 = ctx.node_voltage(nodes[3]);
-        let nv4 = ctx.node_voltage(nodes[4]);
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
         let (eq0_e60, eq0_e60_d_n0, eq0_e60_d_n1, eq0_e60_d_n2, eq0_e60_d_n3, eq0_e60_d_n4, eq0_e60_d_n5, eq0_e60_d_n6, eq0_e60_d_b0, eq0_e60_d_b1, eq0_e60_d_b2, eq0_e60_d_b3, eq0_e60_d_b4, eq0_e60_d_b5, eq0_e60_d_b6,) = {
@@ -469,19 +467,6 @@ impl Instance {
         stamper.stamp_potential_const_local(
             4,
             eq16_value,
-        );
-        let eq17_e207: f64 = 0.0;
-        let eq17_e209: f64 = (eq17_e207 * (nv3 - nv4));
-        let eq17_e209_d_n4: f64 = (-eq17_e207);
-        let eq17_value: f64 = eq17_e209;
-        stamper.stamp_current_node2_local(
-            Some(3),
-            Some(4),
-            multiplicity * (eq17_value),
-            3,
-            multiplicity * (eq17_e207),
-            4,
-            multiplicity * (eq17_e209_d_n4),
         );
     }
 

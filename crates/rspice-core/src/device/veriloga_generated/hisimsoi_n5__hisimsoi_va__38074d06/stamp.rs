@@ -112,8 +112,8 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
-        let v1: f64 = 1.0;
-        let v3: f64 = 0.0;
+        let v0: f64 = 1.0;
+        let v1: f64 = 0.0;
         let v5: f64 = 1e-12;
         let v19: f64 = 10000.0;
         let v36: f64 = nv12;
@@ -125,31 +125,31 @@ impl Instance {
         let v56: f64 = nv17;
         let v67: f64 = nv14;
         let v70: f64 = (v48 * v5);
-        let v71: f64 = (if self.scalar_v60 { v70 } else { v3 });
+        let v71: f64 = (if self.scalar_v60 { v70 } else { v1 });
         let v73: f64 = (v48 * v19);
-        let v74: f64 = (if self.scalar_v72 { v73 } else { v3 });
+        let v74: f64 = (if self.scalar_v72 { v73 } else { v1 });
         let v79: f64 = nv9;
         let v80: f64 = (v79 - v36);
         let v81: f64 = (self.scalar_v34 * v80);
-        let v82: f64 = (if self.scalar_v78 { v81 } else { v3 });
+        let v82: f64 = (if self.scalar_v78 { v81 } else { v1 });
         let v83: f64 = nv8;
         let v84: f64 = (v83 - v36);
         let v85: f64 = (self.scalar_v25 * v84);
-        let v86: f64 = (if self.scalar_v78 { v85 } else { v3 });
+        let v86: f64 = (if self.scalar_v78 { v85 } else { v1 });
         let v90: f64 = (v38 * v5);
-        let v91: f64 = (if self.scalar_v37 { v90 } else { v3 });
+        let v91: f64 = (if self.scalar_v37 { v90 } else { v1 });
         let v92: f64 = (v39 * v5);
-        let v93: f64 = (if self.scalar_v37 { v92 } else { v3 });
+        let v93: f64 = (if self.scalar_v37 { v92 } else { v1 });
         let v96: f64 = (v56 * v5);
-        let v97: f64 = (if self.scalar_v95 { v96 } else { v3 });
-        let v103: f64 = (if self.scalar_v102 { v96 } else { v3 });
+        let v97: f64 = (if self.scalar_v95 { v96 } else { v1 });
+        let v103: f64 = (if self.scalar_v102 { v96 } else { v1 });
         let v107: f64 = (v43 * v5);
-        let v108: f64 = (if self.scalar_v42 { v107 } else { v3 });
+        let v108: f64 = (if self.scalar_v42 { v107 } else { v1 });
         let v109: f64 = (v44 * v5);
-        let v110: f64 = (if self.scalar_v42 { v109 } else { v3 });
-        let v111: f64 = (if self.scalar_v42 { v92 } else { v3 });
+        let v110: f64 = (if self.scalar_v42 { v109 } else { v1 });
+        let v111: f64 = (if self.scalar_v42 { v92 } else { v1 });
 
-        let d67_dn14: f64 = v1;
+        let d67_dn14: f64 = v0;
         stamper.stamp_current_node1_local(
             Some(14),
             None,

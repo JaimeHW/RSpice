@@ -701,8 +701,8 @@ pub struct Instance {
     pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
-    pub(crate) scalar_v0: f64,
-    pub(crate) scalar_v2: bool,
+    pub(crate) scalar_v2: f64,
+    pub(crate) scalar_v3: bool,
     pub(crate) scalar_v8: f64,
     pub(crate) scalar_v9: f64,
     pub(crate) scalar_v14: f64,
@@ -776,8 +776,8 @@ impl Clone for Instance {
             idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
-            scalar_v0: self.scalar_v0,
             scalar_v2: self.scalar_v2,
+            scalar_v3: self.scalar_v3,
             scalar_v8: self.scalar_v8,
             scalar_v9: self.scalar_v9,
             scalar_v14: self.scalar_v14,
@@ -868,8 +868,8 @@ impl Instance {
             idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scalar_v0: 0.0,
-            scalar_v2: false,
+            scalar_v2: 0.0,
+            scalar_v3: false,
             scalar_v8: 0.0,
             scalar_v9: 0.0,
             scalar_v14: 0.0,
@@ -947,8 +947,8 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
-            scalar_v0,
             scalar_v2,
+            scalar_v3,
             scalar_v8,
             scalar_v9,
             scalar_v14,
@@ -1018,8 +1018,8 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
-            scalar_v0,
             scalar_v2,
+            scalar_v3,
             scalar_v8,
             scalar_v9,
             scalar_v14,
@@ -1450,10 +1450,10 @@ impl Instance {
     #[inline]
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
-        let v0: f64 = p.p43;
-        self.scalar_v0 = v0;
-        let v2: bool = (p.p43 == 1.0);
+        let v2: f64 = p.p43;
         self.scalar_v2 = v2;
+        let v3: bool = (p.p43 == 1.0);
+        self.scalar_v3 = v3;
         let v8: f64 = p.p242;
         self.scalar_v8 = v8;
         let v9: f64 = p.p34;
@@ -1498,9 +1498,9 @@ impl Instance {
         self.scalar_v33 = v33;
         let v34: f64 = (if v31 { v33 } else { v29 });
         self.scalar_v34 = v34;
-        let v35: bool = (!v2);
+        let v35: bool = (!v3);
         self.scalar_v35 = v35;
-        let v37: bool = (v2 && (p.p34 != 0.0));
+        let v37: bool = (v3 && (p.p34 != 0.0));
         self.scalar_v37 = v37;
         let v42: bool = (v35 && (p.p34 != 0.0));
         self.scalar_v42 = v42;
@@ -1528,9 +1528,9 @@ impl Instance {
         self.scalar_v62 = v62;
         let v72: bool = (!v60);
         self.scalar_v72 = v72;
-        let v78: bool = (v2 && (p.p262 != 0.0));
+        let v78: bool = (v3 && (p.p262 != 0.0));
         self.scalar_v78 = v78;
-        let v95: bool = (v2 && v62);
+        let v95: bool = (v3 && v62);
         self.scalar_v95 = v95;
         let v102: bool = (v35 && (p.p37 != 0.0));
         self.scalar_v102 = v102;

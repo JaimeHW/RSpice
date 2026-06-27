@@ -3969,9 +3969,6 @@ impl Instance {
         multiplicity: f64,
     ) {
         let nv3 = ctx.node_voltage(nodes[3]);
-        let nv6 = ctx.node_voltage(nodes[6]);
-        let nv7 = ctx.node_voltage(nodes[7]);
-        let nv8 = ctx.node_voltage(nodes[8]);
         let nv9 = ctx.node_voltage(nodes[9]);
         let nv11 = ctx.node_voltage(nodes[11]);
         let (eq30_e1217, eq30_e1217_d_n0, eq30_e1217_d_n1, eq30_e1217_d_n2, eq30_e1217_d_n3, eq30_e1217_d_n4, eq30_e1217_d_n5, eq30_e1217_d_n6, eq30_e1217_d_n7, eq30_e1217_d_n8, eq30_e1217_d_n9, eq30_e1217_d_n10, eq30_e1217_d_n11, eq30_e1217_d_n12, eq30_e1217_d_n13, eq30_e1217_d_n14, eq30_e1217_d_n15, eq30_e1217_d_n16, eq30_e1217_d_n17, eq30_e1217_d_n18, eq30_e1217_d_n19, eq30_e1217_d_n20, eq30_e1217_d_b0, eq30_e1217_d_b1, eq30_e1217_d_b2, eq30_e1217_d_b3, eq30_e1217_d_b4, eq30_e1217_d_b5, eq30_e1217_d_b6, eq30_e1217_d_b7, eq30_e1217_d_b8, eq30_e1217_d_b9, eq30_e1217_d_b10, eq30_e1217_d_b11, eq30_e1217_d_b12, eq30_e1217_d_b13, eq30_e1217_d_b14, eq30_e1217_d_b15, eq30_e1217_d_b16, eq30_e1217_d_b17, eq30_e1217_d_b18, eq30_e1217_d_b19, eq30_e1217_d_b20, eq30_e1217_d_b21, eq30_e1217_d_b22, eq30_e1217_d_b23, eq30_e1217_d_b24,) = {
@@ -4341,32 +4338,6 @@ impl Instance {
         stamper.stamp_potential_const_local(
             6,
             eq35_value,
-        );
-        let eq36_e1260: f64 = (p.p32 * s.v[878]);
-        let eq36_e1262: f64 = (eq36_e1260 * (nv7 - nv8));
-        let eq36_e1262_d_n8: f64 = (-eq36_e1260);
-        let eq36_value: f64 = eq36_e1262;
-        stamper.stamp_current_node2_local(
-            Some(7),
-            Some(8),
-            multiplicity * (eq36_value),
-            7,
-            multiplicity * (eq36_e1260),
-            8,
-            multiplicity * (eq36_e1262_d_n8),
-        );
-        let eq37_e1265: f64 = (p.p32 * s.v[878]);
-        let eq37_e1267: f64 = (eq37_e1265 * (nv6 - nv8));
-        let eq37_e1267_d_n8: f64 = (-eq37_e1265);
-        let eq37_value: f64 = eq37_e1267;
-        stamper.stamp_current_node2_local(
-            Some(6),
-            Some(8),
-            multiplicity * (eq37_value),
-            6,
-            multiplicity * (eq37_e1265),
-            8,
-            multiplicity * (eq37_e1267_d_n8),
         );
     }
 

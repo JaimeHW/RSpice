@@ -100,6 +100,9 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv6 = ctx.node_voltage(nodes[6]);
+        let nv7 = ctx.node_voltage(nodes[7]);
+        let nv8 = ctx.node_voltage(nodes[8]);
         let bi7 = ctx.branch_current(branches[7]);
         let bi9 = ctx.branch_current(branches[9]);
         let bi11 = ctx.branch_current(branches[11]);
@@ -121,6 +124,36 @@ impl Instance {
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let idt_scale = if ddt_active { timestep } else { 0.0 };
+        let v5: f64 = nv6;
+        let v6: f64 = nv7;
+        let v7: f64 = nv8;
+        let v8: f64 = (v5 - v7);
+        let v11: f64 = (v6 - v7);
+        let v12: f64 = (self.scalar_v10 * v11);
+        let v13: f64 = (self.scalar_v10 * v8);
+
+        let d12_dn7: f64 = self.scalar_v10;
+        let d12_dn8: f64 = self.scalar_v41;
+        stamper.stamp_current_node2_local(
+            Some(7),
+            Some(8),
+            multiplicity * (v12),
+            7,
+            multiplicity * (d12_dn7),
+            8,
+            multiplicity * (d12_dn8),
+        );
+        let d13_dn6: f64 = self.scalar_v10;
+        let d13_dn8: f64 = self.scalar_v41;
+        stamper.stamp_current_node2_local(
+            Some(6),
+            Some(8),
+            multiplicity * (v13),
+            6,
+            multiplicity * (d13_dn6),
+            8,
+            multiplicity * (d13_dn8),
+        );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),

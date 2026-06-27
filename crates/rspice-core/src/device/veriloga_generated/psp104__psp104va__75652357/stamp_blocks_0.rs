@@ -371,8 +371,6 @@ impl Instance {
             s.store_div_from_scalar(625, 1.0, 624);
         }
 
-        s.v[872] = 0.0;
-
         s.v[345] = ((ctx_temp + p.p55) + p.p35);
 
         s.v[346] = (s.v[345] / s.v[344]);
@@ -661,6 +659,8 @@ impl Instance {
 
         s.v[643] = p.p25;
 
+        s.v[644] = p.p26;
+
     }
 
     pub(super) fn stamp_transient_block_2(
@@ -668,8 +668,6 @@ impl Instance {
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
-        s.v[644] = p.p26;
-
         s.v[670] = p.p27;
 
         s.v[671] = p.p28;

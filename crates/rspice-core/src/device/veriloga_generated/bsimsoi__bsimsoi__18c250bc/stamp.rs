@@ -93,7 +93,10 @@ impl Instance {
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
         let nv1 = ctx.node_voltage(nodes[1]);
+        let nv5 = ctx.node_voltage(nodes[5]);
         let nv10 = ctx.node_voltage(nodes[10]);
+        let nv11 = ctx.node_voltage(nodes[11]);
+        let nv12 = ctx.node_voltage(nodes[12]);
         let nv13 = ctx.node_voltage(nodes[13]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
@@ -103,34 +106,67 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
-        let v1: f64 = 0.0;
-        let v73: f64 = nv10;
-        let v91: f64 = nv13;
-        let v92: f64 = (if self.scalar_v80 { v91 } else { v1 });
-        let v99: f64 = nv1;
-        let v100: f64 = (v99 - v73);
-        let v101: f64 = (self.scalar_v90 * v100);
-        let v102: f64 = (v101 * self.scalar_v69);
-        let v103: f64 = (if self.scalar_v98 { v102 } else { v1 });
+        let v4: f64 = 0.0;
+        let v293: f64 = nv5;
+        let v296: f64 = nv11;
+        let v297: f64 = nv12;
+        let v298: f64 = nv10;
+        let v346: f64 = nv13;
+        let v347: f64 = (if self.scalar_v310 { v346 } else { v4 });
+        let v355: f64 = nv1;
+        let v356: f64 = (v355 - v298);
+        let v357: f64 = (self.scalar_v320 * v356);
+        let v358: f64 = (v357 * self.scalar_v263);
+        let v359: f64 = (if self.scalar_v354 { v358 } else { v4 });
+        let v361: f64 = (v293 - v297);
+        let v362: f64 = (self.scalar_v320 * v361);
+        let v363: f64 = (v362 * self.scalar_v287);
+        let v364: f64 = (if (self.scalar_v268 != 0.0) { v363 } else { v4 });
+        let v365: f64 = (v293 - v296);
+        let v366: f64 = (self.scalar_v320 * v365);
+        let v367: f64 = (v366 * self.scalar_v288);
+        let v368: f64 = (if (self.scalar_v268 != 0.0) { v367 } else { v4 });
 
-        let d92_dn13: f64 = self.scalar_v106;
+        let d347_dn13: f64 = self.scalar_v380;
         stamper.stamp_current_node1_local(
             Some(13),
             None,
-            multiplicity * (v92),
+            multiplicity * (v347),
             13,
-            multiplicity * (d92_dn13),
+            multiplicity * (d347_dn13),
         );
-        let d103_dn1: f64 = self.scalar_v110;
-        let d103_dn10: f64 = self.scalar_v111;
+        let d359_dn1: f64 = self.scalar_v384;
+        let d359_dn10: f64 = self.scalar_v385;
         stamper.stamp_current_node2_local(
             Some(1),
             Some(10),
-            multiplicity * (v103),
+            multiplicity * (v359),
             1,
-            multiplicity * (d103_dn1),
+            multiplicity * (d359_dn1),
             10,
-            multiplicity * (d103_dn10),
+            multiplicity * (d359_dn10),
+        );
+        let d364_dn5: f64 = self.scalar_v388;
+        let d364_dn12: f64 = self.scalar_v389;
+        stamper.stamp_current_node2_local(
+            Some(5),
+            Some(12),
+            multiplicity * (v364),
+            5,
+            multiplicity * (d364_dn5),
+            12,
+            multiplicity * (d364_dn12),
+        );
+        let d368_dn5: f64 = self.scalar_v392;
+        let d368_dn11: f64 = self.scalar_v393;
+        stamper.stamp_current_node2_local(
+            Some(5),
+            Some(11),
+            multiplicity * (v368),
+            5,
+            multiplicity * (d368_dn5),
+            11,
+            multiplicity * (d368_dn11),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),

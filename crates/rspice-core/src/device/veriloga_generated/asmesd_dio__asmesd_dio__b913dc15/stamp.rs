@@ -87,6 +87,8 @@ impl Instance {
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
         let ctx_temp = ctx.temperature();
+        let nv3 = ctx.node_voltage(nodes[3]);
+        let nv4 = ctx.node_voltage(nodes[4]);
         let nv6 = ctx.node_voltage(nodes[6]);
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
@@ -95,17 +97,33 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
-        let v13: f64 = 0.0;
-        let v39: f64 = nv6;
-        let v40: f64 = (if self.scalar_v8 { v39 } else { v13 });
+        let v1: f64 = 0.0;
+        let v5: f64 = nv3;
+        let v6: f64 = nv4;
+        let v7: f64 = (v5 - v6);
+        let v42: f64 = nv6;
+        let v43: f64 = (if self.scalar_v12 { v42 } else { v1 });
+        let v54: f64 = (v1 * v7);
+        let v60: f64 = -0.0;
 
-        let d40_dn6: f64 = self.scalar_v55;
+        let d43_dn6: f64 = self.scalar_v59;
         stamper.stamp_current_node1_local(
             Some(6),
             None,
-            multiplicity * (v40),
+            multiplicity * (v43),
             6,
-            multiplicity * (d40_dn6),
+            multiplicity * (d43_dn6),
+        );
+        let d54_dn3: f64 = v1;
+        let d54_dn4: f64 = v60;
+        stamper.stamp_current_node2_local(
+            Some(3),
+            Some(4),
+            multiplicity * (v54),
+            3,
+            multiplicity * (d54_dn3),
+            4,
+            multiplicity * (d54_dn4),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),

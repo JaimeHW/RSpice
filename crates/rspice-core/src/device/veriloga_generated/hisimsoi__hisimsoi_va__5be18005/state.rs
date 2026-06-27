@@ -701,7 +701,7 @@ pub struct Instance {
     pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
-    pub(crate) scalar_v0: f64,
+    pub(crate) scalar_v1: f64,
     pub(crate) scalar_v4: bool,
     pub(crate) scalar_v8: f64,
     pub(crate) scalar_v9: f64,
@@ -776,7 +776,7 @@ impl Clone for Instance {
             idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
-            scalar_v0: self.scalar_v0,
+            scalar_v1: self.scalar_v1,
             scalar_v4: self.scalar_v4,
             scalar_v8: self.scalar_v8,
             scalar_v9: self.scalar_v9,
@@ -868,7 +868,7 @@ impl Instance {
             idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scalar_v0: 0.0,
+            scalar_v1: 0.0,
             scalar_v4: false,
             scalar_v8: 0.0,
             scalar_v9: 0.0,
@@ -947,7 +947,7 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
-            scalar_v0,
+            scalar_v1,
             scalar_v4,
             scalar_v8,
             scalar_v9,
@@ -1018,7 +1018,7 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
-            scalar_v0,
+            scalar_v1,
             scalar_v4,
             scalar_v8,
             scalar_v9,
@@ -1450,8 +1450,8 @@ impl Instance {
     #[inline]
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
-        let v0: f64 = p.p43;
-        self.scalar_v0 = v0;
+        let v1: f64 = p.p43;
+        self.scalar_v1 = v1;
         let v4: bool = (p.p43 == 1.0);
         self.scalar_v4 = v4;
         let v8: f64 = p.p242;

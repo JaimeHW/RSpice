@@ -2889,7 +2889,6 @@ impl Instance {
         s.v[665] = if s.b[665] { 1.0 } else { 0.0 };
 
         if (!s.b[665]) {
-            s.copy_ad(666, 273);
             s.copy_ad(667, 273);
         }
 

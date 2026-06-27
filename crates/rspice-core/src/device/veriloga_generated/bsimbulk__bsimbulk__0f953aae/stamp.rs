@@ -106,41 +106,41 @@ impl Instance {
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let v0: f64 = 0.0;
         let v1: f64 = 1.0;
-        let v30: f64 = nv16;
-        let v31: f64 = nv15;
-        let v39: f64 = nv14;
-        let v40: f64 = nv0;
-        let v41: f64 = (v39 - v40);
-        let v42: f64 = (v41 * self.scalar_v26);
-        let v43: f64 = (v42 * self.scalar_v21);
-        let v44: f64 = (if self.scalar_v29 { v43 } else { v0 });
+        let v30: f64 = nv14;
+        let v32: f64 = nv0;
+        let v38: f64 = nv16;
+        let v39: f64 = nv15;
+        let v47: f64 = (v30 - v32);
+        let v48: f64 = (v47 * self.scalar_v31);
+        let v49: f64 = (v48 * self.scalar_v25);
+        let v50: f64 = (if self.scalar_v35 { v49 } else { v0 });
 
-        let d30_dn16: f64 = v1;
+        let d38_dn16: f64 = v1;
         stamper.stamp_current_node1_local(
             Some(16),
             None,
-            multiplicity * (v30),
+            multiplicity * (v38),
             16,
-            multiplicity * (d30_dn16),
+            multiplicity * (d38_dn16),
         );
-        let d31_dn15: f64 = v1;
+        let d39_dn15: f64 = v1;
         stamper.stamp_current_node1_local(
             Some(15),
             None,
-            multiplicity * (v31),
+            multiplicity * (v39),
             15,
-            multiplicity * (d31_dn15),
+            multiplicity * (d39_dn15),
         );
-        let d44_dn0: f64 = self.scalar_v50;
-        let d44_dn14: f64 = self.scalar_v51;
+        let d50_dn0: f64 = self.scalar_v56;
+        let d50_dn14: f64 = self.scalar_v57;
         stamper.stamp_current_node2_local(
             Some(14),
             Some(0),
-            multiplicity * (v44),
+            multiplicity * (v50),
             0,
-            multiplicity * (d44_dn0),
+            multiplicity * (d50_dn0),
             14,
-            multiplicity * (d44_dn14),
+            multiplicity * (d50_dn14),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),

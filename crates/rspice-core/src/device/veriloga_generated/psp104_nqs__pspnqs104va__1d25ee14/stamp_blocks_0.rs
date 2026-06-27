@@ -416,8 +416,6 @@ impl Instance {
             s.store_div_from_scalar(631, 1.0, 630);
         }
 
-        s.v[878] = 0.0;
-
         s.v[351] = ((ctx_temp + p.p56) + p.p35);
 
         s.v[352] = (s.v[351] / s.v[350]);

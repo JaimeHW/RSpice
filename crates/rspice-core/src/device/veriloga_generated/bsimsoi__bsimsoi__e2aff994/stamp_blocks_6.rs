@@ -1052,9 +1052,7 @@ impl Instance {
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv6 = ctx.node_voltage(nodes[6]);
-        let nv7 = ctx.node_voltage(nodes[7]);
         let nv10 = ctx.node_voltage(nodes[10]);
-        let nv11 = ctx.node_voltage(nodes[11]);
         let eq79_e2205: f64 = (s.v[379] * s.v[497]);
         let eq79_e2205_d_n0: f64 = ((s.dn[379][0] * s.v[497]) + (s.v[379] * s.dn[497][0]));
         let eq79_e2205_d_n1: f64 = ((s.dn[379][1] * s.v[497]) + (s.v[379] * s.dn[497][1]));
@@ -1228,46 +1226,6 @@ impl Instance {
             &eq81_node_derivatives,
             &eq81_branch_derivatives,
             multiplicity,
-        );
-        let (eq82_e2223, eq82_e2223_d_n7, eq82_e2223_d_n11,) = {
-    if s.b[2039] {
-        let eq82_e2221: f64 = ((nv11 - nv7) * s.v[1018]);
-        let eq82_e2221_d_n7: f64 = (-s.v[1018]);
-        let eq82_e2221_d_n11: f64 = s.v[1018];
-        (eq82_e2221, eq82_e2221_d_n7, eq82_e2221_d_n11,)
-    } else {
-        (0.0, 0.0, 0.0,)
-    }
-};
-        let eq82_value: f64 = eq82_e2223;
-        stamper.stamp_current_node2_local(
-            Some(11),
-            Some(7),
-            multiplicity * (eq82_value),
-            7,
-            multiplicity * (eq82_e2223_d_n7),
-            11,
-            multiplicity * (eq82_e2223_d_n11),
-        );
-        let (eq83_e2229, eq83_e2229_d_n6, eq83_e2229_d_n11,) = {
-    if s.b[2039] {
-        let eq83_e2227: f64 = ((nv11 - nv6) * s.v[1018]);
-        let eq83_e2227_d_n6: f64 = (-s.v[1018]);
-        let eq83_e2227_d_n11: f64 = s.v[1018];
-        (eq83_e2227, eq83_e2227_d_n6, eq83_e2227_d_n11,)
-    } else {
-        (0.0, 0.0, 0.0,)
-    }
-};
-        let eq83_value: f64 = eq83_e2229;
-        stamper.stamp_current_node2_local(
-            Some(11),
-            Some(6),
-            multiplicity * (eq83_value),
-            6,
-            multiplicity * (eq83_e2229_d_n6),
-            11,
-            multiplicity * (eq83_e2229_d_n11),
         );
     }
 

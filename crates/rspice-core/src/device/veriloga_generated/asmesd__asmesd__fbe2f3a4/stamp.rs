@@ -86,6 +86,7 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv4 = ctx.node_voltage(nodes[4]);
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
         let nv8 = ctx.node_voltage(nodes[8]);
@@ -97,49 +98,89 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
-        let v4: f64 = nv5;
-        let v5: f64 = 1.0;
-        let v6: f64 = 0.0;
-        let v7: f64 = nv6;
-        let v8: f64 = (v4 - v7);
-        let v9: f64 = (self.scalar_v3 * v8);
-        let v10: f64 = nv9;
-        let v53: f64 = (v9 - v10);
-        let v54: f64 = (-v53);
-        let v55: f64 = 1e-6;
-        let v56: f64 = (v10 * v55);
-        let v57: f64 = nv8;
-        let v58: f64 = (if self.scalar_v16 { v57 } else { v6 });
+        let v0: f64 = 1.0;
+        let v1: f64 = 0.0;
+        let v6: f64 = nv5;
+        let v7: f64 = nv4;
+        let v8: f64 = (v6 - v7);
+        let v9: f64 = nv6;
+        let v10: f64 = (v6 - v9);
+        let v11: f64 = (self.scalar_v5 * v10);
+        let v12: f64 = nv9;
+        let v55: f64 = (v11 - v12);
+        let v56: f64 = (-v55);
+        let v57: f64 = 1e-6;
+        let v58: f64 = (v12 * v57);
+        let v59: f64 = nv8;
+        let v60: f64 = (if self.scalar_v18 { v59 } else { v1 });
+        let v71: f64 = (v1 * v10);
+        let v72: f64 = (v1 * v8);
+        let v73: f64 = (v7 - v9);
+        let v74: f64 = (v1 * v73);
+        let v85: f64 = -0.0;
 
-        let d54_dn5: f64 = self.scalar_v76;
-        let d54_dn6: f64 = self.scalar_v77;
-        let d54_dn9: f64 = v5;
+        let d56_dn5: f64 = self.scalar_v82;
+        let d56_dn6: f64 = self.scalar_v83;
+        let d56_dn9: f64 = v0;
         stamper.stamp_current_node3_local(
             Some(9),
             None,
-            multiplicity * (v54),
-            5,
-            multiplicity * (d54_dn5),
-            6,
-            multiplicity * (d54_dn6),
-            9,
-            multiplicity * (d54_dn9),
-        );
-        let d56_dn9: f64 = v55;
-        stamper.stamp_current_node1_local(
-            Some(9),
-            None,
             multiplicity * (v56),
+            5,
+            multiplicity * (d56_dn5),
+            6,
+            multiplicity * (d56_dn6),
             9,
             multiplicity * (d56_dn9),
         );
-        let d58_dn8: f64 = self.scalar_v78;
+        let d58_dn9: f64 = v57;
+        stamper.stamp_current_node1_local(
+            Some(9),
+            None,
+            multiplicity * (v58),
+            9,
+            multiplicity * (d58_dn9),
+        );
+        let d60_dn8: f64 = self.scalar_v84;
         stamper.stamp_current_node1_local(
             Some(8),
             None,
-            multiplicity * (v58),
+            multiplicity * (v60),
             8,
-            multiplicity * (d58_dn8),
+            multiplicity * (d60_dn8),
+        );
+        let d71_dn5: f64 = v1;
+        let d71_dn6: f64 = v85;
+        stamper.stamp_current_node2_local(
+            Some(5),
+            Some(6),
+            multiplicity * (v71),
+            5,
+            multiplicity * (d71_dn5),
+            6,
+            multiplicity * (d71_dn6),
+        );
+        let d72_dn4: f64 = v85;
+        let d72_dn5: f64 = v1;
+        stamper.stamp_current_node2_local(
+            Some(5),
+            Some(4),
+            multiplicity * (v72),
+            4,
+            multiplicity * (d72_dn4),
+            5,
+            multiplicity * (d72_dn5),
+        );
+        let d74_dn4: f64 = v1;
+        let d74_dn6: f64 = v85;
+        stamper.stamp_current_node2_local(
+            Some(4),
+            Some(6),
+            multiplicity * (v74),
+            4,
+            multiplicity * (d74_dn4),
+            6,
+            multiplicity * (d74_dn6),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
@@ -200,7 +241,7 @@ impl Instance {
 
         Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_2(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_3(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
     }
 

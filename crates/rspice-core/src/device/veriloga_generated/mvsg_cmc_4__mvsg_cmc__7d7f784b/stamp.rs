@@ -98,9 +98,11 @@ impl Instance {
         let branches = &(*self).branches;
         let nv0 = ctx.node_voltage(nodes[0]);
         let nv1 = ctx.node_voltage(nodes[1]);
+        let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
         let nv7 = ctx.node_voltage(nodes[7]);
         let nv8 = ctx.node_voltage(nodes[8]);
+        let nv9 = ctx.node_voltage(nodes[9]);
         let nv20 = ctx.node_voltage(nodes[20]);
         let nv21 = ctx.node_voltage(nodes[21]);
         let nv22 = ctx.node_voltage(nodes[22]);
@@ -109,6 +111,7 @@ impl Instance {
         let nv25 = ctx.node_voltage(nodes[25]);
         let nv26 = ctx.node_voltage(nodes[26]);
         let nv27 = ctx.node_voltage(nodes[27]);
+        let nv29 = ctx.node_voltage(nodes[29]);
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
         let ddt_state_current = self.ddt_state_current.as_mut();
@@ -117,320 +120,341 @@ impl Instance {
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let v0: f64 = 0.0;
-        let v17: f64 = 1.0;
-        let v23: f64 = nv8;
-        let v24: f64 = nv0;
-        let v29: f64 = nv1;
-        let v30: f64 = (v24 - v29);
-        let v31: f64 = v30.abs();
-        let v32: f64 = (self.scalar_v28 * v31);
-        let v34: f64 = (v30 - self.scalar_v33);
-        let v35: f64 = nv21;
-        let v37: f64 = (v35 * self.scalar_v36);
-        let v38: f64 = (v34 - v37);
-        let v40: f64 = (v38 / self.scalar_v39);
-        let v41: f64 = 50.0;
-        let v42: bool = (v40 > v41);
-        let v43: bool = (!v42);
-        let v44: f64 = -50.0;
-        let v45: bool = (v40 < v44);
-        let v46: bool = (!v45);
-        let v47: bool = (v43 && v46);
-        let v48: f64 = v40.exp();
-        let v49: bool = (v43 && v45);
-        let v50: f64 = 1.9287498479639178e-22;
-        let v51: f64 = 5.184705528587072e21;
-        let v52: f64 = (v40 - v41);
-        let v53: f64 = (v17 + v52);
-        let v54: f64 = (v51 * v53);
-        let v55: f64 = (if v42 { v54 } else { v0 });
-        let v56: f64 = (if v49 { v50 } else { v55 });
-        let v57: f64 = (if v47 { v48 } else { v56 });
-        let v58: f64 = (v32 + v57);
-        let v59: f64 = (if self.scalar_v27 { v58 } else { v0 });
-        let v60: f64 = nv20;
-        let v61: f64 = (if self.scalar_v27 { v60 } else { v0 });
-        let v66: f64 = nv22;
-        let v67: f64 = nv23;
-        let v68: f64 = nv25;
-        let v69: f64 = nv26;
-        let v72: f64 = nv7;
-        let v120: f64 = (v23 - v72);
-        let v139: f64 = nv6;
-        let v143: f64 = (-v59);
-        let v144: f64 = (if self.scalar_v27 { v143 } else { v0 });
-        let v146: f64 = (v35 / self.scalar_v145);
-        let v147: f64 = (if self.scalar_v27 { v146 } else { v0 });
-        let v151: f64 = nv24;
-        let v152: f64 = (v66 - v151);
-        let v154: f64 = (v152 / self.scalar_v153);
-        let v155: f64 = (if self.scalar_v65 { v154 } else { v0 });
-        let v156: f64 = (v66 - v67);
-        let v158: f64 = (v156 / self.scalar_v157);
-        let v159: f64 = (if self.scalar_v65 { v158 } else { v0 });
-        let v163: f64 = nv27;
-        let v164: f64 = (v68 - v163);
-        let v165: f64 = (v164 / self.scalar_v153);
-        let v166: f64 = (if self.scalar_v65 { v165 } else { v0 });
-        let v167: f64 = (v68 - v69);
-        let v168: f64 = (v167 / self.scalar_v157);
-        let v169: f64 = (if self.scalar_v65 { v168 } else { v0 });
-        let v210: f64 = (v120 / self.scalar_v130);
-        let v211: f64 = (if self.scalar_v126 { v210 } else { v0 });
-        let v214: f64 = (v29 - v139);
-        let v215: f64 = (v214 / self.scalar_v16);
-        let v216: f64 = (if self.scalar_v135 { v215 } else { v0 });
-        let v219: f64 = (v139 - v72);
-        let v220: f64 = (v219 / self.scalar_v21);
-        let v221: f64 = (if self.scalar_v138 { v220 } else { v0 });
-        let v232: f64 = (v48 * self.scalar_v229);
-        let v233: f64 = (v48 * self.scalar_v230);
-        let v234: f64 = (v48 * self.scalar_v231);
-        let v238: f64 = (if v42 { self.scalar_v235 } else { v0 });
-        let v239: f64 = (if v42 { self.scalar_v236 } else { v0 });
-        let v240: f64 = (if v42 { self.scalar_v237 } else { v0 });
-        let v241: f64 = (if v49 { v0 } else { v238 });
-        let v242: f64 = (if v49 { v0 } else { v239 });
-        let v243: f64 = (if v49 { v0 } else { v240 });
-        let v244: f64 = (if v47 { v232 } else { v241 });
-        let v245: f64 = (if v47 { v233 } else { v242 });
-        let v246: f64 = (if v47 { v234 } else { v243 });
-        let v247: f64 = (if self.scalar_v27 { v244 } else { v0 });
-        let v248: f64 = (if self.scalar_v27 { v245 } else { v0 });
-        let v249: f64 = (if self.scalar_v27 { v246 } else { v0 });
-        let v251: f64 = (-v247);
-        let v252: f64 = (-v248);
-        let v253: f64 = (-v249);
-        let v254: f64 = (if self.scalar_v27 { v251 } else { v0 });
-        let v255: f64 = (if self.scalar_v27 { v252 } else { v0 });
-        let v256: f64 = (if self.scalar_v27 { v253 } else { v0 });
+        let v1: f64 = 1.0;
+        let v52: f64 = nv5;
+        let v53: f64 = nv9;
+        let v54: f64 = (v52 - v53);
+        let v55: f64 = nv8;
+        let v56: f64 = nv0;
+        let v61: f64 = nv1;
+        let v62: f64 = (v56 - v61);
+        let v63: f64 = v62.abs();
+        let v64: f64 = (self.scalar_v60 * v63);
+        let v66: f64 = (v62 - self.scalar_v65);
+        let v67: f64 = nv21;
+        let v69: f64 = (v67 * self.scalar_v68);
+        let v70: f64 = (v66 - v69);
+        let v72: f64 = (v70 / self.scalar_v71);
+        let v73: f64 = 50.0;
+        let v74: bool = (v72 > v73);
+        let v75: bool = (!v74);
+        let v76: f64 = -50.0;
+        let v77: bool = (v72 < v76);
+        let v78: bool = (!v77);
+        let v79: bool = (v75 && v78);
+        let v80: f64 = v72.exp();
+        let v81: bool = (v75 && v77);
+        let v82: f64 = 1.9287498479639178e-22;
+        let v83: f64 = 5.184705528587072e21;
+        let v84: f64 = (v72 - v73);
+        let v85: f64 = (v1 + v84);
+        let v86: f64 = (v83 * v85);
+        let v87: f64 = (if v74 { v86 } else { v0 });
+        let v88: f64 = (if v81 { v82 } else { v87 });
+        let v89: f64 = (if v79 { v80 } else { v88 });
+        let v90: f64 = (v64 + v89);
+        let v91: f64 = (if self.scalar_v59 { v90 } else { v0 });
+        let v92: f64 = nv20;
+        let v93: f64 = (if self.scalar_v59 { v92 } else { v0 });
+        let v98: f64 = nv22;
+        let v99: f64 = nv23;
+        let v100: f64 = nv25;
+        let v101: f64 = nv26;
+        let v104: f64 = nv7;
+        let v148: f64 = nv29;
+        let v153: f64 = (v55 - v104);
+        let v171: f64 = nv6;
+        let v175: f64 = (-v91);
+        let v176: f64 = (if self.scalar_v59 { v175 } else { v0 });
+        let v178: f64 = (v67 / self.scalar_v177);
+        let v179: f64 = (if self.scalar_v59 { v178 } else { v0 });
+        let v183: f64 = nv24;
+        let v184: f64 = (v98 - v183);
+        let v186: f64 = (v184 / self.scalar_v185);
+        let v187: f64 = (if self.scalar_v97 { v186 } else { v0 });
+        let v188: f64 = (v98 - v99);
+        let v190: f64 = (v188 / self.scalar_v189);
+        let v191: f64 = (if self.scalar_v97 { v190 } else { v0 });
+        let v195: f64 = nv27;
+        let v196: f64 = (v100 - v195);
+        let v197: f64 = (v196 / self.scalar_v185);
+        let v198: f64 = (if self.scalar_v97 { v197 } else { v0 });
+        let v199: f64 = (v100 - v101);
+        let v200: f64 = (v199 / self.scalar_v189);
+        let v201: f64 = (if self.scalar_v97 { v200 } else { v0 });
+        let v243: f64 = (v0 * v54);
+        let v244: f64 = (v148 + v243);
+        let v245: f64 = (if self.scalar_v242 { v244 } else { v0 });
+        let v246: f64 = (v153 / self.scalar_v163);
+        let v247: f64 = (if self.scalar_v159 { v246 } else { v0 });
+        let v252: f64 = (v61 - v171);
+        let v253: f64 = (v252 / self.scalar_v46);
+        let v254: f64 = (if self.scalar_v167 { v253 } else { v0 });
+        let v257: f64 = (v171 - v104);
+        let v258: f64 = (v257 / self.scalar_v50);
+        let v259: f64 = (if self.scalar_v170 { v258 } else { v0 });
+        let v270: f64 = (v80 * self.scalar_v267);
+        let v271: f64 = (v80 * self.scalar_v268);
+        let v272: f64 = (v80 * self.scalar_v269);
+        let v276: f64 = (if v74 { self.scalar_v273 } else { v0 });
+        let v277: f64 = (if v74 { self.scalar_v274 } else { v0 });
+        let v278: f64 = (if v74 { self.scalar_v275 } else { v0 });
+        let v279: f64 = (if v81 { v0 } else { v276 });
+        let v280: f64 = (if v81 { v0 } else { v277 });
+        let v281: f64 = (if v81 { v0 } else { v278 });
+        let v282: f64 = (if v79 { v270 } else { v279 });
+        let v283: f64 = (if v79 { v271 } else { v280 });
+        let v284: f64 = (if v79 { v272 } else { v281 });
+        let v285: f64 = (if self.scalar_v59 { v282 } else { v0 });
+        let v286: f64 = (if self.scalar_v59 { v283 } else { v0 });
+        let v287: f64 = (if self.scalar_v59 { v284 } else { v0 });
+        let v289: f64 = (-v285);
+        let v290: f64 = (-v286);
+        let v291: f64 = (-v287);
+        let v292: f64 = (if self.scalar_v59 { v289 } else { v0 });
+        let v293: f64 = (if self.scalar_v59 { v290 } else { v0 });
+        let v294: f64 = (if self.scalar_v59 { v291 } else { v0 });
 
-        let d144_dn0: f64 = v254;
-        let d144_dn1: f64 = v255;
-        let d144_dn21: f64 = v256;
+        let d176_dn0: f64 = v292;
+        let d176_dn1: f64 = v293;
+        let d176_dn21: f64 = v294;
         stamper.stamp_current_node3_local(
             Some(21),
             None,
-            multiplicity * (v144),
+            multiplicity * (v176),
             0,
-            multiplicity * (d144_dn0),
+            multiplicity * (d176_dn0),
             1,
-            multiplicity * (d144_dn1),
+            multiplicity * (d176_dn1),
             21,
-            multiplicity * (d144_dn21),
+            multiplicity * (d176_dn21),
         );
-        let d147_dn21: f64 = self.scalar_v258;
+        let d179_dn21: f64 = self.scalar_v296;
         stamper.stamp_current_node1_local(
             Some(21),
             None,
-            multiplicity * (v147),
+            multiplicity * (v179),
             21,
-            multiplicity * (d147_dn21),
+            multiplicity * (d179_dn21),
         );
-        let d61_dn20: f64 = self.scalar_v250;
+        let d93_dn20: f64 = self.scalar_v288;
         stamper.stamp_current_node1_local(
             Some(20),
             None,
-            multiplicity * (v61),
+            multiplicity * (v93),
             20,
-            multiplicity * (d61_dn20),
+            multiplicity * (d93_dn20),
         );
-        let d155_dn22: f64 = self.scalar_v263;
-        let d155_dn24: f64 = self.scalar_v264;
+        let d187_dn22: f64 = self.scalar_v301;
+        let d187_dn24: f64 = self.scalar_v302;
         stamper.stamp_current_node2_local(
             Some(22),
             Some(24),
-            multiplicity * (v155),
+            multiplicity * (v187),
             22,
-            multiplicity * (d155_dn22),
+            multiplicity * (d187_dn22),
             24,
-            multiplicity * (d155_dn24),
+            multiplicity * (d187_dn24),
         );
-        let d159_dn22: f64 = self.scalar_v267;
-        let d159_dn23: f64 = self.scalar_v268;
+        let d191_dn22: f64 = self.scalar_v305;
+        let d191_dn23: f64 = self.scalar_v306;
         stamper.stamp_current_node2_local(
             Some(22),
             Some(23),
-            multiplicity * (v159),
+            multiplicity * (v191),
             22,
-            multiplicity * (d159_dn22),
+            multiplicity * (d191_dn22),
             23,
-            multiplicity * (d159_dn23),
+            multiplicity * (d191_dn23),
         );
-        let d166_dn25: f64 = self.scalar_v263;
-        let d166_dn27: f64 = self.scalar_v264;
+        let d198_dn25: f64 = self.scalar_v301;
+        let d198_dn27: f64 = self.scalar_v302;
         stamper.stamp_current_node2_local(
             Some(25),
             Some(27),
-            multiplicity * (v166),
+            multiplicity * (v198),
             25,
-            multiplicity * (d166_dn25),
+            multiplicity * (d198_dn25),
             27,
-            multiplicity * (d166_dn27),
+            multiplicity * (d198_dn27),
         );
-        let d169_dn25: f64 = self.scalar_v267;
-        let d169_dn26: f64 = self.scalar_v268;
+        let d201_dn25: f64 = self.scalar_v305;
+        let d201_dn26: f64 = self.scalar_v306;
         stamper.stamp_current_node2_local(
             Some(25),
             Some(26),
-            multiplicity * (v169),
+            multiplicity * (v201),
             25,
-            multiplicity * (d169_dn25),
+            multiplicity * (d201_dn25),
             26,
-            multiplicity * (d169_dn26),
+            multiplicity * (d201_dn26),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(17),
-            multiplicity * (self.scalar_v175),
+            multiplicity * (self.scalar_v207),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(17),
-            multiplicity * (self.scalar_v176),
+            multiplicity * (self.scalar_v208),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v176),
+            multiplicity * (self.scalar_v208),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(16),
-            multiplicity * (self.scalar_v179),
+            multiplicity * (self.scalar_v211),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(16),
-            multiplicity * (self.scalar_v180),
+            multiplicity * (self.scalar_v212),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v180),
+            multiplicity * (self.scalar_v212),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(15),
-            multiplicity * (self.scalar_v183),
+            multiplicity * (self.scalar_v215),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(15),
-            multiplicity * (self.scalar_v184),
+            multiplicity * (self.scalar_v216),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v184),
+            multiplicity * (self.scalar_v216),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(14),
-            multiplicity * (self.scalar_v187),
+            multiplicity * (self.scalar_v219),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(14),
-            multiplicity * (self.scalar_v188),
+            multiplicity * (self.scalar_v220),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v188),
+            multiplicity * (self.scalar_v220),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(9),
-            multiplicity * (self.scalar_v191),
+            multiplicity * (self.scalar_v223),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v192),
+            multiplicity * (self.scalar_v224),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v192),
+            multiplicity * (self.scalar_v224),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(10),
-            multiplicity * (self.scalar_v195),
+            multiplicity * (self.scalar_v227),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(10),
-            multiplicity * (self.scalar_v196),
+            multiplicity * (self.scalar_v228),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v196),
+            multiplicity * (self.scalar_v228),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(11),
-            multiplicity * (self.scalar_v199),
+            multiplicity * (self.scalar_v231),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(11),
-            multiplicity * (self.scalar_v200),
+            multiplicity * (self.scalar_v232),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v200),
+            multiplicity * (self.scalar_v232),
         );
         stamper.stamp_current_const_local(
             Some(2),
             Some(12),
-            multiplicity * (self.scalar_v203),
+            multiplicity * (self.scalar_v235),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(12),
-            multiplicity * (self.scalar_v204),
+            multiplicity * (self.scalar_v236),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(9),
-            multiplicity * (self.scalar_v204),
+            multiplicity * (self.scalar_v236),
         );
-        let d211_dn7: f64 = self.scalar_v271;
-        let d211_dn8: f64 = self.scalar_v272;
+        let d245_dn5: f64 = self.scalar_v308;
+        let d245_dn9: f64 = self.scalar_v309;
+        let d245_dn29: f64 = self.scalar_v310;
+        stamper.stamp_current_node3_local(
+            Some(5),
+            Some(9),
+            multiplicity * (v245),
+            5,
+            multiplicity * (d245_dn5),
+            9,
+            multiplicity * (d245_dn9),
+            29,
+            multiplicity * (d245_dn29),
+        );
+        let d247_dn7: f64 = self.scalar_v313;
+        let d247_dn8: f64 = self.scalar_v314;
         stamper.stamp_current_node2_local(
             Some(8),
             Some(7),
-            multiplicity * (v211),
+            multiplicity * (v247),
             7,
-            multiplicity * (d211_dn7),
+            multiplicity * (d247_dn7),
             8,
-            multiplicity * (d211_dn8),
+            multiplicity * (d247_dn8),
         );
-        let d216_dn1: f64 = self.scalar_v275;
-        let d216_dn6: f64 = self.scalar_v276;
+        let d254_dn1: f64 = self.scalar_v317;
+        let d254_dn6: f64 = self.scalar_v318;
         stamper.stamp_current_node2_local(
             Some(1),
             Some(6),
-            multiplicity * (v216),
+            multiplicity * (v254),
             1,
-            multiplicity * (d216_dn1),
+            multiplicity * (d254_dn1),
             6,
-            multiplicity * (d216_dn6),
+            multiplicity * (d254_dn6),
         );
-        let d221_dn6: f64 = self.scalar_v279;
-        let d221_dn7: f64 = self.scalar_v280;
+        let d259_dn6: f64 = self.scalar_v321;
+        let d259_dn7: f64 = self.scalar_v322;
         stamper.stamp_current_node2_local(
             Some(6),
             Some(7),
-            multiplicity * (v221),
+            multiplicity * (v259),
             6,
-            multiplicity * (d221_dn6),
+            multiplicity * (d259_dn6),
             7,
-            multiplicity * (d221_dn7),
+            multiplicity * (d259_dn7),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),

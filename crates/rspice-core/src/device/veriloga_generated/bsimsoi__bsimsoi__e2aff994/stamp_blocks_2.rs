@@ -3800,9 +3800,6 @@ impl Instance {
         s.b[2038] = ((p.p40 == 0.0) || true);
         s.v[2038] = if s.b[2038] { 1.0 } else { 0.0 };
 
-        s.b[2039] = ((((p.p43 != 0.0) && true) && (!((p.p40 == 1.0) && (!true)))) && (p.p45 == 1.0));
-        s.v[2039] = if s.b[2039] { 1.0 } else { 0.0 };
-
     }
 
     pub(super) fn stamp_reactive_block_0(

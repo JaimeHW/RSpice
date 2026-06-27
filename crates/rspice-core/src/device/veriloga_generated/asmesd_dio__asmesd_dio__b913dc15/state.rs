@@ -208,9 +208,9 @@ pub struct Instance {
     pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
-    pub(crate) scalar_v7: f64,
-    pub(crate) scalar_v8: bool,
-    pub(crate) scalar_v55: f64,
+    pub(crate) scalar_v11: f64,
+    pub(crate) scalar_v12: bool,
+    pub(crate) scalar_v59: f64,
     pub(crate) scratch: Option<Box<GenericScratch<75, 7, 7>>>,
     pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<75, 7, 7>>>,
 }
@@ -232,9 +232,9 @@ impl Clone for Instance {
             idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
-            scalar_v7: self.scalar_v7,
-            scalar_v8: self.scalar_v8,
-            scalar_v55: self.scalar_v55,
+            scalar_v11: self.scalar_v11,
+            scalar_v12: self.scalar_v12,
+            scalar_v59: self.scalar_v59,
             scratch: None,
             reactive_scratch: None,
         }
@@ -273,9 +273,9 @@ impl Instance {
             idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
-            scalar_v7: 0.0,
-            scalar_v8: false,
-            scalar_v55: 0.0,
+            scalar_v11: 0.0,
+            scalar_v12: false,
+            scalar_v59: 0.0,
             scratch: Some(GenericScratch::new_box()),
             reactive_scratch: Some(GenericReactiveScratch::new_box()),
         };
@@ -301,9 +301,9 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
-            scalar_v7,
-            scalar_v8,
-            scalar_v55,
+            scalar_v11,
+            scalar_v12,
+            scalar_v59,
             scratch: _,
             reactive_scratch: _,
         } = snapshot;
@@ -321,9 +321,9 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
-            scalar_v7,
-            scalar_v8,
-            scalar_v55,
+            scalar_v11,
+            scalar_v12,
+            scalar_v59,
             scratch,
             reactive_scratch,
         };
@@ -459,11 +459,11 @@ impl Instance {
     #[inline]
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
-        let v7: f64 = p.p32;
-        self.scalar_v7 = v7;
-        let v8: bool = (p.p32 == 1.0);
-        self.scalar_v8 = v8;
-        let v55: f64 = (if v8 { 1.0 } else { 0.0 });
-        self.scalar_v55 = v55;
+        let v11: f64 = p.p32;
+        self.scalar_v11 = v11;
+        let v12: bool = (p.p32 == 1.0);
+        self.scalar_v12 = v12;
+        let v59: f64 = (if v12 { 1.0 } else { 0.0 });
+        self.scalar_v59 = v59;
     }
 }
