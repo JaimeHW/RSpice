@@ -15,6 +15,11 @@ use std::time::UNIX_EPOCH;
 #[derive(Debug, Default)]
 pub struct DigitalSource;
 
+const D_SOURCE_NO_ROW: i64 = -1;
+const D_SOURCE_BEFORE_FIRST_ROW: i64 = -2;
+const D_SOURCE_EMITTED_ROW: usize = 0;
+const D_SOURCE_SCHEDULED_ROW: usize = 1;
+
 #[derive(Debug, Clone)]
 struct DSourceRow {
     time: Value,
@@ -209,24 +214,18 @@ fn load_d_source_rows(input_file: &str, width: usize) -> CmResult<Arc<Vec<DSourc
     Ok(rows)
 }
 
-fn d_source_values_at(
-    rows: &[DSourceRow],
-    time: Value,
-    width: usize,
-) -> (Value, Vec<DigitalValue>) {
+fn d_source_row_indices(rows: &[DSourceRow], time: Value) -> (Option<usize>, Option<usize>) {
     const TIME_EPSILON: Value = 1e-18;
-    let mut selected = None;
-    for row in rows {
+    let mut active = None;
+    for (idx, row) in rows.iter().enumerate() {
         if row.time <= time + TIME_EPSILON {
-            selected = Some(row);
+            active = Some(idx);
         } else {
-            break;
+            return (active, Some(idx));
         }
     }
 
-    selected
-        .map(|row| (row.time, row.values.clone()))
-        .unwrap_or_else(|| (time, vec![DigitalValue::unknown(); width]))
+    (active, None)
 }
 
 impl CodeModel for DigitalSource {
@@ -254,7 +253,10 @@ impl CodeModel for DigitalSource {
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ctx.allocate_int_states(2);
+        ctx.set_int_state(D_SOURCE_EMITTED_ROW, D_SOURCE_NO_ROW);
+        ctx.set_int_state(D_SOURCE_SCHEDULED_ROW, D_SOURCE_NO_ROW);
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -264,8 +266,31 @@ impl CodeModel for DigitalSource {
             .unwrap_or("source.txt");
         let width = ctx.port_width("out").max(1);
         let rows = load_d_source_rows(input_file, width)?;
-        let (event_time, values) = d_source_values_at(&rows, ctx.time, width);
-        ctx.set_output_digital_vector("out", values, event_time - ctx.time);
+        let (active_idx, next_idx) = d_source_row_indices(&rows, ctx.time);
+        let emitted_row = ctx.int_state(D_SOURCE_EMITTED_ROW);
+        let scheduled_row = ctx.int_state(D_SOURCE_SCHEDULED_ROW);
+
+        if let Some(idx) = active_idx {
+            if emitted_row != idx as i64 {
+                let row = &rows[idx];
+                ctx.set_output_digital_vector("out", row.values.clone(), row.time - ctx.time);
+                ctx.set_int_state(D_SOURCE_EMITTED_ROW, idx as i64);
+            }
+        } else if emitted_row != D_SOURCE_BEFORE_FIRST_ROW {
+            ctx.set_output_digital_vector("out", vec![DigitalValue::unknown(); width], 0.0);
+            ctx.set_int_state(D_SOURCE_EMITTED_ROW, D_SOURCE_BEFORE_FIRST_ROW);
+        }
+
+        if let Some(idx) = next_idx {
+            if scheduled_row != idx as i64 {
+                let row = &rows[idx];
+                ctx.set_output_digital_vector("out", row.values.clone(), row.time - ctx.time);
+                ctx.set_int_state(D_SOURCE_SCHEDULED_ROW, idx as i64);
+            }
+        } else if scheduled_row != D_SOURCE_NO_ROW {
+            ctx.set_int_state(D_SOURCE_SCHEDULED_ROW, D_SOURCE_NO_ROW);
+        }
+
         Ok(())
     }
 }

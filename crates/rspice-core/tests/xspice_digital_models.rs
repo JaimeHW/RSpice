@@ -169,6 +169,36 @@ a_src [d] src
 }
 
 #[test]
+fn d_source_schedules_stimulus_times_as_breakpoints() {
+    let result = run_temp_deck(
+        "rspice-d-source-breakpoints",
+        "0 0s\n1n 1s\n2n 0s\n",
+        "\
+* d_source should force transient stops at stimulus event times
+a_src [d] src
+.model src d_source (input_file=\"stim.stim\")
+.end
+",
+        3.0e-9,
+        5.0e-9,
+    );
+
+    let trace = digital_tokens(&result, "d");
+    assert!(
+        trace
+            .iter()
+            .any(|(time, token)| (*time - 1.0e-9).abs() <= 1.0e-18 && token == "1s"),
+        "d_source must schedule the 1ns stimulus event as a transient breakpoint: {trace:?}"
+    );
+    assert!(
+        trace
+            .iter()
+            .any(|(time, token)| (*time - 2.0e-9).abs() <= 1.0e-18 && token == "0s"),
+        "d_source must schedule the 2ns stimulus event as a transient breakpoint: {trace:?}"
+    );
+}
+
+#[test]
 fn d_source_reaches_dac_bridge_independent_of_instance_order() {
     let result = run_temp_deck(
         "rspice-d-source-reversed",
