@@ -222,7 +222,7 @@ fn generate_devices(
     let mut options = CompilerOptions::default();
     options.include_paths.push(model_root.to_path_buf());
     let compiler = VerilogACompiler::new(options);
-    let transpiler = RustTranspiler::default();
+    let transpiler = RustTranspiler::new_auto(Default::default());
     let mut devices = Vec::new();
 
     for candidate in candidates {

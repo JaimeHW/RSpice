@@ -34,6 +34,11 @@ impl RustBackendError {
             message: message.into(),
         }
     }
+
+    pub fn is_unsupported(&self) -> bool {
+        self.message
+            .starts_with("unsupported Verilog-A construct for Rust backend:")
+    }
 }
 
 impl fmt::Display for RustBackendError {

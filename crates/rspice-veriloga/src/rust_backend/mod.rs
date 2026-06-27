@@ -60,6 +60,7 @@ pub struct RustTranspiler {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum RustBackendKind {
+    Auto,
     #[default]
     Legacy,
     ScalarOptIr,
@@ -70,6 +71,13 @@ impl RustTranspiler {
         Self {
             options,
             backend: RustBackendKind::Legacy,
+        }
+    }
+
+    pub fn new_auto(options: RustTranspileOptions) -> Self {
+        Self {
+            options,
+            backend: RustBackendKind::Auto,
         }
     }
 
@@ -89,6 +97,13 @@ impl RustTranspiler {
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDevice, RustBackendError> {
         match self.backend {
+            RustBackendKind::Auto => match scalar::generate_device(artifact, &self.options) {
+                Ok(device) => Ok(device),
+                Err(error) if error.is_unsupported() => {
+                    device::generate_device(artifact, &self.options)
+                }
+                Err(error) => Err(error),
+            },
             RustBackendKind::Legacy => device::generate_device(artifact, &self.options),
             RustBackendKind::ScalarOptIr => scalar::generate_device(artifact, &self.options),
         }

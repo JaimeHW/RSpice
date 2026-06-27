@@ -14,6 +14,9 @@ static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[test]
 fn rust_backend_public_api_exists() {
     let _ = RustTranspiler::default();
+    let _ = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    });
     let diagnostic = RustBackendError::unsupported("fixture.va", "tiny_res", "arrays");
 
     assert!(diagnostic.to_string().contains("fixture.va"));
@@ -666,7 +669,7 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
         .compile_canonical_ir(tiny_resistor_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile simple resistor");
 
@@ -828,6 +831,66 @@ fn scalar_rust_backend_caches_parameter_static_values_outside_stamp() {
     assert!(!stamp.contains("let v6: f64 = -1.0;"), "{stamp}");
     assert!(!stamp.contains("let v7: f64 = (v5 / v3);"), "{stamp}");
     assert!(!stamp.contains("let v8: f64 = (v6 / v3);"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_selects_scalar_for_supported_algebraic_current() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(tiny_resistor_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile simple resistor through auto backend");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        state.contains("fn recompute_instance_static(&mut self)"),
+        "{state}"
+    );
+    assert!(stamp.contains("self.scalar_v3"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_falls_back_to_legacy_for_unsupported_stateful_model() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(capacitor_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile ddt current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(stamp.contains("Scratch"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
