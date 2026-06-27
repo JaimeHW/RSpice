@@ -1044,6 +1044,147 @@ fn rust_backend_auto_falls_back_for_runtime_bounded_scalar_loops() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_hybrid_ddt_current_equations() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(ddt_runtime_bounded_loop_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid ddt and runtime loop current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let reactive_body = stamp
+        .split("pub fn stamp_reactive")
+        .nth(1)
+        .expect("reactive stamp body");
+
+    assert!(
+        stamp.contains("while") && stamp.contains("loop_guard"),
+        "runtime loop should keep this model on the hybrid path:\n{stamp}"
+    );
+    assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(
+        reactive_body.contains("stamper.stamp_current_reactive_node2("),
+        "{reactive_body}"
+    );
+    assert!(
+        !stamp.contains("let eq0_"),
+        "scalarized ddt current should not be lowered as legacy equation 0:\n{stamp}"
+    );
+    assert!(
+        !reactive_body.contains("A::ddt") && !reactive_body.contains("AdValue::ddt"),
+        "scalarized ddt current should not be represented by reactive AD temporaries:\n{reactive_body}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_preserves_hybrid_ddt_named_branch_current_cache() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(ddt_named_branch_runtime_loop_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid ddt named branch current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("while") && stamp.contains("loop_guard"),
+        "runtime loop should keep this model on the hybrid path:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let eq0_") && stamp.contains("eq0_value"),
+        "ddt contribution feeding I(sense) must stay on the legacy path until scalar branch-current caching is available:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("I(sense)") || stamp.contains("eq0_value"),
+        "generated code should preserve a cached named current value for the later probe:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_preserves_hybrid_static_named_branch_current_cache() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(static_named_branch_runtime_loop_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid static named branch current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("while") && stamp.contains("loop_guard"),
+        "runtime loop should keep this model on the hybrid path:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let eq0_") && stamp.contains("eq0_value"),
+        "current contribution feeding I(sense) must stay on the legacy path until scalar branch-current caching is available:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_preserves_hybrid_terminal_named_branch_current_cache() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(terminal_named_branch_runtime_loop_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid terminal named branch current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("while") && stamp.contains("loop_guard"),
+        "runtime loop should keep this model on the hybrid path:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let eq0_") && stamp.contains("eq0_value"),
+        "terminal current contribution feeding I(sense) must stay on the legacy path until scalar branch-current caching is available:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_min_max_clipped_currents() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(scalar_min_max_clip_source())
@@ -16471,6 +16612,101 @@ module runtime_loop_accum(p, n);
             loop = loop + 1.0;
         end
         I(p, n) <+ acc;
+    end
+endmodule
+"#
+}
+
+fn ddt_runtime_bounded_loop_source() -> &'static str {
+    r#"
+module ddt_runtime_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        I(p, n) <+ ddt(c * V(p, n));
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+            acc = acc + V(p, n);
+            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#
+}
+
+fn ddt_named_branch_runtime_loop_source() -> &'static str {
+    r#"
+module ddt_named_branch_runtime_loop(p, n);
+    inout p, n;
+    electrical p, n, sense_node;
+    branch (sense_node) sense;
+    parameter real c = 1e-12 from [0:inf);
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        I(sense) <+ ddt(c * V(p, n));
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+            acc = acc + V(p, n);
+            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc + I(sense);
+    end
+endmodule
+"#
+}
+
+fn static_named_branch_runtime_loop_source() -> &'static str {
+    r#"
+module static_named_branch_runtime_loop(p, n);
+    inout p, n;
+    electrical p, n, sense_node;
+    branch (sense_node) sense;
+    parameter real g = 1e-3 from [0:inf);
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        I(sense) <+ g * V(p, n);
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+            acc = acc + V(p, n);
+            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc + I(sense);
+    end
+endmodule
+"#
+}
+
+fn terminal_named_branch_runtime_loop_source() -> &'static str {
+    r#"
+module terminal_named_branch_runtime_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    branch (p, n) sense;
+    parameter real g = 1e-3 from [0:inf);
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        I(sense) <+ g * V(p, n);
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+            acc = acc + V(p, n);
+            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc + I(sense);
     end
 endmodule
 "#

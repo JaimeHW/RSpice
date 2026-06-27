@@ -25,9 +25,36 @@ const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
 
-struct ScalarStaticStampPlan {
-    roots: HashMap<EquationId, ValueId>,
+struct ScalarHybridStampPlan {
+    large_signal_roots: HashMap<EquationId, ValueId>,
+    ddt_roots: HashMap<EquationId, ValueId>,
     static_cache: super::scalar::ScalarStaticCache,
+}
+
+impl ScalarHybridStampPlan {
+    fn selected_equations(&self) -> HashSet<EquationId> {
+        self.large_signal_roots
+            .keys()
+            .chain(self.ddt_roots.keys())
+            .copied()
+            .collect()
+    }
+
+    fn transient_roots(&self) -> HashMap<EquationId, ValueId> {
+        self.large_signal_roots
+            .iter()
+            .chain(self.ddt_roots.iter())
+            .map(|(equation, root)| (*equation, *root))
+            .collect()
+    }
+
+    fn has_transient_equation(&self, equation: EquationId) -> bool {
+        self.large_signal_roots.contains_key(&equation) || self.ddt_roots.contains_key(&equation)
+    }
+
+    fn has_reactive_equation(&self, equation: EquationId) -> bool {
+        self.ddt_roots.contains_key(&equation)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -233,7 +260,7 @@ pub fn generate_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
-    generate_device_with_scalar_static_plan(artifact, options, None)
+    generate_device_with_scalar_hybrid_plan(artifact, options, None)
 }
 
 pub(super) fn generate_hybrid_device(
@@ -248,25 +275,65 @@ pub(super) fn generate_hybrid_device(
             format!("invalid scalar OptIR: {diagnostics:?}"),
         )
     })?;
-    let roots = super::scalar::scalarizable_current_equation_roots(artifact)?;
-    if roots.is_empty() {
+    let equation_inline = equation_inline_plan(artifact)?;
+    let large_signal_roots = exclude_legacy_branch_current_ordered_roots(
+        artifact,
+        super::scalar::scalarizable_current_equation_roots(artifact)?,
+        &equation_inline,
+    )?;
+    let ddt_roots = exclude_legacy_branch_current_ordered_roots(
+        artifact,
+        super::scalar::scalarizable_ddt_current_equation_roots(artifact)?,
+        &equation_inline,
+    )?;
+    if large_signal_roots.is_empty() && ddt_roots.is_empty() {
         return Err(unsupported(
             artifact,
-            "no scalarizable static current equations",
+            "no scalarizable hybrid current equations",
         ));
     }
-    let static_cache = super::scalar::ScalarStaticCache::from_roots(artifact, &roots)?;
-    let scalar_static_plan = ScalarStaticStampPlan {
-        roots,
+    let scalar_cache_roots: HashMap<_, _> = large_signal_roots
+        .iter()
+        .chain(ddt_roots.iter())
+        .map(|(equation, root)| (*equation, *root))
+        .collect();
+    let static_cache = super::scalar::ScalarStaticCache::from_roots(artifact, &scalar_cache_roots)?;
+    let scalar_hybrid_plan = ScalarHybridStampPlan {
+        large_signal_roots,
+        ddt_roots,
         static_cache,
     };
-    generate_device_with_scalar_static_plan(artifact, options, Some(&scalar_static_plan))
+    generate_device_with_scalar_hybrid_plan(artifact, options, Some(&scalar_hybrid_plan))
 }
 
-fn generate_device_with_scalar_static_plan(
+fn exclude_legacy_branch_current_ordered_roots(
+    artifact: &CanonicalIrArtifact,
+    mut roots: HashMap<EquationId, ValueId>,
+    equation_inline: &[bool],
+) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
+    if equation_inline.len() != artifact.mir.equations.len() {
+        return Err(RustBackendError::internal(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            "equation inline plan length does not match MIR equation count",
+        ));
+    }
+
+    let legacy_ordered_equations: HashSet<_> = artifact
+        .mir
+        .equations
+        .iter()
+        .enumerate()
+        .filter_map(|(index, equation)| equation_inline[index].then_some(equation.id))
+        .collect();
+    roots.retain(|equation, _root| !legacy_ordered_equations.contains(equation));
+    Ok(roots)
+}
+
+fn generate_device_with_scalar_hybrid_plan(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
-    scalar_static_plan: Option<&ScalarStaticStampPlan>,
+    scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
     reject_unsupported_model_shape(artifact)?;
 
@@ -279,14 +346,16 @@ fn generate_device_with_scalar_static_plan(
     let parameter_fields = parameter_field_names(artifact);
     let variable_fields = variable_local_names(artifact);
     let ddt_slots = collect_ddt_slots(artifact)?;
+    let scalar_equations: HashSet<_> = scalar_hybrid_plan
+        .map(ScalarHybridStampPlan::selected_equations)
+        .unwrap_or_default();
     let reactive_liveness = if ddt_slots.len() == 0 {
         ReactiveLiveness::default()
-    } else {
+    } else if scalar_equations.is_empty() {
         collect_reactive_liveness(artifact)?
+    } else {
+        collect_reactive_liveness_excluding(artifact, &scalar_equations)?
     };
-    let scalar_equations: HashSet<_> = scalar_static_plan
-        .map(|plan| plan.roots.keys().copied().collect())
-        .unwrap_or_default();
     let transient_liveness = if scalar_equations.is_empty() {
         collect_transient_liveness(artifact)?
     } else {
@@ -303,9 +372,9 @@ fn generate_device_with_scalar_static_plan(
         &transient_liveness,
         &reactive_liveness,
         &potential_branch_slots,
-        scalar_static_plan,
+        scalar_hybrid_plan,
     )?);
-    let state = if let Some(plan) = scalar_static_plan.filter(|plan| !plan.static_cache.is_empty())
+    let state = if let Some(plan) = scalar_hybrid_plan.filter(|plan| !plan.static_cache.is_empty())
     {
         let extensions = super::scalar::scalar_state_extensions(
             artifact,
@@ -4059,11 +4128,21 @@ impl ReactiveLiveness {
 fn collect_reactive_liveness(
     artifact: &CanonicalIrArtifact,
 ) -> Result<ReactiveLiveness, RustBackendError> {
+    collect_reactive_liveness_excluding(artifact, &HashSet::new())
+}
+
+fn collect_reactive_liveness_excluding(
+    artifact: &CanonicalIrArtifact,
+    excluded_equations: &HashSet<EquationId>,
+) -> Result<ReactiveLiveness, RustBackendError> {
     let dynamic_variables = collect_dynamic_variables(artifact)?;
     let mut live_variables = HashSet::new();
     let mut reactive_equations = HashSet::new();
 
     for equation in &artifact.mir.equations {
+        if excluded_equations.contains(&equation.id) {
+            continue;
+        }
         if expr_depends_on_ddt_or_dynamic(
             artifact,
             equation.expression.id,
@@ -6198,7 +6277,7 @@ fn generate_stamp_file(
     transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
     potential_branch_slots: &PotentialBranchSlots,
-    scalar_static_plan: Option<&ScalarStaticStampPlan>,
+    scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
 ) -> Result<StampFiles, RustBackendError> {
     let mut out = String::new();
     out.push_str("#![allow(dead_code, unused_assignments, unused_parens, unused_variables)]\n\n");
@@ -6309,7 +6388,7 @@ fn generate_stamp_file(
         false,
         "stamp_transient",
         common_usage,
-        scalar_static_plan,
+        scalar_hybrid_plan,
         &mut helper_modules,
         &mut out,
     )?;
@@ -6330,7 +6409,7 @@ fn generate_stamp_file(
             true,
             "stamp_reactive",
             common_usage,
-            None,
+            scalar_hybrid_plan,
             &mut helper_modules,
             &mut out,
         )?;
@@ -14271,7 +14350,7 @@ fn emit_stamp_body(
     reactive: bool,
     helper_prefix: &str,
     common_usage: StampCommonUsage,
-    scalar_static_plan: Option<&ScalarStaticStampPlan>,
+    scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
     helper_modules: &mut StampHelperModules,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
@@ -14304,15 +14383,46 @@ fn emit_stamp_body(
         out.push_str("        let idt_scale = if ddt_active { timestep } else { 0.0 };\n");
     }
 
-    if !reactive && let Some(plan) = scalar_static_plan {
+    if let Some(plan) = scalar_hybrid_plan {
+        let transient_roots = if reactive {
+            HashMap::new()
+        } else {
+            plan.transient_roots()
+        };
+        let roots = if reactive {
+            &plan.ddt_roots
+        } else {
+            &transient_roots
+        };
         super::scalar::emit_static_current_values(
             artifact,
             parameter_fields,
-            &plan.roots,
+            roots,
             &plan.static_cache,
             out,
         )?;
-        super::scalar::emit_static_current_stamps(artifact, &plan.roots, &plan.static_cache, out)?;
+        if reactive {
+            super::scalar::emit_current_reactive_stamps(
+                artifact,
+                &plan.ddt_roots,
+                &plan.static_cache,
+                out,
+            )?;
+        } else {
+            super::scalar::emit_static_current_stamps(
+                artifact,
+                &plan.large_signal_roots,
+                &plan.static_cache,
+                out,
+            )?;
+            super::scalar::emit_ddt_current_stamps(
+                artifact,
+                &plan.ddt_roots,
+                &plan.static_cache,
+                ddt_slots,
+                out,
+            )?;
+        }
     }
 
     let uses_scratch = artifact.hir.variables.iter().any(|variable| {
@@ -14401,8 +14511,15 @@ fn emit_stamp_body(
     let mut branch_currents = HashMap::new();
     for (index, equation) in artifact.mir.equations.iter().enumerate() {
         if !reactive
-            && scalar_static_plan
-                .map(|plan| plan.roots.contains_key(&equation.id))
+            && scalar_hybrid_plan
+                .map(|plan| plan.has_transient_equation(equation.id))
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        if reactive
+            && scalar_hybrid_plan
+                .map(|plan| plan.has_reactive_equation(equation.id))
                 .unwrap_or(false)
         {
             continue;

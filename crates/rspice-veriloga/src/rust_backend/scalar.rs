@@ -403,6 +403,31 @@ pub(super) fn scalarizable_current_equation_roots(
     Ok(selected)
 }
 
+pub(super) fn scalarizable_ddt_current_equation_roots(
+    artifact: &CanonicalIrArtifact,
+) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
+    let roots = available_scalar_equation_roots(artifact);
+    let mut selected = HashMap::new();
+    for equation in &artifact.mir.equations {
+        if equation_ddt_expr(artifact, equation)?.is_none() {
+            continue;
+        }
+        let Some(root) = roots.get(&equation.id).copied() else {
+            continue;
+        };
+        match validate_scalar_current_equation(artifact, equation, root)
+            .and_then(|()| scalar_node_derivatives(artifact, equation, root).map(|_| ()))
+        {
+            Ok(()) => {
+                selected.insert(equation.id, root);
+            }
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(selected)
+}
+
 pub(super) fn emit_static_current_values(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
@@ -444,6 +469,16 @@ pub(super) fn emit_static_current_stamps(
     emit_current_stamps(artifact, roots, static_cache, None, out)
 }
 
+pub(super) fn emit_ddt_current_stamps(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+    static_cache: &ScalarStaticCache,
+    ddt_slots: &DdtSlots,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    emit_current_stamps(artifact, roots, static_cache, Some(ddt_slots), out)
+}
+
 fn emit_current_stamps(
     artifact: &CanonicalIrArtifact,
     roots: &HashMap<EquationId, ValueId>,
@@ -470,7 +505,7 @@ fn emit_current_stamps(
     Ok(())
 }
 
-fn emit_current_reactive_stamps(
+pub(super) fn emit_current_reactive_stamps(
     artifact: &CanonicalIrArtifact,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
