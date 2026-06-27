@@ -153,7 +153,10 @@ impl XspiceInstance {
     /// * `name` - Instance name
     /// * `model` - Code model reference
     /// * `connections` - Port connections (must match model port count)
-    /// * `params` - Instance parameter overrides
+    /// * `params` - Numeric instance/model parameter overrides
+    /// * `string_params` - String instance/model parameter overrides
+    /// * `real_vector_params` - Real-vector instance/model parameter overrides
+    /// * `integer_vector_params` - Integer-vector instance/model parameter overrides
     pub fn new(
         name: impl Into<String>,
         model: Arc<dyn CodeModel>,
@@ -229,6 +232,17 @@ impl XspiceInstance {
             context.set_param(name, *value);
         }
         for (name, value) in string_params {
+            if let Some(spec) = param_specs.get(&canonical_param_key(name))
+                && matches!(
+                    spec.param_type,
+                    ParamType::RealVector | ParamType::IntegerVector
+                )
+            {
+                return Err(CmError::InvalidParameter {
+                    name: spec.name.clone(),
+                    message: "expected vector parameter, got string parameter".to_string(),
+                });
+            }
             context.set_string_param(name, value);
         }
         for (name, values) in real_vector_params {
@@ -1073,6 +1087,26 @@ mod tests {
             &[],
         )
         .expect_err("known vector parameter must not accept scalar override");
+
+        assert!(matches!(
+            err,
+            CmError::InvalidParameter { ref name, .. } if name.eq_ignore_ascii_case("points")
+        ));
+    }
+
+    #[test]
+    fn instance_rejects_string_override_for_known_vector_parameter() {
+        let model = model_with_params(vec![ParamSpec::real_vector("points", vec![1.0, 2.0])]);
+        let err = XspiceInstance::new(
+            "Avec",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[("points".to_string(), "bad".to_string())],
+            &[],
+            &[],
+        )
+        .expect_err("known vector parameter must not accept string override");
 
         assert!(matches!(
             err,

@@ -25,11 +25,12 @@ fn merge_numeric_params(base: &[(String, f64)], overrides: &[(String, f64)]) -> 
     merged
 }
 
-fn reject_scalar_params_for_vector_specs(
+fn reject_param_names_for_vector_specs<'a>(
     code_model: &dyn crate::xspice::CodeModel,
-    params: &[(String, f64)],
+    names: impl IntoIterator<Item = &'a str>,
+    channel: &str,
 ) -> Result<(), SimulationError> {
-    for (name, _value) in params {
+    for name in names {
         if let Some(spec) = code_model
             .parameters()
             .iter()
@@ -40,13 +41,25 @@ fn reject_scalar_params_for_vector_specs(
             )
         {
             return Err(SimulationError::Circuit(format!(
-                "XSPICE model '{}' vector parameter '{}' was given a scalar value",
+                "XSPICE model '{}' vector parameter '{}' was given a {} value",
                 code_model.name(),
-                name
+                name,
+                channel
             )));
         }
     }
     Ok(())
+}
+
+fn reject_scalar_params_for_vector_specs(
+    code_model: &dyn crate::xspice::CodeModel,
+    params: &[(String, f64)],
+) -> Result<(), SimulationError> {
+    reject_param_names_for_vector_specs(
+        code_model,
+        params.iter().map(|(name, _)| name.as_str()),
+        "scalar",
+    )
 }
 
 fn resolve_vector_params(
@@ -125,6 +138,19 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     })?;
 
     reject_scalar_params_for_vector_specs(code_model.as_ref(), &model_def.params)?;
+    reject_param_names_for_vector_specs(
+        code_model.as_ref(),
+        model_def
+            .string_params
+            .iter()
+            .map(|(name, _)| name.as_str()),
+        "string",
+    )?;
+    reject_param_names_for_vector_specs(
+        code_model.as_ref(),
+        model_def.expr_params.iter().map(|(name, _)| name.as_str()),
+        "expression",
+    )?;
     reject_scalar_params_for_vector_specs(code_model.as_ref(), instance_params)?;
 
     let (real_vector_params, mut integer_vector_params) =
@@ -294,6 +320,60 @@ mod tests {
         let lowered = message.to_ascii_lowercase();
         assert!(
             lowered.contains("points") && lowered.contains("scalar"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_resolver_rejects_string_model_param_for_known_vector_param() {
+        let netlist = Netlist::parse(
+            "xspice string where vector expected\n\
+             .model vp vector_probe (points=\"bad\")\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        let mut registry = crate::xspice::CodeModelRegistry::new();
+        registry.register(Arc::new(ParamOnlyModel::new(
+            "vector_probe",
+            vec![ParamSpec::real_vector("points", vec![0.0])],
+        )));
+
+        let err = match resolve_xspice_model_instance(&netlist, &registry, "vp", &[]) {
+            Ok(_) => panic!("string value for known vector parameter must be rejected"),
+            Err(err) => err,
+        };
+
+        let message = err.to_string();
+        let lowered = message.to_ascii_lowercase();
+        assert!(
+            lowered.contains("points") && lowered.contains("string"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_resolver_rejects_expr_model_param_for_known_vector_param() {
+        let netlist = Netlist::parse(
+            "xspice expression where vector expected\n\
+             .model vp vector_probe (points={missing_param})\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        let mut registry = crate::xspice::CodeModelRegistry::new();
+        registry.register(Arc::new(ParamOnlyModel::new(
+            "vector_probe",
+            vec![ParamSpec::real_vector("points", vec![0.0])],
+        )));
+
+        let err = match resolve_xspice_model_instance(&netlist, &registry, "vp", &[]) {
+            Ok(_) => panic!("expression value for known vector parameter must be rejected"),
+            Err(err) => err,
+        };
+
+        let message = err.to_string();
+        let lowered = message.to_ascii_lowercase();
+        assert!(
+            lowered.contains("points") && lowered.contains("expression"),
             "unexpected error: {message}"
         );
     }
