@@ -790,6 +790,51 @@ impl CodeModel for Differentiator {
 }
 
 //=============================================================================
+// Official Aliases
+//=============================================================================
+
+macro_rules! analog_model_alias {
+    ($alias:ident, $target:ident, $name:literal) => {
+        #[derive(Debug, Default)]
+        pub struct $alias;
+
+        impl CodeModel for $alias {
+            fn name(&self) -> &str {
+                $name
+            }
+
+            fn description(&self) -> &str {
+                $target.description()
+            }
+
+            fn ports(&self) -> &[PortSpec] {
+                $target.ports()
+            }
+
+            fn parameters(&self) -> &[ParamSpec] {
+                $target.parameters()
+            }
+
+            fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+                $target.init(ctx)
+            }
+
+            fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+                $target.evaluate(ctx)
+            }
+
+            fn ac_gain(&self, ctx: &CmContext) -> Vec<Value> {
+                $target.ac_gain(ctx)
+            }
+        }
+    };
+}
+
+analog_model_alias!(DivideAlias, Divider, "divide");
+analog_model_alias!(IntegratorAlias, Integrator, "int");
+analog_model_alias!(DifferentiatorAlias, Differentiator, "d_dt");
+
+//=============================================================================
 // Analog Switch
 //=============================================================================
 

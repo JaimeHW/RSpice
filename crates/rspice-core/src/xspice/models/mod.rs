@@ -50,8 +50,8 @@ mod digital;
 
 // Re-export all models
 pub use analog::{
-    AnalogSwitch, ControlledLimiter, Differentiator, Divider, Gain, Integrator, Limiter,
-    Multiplier, SampleHold, Summer,
+    AnalogSwitch, ControlledLimiter, Differentiator, DifferentiatorAlias, DivideAlias, Divider,
+    Gain, Integrator, IntegratorAlias, Limiter, Multiplier, SampleHold, Summer,
 };
 
 pub use bridges::{AdcBridge, DacBridge};

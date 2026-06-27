@@ -100,3 +100,61 @@ rsmooth out_smooth 0 1k
         "climit fraction smoothing should match ngspice: got {out_smooth}"
     );
 }
+
+#[test]
+fn xspice_official_divide_alias_matches_divider() {
+    let deck = "\
+* XSPICE official divide alias
+vnum num 0 dc 1
+vden den 0 dc 2
+adiv num den out div_alias
+.model div_alias divide (out_gain=1 out_offset=0 den_lower_limit=1e-12)
+rl out 0 1k
+.op
+.end
+";
+
+    let out = op_voltage(deck, "out");
+    assert!(
+        (out - 0.5).abs() < 1e-9,
+        "divide alias should match divider behavior: got {out}"
+    );
+}
+
+#[test]
+fn xspice_official_int_alias_matches_integrator() {
+    let deck = "\
+* XSPICE official int alias
+vin in 0 dc 0
+aint in out int_alias
+.model int_alias int (gain=1 out_ic=1.25 out_lower_limit=-10 out_upper_limit=10)
+rl out 0 1k
+.op
+.end
+";
+
+    let out = op_voltage(deck, "out");
+    assert!(
+        (out - 1.25).abs() < 1e-9,
+        "int alias should match integrator initial output behavior: got {out}"
+    );
+}
+
+#[test]
+fn xspice_official_d_dt_alias_matches_differentiator() {
+    let deck = "\
+* XSPICE official d_dt alias
+vin in 0 dc 0
+adiff in out ddt_alias
+.model ddt_alias d_dt (gain=1 out_offset=2 out_lower_limit=-10 out_upper_limit=10)
+rl out 0 1k
+.op
+.end
+";
+
+    let out = op_voltage(deck, "out");
+    assert!(
+        (out - 2.0).abs() < 1e-9,
+        "d_dt alias should match differentiator offset behavior: got {out}"
+    );
+}

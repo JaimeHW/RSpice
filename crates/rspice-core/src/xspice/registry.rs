@@ -74,10 +74,13 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::Summer));
         self.register(Arc::new(super::models::Multiplier));
         self.register(Arc::new(super::models::Divider));
+        self.register(Arc::new(super::models::DivideAlias));
         self.register(Arc::new(super::models::Limiter));
         self.register(Arc::new(super::models::ControlledLimiter));
         self.register(Arc::new(super::models::Integrator));
+        self.register(Arc::new(super::models::IntegratorAlias));
         self.register(Arc::new(super::models::Differentiator));
+        self.register(Arc::new(super::models::DifferentiatorAlias));
         self.register(Arc::new(super::models::AnalogSwitch));
         self.register(Arc::new(super::models::SampleHold));
 
