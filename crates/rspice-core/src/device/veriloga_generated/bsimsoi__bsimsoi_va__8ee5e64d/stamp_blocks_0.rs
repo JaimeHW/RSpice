@@ -5689,7 +5689,7 @@ impl Instance {
         }
 
         if ((s.b[1613] && (!s.b[1648])) && (!s.b[1651])) {
-            s.store_offset_div_scaled_inputs2(1179, s.ad_value(1421), 1.0, s.ad_value(1422), 1.0, s.ad_value(715), 1.0, 1.0);
+            s.store_offset_div_scaled_inputs2_indices(1179, 1421, 1.0, 1422, 1.0, 715, 1.0, 1.0);
             s.store_add(1180, 1324, 1325);
             s.store_sqrt_add_scaled_square_input(1182, 1179, 1.0, 1180, 4.0);
             s.store_scaled_add(1181, 1179, 1182, 0.5);

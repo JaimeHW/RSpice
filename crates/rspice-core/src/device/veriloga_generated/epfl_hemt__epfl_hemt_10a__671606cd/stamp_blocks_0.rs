@@ -130,7 +130,7 @@ impl Instance {
 
         s.store_sqrt(36, 35);
 
-        s.store_offset_div_scaled_inputs(45, s.ad_value(71), 1.0, A::sqrt(s.ad_value(35)), 2.0, 1.0);
+        s.store_offset_div_scaled_inputs_mixed_ia(45, 71, 1.0, A::sqrt(s.ad_value(35)), 2.0, 1.0);
 
         s.store_scaled_mul(46, 45, 63, (2.0 * s.v[47]));
 
@@ -140,7 +140,7 @@ impl Instance {
 
         s.store_mul_powf_ad_rhs(44, 43, s.ad_value(42), 0.6666);
 
-        s.store_offset_div_scaled_inputs(41, s.ad_value(48), 1.0, s.ad_value(63), s.v[39], (((p.p11 / s.v[56])) as f64).ln());
+        s.store_offset_div_scaled_inputs_indices(41, 48, 1.0, 63, s.v[39], (((p.p11 / s.v[56])) as f64).ln());
 
     }
 

@@ -5189,7 +5189,7 @@ impl Instance {
         if s.b[2155] {
             s.store_add_scaled_inputs3_indices(1924, 1922, 1.0, 820, 0.5, 824, (-0.5));
             s.store_sub_ad_lhs(1925, A::sqrt(A::add(s.ad_value(1924), s.ad_value(722))), 730);
-            s.store_offset_div_scaled_inputs2(1919, s.ad_value(1925), 2.0, s.ad_value(737), (-2.0), s.ad_value(738), 1.0, (-1.0));
+            s.store_offset_div_scaled_inputs2_indices(1919, 1925, 2.0, 737, (-2.0), 738, 1.0, (-1.0));
             s.store_add_scaled_product_mixed_iaa(1926, 1925, 1.0, A::mul_sub_from_scalar_lhs_scaled_output(1.0, s.ad_value(179), s.ad_value(738), 0.25), A::add(s.ad_value(1919), A::sqrt(A::offset(A::square(s.ad_value(1919)), 0.4804530139182))), (-1.0));
             s.store_add_scaled_square_product_indices(1927, 1926, 1.0, 730, 1926, 2.0);
             s.store_add_scaled_inputs3_indices(1922, 1927, 1.0, 820, (-0.5), 824, (-(-0.5)));
@@ -5223,7 +5223,7 @@ impl Instance {
             s.store_scale(2008, 1996, s.v[355]);
             s.store_scale(2009, 2005, s.v[355]);
             s.store_scale(2010, 2003, s.v[355]);
-            s.store_offset_div_scaled_inputs(1920, s.ad_value(1998), 0.5, A::sqrt(s.ad_value(2008)), 1.0, 1.0);
+            s.store_offset_div_scaled_inputs_mixed_ia(1920, 1998, 0.5, A::sqrt(s.ad_value(2008)), 1.0, 1.0);
             s.store_add_scaled_product_right_ad(1921, 2008, 1.0, 1998, A::sqrt(s.ad_value(2008)), 1.0);
             s.store_add_scaled_inputs_product_mixed_aiai(2011, A::div_scaled_inputs2(s.ad_value(2010), 1.0, s.ad_value(1921), (-1.0), s.ad_value(1920), 1.0), 1.0, 2008, 0.5, A::offset(s.ad_value(186), 1.0), 2009, (-1.0));
             s.store_offset_scaled(2012, 2008, 0.5, 2.0);
@@ -5315,7 +5315,7 @@ impl Instance {
         }
 
         if (!s.b[2158]) {
-            s.store_offset_div_scaled_inputs(2032, s.ad_value(2006), 0.5, A::sqrt(s.ad_value(2031)), 1.0, 1.0);
+            s.store_offset_div_scaled_inputs_mixed_ia(2032, 2006, 0.5, A::sqrt(s.ad_value(2031)), 1.0, 1.0);
         }
 
         s.store_add_scaled_value_products(2033, s.ad_value(2031), 1.0, s.ad_value(2006), A::sqrt(s.ad_value(2031)), 1.0, s.ad_value(2032), A::ln(A::offset(s.ad_value(2032), (-1.0))), (-1.0));

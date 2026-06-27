@@ -781,7 +781,7 @@ impl Instance {
         }
 
         if ((s.b[1275] && (!s.b[1310])) && (!s.b[1313])) {
-            s.store_offset_div_scaled_inputs2(843, s.ad_value(1087), 1.0, s.ad_value(1088), 1.0, s.ad_value(354), 1.0, 1.0);
+            s.store_offset_div_scaled_inputs2_indices(843, 1087, 1.0, 1088, 1.0, 354, 1.0, 1.0);
         }
 
     }
