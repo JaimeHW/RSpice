@@ -458,6 +458,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_div_scaled_product_sqrt_square_sum_denominator_helper_calls(source);
     source = compact_div_scaled_product_add_scaled_denominator_helper_calls(source);
     source = compact_exp_div_scaled_inputs_helper_calls(source);
+    source = compact_add_sub_div_lhs_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
         ("scratch.reactive_node_derivatives", "scratch.rdn"),
@@ -1046,6 +1047,111 @@ fn compact_exp_div_scaled_inputs_helper_call_replacement(
         &[div_args[1], div_args[3]],
         &[],
     )?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_add_sub_div_lhs_helper_calls(source: String) -> String {
+    let source =
+        compact_add_sub_div_helper_calls_for(source, "scratch.store_add_ad_lhs(", "add_lhs");
+    let source =
+        compact_add_sub_div_helper_calls_for(source, "scratch.store_add_ad_rhs(", "add_rhs");
+    compact_add_sub_div_helper_calls_for(source, "scratch.store_sub_ad_lhs(", "sub_lhs")
+}
+
+fn compact_add_sub_div_helper_calls_for(source: String, needle: &str, kind: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(needle) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + needle.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_add_sub_div_helper_call_replacement(&source, call_start, indent, needle, kind)
+        else {
+            let skip_to = call_start + needle.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_add_sub_div_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+    needle: &str,
+    kind: &str,
+) -> Option<(usize, String)> {
+    let open_paren = call_start + needle.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let (base, left_index, div_expr, right_index) = match kind {
+        "add_lhs" => (
+            "store_add_div_lhs",
+            None,
+            args[1].trim(),
+            args[2].trim().parse::<usize>().ok()?,
+        ),
+        "add_rhs" => (
+            "store_add_div_rhs",
+            Some(args[1].trim().parse::<usize>().ok()?),
+            args[2].trim(),
+            0usize,
+        ),
+        "sub_lhs" => (
+            "store_sub_div_lhs",
+            None,
+            args[1].trim(),
+            args[2].trim().parse::<usize>().ok()?,
+        ),
+        _ => return None,
+    };
+    let div_args = compact_ad_call_args(div_expr, "div")?;
+    if div_args.len() != 2 {
+        return None;
+    }
+    let line = match left_index {
+        Some(left) => compact_index_or_mixed_div_rhs_helper_line(
+            target_index,
+            base,
+            left,
+            div_args[0],
+            div_args[1],
+        )?,
+        None => compact_index_or_mixed_div_lhs_helper_line(
+            target_index,
+            base,
+            div_args[0],
+            div_args[1],
+            right_index,
+        )?,
+    };
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -3561,6 +3667,66 @@ fn stamp() {
         );
         assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
         assert!(!compact.contains("s.store_exp_ad("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_add_sub_div_lhs_helper_calls_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_add_div_lhs(",
+            "fn store_add_div_lhs_indices",
+            "fn store_add_div_lhs_mixed_ai",
+            "fn store_add_div_lhs_mixed_ia",
+            "fn store_add_div_rhs(",
+            "fn store_add_div_rhs_indices",
+            "fn store_sub_div_lhs(",
+            "fn store_sub_div_lhs_indices",
+        ] {
+            assert!(support.contains(helper), "{helper}\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_add_ad_lhs(90, AdValue::div(scratch.ad_value(2), scratch.ad_value(3)), 4);
+    scratch.store_add_ad_rhs(91, 5, AdValue::div(scratch.ad_value(6), scratch.ad_value(7)));
+    scratch.store_sub_ad_lhs(92, AdValue::div(scratch.ad_value(8), scratch.ad_value(9)), 10);
+    scratch.store_add_ad_lhs(93, AdValue::div(AdValue::sqrt(scratch.ad_value(11)), scratch.ad_value(12)), 13);
+    scratch.store_sub_ad_lhs(94, AdValue::div(scratch.ad_value(14), AdValue::exp(scratch.ad_value(15))), 16);
+    scratch.store_add_ad_rhs(95, 17, AdValue::div(AdValue::sqrt(scratch.ad_value(18)), AdValue::exp(scratch.ad_value(19))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_add_div_lhs_indices(90, 2, 3, 4);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_div_rhs_indices(91, 5, 6, 7);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_div_lhs_indices(92, 8, 9, 10);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_div_lhs_mixed_ai(93, A::sqrt(s.ad_value(11)), 12, 13);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_div_lhs_mixed_ia(94, 14, A::exp(s.ad_value(15)), 16);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_add_div_rhs(95, 17, A::sqrt(s.ad_value(18)), A::exp(s.ad_value(19)));"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_add_ad_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_add_ad_rhs("), "{compact}");
+        assert!(!compact.contains("s.store_sub_ad_lhs("), "{compact}");
     }
 
     #[test]
@@ -9700,6 +9866,60 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_add_div_rhs_components(&mut self, index: usize, left: usize, numerator_raw: f64, numerator_node_derivatives: [f64; Instance::NODE_COUNT], numerator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
+        "        let left_value = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let reciprocal = 1.0 / denominator_raw;",
+        "        let quotient = numerator_raw * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal;",
+        "        self.values[index] = left_value + quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + numerator_node_derivatives[axis] * reciprocal + denominator_node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + numerator_branch_derivatives[axis] * reciprocal + denominator_branch_derivatives[axis] * denominator_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_div_rhs(&mut self, index: usize, left: usize, numerator: AdValue, denominator: AdValue) {",
+        "        self.store_add_div_rhs_components(index, left, numerator.value, numerator.node_derivatives, numerator.branch_derivatives, denominator.value, denominator.node_derivatives, denominator.branch_derivatives);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_div_lhs_components(&mut self, index: usize, numerator_raw: f64, numerator_node_derivatives: [f64; Instance::NODE_COUNT], numerator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], right: usize) {",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let reciprocal = 1.0 / denominator_raw;",
+        "        let quotient = numerator_raw * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient + right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = numerator_node_derivatives[axis] * reciprocal + denominator_node_derivatives[axis] * denominator_derivative_scale + right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = numerator_branch_derivatives[axis] * reciprocal + denominator_branch_derivatives[axis] * denominator_derivative_scale + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_div_lhs(&mut self, index: usize, numerator: AdValue, denominator: AdValue, right: usize) {",
+        "        self.store_add_div_lhs_components(index, numerator.value, numerator.node_derivatives, numerator.branch_derivatives, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, right);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_div_lhs_components(&mut self, index: usize, numerator_raw: f64, numerator_node_derivatives: [f64; Instance::NODE_COUNT], numerator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], right: usize) {",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let reciprocal = 1.0 / denominator_raw;",
+        "        let quotient = numerator_raw * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient - right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = numerator_node_derivatives[axis] * reciprocal + denominator_node_derivatives[axis] * denominator_derivative_scale - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = numerator_branch_derivatives[axis] * reciprocal + denominator_branch_derivatives[axis] * denominator_derivative_scale - right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_div_lhs(&mut self, index: usize, numerator: AdValue, denominator: AdValue, right: usize) {",
+        "        self.store_sub_div_lhs_components(index, numerator.value, numerator.node_derivatives, numerator.branch_derivatives, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, right);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sub_from_scalar_div_components(&mut self, index: usize, scalar: f64, numerator_raw: f64, numerator_node_derivatives: [f64; Instance::NODE_COUNT], numerator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
         "        let reciprocal = 1.0 / denominator_raw;",
         "        let quotient = numerator_raw * reciprocal;",
@@ -13384,6 +13604,15 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     }
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_sub_div_rhs_helper(&mask));
+        out.push_str(&generate_index_or_mixed_add_div_rhs_helper(&mask));
+        out.push_str(&generate_index_or_mixed_add_sub_div_lhs_helper(
+            &mask,
+            "store_add_div_lhs",
+        ));
+        out.push_str(&generate_index_or_mixed_add_sub_div_lhs_helper(
+            &mask,
+            "store_sub_div_lhs",
+        ));
     }
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_sub_from_scalar_div_helper(&mask));
@@ -13955,6 +14184,44 @@ fn generate_index_or_mixed_sub_div_rhs_helper(mask: &str) -> String {
     #[inline]
     fn {helper}(&mut self, index: usize, left: usize, numerator: {numerator_ty}, denominator: {denominator_ty}) {{
 {locals}        self.store_sub_div_rhs_components(index, left, {numerator}, {denominator});
+    }}
+"#,
+        numerator_ty = mixed_helper_type(mask, 0),
+        denominator_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_add_div_rhs_helper(mask: &str) -> String {
+    let operands = ["numerator", "denominator"];
+    let helper = index_or_mixed_helper_name("store_add_div_rhs", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let numerator = mixed_helper_component_args(mask, 0, "numerator");
+    let denominator = mixed_helper_component_args(mask, 1, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: usize, numerator: {numerator_ty}, denominator: {denominator_ty}) {{
+{locals}        self.store_add_div_rhs_components(index, left, {numerator}, {denominator});
+    }}
+"#,
+        numerator_ty = mixed_helper_type(mask, 0),
+        denominator_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_add_sub_div_lhs_helper(mask: &str, base: &str) -> String {
+    let operands = ["numerator", "denominator"];
+    let helper = index_or_mixed_helper_name(base, mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let numerator = mixed_helper_component_args(mask, 0, "numerator");
+    let denominator = mixed_helper_component_args(mask, 1, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, numerator: {numerator_ty}, denominator: {denominator_ty}, right: usize) {{
+{locals}        self.{base}_components(index, {numerator}, {denominator}, right);
     }}
 "#,
         numerator_ty = mixed_helper_type(mask, 0),
@@ -20324,6 +20591,12 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
         return match (left, right) {
             (Some(_), Some(_)) | (None, None) => None,
             (Some(left), None) => {
+                if name == "add"
+                    && let Some(line) =
+                        compact_add_div_rhs_store_helper_line(target_index, left, args[1])
+                {
+                    return Some(line);
+                }
                 if name == "sub"
                     && let Some(line) =
                         compact_sub_div_rhs_store_helper_line(target_index, left, args[1])
@@ -20344,10 +20617,22 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
                     args[1]
                 ))
             }
-            (None, Some(right)) => Some(format!(
-                "scratch.{lhs_helper}({target_index}, {}, {right});",
-                args[0]
-            )),
+            (None, Some(right)) => {
+                if matches!(name, "add" | "sub")
+                    && let Some(line) = compact_add_sub_div_lhs_store_helper_line(
+                        target_index,
+                        name,
+                        args[0],
+                        right,
+                    )
+                {
+                    return Some(line);
+                }
+                Some(format!(
+                    "scratch.{lhs_helper}({target_index}, {}, {right});",
+                    args[0]
+                ))
+            }
         };
     }
     None
@@ -20517,6 +20802,44 @@ fn compact_sub_div_rhs_store_helper_line(
         "scratch.store_sub_div_rhs_ad({target_index}, {left}, {}, {});",
         args[0], args[1]
     ))
+}
+
+fn compact_add_div_rhs_store_helper_line(
+    target_index: usize,
+    left: usize,
+    right: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(right, "div")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    compact_index_or_mixed_div_rhs_helper_line(
+        target_index,
+        "store_add_div_rhs",
+        left,
+        args[0],
+        args[1],
+    )
+}
+
+fn compact_add_sub_div_lhs_store_helper_line(
+    target_index: usize,
+    op: &str,
+    left: &str,
+    right: usize,
+) -> Option<String> {
+    let args = compact_ad_call_args(left, "div")?;
+    if args.len() != 2 {
+        return None;
+    }
+    let base = if op == "add" {
+        "store_add_div_lhs"
+    } else {
+        "store_sub_div_lhs"
+    };
+
+    compact_index_or_mixed_div_lhs_helper_line(target_index, base, args[0], args[1], right)
 }
 
 fn compact_sub_from_scalar_div_store_helper_call(
@@ -21754,6 +22077,36 @@ fn compact_index_or_mixed_scaled_inputs_helper_line(
         call_args.push((*scale).to_string());
     }
     call_args.extend(trailing.iter().map(|arg| (*arg).to_string()));
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_div_lhs_helper_line(
+    target_index: usize,
+    base: &str,
+    numerator: &str,
+    denominator: &str,
+    right: usize,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(base, &[numerator, denominator])?;
+    let mut call_args = Vec::with_capacity(4);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    call_args.push(right.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_div_rhs_helper_line(
+    target_index: usize,
+    base: &str,
+    left: usize,
+    numerator: &str,
+    denominator: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(base, &[numerator, denominator])?;
+    let mut call_args = Vec::with_capacity(4);
+    call_args.push(target_index.to_string());
+    call_args.push(left.to_string());
+    call_args.extend(value_args);
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
