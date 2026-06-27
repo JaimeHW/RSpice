@@ -752,6 +752,33 @@ mod tests {
     }
 
     #[test]
+    fn model_params_accept_spice_boolean_literals() {
+        let netlist = Netlist::parse(
+            "xspice boolean model params\n\
+             .model sw aswitch (limit=true log=FALSE)\n\
+             .end\n",
+        )
+        .expect("boolean model parameters parse");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("sw"))
+            .expect("model exists");
+        let param = |name: &str| {
+            model
+                .params
+                .iter()
+                .find(|(param_name, _)| param_name.eq_ignore_ascii_case(name))
+                .map(|(_, value)| *value)
+                .unwrap_or_else(|| panic!("{name} exists"))
+        };
+
+        assert_eq!(param("limit"), 1.0);
+        assert_eq!(param("log"), 0.0);
+    }
+
+    #[test]
     fn model_vector_params_reject_missing_closing_bracket() {
         let err = Netlist::parse(
             "unterminated xspice vector model param\n\

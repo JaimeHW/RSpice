@@ -492,9 +492,21 @@ fn token_is_value_like(kind: &TokenKind, params: &ParamContext) -> bool {
     match kind {
         TokenKind::Number(_) | TokenKind::Expression(_) => true,
         TokenKind::Ident(s) => {
-            params.get(s).is_some() || crate::netlist::lexer::parse_spice_value(s).is_ok()
+            params.get(s).is_some()
+                || parse_boolean_literal(s).is_some()
+                || crate::netlist::lexer::parse_spice_value(s).is_ok()
         }
         _ => false,
+    }
+}
+
+fn parse_boolean_literal(raw: &str) -> Option<Value> {
+    if raw.eq_ignore_ascii_case("true") {
+        Some(1.0)
+    } else if raw.eq_ignore_ascii_case("false") {
+        Some(0.0)
+    } else {
+        None
     }
 }
 
@@ -512,6 +524,9 @@ fn try_value_unsigned(stream: &mut TokenStream, params: &ParamContext) -> Option
         }
         TokenKind::Ident(s) => {
             if let Some(v) = params.get(s) {
+                stream.advance();
+                Some(v)
+            } else if let Some(v) = parse_boolean_literal(s) {
                 stream.advance();
                 Some(v)
             } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
