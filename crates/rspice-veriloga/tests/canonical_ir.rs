@@ -226,6 +226,26 @@ endmodule
 "#
 }
 
+fn constant_arithmetic_source() -> &'static str {
+    r#"
+module const_arith(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ (2.0 + 3.0) * V(p, n);
+endmodule
+"#
+}
+
+fn negative_constant_gain_source() -> &'static str {
+    r#"
+module neg_const_gain(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ -1.0 * V(p, n);
+endmodule
+"#
+}
+
 fn named_branch_potential_source() -> &'static str {
     r#"
 module branch_potential(p, n);
@@ -796,6 +816,62 @@ fn opt_lowering_strength_reduces_multiply_by_one() {
             )
         }),
         "multiply by one should not remain in scalar OptIR: {:?}",
+        opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_constant_folds_real_arithmetic() {
+    let (_, _, _, opt) = lower_fixture_parts(constant_arithmetic_source(), "const_arith");
+
+    assert!(
+        opt.values
+            .iter()
+            .any(|value| value.kind == OptValueKind::RealConstant(5.0)),
+        "constant arithmetic should fold to one scalar value: {:?}",
+        opt.values
+    );
+    assert!(
+        opt.values.iter().all(|value| {
+            !matches!(
+                value.kind,
+                OptValueKind::Binary {
+                    op: OptBinaryOp::Add,
+                    left,
+                    right,
+                } if matches!(
+                    (&opt.values[usize::from(left)].kind, &opt.values[usize::from(right)].kind),
+                    (OptValueKind::RealConstant(_), OptValueKind::RealConstant(_))
+                )
+            )
+        }),
+        "constant-only additions should not remain in scalar OptIR: {:?}",
+        opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_constant_folds_unary_negation() {
+    let (_, _, _, opt) = lower_fixture_parts(negative_constant_gain_source(), "neg_const_gain");
+
+    assert!(
+        opt.values
+            .iter()
+            .any(|value| value.kind == OptValueKind::RealConstant(-1.0)),
+        "negative literal should fold to one scalar value: {:?}",
+        opt.values
+    );
+    assert!(
+        opt.values.iter().all(|value| {
+            !matches!(
+                value.kind,
+                OptValueKind::Unary {
+                    op: OptUnaryOp::Neg,
+                    input,
+                } if matches!(opt.values[usize::from(input)].kind, OptValueKind::RealConstant(_))
+            )
+        }),
+        "constant unary negation should not remain in scalar OptIR: {:?}",
         opt.values
     );
 }

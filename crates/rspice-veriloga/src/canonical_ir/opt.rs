@@ -344,6 +344,7 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn push_value(&mut self, value_type: OptValueType, kind: OptValueKind) -> ValueId {
+        let (value_type, kind) = self.fold_constant_value(value_type, kind);
         if let Some(value) = self.simplified_existing_value(&kind) {
             return value;
         }
@@ -362,6 +363,85 @@ impl<'a> ScalarGraphBuilder<'a> {
         });
         self.value_keys.insert(key, id);
         id
+    }
+
+    fn fold_constant_value(
+        &self,
+        value_type: OptValueType,
+        kind: OptValueKind,
+    ) -> (OptValueType, OptValueKind) {
+        match kind {
+            OptValueKind::Unary { op, input } => {
+                if let Some(value) = self.real_constant(input) {
+                    let folded = match op {
+                        OptUnaryOp::Pos => Some(value),
+                        OptUnaryOp::Neg => Some(-value),
+                        OptUnaryOp::Exp => Some(value.exp()),
+                        OptUnaryOp::Ln => Some(value.ln()),
+                        OptUnaryOp::Sqrt => Some(value.sqrt()),
+                        OptUnaryOp::Abs => Some(value.abs()),
+                        OptUnaryOp::Not => None,
+                    };
+                    if let Some(folded) = folded {
+                        return (OptValueType::Real, OptValueKind::RealConstant(folded));
+                    }
+                }
+                if let (OptUnaryOp::Not, Some(value)) = (op, self.boolean_constant(input)) {
+                    return (OptValueType::Boolean, OptValueKind::BooleanConstant(!value));
+                }
+                (value_type, OptValueKind::Unary { op, input })
+            }
+            OptValueKind::Binary { op, left, right } => {
+                if let Some(folded) = self.fold_constant_binary(op, left, right) {
+                    return folded;
+                }
+                (value_type, OptValueKind::Binary { op, left, right })
+            }
+            other => (value_type, other),
+        }
+    }
+
+    fn fold_constant_binary(
+        &self,
+        op: OptBinaryOp,
+        left: ValueId,
+        right: ValueId,
+    ) -> Option<(OptValueType, OptValueKind)> {
+        if let (Some(left), Some(right)) = (self.real_constant(left), self.real_constant(right)) {
+            let real = |value| Some((OptValueType::Real, OptValueKind::RealConstant(value)));
+            let boolean =
+                |value| Some((OptValueType::Boolean, OptValueKind::BooleanConstant(value)));
+            return match op {
+                OptBinaryOp::Add => real(left + right),
+                OptBinaryOp::Sub => real(left - right),
+                OptBinaryOp::Mul => real(left * right),
+                OptBinaryOp::Div => real(left / right),
+                OptBinaryOp::Pow => real(left.powf(right)),
+                OptBinaryOp::Eq => boolean(left == right),
+                OptBinaryOp::Ne => boolean(left != right),
+                OptBinaryOp::Lt => boolean(left < right),
+                OptBinaryOp::Le => boolean(left <= right),
+                OptBinaryOp::Gt => boolean(left > right),
+                OptBinaryOp::Ge => boolean(left >= right),
+                OptBinaryOp::And | OptBinaryOp::Or => None,
+            };
+        }
+
+        if let (Some(left), Some(right)) =
+            (self.boolean_constant(left), self.boolean_constant(right))
+        {
+            let boolean =
+                |value| Some((OptValueType::Boolean, OptValueKind::BooleanConstant(value)));
+            return match op {
+                OptBinaryOp::Eq => boolean(left == right),
+                OptBinaryOp::Ne => boolean(left != right),
+                OptBinaryOp::And => boolean(left && right),
+                OptBinaryOp::Or => boolean(left || right),
+                _ => None,
+            };
+        }
+
+        None
     }
 
     fn simplified_existing_value(&self, kind: &OptValueKind) -> Option<ValueId> {
@@ -394,6 +474,20 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.values.get(usize::from(value)).map(|value| &value.kind),
             Some(OptValueKind::RealConstant(actual)) if actual.to_bits() == expected.to_bits()
         )
+    }
+
+    fn real_constant(&self, value: ValueId) -> Option<f64> {
+        match self.values.get(usize::from(value)).map(|value| &value.kind) {
+            Some(OptValueKind::RealConstant(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
+    fn boolean_constant(&self, value: ValueId) -> Option<bool> {
+        match self.values.get(usize::from(value)).map(|value| &value.kind) {
+            Some(OptValueKind::BooleanConstant(value)) => Some(*value),
+            _ => None,
+        }
     }
 
     fn add_sparse_derivatives(&mut self) {
