@@ -944,7 +944,10 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
-    use super::{compact_generated_stamp_surface, generate_scratch_operation_helpers};
+    use super::{
+        compact_generated_stamp_surface, generate_scratch_operation_helpers,
+        render_runtime_support_module,
+    };
 
     #[test]
     fn rewrites_conditional_ad_rvalue_store_as_direct_branch_stores() {
@@ -1989,6 +1992,74 @@ fn stamp() {
         assert!(!compact.contains("s.store_sub_ad("), "{compact}");
         assert!(!compact.contains("A::div(s.ad_value("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_sub_div_rhs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_sub_div_rhs_indices",
+            "fn store_sub_div_rhs_mixed_ai",
+            "fn store_sub_div_rhs_mixed_ia",
+            "fn store_sub_div_rhs_ad",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(50, AdValue::sub(scratch.ad_value(2), AdValue::div(scratch.ad_value(3), scratch.ad_value(4))));
+    scratch.store_ad_value(51, AdValue::sub(scratch.ad_value(5), AdValue::div(AdValue::ln(scratch.ad_value(6)), scratch.ad_value(7))));
+    scratch.store_ad_value(52, AdValue::sub(scratch.ad_value(8), AdValue::div(scratch.ad_value(9), AdValue::offset(scratch.ad_value(10), params.bias))));
+    scratch.store_ad_value(53, AdValue::sub(scratch.ad_value(11), AdValue::div(AdValue::exp(scratch.ad_value(12)), AdValue::ln(scratch.ad_value(13)))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_sub_div_rhs_indices(50, 2, 3, 4);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_div_rhs_mixed_ai(51, 5, A::ln(s.ad_value(6)), 7);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_sub_div_rhs_mixed_ia(52, 8, 9, A::offset(s.ad_value(10), p.bias));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_sub_div_rhs_ad(53, 11, A::exp(s.ad_value(12)), A::ln(s.ad_value(13)));"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::div("), "{compact}");
+        assert!(!compact.contains("s.store_sub_ad_rhs("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+
+        let runtime_support = render_runtime_support_module();
+        assert!(
+            runtime_support.contains(
+                "store_sub_div_rhs_ad(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>)"
+            ),
+            "{runtime_support}"
+        );
+        assert!(
+            runtime_support.contains(
+                "store_sub_div_rhs_mixed_ai(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize)"
+            ),
+            "{runtime_support}"
+        );
+        assert!(
+            runtime_support.contains(
+                "store_sub_div_rhs_mixed_ia(&mut self, index: usize, left: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>)"
+            ),
+            "{runtime_support}"
+        );
     }
 
     #[test]
@@ -7286,6 +7357,24 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_sub_div_rhs_components(&mut self, index: usize, left: usize, numerator_raw: f64, numerator_node_derivatives: [f64; Instance::NODE_COUNT], numerator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
+        "        let left_value = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let reciprocal = 1.0 / denominator_raw;",
+        "        let quotient = numerator_raw * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal;",
+        "        self.values[index] = left_value - quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] - (numerator_node_derivatives[axis] * reciprocal + denominator_node_derivatives[axis] * denominator_derivative_scale); }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] - (numerator_branch_derivatives[axis] * reciprocal + denominator_branch_derivatives[axis] * denominator_derivative_scale); }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_div_rhs_ad(&mut self, index: usize, left: usize, numerator: AdValue, denominator: AdValue) {",
+        "        self.store_sub_div_rhs_components(index, left, numerator.value, numerator.node_derivatives, numerator.branch_derivatives, denominator.value, denominator.node_derivatives, denominator.branch_derivatives);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sub_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
         "        let right_value = self.values[right];",
         "        let right_node_derivatives = self.node_derivatives[right];",
@@ -10358,6 +10447,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_index_or_mixed_add_scaled_inputs3_sqrt_third_helper(&mask));
         out.push_str(&generate_index_or_mixed_add_scaled_inputs3_sqrt_first_helper(&mask));
     }
+    for mask in index_or_mixed_masks(2) {
+        out.push_str(&generate_index_or_mixed_sub_div_rhs_helper(&mask));
+    }
     for mask in index_or_mixed_masks(5) {
         out.push_str(&generate_index_or_mixed_add_scaled_offset_product_lhs_product_helper(&mask));
     }
@@ -10603,6 +10695,25 @@ fn generate_index_or_mixed_add_scaled_inputs3_sqrt_first_helper(mask: &str) -> S
         sqrt_value_ty = mixed_helper_type(mask, 0),
         second_ty = mixed_helper_type(mask, 1),
         third_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_index_or_mixed_sub_div_rhs_helper(mask: &str) -> String {
+    let operands = ["numerator", "denominator"];
+    let helper = index_or_mixed_helper_name("store_sub_div_rhs", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let numerator = mixed_helper_component_args(mask, 0, "numerator");
+    let denominator = mixed_helper_component_args(mask, 1, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: usize, numerator: {numerator_ty}, denominator: {denominator_ty}) {{
+{locals}        self.store_sub_div_rhs_components(index, left, {numerator}, {denominator});
+    }}
+"#,
+        numerator_ty = mixed_helper_type(mask, 0),
+        denominator_ty = mixed_helper_type(mask, 1),
     )
 }
 
@@ -12007,82 +12118,10 @@ pub fn render_runtime_support_module() -> String {
             "AdValue::pow_derivative",
             "AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative",
         )
-        .replace(
-            "value: &AdValue)",
-            "value: &AdValue<NODE_COUNT, BRANCH_COUNT>)",
-        )
-        .replace(
-            "right: AdValue)",
-            "right: AdValue<NODE_COUNT, BRANCH_COUNT>)",
-        )
-        .replace(
-            "right: AdValue,",
-            "right: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "left: AdValue,",
-            "left: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "denominator: AdValue,",
-            "denominator: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "subtrahend: AdValue,",
-            "subtrahend: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "first: AdValue,",
-            "first: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "second: AdValue,",
-            "second: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "first_product_left: AdValue,",
-            "first_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "first_product_right: AdValue,",
-            "first_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "second_product_left: AdValue,",
-            "second_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "second_product_right: AdValue,",
-            "second_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "middle: AdValue,",
-            "middle: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "third: AdValue,",
-            "third: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "fourth: AdValue,",
-            "fourth: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "value: AdValue)",
-            "value: AdValue<NODE_COUNT, BRANCH_COUNT>)",
-        )
-        .replace(
-            "value: AdValue,",
-            "value: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "input: AdValue,",
-            "input: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
-        .replace(
-            "product_middle: AdValue,",
-            "product_middle: AdValue<NODE_COUNT, BRANCH_COUNT>,",
-        )
+        .replace(": &AdValue)", ": &AdValue<NODE_COUNT, BRANCH_COUNT>)")
+        .replace(": &AdValue,", ": &AdValue<NODE_COUNT, BRANCH_COUNT>,")
+        .replace(": AdValue)", ": AdValue<NODE_COUNT, BRANCH_COUNT>)")
+        .replace(": AdValue,", ": AdValue<NODE_COUNT, BRANCH_COUNT>,")
         .replace("            pub(crate) values:", "            values:")
         .replace(
             "            pub(crate) node_derivatives:",
@@ -16521,10 +16560,18 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
         let right = compact_scratch_ad_value_index(args[1]);
         return match (left, right) {
             (Some(_), Some(_)) | (None, None) => None,
-            (Some(left), None) => Some(format!(
-                "scratch.{rhs_helper}({target_index}, {left}, {});",
-                args[1]
-            )),
+            (Some(left), None) => {
+                if name == "sub"
+                    && let Some(line) =
+                        compact_sub_div_rhs_store_helper_line(target_index, left, args[1])
+                {
+                    return Some(line);
+                }
+                Some(format!(
+                    "scratch.{rhs_helper}({target_index}, {left}, {});",
+                    args[1]
+                ))
+            }
             (None, Some(right)) => Some(format!(
                 "scratch.{lhs_helper}({target_index}, {}, {right});",
                 args[0]
@@ -16532,6 +16579,35 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
         };
     }
     None
+}
+
+fn compact_sub_div_rhs_store_helper_line(
+    target_index: usize,
+    left: usize,
+    right: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(right, "div")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    let numerator_index = compact_scratch_ad_value_index(args[0]);
+    let denominator_index = compact_scratch_ad_value_index(args[1]);
+    if let Some(helper) = compact_index_or_mixed_product_store_helper_name(
+        "store_sub_div_rhs",
+        &[numerator_index, denominator_index],
+    ) {
+        return Some(format!(
+            "scratch.{helper}({target_index}, {left}, {}, {});",
+            compact_mixed_index_product_arg(numerator_index, args[0]),
+            compact_mixed_index_product_arg(denominator_index, args[1])
+        ));
+    }
+
+    Some(format!(
+        "scratch.store_sub_div_rhs_ad({target_index}, {left}, {}, {});",
+        args[0], args[1]
+    ))
 }
 
 fn compact_add_sub_mixed_multiply_store_helper_call(
