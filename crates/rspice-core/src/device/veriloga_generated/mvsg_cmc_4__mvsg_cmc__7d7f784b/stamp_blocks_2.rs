@@ -12,8 +12,6 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
         if ((s.b[1934] && s.b[2176]) && s.b[2297]) {
-            s.store_scalar(2342, 0.0);
-            s.store_scalar(2343, 0.0);
             s.store_scalar(2344, 0.0);
             s.store_scalar(2345, 0.0);
             s.store_scalar(2346, 0.0);
@@ -305,17 +303,19 @@ impl Instance {
             s.store_scalar(2381, 0.0);
             s.store_scalar(2382, 0.0);
             s.store_scalar(2383, 0.0);
+            s.store_scalar(2384, 0.0);
+            s.store_scalar(2385, 0.0);
         }
 
     }
 
     pub(super) fn stamp_transient_block_33(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
         p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
     ) {
         if ((s.b[1934] && s.b[2176]) && s.b[2297]) {
-            s.store_scalar(2384, 0.0);
-            s.store_scalar(2385, 0.0);
             s.store_scalar(2386, 0.0);
             s.store_scalar(2387, 0.0);
             s.store_scalar(2388, 0.0);
@@ -631,19 +631,20 @@ impl Instance {
 
         s.v[258] = 0.0;
 
-    }
-
-    pub(super) fn stamp_transient_block_34(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-    ) {
         s.b[2418] = (p.p291 == 1.0);
         s.v[2418] = if s.b[2418] { 1.0 } else { 0.0 };
 
         if s.b[2418] {
             s.store_scaled_voltage(234, ctx, nodes, Some(8), Some(7), p.p6);
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_34(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if s.b[2418] {
             s.store_scalar(2419, 0.0);
             s.store_scalar(2420, 0.0);
             s.store_scalar(2421, 0.0);
@@ -897,12 +898,6 @@ impl Instance {
             s.store_scalar(2445, 0.0);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_35(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         s.b[2478] = (s.v[2455] < (-50.0));
         s.v[2478] = if s.b[2478] { 1.0 } else { 0.0 };
 
@@ -910,6 +905,12 @@ impl Instance {
             s.store_scalar(2445, 1.0);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_35(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         if (((s.b[2418] && (!s.b[2475])) && (!s.b[2477])) && (!s.b[2478])) {
             s.store_div_from_scalar_offset_ad(2445, 1.0, A::exp(s.ad_value(2455)), 1.0);
         }
@@ -2045,12 +2046,6 @@ impl Instance {
         s.b[2671] = ((s.v[3] >= p.p353) && (s.v[3] > 0.0));
         s.v[2671] = if s.b[2671] { 1.0 } else { 0.0 };
 
-        s.b[2672] = ((s.v[5] >= p.p353) && (s.v[5] > 0.0));
-        s.v[2672] = if s.b[2672] { 1.0 } else { 0.0 };
-
-        s.b[2673] = ((s.v[6] >= p.p353) && (s.v[6] > 0.0));
-        s.v[2673] = if s.b[2673] { 1.0 } else { 0.0 };
-
         s.b[2674] = ((((nv6 - nv2) - p.p27) / p.p28) > 50.0);
         s.v[2674] = if s.b[2674] { 1.0 } else { 0.0 };
 
@@ -2112,6 +2107,9 @@ impl Instance {
             s.store_add_scaled_products_mixed_iaia(218, 16, A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), 10, A::offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27)), (p.p0 * p.p2));
         }
 
+        s.b[2681] = ((((nv3 - nv2) - p.p27) / p.p28) < (-50.0));
+        s.v[2681] = if s.b[2681] { 1.0 } else { 0.0 };
+
     }
 
     pub(super) fn stamp_transient_block_39(
@@ -2121,12 +2119,8 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
         let nv0 = ctx.node_voltage(nodes[0]);
-        let nv2 = ctx.node_voltage(nodes[2]);
         let nv3 = ctx.node_voltage(nodes[3]);
         let nv6 = ctx.node_voltage(nodes[6]);
-        s.b[2681] = ((((nv3 - nv2) - p.p27) / p.p28) < (-50.0));
-        s.v[2681] = if s.b[2681] { 1.0 } else { 0.0 };
-
         if ((!s.b[2680]) && s.b[2681]) {
             s.store_add_scaled_products_mixed_iaia(218, 16, A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), 10, A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }
@@ -2170,59 +2164,6 @@ impl Instance {
         if ((!s.b[2684]) && (!s.b[2685])) {
             s.store_add_scaled_products_mixed_iaia(219, 18, A::voltage(ctx, nodes, Some(6), Some(3)), (p.p0 * p.p2), 12, A::ln_one_plus_exp(A::scaled_offset(A::voltage(ctx, nodes, Some(6), Some(3)), (-p.p27), 1.0 / (p.p28))), (p.p28 * (p.p0 * p.p2)));
         }
-
-        s.v[231] = 0.0;
-
-        s.v[232] = 0.0;
-
-        s.b[2686] = (p.p347 == 1.0);
-        s.v[2686] = if s.b[2686] { 1.0 } else { 0.0 };
-
-        if s.b[2686] {
-            s.store_scaled_powf_ad(233, A::scale(A::abs(s.ad_value(115)), 1.0 / ((p.p0 * p.p2))), p.p351, (p.p350 * ((p.p0 * p.p2) / p.p1)));
-        }
-
-        s.b[2687] = (s.v[115] < 0.0);
-        s.v[2687] = if s.b[2687] { 1.0 } else { 0.0 };
-
-        if (s.b[2686] && s.b[2687]) {
-            s.store_neg(233, 233);
-        }
-
-        if s.b[2686] {
-            s.store_scalar(231, A::ddx_projection(&s.ad_value(115), Some(8), None));
-            s.store_mul_ad_affine_product_rhs(232, 111, s.ad_value(231), A::add(s.ad_value(117), s.ad_value(118)), ((4.0 * 1.38062e-23) * 1.0 / (((((p.p0 * p.p2) * p.p1) * p.p6) * p.p7))), 0.0);
-        }
-
-        s.b[2688] = ((p.p79 > p.p354) && (p.p29 != 0.0));
-        s.v[2688] = if s.b[2688] { 1.0 } else { 0.0 };
-
-        s.b[2689] = ((p.p101 > p.p354) && (p.p29 != 0.0));
-        s.v[2689] = if s.b[2689] { 1.0 } else { 0.0 };
-
-        s.b[2690] = ((p.p123 > p.p354) && (p.p29 != 0.0));
-        s.v[2690] = if s.b[2690] { 1.0 } else { 0.0 };
-
-        s.b[2691] = ((p.p145 > p.p354) && (p.p29 != 0.0));
-        s.v[2691] = if s.b[2691] { 1.0 } else { 0.0 };
-
-        s.b[2692] = ((p.p167 > p.p354) && (p.p29 != 0.0));
-        s.v[2692] = if s.b[2692] { 1.0 } else { 0.0 };
-
-        s.b[2693] = ((p.p189 > p.p354) && (p.p29 != 0.0));
-        s.v[2693] = if s.b[2693] { 1.0 } else { 0.0 };
-
-        s.b[2694] = ((p.p211 > p.p354) && (p.p29 != 0.0));
-        s.v[2694] = if s.b[2694] { 1.0 } else { 0.0 };
-
-        s.b[2695] = ((p.p233 > p.p354) && (p.p29 != 0.0));
-        s.v[2695] = if s.b[2695] { 1.0 } else { 0.0 };
-
-        s.b[2696] = ((s.v[3] >= p.p353) && (s.v[3] > 0.0));
-        s.v[2696] = if s.b[2696] { 1.0 } else { 0.0 };
-
-        s.b[2697] = ((s.v[4] >= p.p353) && (s.v[4] > 0.0));
-        s.v[2697] = if s.b[2697] { 1.0 } else { 0.0 };
 
         let assign46640_ad_e45462: A = A::add_scaled_value_products3(A::add_scaled_products3(s.ad_value(115), A::voltage(ctx, nodes, Some(5), Some(9)), 1.0, s.ad_value(160), A::voltage(ctx, nodes, Some(18), Some(17)), 1.0, s.ad_value(154), A::voltage(ctx, nodes, Some(13), Some(19)), 1.0), 1.0, s.ad_value(184), A::voltage(ctx, nodes, Some(12), Some(13)), 1.0, s.ad_value(178), A::voltage(ctx, nodes, Some(11), Some(12)), 1.0, s.ad_value(172), A::voltage(ctx, nodes, Some(10), Some(11)), 1.0);
         s.store_add_scaled_value_products(114, A::add_scaled_value_products3(assign46640_ad_e45462, 1.0, s.ad_value(166), A::voltage(ctx, nodes, Some(9), Some(10)), 1.0, s.ad_value(190), A::voltage(ctx, nodes, Some(14), Some(5)), 1.0, s.ad_value(196), A::voltage(ctx, nodes, Some(15), Some(14)), 1.0), 1.0, s.ad_value(202), A::voltage(ctx, nodes, Some(16), Some(15)), 1.0, s.ad_value(208), A::voltage(ctx, nodes, Some(17), Some(16)), 1.0);

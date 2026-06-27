@@ -146,7 +146,7 @@ impl Instance {
         Self::stamp_transient_block_3(s, p, param_given);
         Self::stamp_transient_block_4(s, p, param_given);
         Self::stamp_transient_block_5(s, p, param_given);
-        Self::stamp_transient_block_6(s, p);
+        Self::stamp_transient_block_6(s);
         Self::stamp_transient_block_7(s, p);
         Self::stamp_transient_block_8(s, p);
         Self::stamp_transient_block_9(s, p);
@@ -167,8 +167,8 @@ impl Instance {
         Self::stamp_transient_block_24(s, p);
         Self::stamp_transient_block_25(s, p);
         Self::stamp_transient_block_26(s, p);
-        Self::stamp_transient_block_27(s, p);
-        Self::stamp_transient_block_28(ctx, s, p, nodes);
+        Self::stamp_transient_block_27(ctx, s, p, nodes);
+        Self::stamp_transient_block_28(s, p);
         Self::stamp_transient_block_29(s);
         Self::stamp_transient_block_30(s);
         Self::stamp_transient_block_31(s, p);
@@ -184,7 +184,6 @@ impl Instance {
         Self::stamp_transient_block_41(s, p);
         Self::stamp_transient_block_42(s, p);
         Self::stamp_transient_block_43(s, p);
-        Self::stamp_transient_block_44(s, p);
 
         stamper.stamp_potential_branch_local(
             Some(1),
@@ -353,7 +352,6 @@ impl Instance {
             &eq51_branch_derivatives,
             multiplicity,
         );
-        Self::stamp_transient_equations_block_7(stamper, multiplicity);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

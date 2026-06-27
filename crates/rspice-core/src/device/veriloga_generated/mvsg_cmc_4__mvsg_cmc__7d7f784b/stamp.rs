@@ -487,15 +487,15 @@ impl Instance {
         Self::stamp_transient_block_23(s, p);
         Self::stamp_transient_block_24(ctx, s, p, nodes);
         Self::stamp_transient_block_25(ctx, s, p, nodes);
-        Self::stamp_transient_block_26(s, p);
-        Self::stamp_transient_block_27(ctx, s, p, nodes);
+        Self::stamp_transient_block_26(ctx, s, p, nodes);
+        Self::stamp_transient_block_27(s, p);
         Self::stamp_transient_block_28(ctx, s, p, nodes);
         Self::stamp_transient_block_29(ctx, s, p, nodes);
         Self::stamp_transient_block_30(ctx, s, p, nodes);
         Self::stamp_transient_block_31(ctx, s, p, nodes);
         Self::stamp_transient_block_32(ctx, s, p, nodes);
-        Self::stamp_transient_block_33(s, p);
-        Self::stamp_transient_block_34(ctx, s, p, nodes);
+        Self::stamp_transient_block_33(ctx, s, p, nodes);
+        Self::stamp_transient_block_34(s, p);
         Self::stamp_transient_block_35(s, p);
         Self::stamp_transient_block_36(ctx, s, p, nodes);
         Self::stamp_transient_block_37(s, p);
@@ -738,8 +738,8 @@ impl Instance {
         Self::stamp_transient_equations_block_16(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_17(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_18(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_19(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_20(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_19(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_20(ctx, stamper, s, p, nodes, multiplicity);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

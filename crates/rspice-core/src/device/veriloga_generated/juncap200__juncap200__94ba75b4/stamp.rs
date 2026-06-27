@@ -7045,19 +7045,9 @@ impl Instance {
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
-        Self::stamp_transient_block_0(ctx, s, p);
+        Self::stamp_transient_block_0(ctx, s, p, nodes);
         Self::stamp_transient_block_1(s, p);
         Self::stamp_transient_block_2(s, p);
-        Self::stamp_transient_block_3(s, p);
-        Self::stamp_transient_block_4(s, p);
-        Self::stamp_transient_block_5(s, p);
-        Self::stamp_transient_block_6(s, p);
-        Self::stamp_transient_block_7(s, p);
-        Self::stamp_transient_block_8(s, p);
-        Self::stamp_transient_block_9(s, p);
-        Self::stamp_transient_block_10(ctx, s, p, nodes);
-        Self::stamp_transient_block_11(s, p);
-        Self::stamp_transient_block_12(s, p);
 
         let eq1_e78: f64 = (p.p1 * s.v[0]);
         let eq1_e80: f64 = (eq1_e78 * p.p8);
@@ -7076,12 +7066,6 @@ impl Instance {
             multiplicity * (eq1_e83_d_n0),
             1,
             multiplicity * (eq1_e83_d_n1),
-        );
-        let eq2_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(1),
-            multiplicity * (eq2_value),
         );
     }
 

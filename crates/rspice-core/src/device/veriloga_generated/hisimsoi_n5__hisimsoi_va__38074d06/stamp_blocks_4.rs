@@ -159,7 +159,7 @@ impl Instance {
             eq0_value,
         );
         let (eq1_e313,) = {
-    if s.b[627] {
+    if (s.v[627] != 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -602,6 +602,7 @@ impl Instance {
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv1 = ctx.node_voltage(nodes[1]);
+        let nv10 = ctx.node_voltage(nodes[10]);
         let nv11 = ctx.node_voltage(nodes[11]);
         let nv14 = ctx.node_voltage(nodes[14]);
         let eq11_e363: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, s.v[198]);
@@ -765,24 +766,6 @@ impl Instance {
             &eq12_node_derivatives,
             &eq12_branch_derivatives,
             multiplicity,
-        );
-        let eq13_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(6),
-            Some(7),
-            multiplicity * (eq13_value),
-        );
-        let eq15_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(14),
-            None,
-            multiplicity * (eq15_value),
-        );
-        let eq16_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(6),
-            Some(7),
-            multiplicity * (eq16_value),
         );
         let eq17_e394: f64 = (s.v[614] * (nv14 - 0.0));
         let eq17_e394_d_n0: f64 = (s.dn[614][0] * (nv14 - 0.0));
@@ -992,71 +975,6 @@ impl Instance {
             &eq19_branch_derivatives,
             multiplicity,
         );
-        let (eq20_e410,) = {
-    if (p.p259 != 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq20_value: f64 = eq20_e410;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(2),
-            multiplicity * (eq20_value),
-        );
-        let (eq21_e418,) = {
-    if (p.p260 != 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq21_value: f64 = eq21_e418;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(6),
-            multiplicity * (eq21_value),
-        );
-        let (eq22_e428,) = {
-    if s.b[1847] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq22_value: f64 = eq22_e428;
-        stamper.stamp_current_const_local(
-            Some(11),
-            Some(6),
-            multiplicity * (eq22_value),
-        );
-        let (eq23_e438,) = {
-    if s.b[1847] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq23_value: f64 = eq23_e438;
-        stamper.stamp_current_const_local(
-            Some(11),
-            Some(7),
-            multiplicity * (eq23_value),
-        );
-        let (eq24_e448,) = {
-    if s.b[1847] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq24_value: f64 = eq24_e448;
-        stamper.stamp_current_const_local(
-            Some(11),
-            Some(12),
-            multiplicity * (eq24_value),
-        );
         let (eq25_e454, eq25_e454_d_n0, eq25_e454_d_n1, eq25_e454_d_n2, eq25_e454_d_n3, eq25_e454_d_n4, eq25_e454_d_n5, eq25_e454_d_n6, eq25_e454_d_n7, eq25_e454_d_n8, eq25_e454_d_n9, eq25_e454_d_n10, eq25_e454_d_n11, eq25_e454_d_n12, eq25_e454_d_n13, eq25_e454_d_n14, eq25_e454_d_n15, eq25_e454_d_n16, eq25_e454_d_n17, eq25_e454_d_n18, eq25_e454_d_b0, eq25_e454_d_b1, eq25_e454_d_b2, eq25_e454_d_b3, eq25_e454_d_b4, eq25_e454_d_b5, eq25_e454_d_b6, eq25_e454_d_b7, eq25_e454_d_b8, eq25_e454_d_b9, eq25_e454_d_b10, eq25_e454_d_b11, eq25_e454_d_b12, eq25_e454_d_b13, eq25_e454_d_b14,) = {
     if (p.p35 != 0.0) {
         let eq25_e452: f64 = (s.v[551] * (nv1 - nv11));
@@ -1110,22 +1028,6 @@ impl Instance {
             &eq25_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_2(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv10 = ctx.node_voltage(nodes[10]);
         let (eq26_e459,) = {
     if (p.p35 == 0.0) {
         (0.0,)
@@ -1191,6 +1093,22 @@ impl Instance {
             &eq27_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_2(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
+        let nv10 = ctx.node_voltage(nodes[10]);
         let (eq28_e470, eq28_e470_d_n0, eq28_e470_d_n1, eq28_e470_d_n2, eq28_e470_d_n3, eq28_e470_d_n4, eq28_e470_d_n5, eq28_e470_d_n6, eq28_e470_d_n7, eq28_e470_d_n8, eq28_e470_d_n9, eq28_e470_d_n10, eq28_e470_d_n11, eq28_e470_d_n12, eq28_e470_d_n13, eq28_e470_d_n14, eq28_e470_d_n15, eq28_e470_d_n16, eq28_e470_d_n17, eq28_e470_d_n18, eq28_e470_d_b0, eq28_e470_d_b1, eq28_e470_d_b2, eq28_e470_d_b3, eq28_e470_d_b4, eq28_e470_d_b5, eq28_e470_d_b6, eq28_e470_d_b7, eq28_e470_d_b8, eq28_e470_d_b9, eq28_e470_d_b10, eq28_e470_d_b11, eq28_e470_d_b12, eq28_e470_d_b13, eq28_e470_d_b14,) = {
     if s.b[1848] {
         let eq28_e468: f64 = (-s.v[595]);
@@ -2414,7 +2332,7 @@ impl Instance {
             eq72_value,
         );
         let (eq73_e836,) = {
-    if s.b[1851] {
+    if (s.v[1851] != 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -2426,7 +2344,7 @@ impl Instance {
             eq73_value,
         );
         let (eq74_e841,) = {
-    if (!s.b[1851]) {
+    if (s.v[1851] == 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -2438,7 +2356,7 @@ impl Instance {
             eq74_value,
         );
         let (eq75_e846,) = {
-    if (!s.b[1851]) {
+    if (s.v[1851] == 0.0) {
         (0.0,)
     } else {
         (0.0,)

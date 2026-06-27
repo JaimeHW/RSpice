@@ -2667,26 +2667,8 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
-        let eq0_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(2),
-            multiplicity * (eq0_value),
-        );
-        let eq1_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(2),
-            multiplicity * (eq1_value),
-        );
-        let eq2_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(2),
-            Some(1),
-            multiplicity * (eq2_value),
-        );
         let (eq6_e135,) = {
-    if (!s.b[957]) {
+    if (s.v[957] == 0.0) {
         (0.0,)
     } else {
         (0.0,)

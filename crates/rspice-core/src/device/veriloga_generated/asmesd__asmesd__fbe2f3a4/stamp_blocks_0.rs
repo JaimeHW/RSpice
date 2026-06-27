@@ -651,8 +651,6 @@ impl Instance {
         s.b[124] = (p.p30 == (-1.0));
         s.v[124] = if s.b[124] { 1.0 } else { 0.0 };
 
-        s.store_scale(69, 10, (4.0 * 1.3806226e-23));
-
         s.v[50] = ((p.p12 + (p.p31 * p.p13)) / s.v[3]);
 
         s.v[48] = ((p.p14 + (p.p31 * p.p15)) / s.v[3]);
@@ -662,43 +660,11 @@ impl Instance {
         s.b[125] = ((s.v[50] > 0.0) && (s.v[50] >= p.p46));
         s.v[125] = if s.b[125] { 1.0 } else { 0.0 };
 
-        if s.b[125] {
-            if ((s.v[51] / s.v[3]) >= p.p46) {
-                s.store_div_scaled_inputs(72, s.ad_value(69), 1.0, s.ad_value(51), 1.0 / (s.v[3]));
-            } else {
-                s.store_scalar(72, 0.0);
-            }
-        }
-
         s.b[126] = ((s.v[48] > 0.0) && (s.v[48] >= p.p46));
         s.v[126] = if s.b[126] { 1.0 } else { 0.0 };
 
-        if s.b[126] {
-            if ((s.v[53] / s.v[3]) >= p.p46) {
-                s.store_div_scaled_inputs(73, s.ad_value(69), 1.0, s.ad_value(53), 1.0 / (s.v[3]));
-            } else {
-                s.store_scalar(73, 0.0);
-            }
-        }
-
         s.b[127] = ((s.v[49] > 0.0) && (s.v[49] >= p.p46));
         s.v[127] = if s.b[127] { 1.0 } else { 0.0 };
-
-        if s.b[127] {
-            if ((s.v[52] / s.v[3]) >= p.p46) {
-                s.store_div_scaled_inputs(74, s.ad_value(69), 1.0, s.ad_value(52), 1.0 / (s.v[3]));
-            } else {
-                s.store_scalar(74, 0.0);
-            }
-        }
-
-        if (if ((p.p28 > 0.0) && (p.p27 > 0.0)) { 1.0 } else { 0.0 } > 0.0) {
-            s.store_scaled_powf_ad(71, A::abs(s.ad_value(37)), p.p28, p.p27);
-        } else {
-            s.store_scalar(71, 0.0);
-        }
-
-        s.v[70] = (2.0 * 1.6021918e-19);
 
     }
 
@@ -2096,19 +2062,6 @@ impl Instance {
             &eq23_branch_derivatives,
             multiplicity,
         );
-        let (eq24_e303,) = {
-    if s.b[125] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq24_value: f64 = eq24_e303;
-        stamper.stamp_current_const_local(
-            Some(1),
-            Some(5),
-            multiplicity * (eq24_value),
-        );
         let (eq25_e308,) = {
     if (!s.b[125]) {
         (0.0,)
@@ -2203,19 +2156,6 @@ impl Instance {
             &eq26_branch_derivatives,
             multiplicity,
         );
-        let (eq27_e329,) = {
-    if s.b[126] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq27_value: f64 = eq27_e329;
-        stamper.stamp_current_const_local(
-            Some(2),
-            Some(6),
-            multiplicity * (eq27_value),
-        );
         let (eq28_e334,) = {
     if (!s.b[126]) {
         (0.0,)
@@ -2309,19 +2249,6 @@ impl Instance {
             &eq29_node_derivatives,
             &eq29_branch_derivatives,
             multiplicity,
-        );
-        let (eq30_e355,) = {
-    if s.b[127] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq30_value: f64 = eq30_e355;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(4),
-            multiplicity * (eq30_value),
         );
         let (eq31_e360,) = {
     if (!s.b[127]) {
@@ -3098,24 +3025,6 @@ impl Instance {
             &eq43_node_derivatives,
             &eq43_branch_derivatives,
             multiplicity,
-        );
-        let eq44_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(5),
-            Some(6),
-            multiplicity * (eq44_value),
-        );
-        let eq45_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(5),
-            Some(6),
-            multiplicity * (eq45_value),
-        );
-        let eq46_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(4),
-            Some(6),
-            multiplicity * (eq46_value),
         );
     }
 

@@ -10,12 +10,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((s.b[3334] && (!s.b[3354])) && s.b[3379]) {
-            s.store_scalar(724, 1.0);
-            s.store_scalar(725, 1.0);
-            s.store_scalar(719, 0.0);
-            s.store_scalar(720, 0.0);
-            s.store_scalar(770, 0.0);
-            s.store_scalar(726, 0.0);
             s.store_mul(724, 724, 722);
             s.store_mul(725, 725, 723);
             s.store_mul(724, 724, 722);
@@ -208,17 +202,6 @@ impl Instance {
             s.store_add(4, 4, 644);
         }
 
-        s.b[3392] = ((s.v[4] > p.p444) && (p.p30 != 0.0));
-        s.v[3392] = if s.b[3392] { 1.0 } else { 0.0 };
-
-        if ((s.b[3334] && (!s.b[3354])) && s.b[3392]) {
-            s.store_div_from_scalar(695, s.v[365], 4);
-        }
-
-        if ((s.b[3334] && (!s.b[3354])) && (!s.b[3392])) {
-            s.store_scalar(695, 0.0);
-        }
-
         s.b[3393] = (s.v[4] < p.p444);
         s.v[3393] = if s.b[3393] { 1.0 } else { 0.0 };
 
@@ -311,15 +294,6 @@ impl Instance {
             s.store_scalar(424, 0.0);
             s.copy_ad(425, 422);
             s.copy_ad(203, 8);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_97(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        if (!s.b[3397]) {
             s.copy_ad(204, 7);
         }
 
@@ -355,6 +329,12 @@ impl Instance {
             s.store_div_from_scalar(740, 1.0, 766);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_97(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         if (s.b[3398] && (!s.b[3399])) {
             s.store_scalar(740, (1.0 / 0.0001));
         }
@@ -465,17 +445,6 @@ impl Instance {
 
         s.b[3408] = (p.p24 == 1.0);
         s.v[3408] = if s.b[3408] { 1.0 } else { 0.0 };
-
-        s.b[3409] = (((s.v[74] != 1.0) && (s.v[74] != 3.0)) && (s.v[449] != 1.0));
-        s.v[3409] = if s.b[3409] { 1.0 } else { 0.0 };
-
-        if s.b[3409] {
-            s.store_scalar(695, 0.0);
-            s.store_scalar(696, 0.0);
-        }
-
-        s.b[3410] = ((p.p51 == 1.0) && (p.p132 > 0.0));
-        s.v[3410] = if s.b[3410] { 1.0 } else { 0.0 };
 
         s.b[3411] = (p.p53 > 0.0);
         s.v[3411] = if s.b[3411] { 1.0 } else { 0.0 };

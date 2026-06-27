@@ -557,19 +557,6 @@ impl Instance {
             &eq18_branch_derivatives,
             multiplicity,
         );
-        let (eq19_e230,) = {
-    if s.b[73] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq19_value: f64 = eq19_e230;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(3),
-            multiplicity * (eq19_value),
-        );
         let (eq20_e235,) = {
     if (!s.b[73]) {
         (0.0,)
@@ -651,19 +638,6 @@ impl Instance {
             &eq21_node_derivatives,
             &eq21_branch_derivatives,
             multiplicity,
-        );
-        let (eq22_e256,) = {
-    if s.b[74] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq22_value: f64 = eq22_e256;
-        stamper.stamp_current_const_local(
-            Some(1),
-            Some(4),
-            multiplicity * (eq22_value),
         );
         let (eq23_e261,) = {
     if (!s.b[74]) {
@@ -829,18 +803,6 @@ impl Instance {
             &eq26_node_derivatives,
             &eq26_branch_derivatives,
             multiplicity,
-        );
-        let eq27_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(3),
-            Some(4),
-            multiplicity * (eq27_value),
-        );
-        let eq28_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(3),
-            Some(4),
-            multiplicity * (eq28_value),
         );
     }
 

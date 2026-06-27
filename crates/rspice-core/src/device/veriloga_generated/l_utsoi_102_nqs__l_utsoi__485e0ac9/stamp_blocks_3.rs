@@ -4547,21 +4547,8 @@ impl Instance {
             &eq10_branch_derivatives,
             multiplicity,
         );
-        let (eq12_e558,) = {
-    if s.b[1768] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq12_value: f64 = eq12_e558;
-        stamper.stamp_current_const_local(
-            Some(1),
-            Some(9),
-            multiplicity * (eq12_value),
-        );
         let (eq13_e563,) = {
-    if (!s.b[1768]) {
+    if (s.v[1768] == 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -4572,21 +4559,8 @@ impl Instance {
             0,
             eq13_value,
         );
-        let (eq15_e583,) = {
-    if s.b[1769] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq15_value: f64 = eq15_e583;
-        stamper.stamp_current_const_local(
-            Some(2),
-            Some(6),
-            multiplicity * (eq15_value),
-        );
         let (eq16_e588,) = {
-    if (!s.b[1769]) {
+    if (s.v[1769] == 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -4597,21 +4571,8 @@ impl Instance {
             1,
             eq16_value,
         );
-        let (eq18_e608,) = {
-    if s.b[1770] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq18_value: f64 = eq18_e608;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(7),
-            multiplicity * (eq18_value),
-        );
         let (eq19_e613,) = {
-    if (!s.b[1770]) {
+    if (s.v[1770] == 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -4622,21 +4583,8 @@ impl Instance {
             2,
             eq19_value,
         );
-        let (eq21_e633,) = {
-    if s.b[1771] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq21_value: f64 = eq21_e633;
-        stamper.stamp_current_const_local(
-            Some(3),
-            Some(8),
-            multiplicity * (eq21_value),
-        );
         let (eq22_e638,) = {
-    if (!s.b[1771]) {
+    if (s.v[1771] == 0.0) {
         (0.0,)
     } else {
         (0.0,)

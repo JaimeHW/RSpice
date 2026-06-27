@@ -10,12 +10,6 @@ impl Instance {
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
-        s.b[625] = true;
-        s.v[625] = if s.b[625] { 1.0 } else { 0.0 };
-
-        s.b[629] = (p.p43 == 0.0);
-        s.v[629] = if s.b[629] { 1.0 } else { 0.0 };
-
         s.v[246] = 0.0;
 
         s.v[300] = 1e-12;
@@ -256,8 +250,6 @@ impl Instance {
 
         s.v[203] = 0.0;
 
-        s.v[442] = 0.0;
-
         s.v[161] = 0.0;
 
         s.v[515] = 0.0;
@@ -269,12 +261,6 @@ impl Instance {
         s.v[60] = (p.p104 * 0.01);
 
         s.v[61] = (p.p201 / 1e-6);
-
-        s.v[62] = (p.p229 * 0.01);
-
-        s.v[63] = (p.p228 / 0.0001);
-
-        s.v[64] = (p.p230 / 0.0001);
 
         s.v[65] = (p.p240 / 1e-6);
 
@@ -466,15 +452,6 @@ impl Instance {
 
         s.v[113] = (2.0 / ((1.0 / (p.p62 + (0.5 * s.v[96]))) + (1.0 / (p.p63 + (0.5 * s.v[96])))));
 
-    }
-
-    pub(super) fn stamp_transient_block_1(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-    ) {
         s.v[114] = (1.6021918e-19 / (1.3806226e-23 * s.v[81]));
 
         s.v[115] = ((1.6021918e-19 * s.v[66]) * 1.034943e-10);
@@ -489,6 +466,15 @@ impl Instance {
 
         s.v[120] = (1.0 / (s.v[71] * s.v[71]));
 
+    }
+
+    pub(super) fn stamp_transient_block_1(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+    ) {
         s.v[121] = ((((1.0 + (1.0 / s.v[100]))) as f64).powf(p.p91) * p.p89);
 
         s.v[122] = s.v[115];
@@ -865,6 +851,8 @@ impl Instance {
 
         if ((!s.b[659]) && (s.v[85] == 0.0)) {
             s.store_scalar(584, 0.0);
+            s.store_scalar(585, 0.0);
+            s.store_scalar(581, 0.0);
         }
 
     }
@@ -877,11 +865,6 @@ impl Instance {
     ) {
         let ctx_temp = ctx.temperature();
         let nv10 = ctx.node_voltage(nodes[10]);
-        if ((!s.b[659]) && (s.v[85] == 0.0)) {
-            s.store_scalar(585, 0.0);
-            s.store_scalar(581, 0.0);
-        }
-
         if ((p.p38 > 0.0) && (s.v[67] > 0.0)) {
             if (nv10 > 0.0) {
                 s.store_voltage(20, ctx, nodes, Some(10), None);
@@ -1251,12 +1234,6 @@ impl Instance {
 
         s.store_offset_add_scaled_inputs(194, s.ad_value(44), 0.5, s.ad_value(45), 0.5, 0.1);
 
-    }
-
-    pub(super) fn stamp_transient_block_3(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         s.store_div(685, 157, 194);
 
         s.copy_ad(44, 685);
@@ -1265,6 +1242,12 @@ impl Instance {
 
         s.store_mul(46, 45, 44);
 
+    }
+
+    pub(super) fn stamp_transient_block_3(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         s.store_square(47, 45);
 
         s.store_div_from_scalar_ad(688, 1.0, A::add_scaled_inputs4_offset(s.ad_value(44), 1.0, s.ad_value(45), 1.0, s.ad_value(46), 1.0, s.ad_value(47), 1.0, 1.0));
@@ -1621,17 +1604,20 @@ impl Instance {
 
         s.store_square(241, 240);
 
+        s.b[737] = (p.p43 == 0.0);
+        s.v[737] = if s.b[737] { 1.0 } else { 0.0 };
+
+        if s.b[737] {
+            s.store_scalar(742, 7.0);
+        }
+
     }
 
     pub(super) fn stamp_transient_block_4(
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        s.b[737] = (p.p43 == 0.0);
-        s.v[737] = if s.b[737] { 1.0 } else { 0.0 };
-
         if s.b[737] {
-            s.store_scalar(742, 7.0);
             s.store_offset(399, 231, 1.0);
             s.store_div_scalar_by_product(328, 1.0, s.ad_value(379), s.ad_value(434), 1.0);
             s.store_mul_ad_product_rhs(329, 328, A::offset(s.ad_value(399), (-s.v[383])), A::offset(s.ad_value(399), (-s.v[383])));
@@ -1919,6 +1905,7 @@ impl Instance {
             s.store_scalar(52, 1.0);
             s.store_scalar(54, 0.0);
             s.store_scalar(55, 0.0);
+            s.store_scalar(48, 0.0);
         }
 
     }
@@ -1927,7 +1914,6 @@ impl Instance {
         s: &mut Scratch,
     ) {
         if (s.b[737] && s.b[780]) {
-            s.store_scalar(48, 0.0);
             s.store_scalar(53, 0.0);
             s.store_mul(51, 51, 49);
             s.store_mul(52, 52, 50);
@@ -2221,6 +2207,7 @@ impl Instance {
         if (s.b[737] && (!s.b[786])) {
             s.copy_ad(349, 378);
             s.copy_ad(163, 376);
+            s.store_sub_ad_lhs(328, A::add_scaled_product(s.ad_value(349), 1.0, s.ad_value(341), s.ad_value(739), 0.5), 475);
         }
 
     }
@@ -2229,10 +2216,6 @@ impl Instance {
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        if (s.b[737] && (!s.b[786])) {
-            s.store_sub_ad_lhs(328, A::add_scaled_product(s.ad_value(349), 1.0, s.ad_value(341), s.ad_value(739), 0.5), 475);
-        }
-
         s.b[798] = (s.v[328] < 0.0);
         s.v[798] = if s.b[798] { 1.0 } else { 0.0 };
 

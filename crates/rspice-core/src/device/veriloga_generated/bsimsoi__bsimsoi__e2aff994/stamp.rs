@@ -215,7 +215,7 @@ impl Instance {
         Self::stamp_transient_block_25(ctx, s, p, nodes);
         Self::stamp_transient_block_26(s, p);
         Self::stamp_transient_block_27(s, p);
-        Self::stamp_transient_block_28(s);
+        Self::stamp_transient_block_28(s, p);
         Self::stamp_transient_block_29(s, p);
         Self::stamp_transient_block_30(s, p);
         Self::stamp_transient_block_31(s, p);
@@ -225,14 +225,13 @@ impl Instance {
         Self::stamp_transient_block_35(s, p);
         Self::stamp_transient_block_36(s, p);
         Self::stamp_transient_block_37(ctx, s, p, nodes);
-        Self::stamp_transient_block_38(s, p);
-        Self::stamp_transient_block_39(ctx, s, p, nodes);
+        Self::stamp_transient_block_38(ctx, s, p, nodes);
+        Self::stamp_transient_block_39(s, p);
         Self::stamp_transient_block_40(s, p);
         Self::stamp_transient_block_41(s, p);
-        Self::stamp_transient_block_42(s, p);
-        Self::stamp_transient_block_43(ctx, s, p, nodes, param_given);
-        Self::stamp_transient_block_44(s, p);
-        Self::stamp_transient_block_45(ctx, s, p, nodes);
+        Self::stamp_transient_block_42(ctx, s, p, nodes, param_given);
+        Self::stamp_transient_block_43(s, p);
+        Self::stamp_transient_block_44(ctx, s, p, nodes);
 
         stamper.stamp_potential_branch_local(
             Some(5),

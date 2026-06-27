@@ -250,8 +250,6 @@ impl Instance {
 
         s.v[203] = 0.0;
 
-        s.v[442] = 0.0;
-
         s.v[161] = 0.0;
 
         s.v[515] = 0.0;
@@ -263,12 +261,6 @@ impl Instance {
         s.v[60] = (p.p104 * 0.01);
 
         s.v[61] = (p.p201 / 1e-6);
-
-        s.v[62] = (p.p229 * 0.01);
-
-        s.v[63] = (p.p228 / 0.0001);
-
-        s.v[64] = (p.p230 / 0.0001);
 
         s.v[65] = (p.p240 / 1e-6);
 
@@ -466,6 +458,14 @@ impl Instance {
 
         s.v[116] = (p.p244 * ((s.v[100]) as f64).powf((-p.p247)));
 
+        s.v[117] = (p.p251 * ((s.v[100]) as f64).powf((-p.p252)));
+
+        s.v[118] = (p.p248 * (((s.v[100] + s.v[79])) as f64).powf((-p.p249)));
+
+        s.v[119] = (((((2.0 * 1.6021918e-19) * s.v[71]) * 1.034943e-10)) as f64).sqrt();
+
+        s.v[120] = (1.0 / (s.v[71] * s.v[71]));
+
     }
 
     pub(super) fn stamp_transient_block_1(
@@ -475,14 +475,6 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
-        s.v[117] = (p.p251 * ((s.v[100]) as f64).powf((-p.p252)));
-
-        s.v[118] = (p.p248 * (((s.v[100] + s.v[79])) as f64).powf((-p.p249)));
-
-        s.v[119] = (((((2.0 * 1.6021918e-19) * s.v[71]) * 1.034943e-10)) as f64).sqrt();
-
-        s.v[120] = (1.0 / (s.v[71] * s.v[71]));
-
         s.v[121] = ((((1.0 + (1.0 / s.v[100]))) as f64).powf(p.p91) * p.p89);
 
         s.v[122] = s.v[115];
@@ -860,6 +852,7 @@ impl Instance {
         if ((!s.b[655]) && (s.v[85] == 0.0)) {
             s.store_scalar(584, 0.0);
             s.store_scalar(585, 0.0);
+            s.store_scalar(581, 0.0);
         }
 
     }
@@ -872,10 +865,6 @@ impl Instance {
     ) {
         let ctx_temp = ctx.temperature();
         let nv10 = ctx.node_voltage(nodes[10]);
-        if ((!s.b[655]) && (s.v[85] == 0.0)) {
-            s.store_scalar(581, 0.0);
-        }
-
         if ((p.p38 > 0.0) && (s.v[67] > 0.0)) {
             if (nv10 > 0.0) {
                 s.store_voltage(20, ctx, nodes, Some(10), None);
@@ -1249,16 +1238,16 @@ impl Instance {
 
         s.copy_ad(44, 681);
 
+        s.store_square(45, 44);
+
+        s.store_mul(46, 45, 44);
+
     }
 
     pub(super) fn stamp_transient_block_3(
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        s.store_square(45, 44);
-
-        s.store_mul(46, 45, 44);
-
         s.store_square(47, 45);
 
         s.store_div_from_scalar_ad(684, 1.0, A::add_scaled_inputs4_offset(s.ad_value(44), 1.0, s.ad_value(45), 1.0, s.ad_value(46), 1.0, s.ad_value(47), 1.0, 1.0));
@@ -1618,6 +1607,10 @@ impl Instance {
         s.b[733] = (p.p43 == 0.0);
         s.v[733] = if s.b[733] { 1.0 } else { 0.0 };
 
+        if s.b[733] {
+            s.store_scalar(738, 7.0);
+        }
+
     }
 
     pub(super) fn stamp_transient_block_4(
@@ -1625,7 +1618,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[733] {
-            s.store_scalar(738, 7.0);
             s.store_offset(399, 231, 1.0);
             s.store_div_scalar_by_product(328, 1.0, s.ad_value(379), s.ad_value(434), 1.0);
             s.store_mul_ad_product_rhs(329, 328, A::offset(s.ad_value(399), (-s.v[383])), A::offset(s.ad_value(399), (-s.v[383])));
@@ -1913,6 +1905,7 @@ impl Instance {
             s.store_scalar(52, 1.0);
             s.store_scalar(54, 0.0);
             s.store_scalar(55, 0.0);
+            s.store_scalar(48, 0.0);
         }
 
     }
@@ -1921,7 +1914,6 @@ impl Instance {
         s: &mut Scratch,
     ) {
         if (s.b[733] && s.b[776]) {
-            s.store_scalar(48, 0.0);
             s.store_scalar(53, 0.0);
             s.store_mul(51, 51, 49);
             s.store_mul(52, 52, 50);
@@ -2215,6 +2207,7 @@ impl Instance {
         if (s.b[733] && (!s.b[782])) {
             s.copy_ad(349, 378);
             s.copy_ad(163, 376);
+            s.store_sub_ad_lhs(328, A::add_scaled_product(s.ad_value(349), 1.0, s.ad_value(341), s.ad_value(735), 0.5), 475);
         }
 
     }
@@ -2223,10 +2216,6 @@ impl Instance {
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        if (s.b[733] && (!s.b[782])) {
-            s.store_sub_ad_lhs(328, A::add_scaled_product(s.ad_value(349), 1.0, s.ad_value(341), s.ad_value(735), 0.5), 475);
-        }
-
         s.b[794] = (s.v[328] < 0.0);
         s.v[794] = if s.b[794] { 1.0 } else { 0.0 };
 

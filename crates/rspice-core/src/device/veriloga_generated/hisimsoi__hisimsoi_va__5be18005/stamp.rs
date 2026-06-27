@@ -286,7 +286,7 @@ impl Instance {
         Self::stamp_transient_block_27(s, p);
         Self::stamp_transient_block_28(s, p);
         Self::stamp_transient_block_29(s, p);
-        Self::stamp_transient_block_30(s, p);
+        Self::stamp_transient_block_30(ctx, s, p, nodes);
         Self::stamp_transient_block_31(ctx, s, p, nodes);
         Self::stamp_transient_block_32(s, p);
 

@@ -369,8 +369,6 @@ impl Instance {
         s.b[72] = (p.p30 == (-1.0));
         s.v[72] = if s.b[72] { 1.0 } else { 0.0 };
 
-        s.store_scale(35, 10, (4.0 * 1.3806226e-23));
-
         s.v[28] = ((p.p12 + (p.p31 * p.p13)) / s.v[3]);
 
         s.v[27] = ((p.p14 + (p.p31 * p.p15)) / s.v[3]);
@@ -378,32 +376,8 @@ impl Instance {
         s.b[73] = ((s.v[28] > 0.0) && (s.v[28] >= p.p46));
         s.v[73] = if s.b[73] { 1.0 } else { 0.0 };
 
-        if s.b[73] {
-            if ((s.v[29] / s.v[3]) >= p.p46) {
-                s.store_div_scaled_inputs(38, s.ad_value(35), 1.0, s.ad_value(29), 1.0 / (s.v[3]));
-            } else {
-                s.store_scalar(38, 0.0);
-            }
-        }
-
         s.b[74] = ((s.v[27] > 0.0) && (s.v[27] >= p.p46));
         s.v[74] = if s.b[74] { 1.0 } else { 0.0 };
-
-        if s.b[74] {
-            if ((s.v[30] / s.v[3]) >= p.p46) {
-                s.store_div_scaled_inputs(39, s.ad_value(35), 1.0, s.ad_value(30), 1.0 / (s.v[3]));
-            } else {
-                s.store_scalar(39, 0.0);
-            }
-        }
-
-        if (if ((p.p28 > 0.0) && (p.p27 > 0.0)) { 1.0 } else { 0.0 } > 0.0) {
-            s.store_scaled_powf_ad(37, A::abs(s.ad_value(24)), p.p28, p.p27);
-        } else {
-            s.store_scalar(37, 0.0);
-        }
-
-        s.v[36] = (2.0 * 1.6021918e-19);
 
         stamper.stamp_potential_branch_local(
             Some(6),

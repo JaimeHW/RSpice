@@ -93,10 +93,6 @@ impl Instance {
             s.store_scalar(1, 0.0);
         }
 
-        s.v[5] = (((p.p324 / p.p2) / p.p325) * (p.p326 + ((p.p327 * p.p0) / p.p325)));
-
-        s.v[6] = (((p.p324 / p.p2) / p.p325) * (((1.0 - p.p327) * p.p0) / p.p325));
-
         s.store_scale(113, 111, (1.38062e-23 * 6.241457005723417e18));
 
         s.store_offset_scaled(223, 111, p.p336, (((((-s.v[109])) * (p.p336))) + (1.0)));
@@ -491,6 +487,10 @@ impl Instance {
             s.store_scaled_voltage(49, ctx, nodes, Some(17), Some(2), p.p6);
         }
 
+        if (s.b[310] && (!s.b[311])) {
+            s.store_scaled_voltage(49, ctx, nodes, Some(17), Some(0), p.p6);
+        }
+
     }
 
     pub(super) fn stamp_transient_block_1(
@@ -499,10 +499,6 @@ impl Instance {
         p: &Parameters,
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
-        if (s.b[310] && (!s.b[311])) {
-            s.store_scaled_voltage(49, ctx, nodes, Some(17), Some(0), p.p6);
-        }
-
         if (!s.b[310]) {
             if (p.p52 != 0.0) {
                 s.store_scale_ad(49, A::add_scaled_inputs_product(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6, A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), A::tanh_scaled_input(A::sub_scaled_inputs(A::voltage(ctx, nodes, Some(17), Some(0)), p.p6, A::voltage(ctx, nodes, Some(17), Some(2)), p.p6), (0.001 / p.p53)), 1.0), 0.5);
@@ -743,6 +739,7 @@ impl Instance {
             s.store_scalar(388, 0.0);
             s.store_scalar(389, 0.0);
             s.store_scalar(390, 0.0);
+            s.store_scalar(391, 0.0);
         }
 
     }
@@ -752,7 +749,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[320] {
-            s.store_scalar(391, 0.0);
             s.store_scalar(392, 0.0);
             s.store_scalar(393, 0.0);
             s.store_scalar(394, 0.0);
@@ -1070,6 +1066,7 @@ impl Instance {
             s.store_div_scaled_inputs(377, s.ad_value(346), 1.0, s.ad_value(338), 2.302585092994046);
             s.store_scaled_mul(379, 377, 338, 2.0);
             s.store_mul(380, 341, 379);
+            s.store_sub_scaled_inputs(432, 367, 1.0, 364, (p.p51 * 0.5));
         }
 
     }
@@ -1078,10 +1075,6 @@ impl Instance {
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        if s.b[320] {
-            s.store_sub_scaled_inputs(432, 367, 1.0, 364, (p.p51 * 0.5));
-        }
-
         if s.b[320] {
             let assign3580_ad_e5294: A = {
                 if (p.p52 != 0.0) {
@@ -1445,6 +1438,7 @@ impl Instance {
             s.store_scalar(489, p.p216);
             s.copy_ad(490, 39);
             s.copy_ad(491, 40);
+            s.store_scalar(492, p.p212);
         }
 
     }
@@ -1454,7 +1448,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[467] {
-            s.store_scalar(492, p.p212);
             s.store_scalar(493, p.p226);
             s.store_scalar(494, p.p225);
             s.store_scalar(495, 0.0);
@@ -1659,6 +1652,7 @@ impl Instance {
             s.store_add_ad(523, A::div_scaled_product3(s.ad_value(533), s.ad_value(485), s.ad_value(521), 2.0, s.ad_value(487), 1.0), A::mul_sub_from_scalar_lhs(1.0, s.ad_value(533), s.ad_value(522)));
             s.store_div_scaled_product_indices(539, 522, 487, 1.0, 521, 1.0);
             s.store_add_scaled_product_right_ad(540, 539, (-1.0), 539, A::sqrt(A::offset(A::div_scaled_value_by_product(s.ad_value(535), 2.0, s.ad_value(488), s.ad_value(539), 1.0), 1.0)), 1.0);
+            s.store_add_scaled_product_value_ad(541, A::mul_sub_from_scalar_rhs(s.ad_value(539), 1.0, s.ad_value(533)), 1.0, 517, 533, 1.0);
         }
 
     }
@@ -1668,7 +1662,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[467] {
-            s.store_add_scaled_product_value_ad(541, A::mul_sub_from_scalar_rhs(s.ad_value(539), 1.0, s.ad_value(533)), 1.0, 517, 533, 1.0);
             s.store_add_scaled_product_value_ad(476, A::mul_sub_from_scalar_rhs(s.ad_value(540), 1.0, s.ad_value(533)), 1.0, 517, 533, 1.0);
         }
 
@@ -2103,6 +2096,7 @@ impl Instance {
 
         if (s.b[467] && (!s.b[605])) {
             s.store_scalar(472, 0.0);
+            s.store_scalar(473, 0.0);
         }
 
     }
@@ -2111,10 +2105,6 @@ impl Instance {
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        if (s.b[467] && (!s.b[605])) {
-            s.store_scalar(473, 0.0);
-        }
-
         s.b[610] = (s.v[482] == 1.0);
         s.v[610] = if s.b[610] { 1.0 } else { 0.0 };
 
@@ -2284,6 +2274,7 @@ impl Instance {
             s.store_scalar(718, 0.0);
             s.store_scalar(719, 0.0);
             s.store_scalar(720, 0.0);
+            s.store_scalar(721, 0.0);
         }
 
     }
@@ -2293,7 +2284,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[614] {
-            s.store_scalar(721, 0.0);
             s.store_scalar(722, 0.0);
             s.store_scalar(723, 0.0);
             s.store_scalar(724, 0.0);
@@ -2706,15 +2696,15 @@ impl Instance {
             s.store_scalar(672, 0.0);
         }
 
+        s.b[745] = (s.v[725] < (-50.0));
+        s.v[745] = if s.b[745] { 1.0 } else { 0.0 };
+
     }
 
     pub(super) fn stamp_transient_block_8(
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        s.b[745] = (s.v[725] < (-50.0));
-        s.v[745] = if s.b[745] { 1.0 } else { 0.0 };
-
         if ((s.b[614] && (!s.b[744])) && s.b[745]) {
             s.store_scalar(672, 1.0);
         }
@@ -2984,6 +2974,7 @@ impl Instance {
             s.store_scalar(820, 0.0);
             s.store_scalar(821, 0.0);
             s.store_scalar(822, 0.0);
+            s.store_scalar(823, 0.0);
         }
 
     }
@@ -2993,7 +2984,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[761] {
-            s.store_scalar(823, 0.0);
             s.store_scalar(824, 0.0);
             s.store_scalar(825, 0.0);
             s.store_scalar(826, 0.0);

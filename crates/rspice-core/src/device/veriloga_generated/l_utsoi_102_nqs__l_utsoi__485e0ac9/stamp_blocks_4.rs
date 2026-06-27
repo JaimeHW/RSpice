@@ -1335,42 +1335,6 @@ impl Instance {
             &eq43_branch_derivatives,
             multiplicity,
         );
-        let eq44_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(6),
-            multiplicity * (eq44_value),
-        );
-    }
-
-    pub(super) fn stamp_transient_equations_block_5(
-        stamper: &mut GeneratedStamper<'_>,
-        multiplicity: f64,
-    ) {
-        let eq46_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(6),
-            multiplicity * (eq46_value),
-        );
-        let eq47_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(9),
-            Some(6),
-            multiplicity * (eq47_value),
-        );
-        let eq48_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(9),
-            Some(7),
-            multiplicity * (eq48_value),
-        );
-        let eq49_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(6),
-            multiplicity * (eq49_value),
-        );
     }
 
     pub(super) fn stamp_reactive_equations_block_0(

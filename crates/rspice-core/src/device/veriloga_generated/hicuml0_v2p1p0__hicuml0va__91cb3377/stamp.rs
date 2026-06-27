@@ -7963,8 +7963,7 @@ impl Instance {
         Self::stamp_transient_block_0(ctx, s, p, nodes);
         Self::stamp_transient_block_1(s, p);
         Self::stamp_transient_block_2(s, p);
-        Self::stamp_transient_block_3(s, p);
-        Self::stamp_transient_block_4(ctx, s, p, nodes, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_block_3(ctx, s, p, nodes, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
 
         stamper.stamp_potential_branch_local(
             Some(7),

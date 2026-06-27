@@ -205,7 +205,7 @@ impl Instance {
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
-        Self::stamp_transient_block_0(s);
+        Self::stamp_transient_block_0(s, p);
         Self::stamp_transient_block_1(s, p);
         Self::stamp_transient_block_2(s, p);
         Self::stamp_transient_block_3(s, p);
@@ -235,7 +235,6 @@ impl Instance {
         Self::stamp_transient_block_27(s, p);
         Self::stamp_transient_block_28(ctx, s, p, nodes);
         Self::stamp_transient_block_29(ctx, s, p, nodes);
-        Self::stamp_transient_block_30(s, p);
 
         stamper.stamp_potential_branch_local(
             Some(7),

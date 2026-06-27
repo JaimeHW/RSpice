@@ -3240,24 +3240,6 @@ impl Instance {
             &eq34_branch_derivatives,
             multiplicity,
         );
-        let eq35_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(5),
-            Some(7),
-            multiplicity * (eq35_value),
-        );
-        let eq37_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(14),
-            None,
-            multiplicity * (eq37_value),
-        );
-        let eq38_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(5),
-            Some(7),
-            multiplicity * (eq38_value),
-        );
         let eq39_e1229: f64 = (s.v[951] * (nv14 - 0.0));
         let eq39_e1229_d_n0: f64 = (s.dn[951][0] * (nv14 - 0.0));
         let eq39_e1229_d_n1: f64 = (s.dn[951][1] * (nv14 - 0.0));
@@ -3391,6 +3373,7 @@ impl Instance {
         let nv4 = ctx.node_voltage(nodes[4]);
         let nv11 = ctx.node_voltage(nodes[11]);
         let nv12 = ctx.node_voltage(nodes[12]);
+        let nv13 = ctx.node_voltage(nodes[13]);
         let nv14 = ctx.node_voltage(nodes[14]);
         let eq41_e1236: f64 = ((nv14 - 0.0) * s.v[955]);
         let eq41_e1236_d_n0: f64 = ((nv14 - 0.0) * s.dn[955][0]);
@@ -3465,52 +3448,8 @@ impl Instance {
             &eq41_branch_derivatives,
             multiplicity,
         );
-        let (eq42_e1245,) = {
-    if (s.v[76] != 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq42_value: f64 = eq42_e1245;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(2),
-            multiplicity * (eq42_value),
-        );
-        let (eq43_e1253,) = {
-    if (s.v[75] != 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq43_value: f64 = eq43_e1253;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(5),
-            multiplicity * (eq43_value),
-        );
-        let eq44_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(6),
-            Some(5),
-            multiplicity * (eq44_value),
-        );
-        let eq45_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(6),
-            Some(7),
-            multiplicity * (eq45_value),
-        );
-        let eq46_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(6),
-            Some(8),
-            multiplicity * (eq46_value),
-        );
         let (eq48_e1288,) = {
-    if (!s.b[3408]) {
+    if (s.v[3408] == 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -3899,22 +3838,6 @@ impl Instance {
             10,
             eq64_value,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_6(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv13 = ctx.node_voltage(nodes[13]);
         let (eq65_e1379, eq65_e1379_d_n0, eq65_e1379_d_n1, eq65_e1379_d_n2, eq65_e1379_d_n3, eq65_e1379_d_n4, eq65_e1379_d_n5, eq65_e1379_d_n6, eq65_e1379_d_n7, eq65_e1379_d_n8, eq65_e1379_d_n9, eq65_e1379_d_n10, eq65_e1379_d_n11, eq65_e1379_d_n12, eq65_e1379_d_n13, eq65_e1379_d_n14, eq65_e1379_d_n15, eq65_e1379_d_n16, eq65_e1379_d_n17, eq65_e1379_d_b0, eq65_e1379_d_b1, eq65_e1379_d_b2, eq65_e1379_d_b3, eq65_e1379_d_b4, eq65_e1379_d_b5, eq65_e1379_d_b6, eq65_e1379_d_b7, eq65_e1379_d_b8, eq65_e1379_d_b9, eq65_e1379_d_b10, eq65_e1379_d_b11,) = {
     if (p.p29 != 0.0) {
         (s.v[815], s.dn[815][0], s.dn[815][1], s.dn[815][2], s.dn[815][3], s.dn[815][4], s.dn[815][5], s.dn[815][6], s.dn[815][7], s.dn[815][8], s.dn[815][9], s.dn[815][10], s.dn[815][11], s.dn[815][12], s.dn[815][13], s.dn[815][14], s.dn[815][15], s.dn[815][16], s.dn[815][17], s.db[815][0], s.db[815][1], s.db[815][2], s.db[815][3], s.db[815][4], s.db[815][5], s.db[815][6], s.db[815][7], s.db[815][8], s.db[815][9], s.db[815][10], s.db[815][11],)

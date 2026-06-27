@@ -2714,47 +2714,6 @@ impl Instance {
         s.b[520] = (p.p145 > 0.0);
         s.v[520] = if s.b[520] { 1.0 } else { 0.0 };
 
-        s.store_scaled_mul(521, 1, 10, 4.0);
-
-        s.b[525] = ((p.p90 >= p.p149) && (p.p90 > 0.0));
-        s.v[525] = if s.b[525] { 1.0 } else { 0.0 };
-
-        s.b[526] = ((p.p89 >= p.p149) && (p.p89 > 0.0));
-        s.v[526] = if s.b[526] { 1.0 } else { 0.0 };
-
-        s.b[527] = ((p.p96 >= p.p149) && (p.p96 > 0.0));
-        s.v[527] = if s.b[527] { 1.0 } else { 0.0 };
-
-        s.b[528] = ((p.p95 >= p.p149) && (p.p95 > 0.0));
-        s.v[528] = if s.b[528] { 1.0 } else { 0.0 };
-
-        s.b[529] = ((p.p102 >= p.p149) && (p.p102 > 0.0));
-        s.v[529] = if s.b[529] { 1.0 } else { 0.0 };
-
-        s.store_scaled_powf_ad(523, A::abs(A::add(s.ad_value(185), s.ad_value(188))), p.p111, p.p110);
-
-        s.b[530] = (p.p112 == (-1.0));
-        s.v[530] = if s.b[530] { 1.0 } else { 0.0 };
-
-        s.b[531] = ((p.p95 >= p.p149) && (p.p95 > 0.0));
-        s.v[531] = if s.b[531] { 1.0 } else { 0.0 };
-
-        if s.b[531] {
-            s.store_div_voltage_by_ad(524, ctx, nodes, Some(6), Some(2), s.ad_value(73));
-            s.store_scaled_powf_ad(523, A::abs(s.ad_value(524)), p.p114, p.p113);
-        }
-
-        s.store_scale(522, 0, 2.0);
-
-    }
-
-    pub(super) fn stamp_transient_block_9(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        s.b[532] = (p.p0 >= 320.0);
-        s.v[532] = if s.b[532] { 1.0 } else { 0.0 };
-
         s.b[533] = ((p.p109 == 1.0) && ((p.p88 > 0.0) && (p.p87 > 0.0)));
         s.v[533] = if s.b[533] { 1.0 } else { 0.0 };
 
@@ -2782,6 +2741,11 @@ impl Instance {
             s.store_mul_sqrt_rhs(537, 219, 538);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_9(
+        s: &mut Scratch,
+    ) {
         if (s.b[533] && (!s.b[540])) {
             s.store_scalar(537, 0.0);
         }

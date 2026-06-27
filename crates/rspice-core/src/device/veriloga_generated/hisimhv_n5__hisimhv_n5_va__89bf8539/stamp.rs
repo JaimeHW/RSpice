@@ -274,7 +274,7 @@ impl Instance {
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
-        Self::stamp_transient_block_0(s, p, param_given);
+        Self::stamp_transient_block_0(s, param_given);
         Self::stamp_transient_block_1(s, p);
         Self::stamp_transient_block_2(s, p);
         Self::stamp_transient_block_3(s, p);

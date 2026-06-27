@@ -2012,8 +2012,8 @@ impl Instance {
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
-        Self::stamp_transient_block_0(ctx, s, p, nodes, param_given);
-        Self::stamp_transient_block_1(ctx, s, p, branches, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_block_0(ctx, s, p, nodes, branches, param_given, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_block_1(s, p);
 
         stamper.stamp_potential_branch_local(
             Some(15),

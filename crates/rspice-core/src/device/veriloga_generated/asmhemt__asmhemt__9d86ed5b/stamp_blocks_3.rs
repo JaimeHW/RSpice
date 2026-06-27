@@ -2430,7 +2430,7 @@ impl Instance {
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
         let (eq0_e298,) = {
-    if (s.b[382] && s.b[383]) {
+    if ((s.v[382] != 0.0) && (s.v[383] != 0.0)) {
         (0.0,)
     } else {
         (0.0,)

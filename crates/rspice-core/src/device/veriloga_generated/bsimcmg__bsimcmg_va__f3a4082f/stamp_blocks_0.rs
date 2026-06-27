@@ -7,6 +7,7 @@ impl Instance {
 
     pub(super) fn stamp_transient_block_0(
         s: &mut Scratch,
+        p: &Parameters,
     ) {
         s.v[188] = 0.0;
 
@@ -107,8 +108,6 @@ impl Instance {
         s.v[417] = 0.0;
 
         s.v[453] = 0.0;
-
-        s.v[456] = 0.0;
 
         s.v[461] = 0.0;
 
@@ -254,21 +253,11 @@ impl Instance {
 
         s.v[570] = 0.0;
 
-        s.v[594] = 0.0;
-
         s.v[589] = 0.0;
-
-        s.v[577] = 0.0;
-
-        s.v[590] = 0.0;
-
-        s.v[591] = 0.0;
 
         s.v[574] = 0.0;
 
         s.v[575] = 0.0;
-
-        s.v[588] = 0.0;
 
         s.v[620] = 0.0;
 
@@ -520,12 +509,6 @@ impl Instance {
 
         s.v[1052] = 0.0;
 
-    }
-
-    pub(super) fn stamp_transient_block_1(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         s.b[1057] = (p.p60 == 1.0);
         s.v[1057] = if s.b[1057] { 1.0 } else { 0.0 };
 
@@ -537,6 +520,12 @@ impl Instance {
             s.store_scalar(114, (-1.0));
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_1(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         s.v[143] = (p.p103 * 8.8542e-12);
 
         s.v[144] = (p.p1088 * 8.8542e-12);
@@ -874,8 +863,6 @@ impl Instance {
 
         s.v[446] = p.p1085;
 
-        s.v[577] = p.p1680;
-
         s.store_add_scaled_inputs4_offset(641, s.ad_value(635), p.p138, s.ad_value(637), p.p140, s.ad_value(638), p.p141, s.ad_value(639), p.p142, ((p.p137) + ((s.v[636] * p.p139))));
 
         s.store_add_scaled_inputs4_offset(666, s.ad_value(635), p.p189, s.ad_value(637), p.p191, s.ad_value(638), p.p192, s.ad_value(639), p.p193, ((p.p188) + ((s.v[636] * p.p190))));
@@ -924,12 +911,6 @@ impl Instance {
 
         s.store_add_scaled_inputs4_offset(870, s.ad_value(635), p.p351, s.ad_value(637), p.p353, s.ad_value(638), p.p354, s.ad_value(639), p.p355, ((p.p350) + ((s.v[636] * p.p352))));
 
-    }
-
-    pub(super) fn stamp_transient_block_2(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         s.store_add_scaled_inputs4_offset(654, s.ad_value(635), p.p404, s.ad_value(637), p.p406, s.ad_value(638), p.p407, s.ad_value(639), p.p408, ((p.p403) + ((s.v[636] * p.p405))));
 
         s.store_add_scaled_inputs4_offset(655, s.ad_value(635), p.p410, s.ad_value(637), p.p412, s.ad_value(638), p.p413, s.ad_value(639), p.p414, ((p.p409) + ((s.v[636] * p.p411))));
@@ -942,6 +923,12 @@ impl Instance {
 
         s.store_add_scaled_inputs4_offset(698, s.ad_value(635), p.p468, s.ad_value(637), p.p470, s.ad_value(638), p.p471, s.ad_value(639), p.p472, ((p.p467) + ((s.v[636] * p.p469))));
 
+    }
+
+    pub(super) fn stamp_transient_block_2(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         s.store_add_scaled_inputs4_offset(702, s.ad_value(635), p.p507, s.ad_value(637), p.p509, s.ad_value(638), p.p510, s.ad_value(639), p.p511, ((p.p506) + ((s.v[636] * p.p508))));
 
         s.store_add_scaled_inputs4_offset(881, s.ad_value(635), p.p513, s.ad_value(637), p.p515, s.ad_value(638), p.p516, s.ad_value(639), p.p517, ((p.p512) + ((s.v[636] * p.p514))));
@@ -1311,6 +1298,9 @@ impl Instance {
             s.store_add_scaled_inputs4_offset(839, s.ad_value(635), p.p750, s.ad_value(637), p.p752, s.ad_value(638), p.p753, s.ad_value(639), p.p754, ((p.p749) + ((s.v[636] * p.p751))));
             s.store_add_scaled_inputs4_offset(840, s.ad_value(635), p.p762, s.ad_value(637), p.p764, s.ad_value(638), p.p765, s.ad_value(639), p.p766, ((p.p761) + ((s.v[636] * p.p763))));
             s.store_add_scaled_inputs4_offset(841, s.ad_value(635), p.p780, s.ad_value(637), p.p782, s.ad_value(638), p.p783, s.ad_value(639), p.p784, ((p.p779) + ((s.v[636] * p.p781))));
+            s.store_add_scaled_inputs4_offset(826, s.ad_value(635), p.p804, s.ad_value(637), p.p806, s.ad_value(638), p.p807, s.ad_value(639), p.p808, ((p.p803) + ((s.v[636] * p.p805))));
+            s.store_add_scaled_inputs4_offset(827, s.ad_value(635), p.p816, s.ad_value(637), p.p818, s.ad_value(638), p.p819, s.ad_value(639), p.p820, ((p.p815) + ((s.v[636] * p.p817))));
+            s.store_add_scaled_inputs4_offset(832, s.ad_value(635), p.p858, s.ad_value(637), p.p860, s.ad_value(638), p.p861, s.ad_value(639), p.p862, ((p.p857) + ((s.v[636] * p.p859))));
         }
 
     }
@@ -1320,9 +1310,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[1101] {
-            s.store_add_scaled_inputs4_offset(826, s.ad_value(635), p.p804, s.ad_value(637), p.p806, s.ad_value(638), p.p807, s.ad_value(639), p.p808, ((p.p803) + ((s.v[636] * p.p805))));
-            s.store_add_scaled_inputs4_offset(827, s.ad_value(635), p.p816, s.ad_value(637), p.p818, s.ad_value(638), p.p819, s.ad_value(639), p.p820, ((p.p815) + ((s.v[636] * p.p817))));
-            s.store_add_scaled_inputs4_offset(832, s.ad_value(635), p.p858, s.ad_value(637), p.p860, s.ad_value(638), p.p861, s.ad_value(639), p.p862, ((p.p857) + ((s.v[636] * p.p859))));
             s.store_add_scaled_inputs4_offset(833, s.ad_value(635), p.p870, s.ad_value(637), p.p872, s.ad_value(638), p.p873, s.ad_value(639), p.p874, ((p.p869) + ((s.v[636] * p.p871))));
         }
 
@@ -1763,13 +1750,6 @@ impl Instance {
         s.b[1165] = (s.v[812] < 0.0);
         s.v[1165] = if s.b[1165] { 1.0 } else { 0.0 };
 
-    }
-
-    pub(super) fn stamp_transient_block_4(
-        s: &mut Scratch,
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-    ) {
         if s.b[1165] {
             s.store_scalar(812, 0.0);
         }
@@ -1784,6 +1764,13 @@ impl Instance {
         s.b[1167] = (s.v[707] < 0.0);
         s.v[1167] = if s.b[1167] { 1.0 } else { 0.0 };
 
+    }
+
+    pub(super) fn stamp_transient_block_4(
+        s: &mut Scratch,
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+    ) {
         if s.b[1167] {
             s.store_scalar(707, 0.0);
         }
@@ -1959,20 +1946,6 @@ impl Instance {
 
         if (s.b[1200] && s.b[1201]) {
             s.store_scalar(873, 0.0);
-        }
-
-        s.b[1211] = (p.p1680 <= 0.0);
-        s.v[1211] = if s.b[1211] { 1.0 } else { 0.0 };
-
-        if s.b[1211] {
-            s.store_scalar(577, 1.0);
-        }
-
-        s.b[1212] = (p.p1680 > 2.0);
-        s.v[1212] = if s.b[1212] { 1.0 } else { 0.0 };
-
-        if ((!s.b[1211]) && s.b[1212]) {
-            s.store_scalar(577, 1.0);
         }
 
         s.b[1213] = (s.v[648] < 0.0);
@@ -2166,17 +2139,6 @@ impl Instance {
             s.store_add_scaled_inputs3(634, s.ad_value(169), p.p1792, s.ad_value(170), p.p1792, s.ad_value(171), p.p1792);
         }
 
-        s.b[1239] = (p.p76 != 0.0);
-        s.v[1239] = if s.b[1239] { 1.0 } else { 0.0 };
-
-        if s.b[1239] {
-            s.store_scalar(457, (((p.p1074 / p.p6) + ((p.p1075 * p.p5) / (if (p.p6 == 2.0) { 12.0 } else { 3.0 }))) / p.p59));
-        }
-
-        if s.b[1239] {
-            s.store_div_from_scalar_ad(456, 1.0, A::max_from_scalar(0.001, s.ad_value(457)));
-        }
-
         s.b[1241] = (p.p77 == 0.0);
         s.v[1241] = if s.b[1241] { 1.0 } else { 0.0 };
 
@@ -2241,13 +2203,6 @@ impl Instance {
             s.store_limited_exp_scaled_input(168, 438, 2.0);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_5(
-        s: &mut Scratch,
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-    ) {
         s.b[1245] = (p.p1086 == 1.0);
         s.v[1245] = if s.b[1245] { 1.0 } else { 0.0 };
 
@@ -2272,6 +2227,16 @@ impl Instance {
 
         if ((!s.b[1241]) && s.b[1246]) {
             s.store_scalar(441, (p.p1082 / (((-p.p1080) * p.p3) * p.p5)));
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_5(
+        s: &mut Scratch,
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+    ) {
+        if ((!s.b[1241]) && s.b[1246]) {
             s.store_div_scaled_product_mixed_aia(442, A::add(s.ad_value(440), s.ad_value(434)), 441, 1.0, A::add_scaled_inputs3(s.ad_value(440), 1.0, s.ad_value(434), 1.0, s.ad_value(441), 1.0), 1.0);
         }
 
@@ -2621,12 +2586,6 @@ impl Instance {
             s.store_mul_scaled_ad_lhs(945, A::offset(s.ad_value(944), 1.0), 943, p.p90);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_6(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         if (s.b[1259] && s.b[1262]) {
             s.store_mul_ad(946, A::div_scaled_inputs(s.ad_value(943), ((((2.0 * s.v[144]) * ((2.0) as f64).sqrt()) / 3.141592653589793) * 0.7), s.ad_value(944), 1.0), {
                             if (!((s.v[933] / s.v[945]) > 1e-38)) {
@@ -2655,6 +2614,15 @@ impl Instance {
             s.store_scalar(926, 1.05);
             s.store_abs_ad(927, A::sub(A::offset(s.ad_value(448), p.p90), s.ad_value(449)));
             s.store_scale(928, 926, p.p1087);
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_6(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if (s.b[1259] && (!s.b[1262])) {
             s.store_min_ad(929, s.ad_value(449), A::offset(s.ad_value(448), p.p90));
             s.store_div_from_scalar_offset_input(930, p.p1087, 925, 1.0);
             s.store_scalar(931, 1700000000000.0);
@@ -2966,12 +2934,6 @@ impl Instance {
             s.copy_ad(934, 932);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_7(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         if (s.b[1267] && (!s.b[1270])) {
             let assign11550_ad_e14991: A = {
                 if ((!(s.v[933] > 37.0)) && (!(s.v[933] < (-37.0)))) {
@@ -3021,6 +2983,15 @@ impl Instance {
             s.store_scaled_add(938, 934, 937, p.p43);
             s.store_scale(930, 928, 1.0 / (p.p1089));
             s.store_div_from_scalar_scaled_ad(939, 4.0, A::sqrt_scaled_input(A::offset(s.ad_value(930), 1.0), 2.0), 3.141592653589793);
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_7(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if s.b[1267] {
             s.store_offset_add_scaled_inputs(940, A::offset(A::mul(A::sqrt(A::scale_offset(s.ad_value(930), (p.p1089 * p.p1089), (((p.p1089 * p.p1089)) + (((p.p90 * p.p90) + ((2.0 * p.p1089) * p.p90)))))), A::sqrt(A::offset(s.ad_value(930), 1.0))), p.p90), 1.0, s.ad_value(930), p.p1089, p.p1089);
             s.store_add_scaled_inputs_ad(941, A::sqrt(A::mul_offset_lhs(s.ad_value(930), 1.0, A::offset(s.ad_value(930), 4.0))), p.p90, A::scaled_offset(s.ad_value(930), 2.0, p.p90), 1.0);
         }
@@ -3337,16 +3308,6 @@ impl Instance {
             s.store_abs_ad(927, A::sub(A::offset(s.ad_value(448), p.p90), s.ad_value(449)));
             s.store_scale(928, 926, p.p1087);
             s.store_min_ad(929, s.ad_value(449), A::offset(s.ad_value(448), p.p90));
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_8(
-        s: &mut Scratch,
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-    ) {
-        if s.b[1267] {
             s.store_div_from_scalar_offset_input(930, p.p1087, 925, 1.0);
             s.store_scalar(931, 1700000000000.0);
             s.store_scaled_sub(932, 929, 930, (s.v[144] * 1.0 / (p.p1087)));
@@ -3388,6 +3349,13 @@ impl Instance {
             s.store_mul(936, 927, 935);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_8(
+        s: &mut Scratch,
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+    ) {
         if s.b[1267] {
             let assign12490_ad_e16549: A = {
                 if (!(((p.p1087 + ((0.5 * 3.141592653589793) * s.v[936])) / p.p1087) > 1e-38)) {
@@ -3749,15 +3717,6 @@ impl Instance {
         s.b[1287] = (p.p1717 < (-273.15));
         s.v[1287] = if s.b[1287] { 1.0 } else { 0.0 };
 
-    }
-
-    pub(super) fn stamp_transient_block_9(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-    ) {
-        let ctx_temp = ctx.temperature();
         if s.b[1287] {
             s.store_scalar(228, 300.15);
         }
@@ -3814,6 +3773,15 @@ impl Instance {
             s.store_offset_add_scaled_inputs3_offset(967, s.ad_value(961), ((0.5 * 1.001) * 0.5), A::sqrt(A::offset(A::mul(A::scaled_offset(s.ad_value(961), (-1.001), 1.001), A::scaled_offset(s.ad_value(961), (-1.001), 1.001)), ((0.25 * 0.001) * 0.001))), (0.5 * 0.5), A::sqrt(A::offset(assign13610_ad_e18378, ((0.25 * 0.001) * 0.001))), (-0.5), ((1.0 + (0.5 * ((-1.001) * 1.001))) * 0.5), (0.25 * 0.001));
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_9(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+    ) {
+        let ctx_temp = ctx.temperature();
         if s.b[1288] {
             let assign13620_ad_e18498: A = A::mul_offset_lhs(A::add_scaled_inputs(A::scaled_offset(s.ad_value(961), (-2.001), 1.001), 0.5, A::sqrt(A::offset(A::mul(A::scaled_offset(s.ad_value(961), (-2.001), 1.001), A::scaled_offset(s.ad_value(961), (-2.001), 1.001)), ((0.25 * 0.001) * 0.001))), 0.5), (-1.0), A::offset(A::add_scaled_inputs(A::scaled_offset(s.ad_value(961), (-2.001), 1.001), 0.5, A::sqrt(A::offset(A::mul(A::scaled_offset(s.ad_value(961), (-2.001), 1.001), A::scaled_offset(s.ad_value(961), (-2.001), 1.001)), ((0.25 * 0.001) * 0.001))), 0.5), (-1.0)));
             s.store_offset_add_scaled_inputs3_offset(970, s.ad_value(961), ((0.5 * 1.001) * 0.5), A::sqrt(A::offset(A::mul(A::scaled_offset(s.ad_value(961), (-2.001), 1.001), A::scaled_offset(s.ad_value(961), (-2.001), 1.001)), ((0.25 * 0.001) * 0.001))), (0.5 * 0.5), A::sqrt(A::offset(assign13620_ad_e18498, ((0.25 * 0.001) * 0.001))), (-0.5), ((1.0 + (0.5 * ((-2.001) * 1.001))) * 0.5), (0.25 * 0.001));
@@ -4164,12 +4132,6 @@ impl Instance {
 
         s.store_add_scaled_inputs3(388, s.ad_value(387), 1.0, A::limited_exp(A::div_scaled_inputs2(s.ad_value(377), 1.0, s.ad_value(379), (-1.0), s.ad_value(389), 1.0)), 1.0, A::limited_exp(A::div_scaled_inputs2(s.ad_value(377), 1.0, s.ad_value(380), (-1.0), s.ad_value(389), 1.0)), s.v[169]);
 
-    }
-
-    pub(super) fn stamp_transient_block_10(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         let assign14720_ad_e21904: A = {
     if (!((((((s.v[386] * s.v[383]) / (((3.141592653589793 * 1.05457e-34) * 1.05457e-34) * s.v[148])) * s.v[389]) / ((2.0 * s.v[894]) / s.v[895])) * s.v[388]) > 1e-38)) {
         A::neg(A::constant(87.498233534))
@@ -4239,6 +4201,12 @@ impl Instance {
             s.store_mul_exp_ad_rhs(318, 812, A::mul(s.ad_value(830), s.ad_value(418)));
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_10(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         s.b[1301] = (p.p66 != 0.0);
         s.v[1301] = if s.b[1301] { 1.0 } else { 0.0 };
 
@@ -4635,12 +4603,6 @@ impl Instance {
             s.store_add_scaled_inputs3(332, s.ad_value(679), 1.0, A::add_scaled_inputs3_offset(A::add_scaled_products(s.ad_value(849), s.ad_value(232), -1.0, s.ad_value(232), s.ad_value(232), p.p561), 0.5, s.ad_value(679), 0.5, A::sqrt(assign15660_ad_e24352), 0.5, ((-1e-6) * 0.5)), 1.0, s.ad_value(679), (-1.0));
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_11(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         if (((!s.b[1298]) && s.b[1313]) && (!s.b[1323])) {
             let assign15670_ad_e24481: A = {
                 if (!((((1.0 + ((-s.v[849]) * s.v[232])) + ((p.p561 * s.v[232]) * s.v[232])) - 1e-6) < ((-10000.0) * 0.001))) {
@@ -4703,6 +4665,12 @@ impl Instance {
             s.store_add_scaled_inputs3(334, s.ad_value(698), 1.0, A::add_scaled_inputs3_offset(A::add_scaled_products(s.ad_value(849), s.ad_value(232), -1.0, s.ad_value(232), s.ad_value(232), p.p561), 0.5, s.ad_value(698), 0.5, A::sqrt(assign15750_ad_e24769), 0.5, ((-1e-6) * 0.5)), 1.0, s.ad_value(698), (-1.0));
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_11(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         if (((!s.b[1298]) && s.b[1313]) && (!s.b[1327])) {
             let assign15760_ad_e24898: A = {
                 if (!((((1.0 + ((-s.v[849]) * s.v[232])) + ((p.p561 * s.v[232]) * s.v[232])) - 1e-6) < ((-10000.0) * 0.001))) {
@@ -5112,12 +5080,6 @@ impl Instance {
         s.b[1345] = (p.p66 != 0.0);
         s.v[1345] = if s.b[1345] { 1.0 } else { 0.0 };
 
-    }
-
-    pub(super) fn stamp_transient_block_12(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         if ((((!s.b[1298]) && (!s.b[1313])) && s.b[1342]) && s.b[1345]) {
             let assign16460_ad_e27243: A = A::add_scaled_offset_product_lhs(s.ad_value(699), (-(-(4.0 * 1e-6))), A::sub_scaled_inputs(A::add_scaled_products(s.ad_value(849), s.ad_value(232), -1.0, s.ad_value(233), s.ad_value(233), p.p561), 1.0, s.ad_value(699), -1.0), (-1e-6), A::offset(A::sub_scaled_inputs(A::add_scaled_products(s.ad_value(849), s.ad_value(232), -1.0, s.ad_value(233), s.ad_value(233), p.p561), 1.0, s.ad_value(699), -1.0), (-1e-6)), 1.0);
             s.store_add_scaled_inputs3(335, s.ad_value(699), 1.0, A::add_scaled_inputs3_offset(A::add_scaled_products(s.ad_value(849), s.ad_value(232), -1.0, s.ad_value(233), s.ad_value(233), p.p561), 0.5, s.ad_value(699), 0.5, A::sqrt(assign16460_ad_e27243), 0.5, ((-1e-6) * 0.5)), 1.0, s.ad_value(699), (-1.0));
@@ -5182,6 +5144,12 @@ impl Instance {
         s.b[1347] = (p.p66 != 0.0);
         s.v[1347] = if s.b[1347] { 1.0 } else { 0.0 };
 
+    }
+
+    pub(super) fn stamp_transient_block_12(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         if ((((!s.b[1298]) && (!s.b[1313])) && (!s.b[1342])) && s.b[1347]) {
             let assign16550_ad_e27782: A = {
                 if (!((((1.0 - (s.v[851] * s.v[232])) + ((p.p561 * s.v[233]) * s.v[233])) - 1e-6) < ((-10000.0) * 0.001))) {
@@ -5531,12 +5499,6 @@ impl Instance {
         s.b[1362] = (s.v[855] < s.v[854]);
         s.v[1362] = if s.b[1362] { 1.0 } else { 0.0 };
 
-    }
-
-    pub(super) fn stamp_transient_block_13(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         if ((((((!s.b[1298]) && (!s.b[1313])) && (!s.b[1354])) && (!s.b[1355])) && s.b[1361]) && s.b[1362]) {
             s.store_add_scaled_inputs3_sqrt_third_mixed_iia(170, 195, 0.5, 196, 0.5, A::offset(A::mul(A::sub(s.ad_value(195), s.ad_value(196)), A::sub(s.ad_value(195), s.ad_value(196))), ((0.25 * 0.01) * 0.01)), 0.5);
         }
@@ -5592,6 +5554,12 @@ impl Instance {
             s.store_scalar(334, 1000.0);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_13(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         s.b[1366] = (s.v[336] < 1000.0);
         s.v[1366] = if s.b[1366] { 1.0 } else { 0.0 };
 
@@ -6030,13 +5998,6 @@ impl Instance {
 };
         s.store_mul_ad_rhs(252, 748, assign18150_ad_e33110);
 
-    }
-
-    pub(super) fn stamp_transient_block_14(
-        s: &mut Scratch,
-        p: &Parameters,
-        param_given: &[bool; Instance::PARAMETER_COUNT],
-    ) {
         let assign18160_ad_e33184: A = {
     if (!(((1.0 + (s.v[862] * s.v[232])) - 1e-6) < ((-10000.0) * 0.001))) {
         A::add_scaled_inputs(A::offset(A::mul(s.ad_value(862), s.ad_value(232)), ((1.0) + ((-1e-6)))), 0.5, A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(862), s.ad_value(232)), ((1.0) + ((-1e-6))), A::offset(A::mul(s.ad_value(862), s.ad_value(232)), ((1.0) + ((-1e-6))))), ((4.0 * 0.001) * 0.001))), 0.5)
@@ -6098,6 +6059,13 @@ impl Instance {
             s.store_offset_add_scaled_inputs(266, A::scale_offset(s.ad_value(232), p.p1721, (((-(-p.p1585))) + ((-1e-6)))), 0.5, A::sqrt(A::offset(A::mul(A::scale_offset(s.ad_value(232), p.p1721, (((-(-p.p1585))) + ((-1e-6)))), A::scale_offset(s.ad_value(232), p.p1721, (((-(-p.p1585))) + ((-1e-6))))), (-((4.0 * (-p.p1585)) * 1e-6)))), 0.5, (((-p.p1585)) + (p.p1585)));
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_14(
+        s: &mut Scratch,
+        p: &Parameters,
+        param_given: &[bool; Instance::PARAMETER_COUNT],
+    ) {
         if (s.b[1390] && (!s.b[1392])) {
             let assign18290_ad_e33614: A = {
                 if (!(((1.0 + (p.p1721 * s.v[232])) - 1e-6) < ((-10000.0) * 0.001))) {

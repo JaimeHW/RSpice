@@ -1406,7 +1406,7 @@ impl Instance {
             multiplicity,
         );
         let (eq61_e1019,) = {
-    if ((!s.b[424]) && s.b[428]) {
+    if ((!s.b[424]) && (s.v[428] != 0.0)) {
         (0.0,)
     } else {
         (0.0,)
@@ -1418,7 +1418,7 @@ impl Instance {
             eq61_value,
         );
         let (eq62_e1026,) = {
-    if ((!s.b[424]) && s.b[428]) {
+    if ((!s.b[424]) && (s.v[428] != 0.0)) {
         (0.0,)
     } else {
         (0.0,)
@@ -1430,7 +1430,7 @@ impl Instance {
             eq62_value,
         );
         let (eq63_e1034,) = {
-    if ((!s.b[424]) && (!s.b[428])) {
+    if ((!s.b[424]) && (s.v[428] == 0.0)) {
         (0.0,)
     } else {
         (0.0,)
@@ -1442,7 +1442,7 @@ impl Instance {
             eq63_value,
         );
         let (eq64_e1042,) = {
-    if ((!s.b[424]) && (!s.b[428])) {
+    if ((!s.b[424]) && (s.v[428] == 0.0)) {
         (0.0,)
     } else {
         (0.0,)
@@ -1452,97 +1452,6 @@ impl Instance {
         stamper.stamp_potential_const_local(
             32,
             eq64_value,
-        );
-        let (eq65_e1050,) = {
-    if s.b[429] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq65_value: f64 = eq65_e1050;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(8),
-            multiplicity * (eq65_value),
-        );
-        let (eq66_e1068,) = {
-    if ((s.b[429] && s.b[430]) && s.b[431]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq66_value: f64 = eq66_e1068;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(18),
-            multiplicity * (eq66_value),
-        );
-        let (eq67_e1086,) = {
-    if ((s.b[429] && s.b[430]) && s.b[431]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq67_value: f64 = eq67_e1086;
-        stamper.stamp_current_const_local(
-            Some(2),
-            Some(22),
-            multiplicity * (eq67_value),
-        );
-        let (eq68_e1105,) = {
-    if ((s.b[429] && s.b[430]) && (!s.b[431])) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq68_value: f64 = eq68_e1105;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(7),
-            multiplicity * (eq68_value),
-        );
-        let (eq69_e1124,) = {
-    if ((s.b[429] && s.b[430]) && (!s.b[431])) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq69_value: f64 = eq69_e1124;
-        stamper.stamp_current_const_local(
-            Some(2),
-            Some(8),
-            multiplicity * (eq69_value),
-        );
-        let (eq70_e1137,) = {
-    if s.b[432] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq70_value: f64 = eq70_e1137;
-        stamper.stamp_current_const_local(
-            Some(9),
-            Some(8),
-            multiplicity * (eq70_value),
-        );
-        let (eq71_e1150,) = {
-    if s.b[432] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq71_value: f64 = eq71_e1150;
-        stamper.stamp_current_const_local(
-            Some(9),
-            Some(7),
-            multiplicity * (eq71_value),
         );
     }
 
@@ -5185,7 +5094,7 @@ impl Instance {
             eq99_value,
         );
         let (eq101_e1418,) = {
-    if s.b[553] {
+    if (s.v[553] != 0.0) {
         (0.0,)
     } else {
         (0.0,)
@@ -5197,7 +5106,7 @@ impl Instance {
             eq101_value,
         );
         let (eq104_e1448,) = {
-    if ((!s.b[553]) && (!s.b[555])) {
+    if ((s.v[553] == 0.0) && (s.v[555] == 0.0)) {
         (0.0,)
     } else {
         (0.0,)
@@ -5209,7 +5118,7 @@ impl Instance {
             eq104_value,
         );
         let (eq105_e1456,) = {
-    if ((!s.b[553]) && (!s.b[555])) {
+    if ((s.v[553] == 0.0) && (s.v[555] == 0.0)) {
         (0.0,)
     } else {
         (0.0,)
@@ -5412,19 +5321,6 @@ impl Instance {
             &eq107_node_derivatives,
             &eq107_branch_derivatives,
             multiplicity,
-        );
-        let (eq108_e1471,) = {
-    if s.b[567] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq108_value: f64 = eq108_e1471;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(8),
-            multiplicity * (eq108_value),
         );
         let eq109_e1474: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 8, s.v[165]);
         let eq109_e1474_d_n0: f64 = (s.dn[165][0] * ddt_scale);
