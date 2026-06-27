@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use super::opt::{limexp_derivative, limexp_value};
 use super::{
     DerivativeLane, EquationId, IrDiagnostic, OptBinaryOp, OptModel, OptUnaryOp, OptValueKind,
     ValueId,
@@ -197,6 +198,10 @@ fn evaluate_unary(
         OptUnaryOp::Neg => Ok(OptEvalValue::Real(-real_value(values, input)?)),
         OptUnaryOp::Not => Ok(OptEvalValue::Boolean(!boolean_value(values, input)?)),
         OptUnaryOp::Exp => Ok(OptEvalValue::Real(real_value(values, input)?.exp())),
+        OptUnaryOp::LimExp => Ok(OptEvalValue::Real(limexp_value(real_value(values, input)?))),
+        OptUnaryOp::LimExpDerivative => Ok(OptEvalValue::Real(limexp_derivative(real_value(
+            values, input,
+        )?))),
         OptUnaryOp::Ln => Ok(OptEvalValue::Real(real_value(values, input)?.ln())),
         OptUnaryOp::Sqrt => Ok(OptEvalValue::Real(real_value(values, input)?.sqrt())),
         OptUnaryOp::Abs => Ok(OptEvalValue::Real(real_value(values, input)?.abs())),

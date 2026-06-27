@@ -1102,6 +1102,37 @@ fn rust_backend_auto_scalarizes_pow_intrinsic_currents_with_derivatives() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_limexp_with_safe_tail() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(scalar_limexp_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile limexp current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("LIMEXP_MAX"), "{stamp}");
+    assert!(stamp.contains("let limexp_arg ="), "{stamp}");
+    assert!(stamp.contains("if limexp_arg < 80.0"), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(comparison_value_device_source())
@@ -16202,6 +16233,19 @@ module scalar_pow_intrinsic(p, n);
     parameter real alpha = 3.0;
     analog begin
         I(p, n) <+ pow(V(p, n), alpha);
+    end
+endmodule
+"#
+}
+
+fn scalar_limexp_source() -> &'static str {
+    r#"
+module scalar_limexp(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    analog begin
+        I(p, n) <+ limexp(V(p, n) * gain);
     end
 endmodule
 "#

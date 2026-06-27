@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::canonical_ir::opt::LIMEXP_MAX;
 use crate::canonical_ir::{
     BranchId, CanonicalIrArtifact, CanonicalValueType, DerivativeLaneKind, EquationId, ExprId,
     HirAnalogOperator, HirExprKind, HirStatement, InvalidationClass, MirEquation, MirEquationKind,
@@ -69,6 +70,7 @@ struct ValueEmitContext<'a> {
     cached_values: &'a HashSet<ValueId>,
     use_cached_fields: bool,
     inline_uncached_constants: bool,
+    limexp_max_expr: String,
 }
 
 struct ScalarDerivatives {
@@ -172,6 +174,12 @@ fn generate_stamp_file(
         "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};\n\n",
         options.runtime_path
     ));
+    if scalar_model_uses_limexp(artifact) {
+        out.push_str(&format!(
+            "const LIMEXP_MAX: f64 = {};\n\n",
+            format_f64(LIMEXP_MAX)
+        ));
+    }
     if ddt_slots.len() > 0 {
         emit_ddt_helpers(&mut out);
     }
@@ -200,6 +208,7 @@ fn generate_stamp_file(
         cached_values: &static_cache.set,
         use_cached_fields: true,
         inline_uncached_constants: false,
+        limexp_max_expr: "LIMEXP_MAX".to_string(),
     };
     for value in &artifact.opt.values {
         if !stamp_live.contains(&value.id) {
@@ -284,6 +293,18 @@ fn emit_ddt_helpers(out: &mut String) {
     out.push_str("}\n\n");
 }
 
+fn scalar_model_uses_limexp(artifact: &CanonicalIrArtifact) -> bool {
+    artifact.opt.values.iter().any(|value| {
+        matches!(
+            &value.kind,
+            OptValueKind::Unary {
+                op: OptUnaryOp::LimExp | OptUnaryOp::LimExpDerivative,
+                ..
+            }
+        )
+    })
+}
+
 pub(super) fn scalar_state_extensions(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
@@ -297,6 +318,7 @@ pub(super) fn scalar_state_extensions(
         cached_values: &static_cache.set,
         use_cached_fields: false,
         inline_uncached_constants: true,
+        limexp_max_expr: format_f64(LIMEXP_MAX),
     };
     let mut recompute = String::new();
     recompute.push_str("\n    #[inline]\n");
@@ -378,6 +400,7 @@ pub(super) fn emit_static_current_values(
         cached_values: &static_cache.set,
         use_cached_fields: true,
         inline_uncached_constants: false,
+        limexp_max_expr: "LIMEXP_MAX".to_string(),
     };
     for value in &artifact.opt.values {
         if !stamp_live.contains(&value.id) {
@@ -1244,9 +1267,11 @@ fn emit_value_expr(
             let slot = branch_flow_slot(artifact, *branch)?;
             format!("ctx.branch_current(branches[{slot}])")
         }
-        OptValueKind::Unary { op, input } => {
-            emit_unary_expr(*op, value_ref(artifact, parameter_fields, *input, context)?)
-        }
+        OptValueKind::Unary { op, input } => emit_unary_expr(
+            *op,
+            value_ref(artifact, parameter_fields, *input, context)?,
+            &context.limexp_max_expr,
+        ),
         OptValueKind::Binary { op, left, right } => emit_binary_expr(
             *op,
             value_ref(artifact, parameter_fields, *left, context)?,
@@ -1322,12 +1347,18 @@ fn value_ref(
     Ok(value_name(value))
 }
 
-fn emit_unary_expr(op: OptUnaryOp, input: String) -> String {
+fn emit_unary_expr(op: OptUnaryOp, input: String, limexp_max: &str) -> String {
     match op {
         OptUnaryOp::Pos => input,
         OptUnaryOp::Neg => format!("(-{input})"),
         OptUnaryOp::Not => format!("(!{input})"),
         OptUnaryOp::Exp => format!("{input}.exp()"),
+        OptUnaryOp::LimExp => format!(
+            "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} * (1.0 + (limexp_arg - 80.0)) }} }}"
+        ),
+        OptUnaryOp::LimExpDerivative => format!(
+            "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} }} }}"
+        ),
         OptUnaryOp::Ln => format!("{input}.ln()"),
         OptUnaryOp::Sqrt => format!("{input}.sqrt()"),
         OptUnaryOp::Abs => format!("{input}.abs()"),

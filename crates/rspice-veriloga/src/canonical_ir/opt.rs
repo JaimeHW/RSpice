@@ -10,6 +10,7 @@ use super::{
 };
 
 const MAX_SCALAR_LOOP_UNROLL_ITERATIONS: usize = 1024;
+pub(crate) const LIMEXP_MAX: f64 = 5.54062238439351e34;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InvalidationClass {
@@ -63,6 +64,8 @@ pub enum OptUnaryOp {
     Neg,
     Not,
     Exp,
+    LimExp,
+    LimExpDerivative,
     Ln,
     Sqrt,
     Abs,
@@ -541,7 +544,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             HirExprKind::Call { name, args } => self.lower_call(name, args),
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Limexp { expr },
-            } => self.lower_intrinsic_unary(OptUnaryOp::Exp, *expr),
+            } => self.lower_intrinsic_unary(OptUnaryOp::LimExp, *expr),
             _ => None,
         };
 
@@ -598,6 +601,8 @@ impl<'a> ScalarGraphBuilder<'a> {
                         OptUnaryOp::Pos => Some(value),
                         OptUnaryOp::Neg => Some(-value),
                         OptUnaryOp::Exp => Some(value.exp()),
+                        OptUnaryOp::LimExp => Some(limexp_value(value)),
+                        OptUnaryOp::LimExpDerivative => Some(limexp_derivative(value)),
                         OptUnaryOp::Ln => Some(value.ln()),
                         OptUnaryOp::Sqrt => Some(value.sqrt()),
                         OptUnaryOp::Abs => Some(value.abs()),
@@ -812,6 +817,16 @@ impl<'a> ScalarGraphBuilder<'a> {
                 OptUnaryOp::Exp => {
                     self.push_binary_value(OptBinaryOp::Mul, value, input_derivative)
                 }
+                OptUnaryOp::LimExp => {
+                    let scale = self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::LimExpDerivative,
+                            input,
+                        },
+                    );
+                    self.push_binary_value(OptBinaryOp::Mul, scale, input_derivative)
+                }
                 OptUnaryOp::Ln => self.push_binary_value(OptBinaryOp::Div, input_derivative, input),
                 OptUnaryOp::Sqrt => {
                     let two = self.push_value(OptValueType::Real, OptValueKind::RealConstant(2.0));
@@ -901,7 +916,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                     );
                     self.push_binary_value(OptBinaryOp::Div, input_derivative, denominator)
                 }
-                OptUnaryOp::Abs | OptUnaryOp::Not => continue,
+                OptUnaryOp::Abs | OptUnaryOp::Not | OptUnaryOp::LimExpDerivative => continue,
             };
             derivatives.insert(lane, derivative);
         }
@@ -1449,6 +1464,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         if args.len() == 1 {
             let op = match name.as_str() {
                 "exp" => OptUnaryOp::Exp,
+                "limexp" => OptUnaryOp::LimExp,
                 "ln" | "log" => OptUnaryOp::Ln,
                 "sqrt" => OptUnaryOp::Sqrt,
                 "abs" => OptUnaryOp::Abs,
@@ -1526,6 +1542,22 @@ fn unary_op(op: &str) -> Option<OptUnaryOp> {
         "Neg" => Some(OptUnaryOp::Neg),
         "Not" => Some(OptUnaryOp::Not),
         _ => None,
+    }
+}
+
+pub(crate) fn limexp_value(value: f64) -> f64 {
+    if value < 80.0 {
+        value.exp()
+    } else {
+        LIMEXP_MAX * (1.0 + (value - 80.0))
+    }
+}
+
+pub(crate) fn limexp_derivative(value: f64) -> f64 {
+    if value < 80.0 {
+        value.exp()
+    } else {
+        LIMEXP_MAX
     }
 }
 
