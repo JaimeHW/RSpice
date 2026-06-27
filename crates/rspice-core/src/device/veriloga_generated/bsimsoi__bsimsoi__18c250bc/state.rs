@@ -2323,7 +2323,7 @@ fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
 pub struct Instance {
     pub nodes: [usize; 14],
     pub branches: [usize; 19],
-    pub params: Box<Parameters>,
+    pub(crate) params: Box<Parameters>,
     pub(crate) param_given: Box<[bool; 1044]>,
     pub(crate) multiplicity: f64,
     pub(crate) ddt_state_current: Box<[f64; 22]>,
@@ -2334,6 +2334,70 @@ pub struct Instance {
     pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
+    pub(crate) scalar_v2: f64,
+    pub(crate) scalar_v3: f64,
+    pub(crate) scalar_v4: f64,
+    pub(crate) scalar_v5: f64,
+    pub(crate) scalar_v6: f64,
+    pub(crate) scalar_v7: f64,
+    pub(crate) scalar_v8: f64,
+    pub(crate) scalar_v9: f64,
+    pub(crate) scalar_v10: f64,
+    pub(crate) scalar_v11: f64,
+    pub(crate) scalar_v12: f64,
+    pub(crate) scalar_v13: f64,
+    pub(crate) scalar_v14: f64,
+    pub(crate) scalar_v15: f64,
+    pub(crate) scalar_v16: f64,
+    pub(crate) scalar_v17: f64,
+    pub(crate) scalar_v18: f64,
+    pub(crate) scalar_v19: f64,
+    pub(crate) scalar_v20: f64,
+    pub(crate) scalar_v21: f64,
+    pub(crate) scalar_v22: f64,
+    pub(crate) scalar_v23: f64,
+    pub(crate) scalar_v24: f64,
+    pub(crate) scalar_v25: f64,
+    pub(crate) scalar_v26: f64,
+    pub(crate) scalar_v27: f64,
+    pub(crate) scalar_v28: f64,
+    pub(crate) scalar_v29: f64,
+    pub(crate) scalar_v47: f64,
+    pub(crate) scalar_v48: f64,
+    pub(crate) scalar_v49: f64,
+    pub(crate) scalar_v50: f64,
+    pub(crate) scalar_v51: f64,
+    pub(crate) scalar_v52: f64,
+    pub(crate) scalar_v53: f64,
+    pub(crate) scalar_v54: f64,
+    pub(crate) scalar_v55: f64,
+    pub(crate) scalar_v56: f64,
+    pub(crate) scalar_v57: f64,
+    pub(crate) scalar_v58: f64,
+    pub(crate) scalar_v59: f64,
+    pub(crate) scalar_v60: f64,
+    pub(crate) scalar_v61: f64,
+    pub(crate) scalar_v62: f64,
+    pub(crate) scalar_v63: f64,
+    pub(crate) scalar_v64: bool,
+    pub(crate) scalar_v65: f64,
+    pub(crate) scalar_v66: f64,
+    pub(crate) scalar_v67: bool,
+    pub(crate) scalar_v69: f64,
+    pub(crate) scalar_v70: f64,
+    pub(crate) scalar_v76: bool,
+    pub(crate) scalar_v79: f64,
+    pub(crate) scalar_v80: bool,
+    pub(crate) scalar_v86: bool,
+    pub(crate) scalar_v87: bool,
+    pub(crate) scalar_v90: f64,
+    pub(crate) scalar_v98: bool,
+    pub(crate) scalar_v106: f64,
+    pub(crate) scalar_v107: f64,
+    pub(crate) scalar_v108: f64,
+    pub(crate) scalar_v109: f64,
+    pub(crate) scalar_v110: f64,
+    pub(crate) scalar_v111: f64,
     pub(crate) scratch: Option<Box<GenericScratch<1569, 14, 19>>>,
     pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<1569, 14, 19>>>,
 }
@@ -2355,6 +2419,70 @@ impl Clone for Instance {
             idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
+            scalar_v2: self.scalar_v2,
+            scalar_v3: self.scalar_v3,
+            scalar_v4: self.scalar_v4,
+            scalar_v5: self.scalar_v5,
+            scalar_v6: self.scalar_v6,
+            scalar_v7: self.scalar_v7,
+            scalar_v8: self.scalar_v8,
+            scalar_v9: self.scalar_v9,
+            scalar_v10: self.scalar_v10,
+            scalar_v11: self.scalar_v11,
+            scalar_v12: self.scalar_v12,
+            scalar_v13: self.scalar_v13,
+            scalar_v14: self.scalar_v14,
+            scalar_v15: self.scalar_v15,
+            scalar_v16: self.scalar_v16,
+            scalar_v17: self.scalar_v17,
+            scalar_v18: self.scalar_v18,
+            scalar_v19: self.scalar_v19,
+            scalar_v20: self.scalar_v20,
+            scalar_v21: self.scalar_v21,
+            scalar_v22: self.scalar_v22,
+            scalar_v23: self.scalar_v23,
+            scalar_v24: self.scalar_v24,
+            scalar_v25: self.scalar_v25,
+            scalar_v26: self.scalar_v26,
+            scalar_v27: self.scalar_v27,
+            scalar_v28: self.scalar_v28,
+            scalar_v29: self.scalar_v29,
+            scalar_v47: self.scalar_v47,
+            scalar_v48: self.scalar_v48,
+            scalar_v49: self.scalar_v49,
+            scalar_v50: self.scalar_v50,
+            scalar_v51: self.scalar_v51,
+            scalar_v52: self.scalar_v52,
+            scalar_v53: self.scalar_v53,
+            scalar_v54: self.scalar_v54,
+            scalar_v55: self.scalar_v55,
+            scalar_v56: self.scalar_v56,
+            scalar_v57: self.scalar_v57,
+            scalar_v58: self.scalar_v58,
+            scalar_v59: self.scalar_v59,
+            scalar_v60: self.scalar_v60,
+            scalar_v61: self.scalar_v61,
+            scalar_v62: self.scalar_v62,
+            scalar_v63: self.scalar_v63,
+            scalar_v64: self.scalar_v64,
+            scalar_v65: self.scalar_v65,
+            scalar_v66: self.scalar_v66,
+            scalar_v67: self.scalar_v67,
+            scalar_v69: self.scalar_v69,
+            scalar_v70: self.scalar_v70,
+            scalar_v76: self.scalar_v76,
+            scalar_v79: self.scalar_v79,
+            scalar_v80: self.scalar_v80,
+            scalar_v86: self.scalar_v86,
+            scalar_v87: self.scalar_v87,
+            scalar_v90: self.scalar_v90,
+            scalar_v98: self.scalar_v98,
+            scalar_v106: self.scalar_v106,
+            scalar_v107: self.scalar_v107,
+            scalar_v108: self.scalar_v108,
+            scalar_v109: self.scalar_v109,
+            scalar_v110: self.scalar_v110,
+            scalar_v111: self.scalar_v111,
             scratch: None,
             reactive_scratch: None,
         }
@@ -2379,7 +2507,7 @@ impl Instance {
         assert_eq!(nodes.len(), Self::NODE_COUNT, "generated Verilog-A node count mismatch");
         let mut mapped = [0usize; Self::NODE_COUNT];
         mapped.copy_from_slice(nodes);
-        Self {
+        let mut instance = Self {
             nodes: mapped,
             branches: [0usize; Self::BRANCH_COUNT],
             params: Parameters::new_box(),
@@ -2393,9 +2521,75 @@ impl Instance {
             idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
+            scalar_v2: 0.0,
+            scalar_v3: 0.0,
+            scalar_v4: 0.0,
+            scalar_v5: 0.0,
+            scalar_v6: 0.0,
+            scalar_v7: 0.0,
+            scalar_v8: 0.0,
+            scalar_v9: 0.0,
+            scalar_v10: 0.0,
+            scalar_v11: 0.0,
+            scalar_v12: 0.0,
+            scalar_v13: 0.0,
+            scalar_v14: 0.0,
+            scalar_v15: 0.0,
+            scalar_v16: 0.0,
+            scalar_v17: 0.0,
+            scalar_v18: 0.0,
+            scalar_v19: 0.0,
+            scalar_v20: 0.0,
+            scalar_v21: 0.0,
+            scalar_v22: 0.0,
+            scalar_v23: 0.0,
+            scalar_v24: 0.0,
+            scalar_v25: 0.0,
+            scalar_v26: 0.0,
+            scalar_v27: 0.0,
+            scalar_v28: 0.0,
+            scalar_v29: 0.0,
+            scalar_v47: 0.0,
+            scalar_v48: 0.0,
+            scalar_v49: 0.0,
+            scalar_v50: 0.0,
+            scalar_v51: 0.0,
+            scalar_v52: 0.0,
+            scalar_v53: 0.0,
+            scalar_v54: 0.0,
+            scalar_v55: 0.0,
+            scalar_v56: 0.0,
+            scalar_v57: 0.0,
+            scalar_v58: 0.0,
+            scalar_v59: 0.0,
+            scalar_v60: 0.0,
+            scalar_v61: 0.0,
+            scalar_v62: 0.0,
+            scalar_v63: 0.0,
+            scalar_v64: false,
+            scalar_v65: 0.0,
+            scalar_v66: 0.0,
+            scalar_v67: false,
+            scalar_v69: 0.0,
+            scalar_v70: 0.0,
+            scalar_v76: false,
+            scalar_v79: 0.0,
+            scalar_v80: false,
+            scalar_v86: false,
+            scalar_v87: false,
+            scalar_v90: 0.0,
+            scalar_v98: false,
+            scalar_v106: 0.0,
+            scalar_v107: 0.0,
+            scalar_v108: 0.0,
+            scalar_v109: 0.0,
+            scalar_v110: 0.0,
+            scalar_v111: 0.0,
             scratch: Some(GenericScratch::new_box()),
             reactive_scratch: Some(GenericReactiveScratch::new_box()),
-        }
+        };
+        instance.recompute_instance_static();
+        instance
     }
 
     #[inline]
@@ -2416,6 +2610,70 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
+            scalar_v2,
+            scalar_v3,
+            scalar_v4,
+            scalar_v5,
+            scalar_v6,
+            scalar_v7,
+            scalar_v8,
+            scalar_v9,
+            scalar_v10,
+            scalar_v11,
+            scalar_v12,
+            scalar_v13,
+            scalar_v14,
+            scalar_v15,
+            scalar_v16,
+            scalar_v17,
+            scalar_v18,
+            scalar_v19,
+            scalar_v20,
+            scalar_v21,
+            scalar_v22,
+            scalar_v23,
+            scalar_v24,
+            scalar_v25,
+            scalar_v26,
+            scalar_v27,
+            scalar_v28,
+            scalar_v29,
+            scalar_v47,
+            scalar_v48,
+            scalar_v49,
+            scalar_v50,
+            scalar_v51,
+            scalar_v52,
+            scalar_v53,
+            scalar_v54,
+            scalar_v55,
+            scalar_v56,
+            scalar_v57,
+            scalar_v58,
+            scalar_v59,
+            scalar_v60,
+            scalar_v61,
+            scalar_v62,
+            scalar_v63,
+            scalar_v64,
+            scalar_v65,
+            scalar_v66,
+            scalar_v67,
+            scalar_v69,
+            scalar_v70,
+            scalar_v76,
+            scalar_v79,
+            scalar_v80,
+            scalar_v86,
+            scalar_v87,
+            scalar_v90,
+            scalar_v98,
+            scalar_v106,
+            scalar_v107,
+            scalar_v108,
+            scalar_v109,
+            scalar_v110,
+            scalar_v111,
             scratch: _,
             reactive_scratch: _,
         } = snapshot;
@@ -2433,6 +2691,70 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
+            scalar_v2,
+            scalar_v3,
+            scalar_v4,
+            scalar_v5,
+            scalar_v6,
+            scalar_v7,
+            scalar_v8,
+            scalar_v9,
+            scalar_v10,
+            scalar_v11,
+            scalar_v12,
+            scalar_v13,
+            scalar_v14,
+            scalar_v15,
+            scalar_v16,
+            scalar_v17,
+            scalar_v18,
+            scalar_v19,
+            scalar_v20,
+            scalar_v21,
+            scalar_v22,
+            scalar_v23,
+            scalar_v24,
+            scalar_v25,
+            scalar_v26,
+            scalar_v27,
+            scalar_v28,
+            scalar_v29,
+            scalar_v47,
+            scalar_v48,
+            scalar_v49,
+            scalar_v50,
+            scalar_v51,
+            scalar_v52,
+            scalar_v53,
+            scalar_v54,
+            scalar_v55,
+            scalar_v56,
+            scalar_v57,
+            scalar_v58,
+            scalar_v59,
+            scalar_v60,
+            scalar_v61,
+            scalar_v62,
+            scalar_v63,
+            scalar_v64,
+            scalar_v65,
+            scalar_v66,
+            scalar_v67,
+            scalar_v69,
+            scalar_v70,
+            scalar_v76,
+            scalar_v79,
+            scalar_v80,
+            scalar_v86,
+            scalar_v87,
+            scalar_v90,
+            scalar_v98,
+            scalar_v106,
+            scalar_v107,
+            scalar_v108,
+            scalar_v109,
+            scalar_v110,
+            scalar_v111,
             scratch,
             reactive_scratch,
         };
@@ -2446,1050 +2768,1050 @@ impl Instance {
 
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
         match name.to_ascii_lowercase().as_str() {
-            "dtemp" => { validate_finite_parameter("DTEMP", value)?; self.params.p0 = value; self.mark_param_given(0); Ok(()) }
-            "l" => { validate_parameter("L", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p1 = value; self.mark_param_given(1); Ok(()) }
-            "w" => { validate_parameter("W", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); Ok(()) }
-            "nf" => { validate_parameter("NF", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); Ok(()) }
-            "sa" => { validate_parameter("SA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); Ok(()) }
-            "sb" => { validate_parameter("SB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p5 = value; self.mark_param_given(5); Ok(()) }
-            "sd" => { validate_parameter("SD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p6 = value; self.mark_param_given(6); Ok(()) }
-            "ad" => { validate_parameter("AD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p7 = value; self.mark_param_given(7); Ok(()) }
-            "as" => { validate_parameter("AS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p8 = value; self.mark_param_given(8); Ok(()) }
-            "pd" => { validate_parameter("PD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p9 = value; self.mark_param_given(9); Ok(()) }
-            "ps" => { validate_parameter("PS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p10 = value; self.mark_param_given(10); Ok(()) }
-            "nrd" => { validate_parameter("NRD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p11 = value; self.mark_param_given(11); Ok(()) }
-            "nrs" => { validate_parameter("NRS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p12 = value; self.mark_param_given(12); Ok(()) }
-            "bjtoff" => { validate_parameter("BJTOFF", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p13 = value; self.mark_param_given(13); Ok(()) }
-            "rth0" => { validate_parameter("RTH0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p14 = value; self.mark_param_given(14); Ok(()) }
-            "cth0" => { validate_parameter("CTH0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p15 = value; self.mark_param_given(15); Ok(()) }
-            "nrb" => { validate_parameter("NRB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p16 = value; self.mark_param_given(16); Ok(()) }
-            "frbody" => { validate_finite_parameter("FRBODY", value)?; self.params.p17 = value; self.mark_param_given(17); Ok(()) }
-            "rbdb" => { validate_parameter("RBDB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p18 = value; self.mark_param_given(18); Ok(()) }
-            "rbsb" => { validate_parameter("RBSB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p19 = value; self.mark_param_given(19); Ok(()) }
-            "delvto" => { validate_finite_parameter("DELVTO", value)?; self.params.p20 = value; self.mark_param_given(20); Ok(()) }
-            "soimod" => { validate_parameter("SOIMOD", value, Some((0.0, "0.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p21 = value; self.mark_param_given(21); Ok(()) }
-            "nbc" => { validate_parameter("NBC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); Ok(()) }
-            "nseg" => { validate_parameter("NSEG", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p23 = value; self.mark_param_given(23); Ok(()) }
-            "pdbcp" => { validate_parameter("PDBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p24 = value; self.mark_param_given(24); Ok(()) }
-            "psbcp" => { validate_parameter("PSBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p25 = value; self.mark_param_given(25); Ok(()) }
-            "agbcp" => { validate_parameter("AGBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p26 = value; self.mark_param_given(26); Ok(()) }
-            "agbcp2" => { validate_parameter("AGBCP2", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p27 = value; self.mark_param_given(27); Ok(()) }
-            "agbcpd" => { validate_parameter("AGBCPD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p28 = value; self.mark_param_given(28); Ok(()) }
-            "aebcp" => { validate_parameter("AEBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p29 = value; self.mark_param_given(29); Ok(()) }
-            "ids0mult" => { validate_parameter("IDS0MULT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p30 = value; self.mark_param_given(30); Ok(()) }
-            "u0mult" => { validate_parameter("U0MULT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p31 = value; self.mark_param_given(31); Ok(()) }
-            "mult_i" => { validate_parameter("MULT_I", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p32 = value; self.mark_param_given(32); Ok(()) }
-            "mult_q" => { validate_parameter("MULT_Q", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p33 = value; self.mark_param_given(33); Ok(()) }
-            "mult_fn" => { validate_parameter("MULT_FN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p34 = value; self.mark_param_given(34); Ok(()) }
-            "tnodeout" => { validate_parameter("TNODEOUT", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p35 = value; self.mark_param_given(35); Ok(()) }
-            "shmod" => { validate_parameter("SHMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p36 = value; self.mark_param_given(36); Ok(()) }
-            "type" => { validate_parameter("TYPE", value, Some((-1.0, "-1.0")), false, Some((1.0, "1.0")), false, &[(0.0, "0.0")])?; self.params.p37 = value; self.mark_param_given(37); Ok(()) }
-            "version" => { validate_parameter("VERSION", value, Some((4.0, "4.0")), false, Some((5.0, "5.0")), true, &[])?; self.params.p38 = value; self.mark_param_given(38); Ok(()) }
-            "rgatemod" => { validate_parameter("RGATEMOD", value, Some((0.0, "0.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p39 = value; self.mark_param_given(39); Ok(()) }
-            "rbodymod" => { validate_parameter("RBODYMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p40 = value; self.mark_param_given(40); Ok(()) }
-            "mtrlmod" => { validate_parameter("MTRLMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p41 = value; self.mark_param_given(41); Ok(()) }
-            "vgstcvmod" => { validate_parameter("VGSTCVMOD", value, Some((0.0, "0.0")), false, Some((2.0, "2.0")), false, &[])?; self.params.p42 = value; self.mark_param_given(42); Ok(()) }
-            "gidlmod" => { validate_parameter("GIDLMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p43 = value; self.mark_param_given(43); Ok(()) }
-            "iiimod" => { validate_parameter("IIIMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p44 = value; self.mark_param_given(44); Ok(()) }
-            "eot" => { validate_parameter("EOT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p45 = value; self.mark_param_given(45); Ok(()) }
-            "epsrox" => { validate_parameter("EPSROX", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p46 = value; self.mark_param_given(46); Ok(()) }
-            "epsrsub" => { validate_parameter("EPSRSUB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p47 = value; self.mark_param_given(47); Ok(()) }
-            "ni0sub" => { validate_parameter("NI0SUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p48 = value; self.mark_param_given(48); Ok(()) }
-            "bg0sub" => { validate_parameter("BG0SUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p49 = value; self.mark_param_given(49); Ok(()) }
-            "tbgasub" => { validate_parameter("TBGASUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p50 = value; self.mark_param_given(50); Ok(()) }
-            "tbgbsub" => { validate_parameter("TBGBSUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p51 = value; self.mark_param_given(51); Ok(()) }
-            "phig" => { validate_parameter("PHIG", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p52 = value; self.mark_param_given(52); Ok(()) }
-            "easub" => { validate_finite_parameter("EASUB", value)?; self.params.p53 = value; self.mark_param_given(53); Ok(()) }
-            "leffeot" => { validate_parameter("LEFFEOT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p54 = value; self.mark_param_given(54); Ok(()) }
-            "weffeot" => { validate_finite_parameter("WEFFEOT", value)?; self.params.p55 = value; self.mark_param_given(55); Ok(()) }
-            "vddeot" => { validate_finite_parameter("VDDEOT", value)?; self.params.p56 = value; self.mark_param_given(56); Ok(()) }
-            "tempeot" => { validate_parameter("TEMPEOT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p57 = value; self.mark_param_given(57); Ok(()) }
-            "ados" => { validate_parameter("ADOS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p58 = value; self.mark_param_given(58); Ok(()) }
-            "bdos" => { validate_parameter("BDOS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p59 = value; self.mark_param_given(59); Ok(()) }
-            "epsrgate" => { validate_parameter("EPSRGATE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p60 = value; self.mark_param_given(60); Ok(()) }
-            "capmod" => { validate_parameter("CAPMOD", value, Some((2.0, "2.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p61 = value; self.mark_param_given(61); Ok(()) }
-            "mobmod" => { validate_parameter("MOBMOD", value, Some((1.0, "1.0")), false, Some((4.0, "4.0")), false, &[])?; self.params.p62 = value; self.mark_param_given(62); Ok(()) }
-            "paramchk" => { validate_parameter("PARAMCHK", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p63 = value; self.mark_param_given(63); Ok(()) }
-            "nodechk" => { validate_parameter("NODECHK", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p64 = value; self.mark_param_given(64); Ok(()) }
-            "binunit" => { validate_parameter("BINUNIT", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p65 = value; self.mark_param_given(65); Ok(()) }
-            "tox" => { validate_parameter("TOX", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p66 = value; self.mark_param_given(66); Ok(()) }
-            "toxm" => { validate_parameter("TOXM", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p67 = value; self.mark_param_given(67); Ok(()) }
-            "dtoxcv" => { validate_finite_parameter("DTOXCV", value)?; self.params.p68 = value; self.mark_param_given(68); Ok(()) }
-            "cdsc" => { validate_finite_parameter("CDSC", value)?; self.params.p69 = value; self.mark_param_given(69); Ok(()) }
-            "cdscb" => { validate_finite_parameter("CDSCB", value)?; self.params.p70 = value; self.mark_param_given(70); Ok(()) }
-            "cdscd" => { validate_finite_parameter("CDSCD", value)?; self.params.p71 = value; self.mark_param_given(71); Ok(()) }
-            "cit" => { validate_finite_parameter("CIT", value)?; self.params.p72 = value; self.mark_param_given(72); Ok(()) }
-            "nfactor" => { validate_finite_parameter("NFACTOR", value)?; self.params.p73 = value; self.mark_param_given(73); Ok(()) }
-            "vsat" => { validate_parameter("VSAT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p74 = value; self.mark_param_given(74); Ok(()) }
-            "at" => { validate_finite_parameter("AT", value)?; self.params.p75 = value; self.mark_param_given(75); Ok(()) }
-            "a0" => { validate_finite_parameter("A0", value)?; self.params.p76 = value; self.mark_param_given(76); Ok(()) }
-            "ags" => { validate_finite_parameter("AGS", value)?; self.params.p77 = value; self.mark_param_given(77); Ok(()) }
-            "a1" => { validate_finite_parameter("A1", value)?; self.params.p78 = value; self.mark_param_given(78); Ok(()) }
-            "a2" => { validate_finite_parameter("A2", value)?; self.params.p79 = value; self.mark_param_given(79); Ok(()) }
-            "keta" => { validate_finite_parameter("KETA", value)?; self.params.p80 = value; self.mark_param_given(80); Ok(()) }
-            "nsub" => { validate_parameter("NSUB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p81 = value; self.mark_param_given(81); Ok(()) }
-            "nch" => { validate_parameter("NCH", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p82 = value; self.mark_param_given(82); Ok(()) }
-            "ngate" => { validate_parameter("NGATE", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p83 = value; self.mark_param_given(83); Ok(()) }
-            "nsd" => { validate_parameter("NSD", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p84 = value; self.mark_param_given(84); Ok(()) }
-            "gamma1" => { validate_finite_parameter("GAMMA1", value)?; self.params.p85 = value; self.mark_param_given(85); Ok(()) }
-            "gamma2" => { validate_finite_parameter("GAMMA2", value)?; self.params.p86 = value; self.mark_param_given(86); Ok(()) }
-            "vbx" => { validate_finite_parameter("VBX", value)?; self.params.p87 = value; self.mark_param_given(87); Ok(()) }
-            "vbm" => { validate_finite_parameter("VBM", value)?; self.params.p88 = value; self.mark_param_given(88); Ok(()) }
-            "xt" => { validate_parameter("XT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p89 = value; self.mark_param_given(89); Ok(()) }
-            "k1" => { validate_finite_parameter("K1", value)?; self.params.p90 = value; self.mark_param_given(90); Ok(()) }
-            "kt1" => { validate_finite_parameter("KT1", value)?; self.params.p91 = value; self.mark_param_given(91); Ok(()) }
-            "kt1l" => { validate_finite_parameter("KT1L", value)?; self.params.p92 = value; self.mark_param_given(92); Ok(()) }
-            "kt2" => { validate_finite_parameter("KT2", value)?; self.params.p93 = value; self.mark_param_given(93); Ok(()) }
-            "k2" => { validate_finite_parameter("K2", value)?; self.params.p94 = value; self.mark_param_given(94); Ok(()) }
-            "k3" => { validate_finite_parameter("K3", value)?; self.params.p95 = value; self.mark_param_given(95); Ok(()) }
-            "k3b" => { validate_finite_parameter("K3B", value)?; self.params.p96 = value; self.mark_param_given(96); Ok(()) }
-            "w0" => { validate_finite_parameter("W0", value)?; self.params.p97 = value; self.mark_param_given(97); Ok(()) }
-            "lpeb" => { validate_finite_parameter("LPEB", value)?; self.params.p98 = value; self.mark_param_given(98); Ok(()) }
-            "dvt0" => { validate_finite_parameter("DVT0", value)?; self.params.p99 = value; self.mark_param_given(99); Ok(()) }
-            "dvt1" => { validate_finite_parameter("DVT1", value)?; self.params.p100 = value; self.mark_param_given(100); Ok(()) }
-            "dvt2" => { validate_finite_parameter("DVT2", value)?; self.params.p101 = value; self.mark_param_given(101); Ok(()) }
-            "dvt0w" => { validate_finite_parameter("DVT0W", value)?; self.params.p102 = value; self.mark_param_given(102); Ok(()) }
-            "dvt1w" => { validate_finite_parameter("DVT1W", value)?; self.params.p103 = value; self.mark_param_given(103); Ok(()) }
-            "dvt2w" => { validate_finite_parameter("DVT2W", value)?; self.params.p104 = value; self.mark_param_given(104); Ok(()) }
-            "drout" => { validate_finite_parameter("DROUT", value)?; self.params.p105 = value; self.mark_param_given(105); Ok(()) }
-            "dsub" => { validate_finite_parameter("DSUB", value)?; self.params.p106 = value; self.mark_param_given(106); Ok(()) }
-            "vtho" => { validate_finite_parameter("VTHO", value)?; self.params.p107 = value; self.mark_param_given(107); Ok(()) }
-            "vth0" => { validate_finite_parameter("VTH0", value)?; self.params.p108 = value; self.mark_param_given(108); Ok(()) }
-            "vfb" => { validate_finite_parameter("VFB", value)?; self.params.p109 = value; self.mark_param_given(109); Ok(()) }
-            "ua" => { validate_finite_parameter("UA", value)?; self.params.p110 = value; self.mark_param_given(110); Ok(()) }
-            "ua1" => { validate_finite_parameter("UA1", value)?; self.params.p111 = value; self.mark_param_given(111); Ok(()) }
-            "ub" => { validate_finite_parameter("UB", value)?; self.params.p112 = value; self.mark_param_given(112); Ok(()) }
-            "ub1" => { validate_finite_parameter("UB1", value)?; self.params.p113 = value; self.mark_param_given(113); Ok(()) }
-            "uc" => { validate_finite_parameter("UC", value)?; self.params.p114 = value; self.mark_param_given(114); Ok(()) }
-            "uc1" => { validate_finite_parameter("UC1", value)?; self.params.p115 = value; self.mark_param_given(115); Ok(()) }
-            "u0" => { validate_finite_parameter("U0", value)?; self.params.p116 = value; self.mark_param_given(116); Ok(()) }
-            "eu" => { validate_finite_parameter("EU", value)?; self.params.p117 = value; self.mark_param_given(117); Ok(()) }
-            "ute" => { validate_finite_parameter("UTE", value)?; self.params.p118 = value; self.mark_param_given(118); Ok(()) }
-            "ucs" => { validate_finite_parameter("UCS", value)?; self.params.p119 = value; self.mark_param_given(119); Ok(()) }
-            "ucste" => { validate_finite_parameter("UCSTE", value)?; self.params.p120 = value; self.mark_param_given(120); Ok(()) }
-            "ud" => { validate_finite_parameter("UD", value)?; self.params.p121 = value; self.mark_param_given(121); Ok(()) }
-            "ud1" => { validate_finite_parameter("UD1", value)?; self.params.p122 = value; self.mark_param_given(122); Ok(()) }
-            "ubg1" => { validate_finite_parameter("UBG1", value)?; self.params.p123 = value; self.mark_param_given(123); Ok(()) }
-            "ubg2" => { validate_finite_parameter("UBG2", value)?; self.params.p124 = value; self.mark_param_given(124); Ok(()) }
-            "voff" => { validate_finite_parameter("VOFF", value)?; self.params.p125 = value; self.mark_param_given(125); Ok(()) }
-            "tnom" => { validate_finite_parameter("TNOM", value)?; self.params.p126 = value; self.mark_param_given(126); Ok(()) }
-            "cgso" => { validate_parameter("CGSO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p127 = value; self.mark_param_given(127); Ok(()) }
-            "cgdo" => { validate_parameter("CGDO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p128 = value; self.mark_param_given(128); Ok(()) }
-            "xpart" => { validate_finite_parameter("XPART", value)?; self.params.p129 = value; self.mark_param_given(129); Ok(()) }
-            "delta" => { validate_finite_parameter("DELTA", value)?; self.params.p130 = value; self.mark_param_given(130); Ok(()) }
-            "rsh" => { validate_parameter("RSH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p131 = value; self.mark_param_given(131); Ok(()) }
-            "rdsw" => { validate_parameter("RDSW", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p132 = value; self.mark_param_given(132); Ok(()) }
-            "rsw" => { validate_parameter("RSW", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p133 = value; self.mark_param_given(133); Ok(()) }
-            "rdw" => { validate_parameter("RDW", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p134 = value; self.mark_param_given(134); Ok(()) }
-            "rsc" => { validate_parameter("RSC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p135 = value; self.mark_param_given(135); Ok(()) }
-            "rdc" => { validate_parameter("RDC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p136 = value; self.mark_param_given(136); Ok(()) }
-            "trs" => { validate_finite_parameter("TRS", value)?; self.params.p137 = value; self.mark_param_given(137); Ok(()) }
-            "trd" => { validate_finite_parameter("TRD", value)?; self.params.p138 = value; self.mark_param_given(138); Ok(()) }
-            "rswmin" => { validate_parameter("RSWMIN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p139 = value; self.mark_param_given(139); Ok(()) }
-            "rdwmin" => { validate_parameter("RDWMIN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p140 = value; self.mark_param_given(140); Ok(()) }
-            "prwg" => { validate_finite_parameter("PRWG", value)?; self.params.p141 = value; self.mark_param_given(141); Ok(()) }
-            "prwb" => { validate_finite_parameter("PRWB", value)?; self.params.p142 = value; self.mark_param_given(142); Ok(()) }
-            "prwe" => { validate_finite_parameter("PRWE", value)?; self.params.p143 = value; self.mark_param_given(143); Ok(()) }
-            "prt" => { validate_finite_parameter("PRT", value)?; self.params.p144 = value; self.mark_param_given(144); Ok(()) }
-            "eta0" => { validate_finite_parameter("ETA0", value)?; self.params.p145 = value; self.mark_param_given(145); Ok(()) }
-            "etab" => { validate_finite_parameter("ETAB", value)?; self.params.p146 = value; self.mark_param_given(146); Ok(()) }
-            "eta0cv" => { validate_finite_parameter("ETA0CV", value)?; self.params.p147 = value; self.mark_param_given(147); Ok(()) }
-            "etabcv" => { validate_finite_parameter("ETABCV", value)?; self.params.p148 = value; self.mark_param_given(148); Ok(()) }
-            "pclm" => { validate_finite_parameter("PCLM", value)?; self.params.p149 = value; self.mark_param_given(149); Ok(()) }
-            "pdiblc1" => { validate_finite_parameter("PDIBLC1", value)?; self.params.p150 = value; self.mark_param_given(150); Ok(()) }
-            "pdiblc2" => { validate_finite_parameter("PDIBLC2", value)?; self.params.p151 = value; self.mark_param_given(151); Ok(()) }
-            "pdiblcb" => { validate_finite_parameter("PDIBLCB", value)?; self.params.p152 = value; self.mark_param_given(152); Ok(()) }
-            "pvag" => { validate_finite_parameter("PVAG", value)?; self.params.p153 = value; self.mark_param_given(153); Ok(()) }
-            "tbox" => { validate_parameter("TBOX", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p154 = value; self.mark_param_given(154); Ok(()) }
-            "tsi" => { validate_parameter("TSI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p155 = value; self.mark_param_given(155); Ok(()) }
-            "etsi" => { validate_parameter("ETSI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p156 = value; self.mark_param_given(156); Ok(()) }
-            "xj" => { validate_parameter("XJ", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p157 = value; self.mark_param_given(157); Ok(()) }
-            "agidl" => { validate_finite_parameter("AGIDL", value)?; self.params.p158 = value; self.mark_param_given(158); Ok(()) }
-            "bgidl" => { validate_finite_parameter("BGIDL", value)?; self.params.p159 = value; self.mark_param_given(159); Ok(()) }
-            "bgidl1" => { validate_finite_parameter("BGIDL1", value)?; self.params.p160 = value; self.mark_param_given(160); Ok(()) }
-            "cgidl" => { validate_finite_parameter("CGIDL", value)?; self.params.p161 = value; self.mark_param_given(161); Ok(()) }
-            "rgidl" => { validate_finite_parameter("RGIDL", value)?; self.params.p162 = value; self.mark_param_given(162); Ok(()) }
-            "kgidl" => { validate_finite_parameter("KGIDL", value)?; self.params.p163 = value; self.mark_param_given(163); Ok(()) }
-            "fgidl" => { validate_finite_parameter("FGIDL", value)?; self.params.p164 = value; self.mark_param_given(164); Ok(()) }
-            "agisl" => { validate_finite_parameter("AGISL", value)?; self.params.p165 = value; self.mark_param_given(165); Ok(()) }
-            "bgisl" => { validate_finite_parameter("BGISL", value)?; self.params.p166 = value; self.mark_param_given(166); Ok(()) }
-            "bgisl1" => { validate_finite_parameter("BGISL1", value)?; self.params.p167 = value; self.mark_param_given(167); Ok(()) }
-            "cgisl" => { validate_finite_parameter("CGISL", value)?; self.params.p168 = value; self.mark_param_given(168); Ok(()) }
-            "rgisl" => { validate_finite_parameter("RGISL", value)?; self.params.p169 = value; self.mark_param_given(169); Ok(()) }
-            "kgisl" => { validate_finite_parameter("KGISL", value)?; self.params.p170 = value; self.mark_param_given(170); Ok(()) }
-            "fgisl" => { validate_finite_parameter("FGISL", value)?; self.params.p171 = value; self.mark_param_given(171); Ok(()) }
-            "ndiode" => { validate_parameter("NDIODE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p172 = value; self.mark_param_given(172); Ok(()) }
-            "ndioded" => { validate_parameter("NDIODED", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p173 = value; self.mark_param_given(173); Ok(()) }
-            "xbjt" => { validate_finite_parameter("XBJT", value)?; self.params.p174 = value; self.mark_param_given(174); Ok(()) }
-            "xdif" => { validate_finite_parameter("XDIF", value)?; self.params.p175 = value; self.mark_param_given(175); Ok(()) }
-            "xrec" => { validate_finite_parameter("XREC", value)?; self.params.p176 = value; self.mark_param_given(176); Ok(()) }
-            "xtun" => { validate_finite_parameter("XTUN", value)?; self.params.p177 = value; self.mark_param_given(177); Ok(()) }
-            "xdifd" => { validate_finite_parameter("XDIFD", value)?; self.params.p178 = value; self.mark_param_given(178); Ok(()) }
-            "xrecd" => { validate_finite_parameter("XRECD", value)?; self.params.p179 = value; self.mark_param_given(179); Ok(()) }
-            "xtund" => { validate_finite_parameter("XTUND", value)?; self.params.p180 = value; self.mark_param_given(180); Ok(()) }
-            "pbswg" => { validate_parameter("PBSWG", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p181 = value; self.mark_param_given(181); Ok(()) }
-            "pbswgd" => { validate_parameter("PBSWGD", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p182 = value; self.mark_param_given(182); Ok(()) }
-            "mjswg" => { validate_finite_parameter("MJSWG", value)?; self.params.p183 = value; self.mark_param_given(183); Ok(()) }
-            "mjswgd" => { validate_finite_parameter("MJSWGD", value)?; self.params.p184 = value; self.mark_param_given(184); Ok(()) }
-            "cjswg" => { validate_parameter("CJSWG", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p185 = value; self.mark_param_given(185); Ok(()) }
-            "cjswgd" => { validate_parameter("CJSWGD", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p186 = value; self.mark_param_given(186); Ok(()) }
-            "lint" => { validate_finite_parameter("LINT", value)?; self.params.p187 = value; self.mark_param_given(187); Ok(()) }
-            "ll" => { validate_finite_parameter("LL", value)?; self.params.p188 = value; self.mark_param_given(188); Ok(()) }
-            "llc" => { validate_finite_parameter("LLC", value)?; self.params.p189 = value; self.mark_param_given(189); Ok(()) }
-            "lln" => { validate_finite_parameter("LLN", value)?; self.params.p190 = value; self.mark_param_given(190); Ok(()) }
-            "lw" => { validate_finite_parameter("LW", value)?; self.params.p191 = value; self.mark_param_given(191); Ok(()) }
-            "lwc" => { validate_finite_parameter("LWC", value)?; self.params.p192 = value; self.mark_param_given(192); Ok(()) }
-            "lwn" => { validate_finite_parameter("LWN", value)?; self.params.p193 = value; self.mark_param_given(193); Ok(()) }
-            "lwl" => { validate_finite_parameter("LWL", value)?; self.params.p194 = value; self.mark_param_given(194); Ok(()) }
-            "lwlc" => { validate_finite_parameter("LWLC", value)?; self.params.p195 = value; self.mark_param_given(195); Ok(()) }
-            "wr" => { validate_finite_parameter("WR", value)?; self.params.p196 = value; self.mark_param_given(196); Ok(()) }
-            "wint" => { validate_finite_parameter("WINT", value)?; self.params.p197 = value; self.mark_param_given(197); Ok(()) }
-            "dwg" => { validate_finite_parameter("DWG", value)?; self.params.p198 = value; self.mark_param_given(198); Ok(()) }
-            "dwb" => { validate_finite_parameter("DWB", value)?; self.params.p199 = value; self.mark_param_given(199); Ok(()) }
-            "wl" => { validate_finite_parameter("WL", value)?; self.params.p200 = value; self.mark_param_given(200); Ok(()) }
-            "wlc" => { validate_finite_parameter("WLC", value)?; self.params.p201 = value; self.mark_param_given(201); Ok(()) }
-            "wln" => { validate_finite_parameter("WLN", value)?; self.params.p202 = value; self.mark_param_given(202); Ok(()) }
-            "ww" => { validate_finite_parameter("WW", value)?; self.params.p203 = value; self.mark_param_given(203); Ok(()) }
-            "wwc" => { validate_finite_parameter("WWC", value)?; self.params.p204 = value; self.mark_param_given(204); Ok(()) }
-            "wwn" => { validate_finite_parameter("WWN", value)?; self.params.p205 = value; self.mark_param_given(205); Ok(()) }
-            "wwl" => { validate_finite_parameter("WWL", value)?; self.params.p206 = value; self.mark_param_given(206); Ok(()) }
-            "wwlc" => { validate_finite_parameter("WWLC", value)?; self.params.p207 = value; self.mark_param_given(207); Ok(()) }
-            "b0" => { validate_finite_parameter("B0", value)?; self.params.p208 = value; self.mark_param_given(208); Ok(()) }
-            "b1" => { validate_finite_parameter("B1", value)?; self.params.p209 = value; self.mark_param_given(209); Ok(()) }
-            "cgsl" => { validate_finite_parameter("CGSL", value)?; self.params.p210 = value; self.mark_param_given(210); Ok(()) }
-            "cgdl" => { validate_finite_parameter("CGDL", value)?; self.params.p211 = value; self.mark_param_given(211); Ok(()) }
-            "ckappa" => { validate_parameter("CKAPPA", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p212 = value; self.mark_param_given(212); Ok(()) }
-            "cf" => { validate_parameter("CF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p213 = value; self.mark_param_given(213); Ok(()) }
-            "clc" => { validate_parameter("CLC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p214 = value; self.mark_param_given(214); Ok(()) }
-            "cle" => { validate_finite_parameter("CLE", value)?; self.params.p215 = value; self.mark_param_given(215); Ok(()) }
-            "dwc" => { validate_finite_parameter("DWC", value)?; self.params.p216 = value; self.mark_param_given(216); Ok(()) }
-            "dlc" => { validate_finite_parameter("DLC", value)?; self.params.p217 = value; self.mark_param_given(217); Ok(()) }
-            "alpha0" => { validate_finite_parameter("ALPHA0", value)?; self.params.p218 = value; self.mark_param_given(218); Ok(()) }
-            "noia" => { validate_finite_parameter("NOIA", value)?; self.params.p219 = value; self.mark_param_given(219); Ok(()) }
-            "noib" => { validate_finite_parameter("NOIB", value)?; self.params.p220 = value; self.mark_param_given(220); Ok(()) }
-            "noic" => { validate_finite_parameter("NOIC", value)?; self.params.p221 = value; self.mark_param_given(221); Ok(()) }
-            "fnoimod" => { validate_parameter("FNOIMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p222 = value; self.mark_param_given(222); Ok(()) }
-            "tnoimod" => { validate_parameter("TNOIMOD", value, Some((0.0, "0.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p223 = value; self.mark_param_given(223); Ok(()) }
-            "tnoic" => { validate_finite_parameter("TNOIC", value)?; self.params.p224 = value; self.mark_param_given(224); Ok(()) }
-            "rnoic" => { validate_finite_parameter("RNOIC", value)?; self.params.p225 = value; self.mark_param_given(225); Ok(()) }
-            "scalen" => { validate_parameter("SCALEN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p226 = value; self.mark_param_given(226); Ok(()) }
-            "tnoia" => { validate_finite_parameter("TNOIA", value)?; self.params.p227 = value; self.mark_param_given(227); Ok(()) }
-            "tnoib" => { validate_finite_parameter("TNOIB", value)?; self.params.p228 = value; self.mark_param_given(228); Ok(()) }
-            "rnoia" => { validate_finite_parameter("RNOIA", value)?; self.params.p229 = value; self.mark_param_given(229); Ok(()) }
-            "rnoib" => { validate_finite_parameter("RNOIB", value)?; self.params.p230 = value; self.mark_param_given(230); Ok(()) }
-            "ntnoi" => { validate_parameter("NTNOI", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p231 = value; self.mark_param_given(231); Ok(()) }
-            "saref" => { validate_parameter("SAREF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p232 = value; self.mark_param_given(232); Ok(()) }
-            "sbref" => { validate_parameter("SBREF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p233 = value; self.mark_param_given(233); Ok(()) }
-            "wlod" => { validate_finite_parameter("WLOD", value)?; self.params.p234 = value; self.mark_param_given(234); Ok(()) }
-            "ku0" => { validate_finite_parameter("KU0", value)?; self.params.p235 = value; self.mark_param_given(235); Ok(()) }
-            "kvsat" => { validate_finite_parameter("KVSAT", value)?; self.params.p236 = value; self.mark_param_given(236); Ok(()) }
-            "kvth0" => { validate_finite_parameter("KVTH0", value)?; self.params.p237 = value; self.mark_param_given(237); Ok(()) }
-            "tku0" => { validate_finite_parameter("TKU0", value)?; self.params.p238 = value; self.mark_param_given(238); Ok(()) }
-            "llodku0" => { validate_finite_parameter("LLODKU0", value)?; self.params.p239 = value; self.mark_param_given(239); Ok(()) }
-            "wlodku0" => { validate_finite_parameter("WLODKU0", value)?; self.params.p240 = value; self.mark_param_given(240); Ok(()) }
-            "llodvth" => { validate_finite_parameter("LLODVTH", value)?; self.params.p241 = value; self.mark_param_given(241); Ok(()) }
-            "wlodvth" => { validate_finite_parameter("WLODVTH", value)?; self.params.p242 = value; self.mark_param_given(242); Ok(()) }
-            "lku0" => { validate_finite_parameter("LKU0", value)?; self.params.p243 = value; self.mark_param_given(243); Ok(()) }
-            "wku0" => { validate_finite_parameter("WKU0", value)?; self.params.p244 = value; self.mark_param_given(244); Ok(()) }
-            "pku0" => { validate_finite_parameter("PKU0", value)?; self.params.p245 = value; self.mark_param_given(245); Ok(()) }
-            "lkvth0" => { validate_finite_parameter("LKVTH0", value)?; self.params.p246 = value; self.mark_param_given(246); Ok(()) }
-            "wkvth0" => { validate_finite_parameter("WKVTH0", value)?; self.params.p247 = value; self.mark_param_given(247); Ok(()) }
-            "pkvth0" => { validate_finite_parameter("PKVTH0", value)?; self.params.p248 = value; self.mark_param_given(248); Ok(()) }
-            "stk2" => { validate_finite_parameter("STK2", value)?; self.params.p249 = value; self.mark_param_given(249); Ok(()) }
-            "lodk2" => { validate_finite_parameter("LODK2", value)?; self.params.p250 = value; self.mark_param_given(250); Ok(()) }
-            "steta0" => { validate_finite_parameter("STETA0", value)?; self.params.p251 = value; self.mark_param_given(251); Ok(()) }
-            "lodeta0" => { validate_finite_parameter("LODETA0", value)?; self.params.p252 = value; self.mark_param_given(252); Ok(()) }
-            "steta0cv" => { validate_finite_parameter("STETA0CV", value)?; self.params.p253 = value; self.mark_param_given(253); Ok(()) }
-            "lodeta0cv" => { validate_finite_parameter("LODETA0CV", value)?; self.params.p254 = value; self.mark_param_given(254); Ok(()) }
-            "gbmin" => { validate_finite_parameter("GBMIN", value)?; self.params.p255 = value; self.mark_param_given(255); Ok(()) }
-            "bf" => { validate_finite_parameter("BF", value)?; self.params.p256 = value; self.mark_param_given(256); Ok(()) }
-            "w0flk" => { validate_finite_parameter("W0FLK", value)?; self.params.p257 = value; self.mark_param_given(257); Ok(()) }
-            "dvtp0" => { validate_finite_parameter("DVTP0", value)?; self.params.p258 = value; self.mark_param_given(258); Ok(()) }
-            "ldvtp0" => { validate_finite_parameter("LDVTP0", value)?; self.params.p259 = value; self.mark_param_given(259); Ok(()) }
-            "wdvtp0" => { validate_finite_parameter("WDVTP0", value)?; self.params.p260 = value; self.mark_param_given(260); Ok(()) }
-            "pdvtp0" => { validate_finite_parameter("PDVTP0", value)?; self.params.p261 = value; self.mark_param_given(261); Ok(()) }
-            "dvtp1" => { validate_finite_parameter("DVTP1", value)?; self.params.p262 = value; self.mark_param_given(262); Ok(()) }
-            "ldvtp1" => { validate_finite_parameter("LDVTP1", value)?; self.params.p263 = value; self.mark_param_given(263); Ok(()) }
-            "wdvtp1" => { validate_finite_parameter("WDVTP1", value)?; self.params.p264 = value; self.mark_param_given(264); Ok(()) }
-            "pdvtp1" => { validate_finite_parameter("PDVTP1", value)?; self.params.p265 = value; self.mark_param_given(265); Ok(()) }
-            "dvtp2" => { validate_finite_parameter("DVTP2", value)?; self.params.p266 = value; self.mark_param_given(266); Ok(()) }
-            "ldvtp2" => { validate_finite_parameter("LDVTP2", value)?; self.params.p267 = value; self.mark_param_given(267); Ok(()) }
-            "wdvtp2" => { validate_finite_parameter("WDVTP2", value)?; self.params.p268 = value; self.mark_param_given(268); Ok(()) }
-            "pdvtp2" => { validate_finite_parameter("PDVTP2", value)?; self.params.p269 = value; self.mark_param_given(269); Ok(()) }
-            "dvtp3" => { validate_finite_parameter("DVTP3", value)?; self.params.p270 = value; self.mark_param_given(270); Ok(()) }
-            "ldvtp3" => { validate_finite_parameter("LDVTP3", value)?; self.params.p271 = value; self.mark_param_given(271); Ok(()) }
-            "wdvtp3" => { validate_finite_parameter("WDVTP3", value)?; self.params.p272 = value; self.mark_param_given(272); Ok(()) }
-            "pdvtp3" => { validate_finite_parameter("PDVTP3", value)?; self.params.p273 = value; self.mark_param_given(273); Ok(()) }
-            "dvtp4" => { validate_finite_parameter("DVTP4", value)?; self.params.p274 = value; self.mark_param_given(274); Ok(()) }
-            "ldvtp4" => { validate_finite_parameter("LDVTP4", value)?; self.params.p275 = value; self.mark_param_given(275); Ok(()) }
-            "wdvtp4" => { validate_finite_parameter("WDVTP4", value)?; self.params.p276 = value; self.mark_param_given(276); Ok(()) }
-            "pdvtp4" => { validate_finite_parameter("PDVTP4", value)?; self.params.p277 = value; self.mark_param_given(277); Ok(()) }
-            "minv" => { validate_finite_parameter("MINV", value)?; self.params.p278 = value; self.mark_param_given(278); Ok(()) }
-            "lminv" => { validate_finite_parameter("LMINV", value)?; self.params.p279 = value; self.mark_param_given(279); Ok(()) }
-            "wminv" => { validate_finite_parameter("WMINV", value)?; self.params.p280 = value; self.mark_param_given(280); Ok(()) }
-            "pminv" => { validate_finite_parameter("PMINV", value)?; self.params.p281 = value; self.mark_param_given(281); Ok(()) }
-            "pdits" => { validate_finite_parameter("PDITS", value)?; self.params.p282 = value; self.mark_param_given(282); Ok(()) }
-            "pditsl" => { validate_finite_parameter("PDITSL", value)?; self.params.p283 = value; self.mark_param_given(283); Ok(()) }
-            "pditsd" => { validate_finite_parameter("PDITSD", value)?; self.params.p284 = value; self.mark_param_given(284); Ok(()) }
-            "fprout" => { validate_finite_parameter("FPROUT", value)?; self.params.p285 = value; self.mark_param_given(285); Ok(()) }
-            "lfprout" => { validate_finite_parameter("LFPROUT", value)?; self.params.p286 = value; self.mark_param_given(286); Ok(()) }
-            "lpdits" => { validate_finite_parameter("LPDITS", value)?; self.params.p287 = value; self.mark_param_given(287); Ok(()) }
-            "lpditsd" => { validate_finite_parameter("LPDITSD", value)?; self.params.p288 = value; self.mark_param_given(288); Ok(()) }
-            "wfprout" => { validate_finite_parameter("WFPROUT", value)?; self.params.p289 = value; self.mark_param_given(289); Ok(()) }
-            "wpdits" => { validate_finite_parameter("WPDITS", value)?; self.params.p290 = value; self.mark_param_given(290); Ok(()) }
-            "wpditsd" => { validate_finite_parameter("WPDITSD", value)?; self.params.p291 = value; self.mark_param_given(291); Ok(()) }
-            "pfprout" => { validate_finite_parameter("PFPROUT", value)?; self.params.p292 = value; self.mark_param_given(292); Ok(()) }
-            "ppdits" => { validate_finite_parameter("PPDITS", value)?; self.params.p293 = value; self.mark_param_given(293); Ok(()) }
-            "ppditsd" => { validate_finite_parameter("PPDITSD", value)?; self.params.p294 = value; self.mark_param_given(294); Ok(()) }
-            "em" => { validate_finite_parameter("EM", value)?; self.params.p295 = value; self.mark_param_given(295); Ok(()) }
-            "ef" => { validate_parameter("EF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p296 = value; self.mark_param_given(296); Ok(()) }
-            "af" => { validate_finite_parameter("AF", value)?; self.params.p297 = value; self.mark_param_given(297); Ok(()) }
-            "kf" => { validate_parameter("KF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p298 = value; self.mark_param_given(298); Ok(()) }
-            "noif" => { validate_parameter("NOIF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p299 = value; self.mark_param_given(299); Ok(()) }
-            "k1w1" => { validate_finite_parameter("K1W1", value)?; self.params.p300 = value; self.mark_param_given(300); Ok(()) }
-            "k1w2" => { validate_finite_parameter("K1W2", value)?; self.params.p301 = value; self.mark_param_given(301); Ok(()) }
-            "ketas" => { validate_finite_parameter("KETAS", value)?; self.params.p302 = value; self.mark_param_given(302); Ok(()) }
-            "dwbc" => { validate_finite_parameter("DWBC", value)?; self.params.p303 = value; self.mark_param_given(303); Ok(()) }
-            "beta0" => { validate_finite_parameter("BETA0", value)?; self.params.p304 = value; self.mark_param_given(304); Ok(()) }
-            "beta1" => { validate_finite_parameter("BETA1", value)?; self.params.p305 = value; self.mark_param_given(305); Ok(()) }
-            "beta2" => { validate_finite_parameter("BETA2", value)?; self.params.p306 = value; self.mark_param_given(306); Ok(()) }
-            "vdsatii0" => { validate_finite_parameter("VDSATII0", value)?; self.params.p307 = value; self.mark_param_given(307); Ok(()) }
-            "tii" => { validate_finite_parameter("TII", value)?; self.params.p308 = value; self.mark_param_given(308); Ok(()) }
-            "lii" => { validate_finite_parameter("LII", value)?; self.params.p309 = value; self.mark_param_given(309); Ok(()) }
-            "sii0" => { validate_finite_parameter("SII0", value)?; self.params.p310 = value; self.mark_param_given(310); Ok(()) }
-            "sii1" => { validate_finite_parameter("SII1", value)?; self.params.p311 = value; self.mark_param_given(311); Ok(()) }
-            "sii2" => { validate_finite_parameter("SII2", value)?; self.params.p312 = value; self.mark_param_given(312); Ok(()) }
-            "siid" => { validate_finite_parameter("SIID", value)?; self.params.p313 = value; self.mark_param_given(313); Ok(()) }
-            "fbjtii" => { validate_finite_parameter("FBJTII", value)?; self.params.p314 = value; self.mark_param_given(314); Ok(()) }
-            "ebjtii" => { validate_finite_parameter("EBJTII", value)?; self.params.p315 = value; self.mark_param_given(315); Ok(()) }
-            "cbjtii" => { validate_finite_parameter("CBJTII", value)?; self.params.p316 = value; self.mark_param_given(316); Ok(()) }
-            "vbci" => { validate_finite_parameter("VBCI", value)?; self.params.p317 = value; self.mark_param_given(317); Ok(()) }
-            "abjtii" => { validate_finite_parameter("ABJTII", value)?; self.params.p318 = value; self.mark_param_given(318); Ok(()) }
-            "mbjtii" => { validate_finite_parameter("MBJTII", value)?; self.params.p319 = value; self.mark_param_given(319); Ok(()) }
-            "tvbci" => { validate_finite_parameter("TVBCI", value)?; self.params.p320 = value; self.mark_param_given(320); Ok(()) }
-            "esatii" => { validate_finite_parameter("ESATII", value)?; self.params.p321 = value; self.mark_param_given(321); Ok(()) }
-            "ntun" => { validate_parameter("NTUN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p322 = value; self.mark_param_given(322); Ok(()) }
-            "ntund" => { validate_parameter("NTUND", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p323 = value; self.mark_param_given(323); Ok(()) }
-            "nrecf0" => { validate_parameter("NRECF0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p324 = value; self.mark_param_given(324); Ok(()) }
-            "nrecf0d" => { validate_parameter("NRECF0D", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p325 = value; self.mark_param_given(325); Ok(()) }
-            "nrecr0" => { validate_parameter("NRECR0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p326 = value; self.mark_param_given(326); Ok(()) }
-            "nrecr0d" => { validate_parameter("NRECR0D", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p327 = value; self.mark_param_given(327); Ok(()) }
-            "isbjt" => { validate_parameter("ISBJT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p328 = value; self.mark_param_given(328); Ok(()) }
-            "idbjt" => { validate_parameter("IDBJT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p329 = value; self.mark_param_given(329); Ok(()) }
-            "isdif" => { validate_parameter("ISDIF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p330 = value; self.mark_param_given(330); Ok(()) }
-            "iddif" => { validate_parameter("IDDIF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p331 = value; self.mark_param_given(331); Ok(()) }
-            "isrec" => { validate_parameter("ISREC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p332 = value; self.mark_param_given(332); Ok(()) }
-            "idrec" => { validate_parameter("IDREC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p333 = value; self.mark_param_given(333); Ok(()) }
-            "istun" => { validate_parameter("ISTUN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p334 = value; self.mark_param_given(334); Ok(()) }
-            "idtun" => { validate_parameter("IDTUN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p335 = value; self.mark_param_given(335); Ok(()) }
-            "ln" => { validate_parameter("LN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p336 = value; self.mark_param_given(336); Ok(()) }
-            "vrec0" => { validate_finite_parameter("VREC0", value)?; self.params.p337 = value; self.mark_param_given(337); Ok(()) }
-            "vrec0d" => { validate_finite_parameter("VREC0D", value)?; self.params.p338 = value; self.mark_param_given(338); Ok(()) }
-            "vtun0" => { validate_finite_parameter("VTUN0", value)?; self.params.p339 = value; self.mark_param_given(339); Ok(()) }
-            "vtun0d" => { validate_finite_parameter("VTUN0D", value)?; self.params.p340 = value; self.mark_param_given(340); Ok(()) }
-            "nbjt" => { validate_finite_parameter("NBJT", value)?; self.params.p341 = value; self.mark_param_given(341); Ok(()) }
-            "lbjt0" => { validate_finite_parameter("LBJT0", value)?; self.params.p342 = value; self.mark_param_given(342); Ok(()) }
-            "ldif0" => { validate_finite_parameter("LDIF0", value)?; self.params.p343 = value; self.mark_param_given(343); Ok(()) }
-            "vabjt" => { validate_finite_parameter("VABJT", value)?; self.params.p344 = value; self.mark_param_given(344); Ok(()) }
-            "aely" => { validate_finite_parameter("AELY", value)?; self.params.p345 = value; self.mark_param_given(345); Ok(()) }
-            "ahli" => { validate_finite_parameter("AHLI", value)?; self.params.p346 = value; self.mark_param_given(346); Ok(()) }
-            "ahlid" => { validate_finite_parameter("AHLID", value)?; self.params.p347 = value; self.mark_param_given(347); Ok(()) }
-            "rbody" => { validate_parameter("RBODY", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p348 = value; self.mark_param_given(348); Ok(()) }
-            "rbsh" => { validate_parameter("RBSH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p349 = value; self.mark_param_given(349); Ok(()) }
-            "cgeo" => { validate_finite_parameter("CGEO", value)?; self.params.p350 = value; self.mark_param_given(350); Ok(()) }
-            "tt" => { validate_parameter("TT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p351 = value; self.mark_param_given(351); Ok(()) }
-            "ndif" => { validate_finite_parameter("NDIF", value)?; self.params.p352 = value; self.mark_param_given(352); Ok(()) }
-            "vsdfb" => { validate_finite_parameter("VSDFB", value)?; self.params.p353 = value; self.mark_param_given(353); Ok(()) }
-            "vsdth" => { validate_finite_parameter("VSDTH", value)?; self.params.p354 = value; self.mark_param_given(354); Ok(()) }
-            "csdmin" => { validate_finite_parameter("CSDMIN", value)?; self.params.p355 = value; self.mark_param_given(355); Ok(()) }
-            "asd" => { validate_parameter("ASD", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p356 = value; self.mark_param_given(356); Ok(()) }
-            "csdesw" => { validate_finite_parameter("CSDESW", value)?; self.params.p357 = value; self.mark_param_given(357); Ok(()) }
-            "ntrecf" => { validate_finite_parameter("NTRECF", value)?; self.params.p358 = value; self.mark_param_given(358); Ok(()) }
-            "ntrecr" => { validate_finite_parameter("NTRECR", value)?; self.params.p359 = value; self.mark_param_given(359); Ok(()) }
-            "dlcb" => { validate_finite_parameter("DLCB", value)?; self.params.p360 = value; self.mark_param_given(360); Ok(()) }
-            "fbody" => { validate_finite_parameter("FBODY", value)?; self.params.p361 = value; self.mark_param_given(361); Ok(()) }
-            "tcjswg" => { validate_finite_parameter("TCJSWG", value)?; self.params.p362 = value; self.mark_param_given(362); Ok(()) }
-            "tpbswg" => { validate_finite_parameter("TPBSWG", value)?; self.params.p363 = value; self.mark_param_given(363); Ok(()) }
-            "tcjswgd" => { validate_finite_parameter("TCJSWGD", value)?; self.params.p364 = value; self.mark_param_given(364); Ok(()) }
-            "tpbswgd" => { validate_finite_parameter("TPBSWGD", value)?; self.params.p365 = value; self.mark_param_given(365); Ok(()) }
-            "acde" => { validate_finite_parameter("ACDE", value)?; self.params.p366 = value; self.mark_param_given(366); Ok(()) }
-            "moin" => { validate_finite_parameter("MOIN", value)?; self.params.p367 = value; self.mark_param_given(367); Ok(()) }
-            "noff" => { validate_parameter("NOFF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p368 = value; self.mark_param_given(368); Ok(()) }
-            "noff2" => { validate_parameter("NOFF2", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p369 = value; self.mark_param_given(369); Ok(()) }
-            "delvt" => { validate_finite_parameter("DELVT", value)?; self.params.p370 = value; self.mark_param_given(370); Ok(()) }
-            "kb1" => { validate_finite_parameter("KB1", value)?; self.params.p371 = value; self.mark_param_given(371); Ok(()) }
-            "dlbg" => { validate_finite_parameter("DLBG", value)?; self.params.p372 = value; self.mark_param_given(372); Ok(()) }
-            "cfrcoeff" => { validate_finite_parameter("CFRCOEFF", value)?; self.params.p373 = value; self.mark_param_given(373); Ok(()) }
-            "igbmod" => { validate_parameter("IGBMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p374 = value; self.mark_param_given(374); Ok(()) }
-            "igcmod" => { validate_parameter("IGCMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p375 = value; self.mark_param_given(375); Ok(()) }
-            "toxqm" => { validate_parameter("TOXQM", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p376 = value; self.mark_param_given(376); Ok(()) }
-            "wth0" => { validate_parameter("WTH0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p377 = value; self.mark_param_given(377); Ok(()) }
-            "rhalo" => { validate_parameter("RHALO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p378 = value; self.mark_param_given(378); Ok(()) }
-            "ntox" => { validate_finite_parameter("NTOX", value)?; self.params.p379 = value; self.mark_param_given(379); Ok(()) }
-            "toxref" => { validate_parameter("TOXREF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p380 = value; self.mark_param_given(380); Ok(()) }
-            "ebg" => { validate_finite_parameter("EBG", value)?; self.params.p381 = value; self.mark_param_given(381); Ok(()) }
-            "vevb" => { validate_parameter("VEVB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p382 = value; self.mark_param_given(382); Ok(()) }
-            "alphagb1" => { validate_finite_parameter("ALPHAGB1", value)?; self.params.p383 = value; self.mark_param_given(383); Ok(()) }
-            "alphagb1_t" => { validate_finite_parameter("ALPHAGB1_T", value)?; self.params.p384 = value; self.mark_param_given(384); Ok(()) }
-            "betagb1" => { validate_finite_parameter("BETAGB1", value)?; self.params.p385 = value; self.mark_param_given(385); Ok(()) }
-            "vgb1" => { validate_finite_parameter("VGB1", value)?; self.params.p386 = value; self.mark_param_given(386); Ok(()) }
-            "vecb" => { validate_parameter("VECB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p387 = value; self.mark_param_given(387); Ok(()) }
-            "alphagb2" => { validate_finite_parameter("ALPHAGB2", value)?; self.params.p388 = value; self.mark_param_given(388); Ok(()) }
-            "alphagb2_t" => { validate_finite_parameter("ALPHAGB2_T", value)?; self.params.p389 = value; self.mark_param_given(389); Ok(()) }
-            "betagb2" => { validate_finite_parameter("BETAGB2", value)?; self.params.p390 = value; self.mark_param_given(390); Ok(()) }
-            "vgb2" => { validate_finite_parameter("VGB2", value)?; self.params.p391 = value; self.mark_param_given(391); Ok(()) }
-            "aigbcp2" => { validate_finite_parameter("AIGBCP2", value)?; self.params.p392 = value; self.mark_param_given(392); Ok(()) }
-            "aigbcp2_t" => { validate_finite_parameter("AIGBCP2_T", value)?; self.params.p393 = value; self.mark_param_given(393); Ok(()) }
-            "bigbcp2" => { validate_finite_parameter("BIGBCP2", value)?; self.params.p394 = value; self.mark_param_given(394); Ok(()) }
-            "cigbcp2" => { validate_finite_parameter("CIGBCP2", value)?; self.params.p395 = value; self.mark_param_given(395); Ok(()) }
-            "voxh" => { validate_finite_parameter("VOXH", value)?; self.params.p396 = value; self.mark_param_given(396); Ok(()) }
-            "deltavox" => { validate_finite_parameter("DELTAVOX", value)?; self.params.p397 = value; self.mark_param_given(397); Ok(()) }
-            "aigc" => { validate_finite_parameter("AIGC", value)?; self.params.p398 = value; self.mark_param_given(398); Ok(()) }
-            "aigc1" => { validate_finite_parameter("AIGC1", value)?; self.params.p399 = value; self.mark_param_given(399); Ok(()) }
-            "bigc" => { validate_finite_parameter("BIGC", value)?; self.params.p400 = value; self.mark_param_given(400); Ok(()) }
-            "cigc" => { validate_finite_parameter("CIGC", value)?; self.params.p401 = value; self.mark_param_given(401); Ok(()) }
-            "aigsd" => { validate_finite_parameter("AIGSD", value)?; self.params.p402 = value; self.mark_param_given(402); Ok(()) }
-            "aigsd1" => { validate_finite_parameter("AIGSD1", value)?; self.params.p403 = value; self.mark_param_given(403); Ok(()) }
-            "bigsd" => { validate_finite_parameter("BIGSD", value)?; self.params.p404 = value; self.mark_param_given(404); Ok(()) }
-            "cigsd" => { validate_finite_parameter("CIGSD", value)?; self.params.p405 = value; self.mark_param_given(405); Ok(()) }
-            "nigc" => { validate_finite_parameter("NIGC", value)?; self.params.p406 = value; self.mark_param_given(406); Ok(()) }
-            "pigcd" => { validate_finite_parameter("PIGCD", value)?; self.params.p407 = value; self.mark_param_given(407); Ok(()) }
-            "poxedge" => { validate_finite_parameter("POXEDGE", value)?; self.params.p408 = value; self.mark_param_given(408); Ok(()) }
-            "igt" => { validate_finite_parameter("IGT", value)?; self.params.p409 = value; self.mark_param_given(409); Ok(()) }
-            "dlcig" => { validate_finite_parameter("DLCIG", value)?; self.params.p410 = value; self.mark_param_given(410); Ok(()) }
-            "vbs0pd" => { validate_finite_parameter("VBS0PD", value)?; self.params.p411 = value; self.mark_param_given(411); Ok(()) }
-            "vbs0fd" => { validate_finite_parameter("VBS0FD", value)?; self.params.p412 = value; self.mark_param_given(412); Ok(()) }
-            "vbsa" => { validate_finite_parameter("VBSA", value)?; self.params.p413 = value; self.mark_param_given(413); Ok(()) }
-            "nofffd" => { validate_finite_parameter("NOFFFD", value)?; self.params.p414 = value; self.mark_param_given(414); Ok(()) }
-            "vofffd" => { validate_finite_parameter("VOFFFD", value)?; self.params.p415 = value; self.mark_param_given(415); Ok(()) }
-            "k1b" => { validate_finite_parameter("K1B", value)?; self.params.p416 = value; self.mark_param_given(416); Ok(()) }
-            "k2b" => { validate_finite_parameter("K2B", value)?; self.params.p417 = value; self.mark_param_given(417); Ok(()) }
-            "dk2b" => { validate_finite_parameter("DK2B", value)?; self.params.p418 = value; self.mark_param_given(418); Ok(()) }
-            "dvbd0" => { validate_finite_parameter("DVBD0", value)?; self.params.p419 = value; self.mark_param_given(419); Ok(()) }
-            "dvbd1" => { validate_finite_parameter("DVBD1", value)?; self.params.p420 = value; self.mark_param_given(420); Ok(()) }
-            "moinfd" => { validate_finite_parameter("MOINFD", value)?; self.params.p421 = value; self.mark_param_given(421); Ok(()) }
-            "xrcrg1" => { validate_finite_parameter("XRCRG1", value)?; self.params.p422 = value; self.mark_param_given(422); Ok(()) }
-            "xrcrg2" => { validate_finite_parameter("XRCRG2", value)?; self.params.p423 = value; self.mark_param_given(423); Ok(()) }
-            "rshg" => { validate_parameter("RSHG", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p424 = value; self.mark_param_given(424); Ok(()) }
-            "ngcon" => { validate_parameter("NGCON", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p425 = value; self.mark_param_given(425); Ok(()) }
-            "rver" => { validate_parameter("RVER", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p426 = value; self.mark_param_given(426); Ok(()) }
-            "xgw" => { validate_finite_parameter("XGW", value)?; self.params.p427 = value; self.mark_param_given(427); Ok(()) }
-            "xgl" => { validate_finite_parameter("XGL", value)?; self.params.p428 = value; self.mark_param_given(428); Ok(()) }
-            "rdsmod" => { validate_parameter("RDSMOD", value, Some((0.0, "0.0")), false, Some((2.0, "2.0")), false, &[])?; self.params.p429 = value; self.mark_param_given(429); Ok(()) }
-            "ids0multmod" => { validate_parameter("IDS0MULTMOD", value, Some((0.0, "0.0")), false, Some((2.0, "2.0")), false, &[])?; self.params.p430 = value; self.mark_param_given(430); Ok(()) }
-            "minr" => { validate_parameter("MINR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p431 = value; self.mark_param_given(431); Ok(()) }
-            "fdmod" => { validate_parameter("FDMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p432 = value; self.mark_param_given(432); Ok(()) }
-            "vsce" => { validate_finite_parameter("VSCE", value)?; self.params.p433 = value; self.mark_param_given(433); Ok(()) }
-            "cdsbs" => { validate_finite_parameter("CDSBS", value)?; self.params.p434 = value; self.mark_param_given(434); Ok(()) }
-            "minvcv" => { validate_finite_parameter("MINVCV", value)?; self.params.p435 = value; self.mark_param_given(435); Ok(()) }
-            "lminvcv" => { validate_finite_parameter("LMINVCV", value)?; self.params.p436 = value; self.mark_param_given(436); Ok(()) }
-            "wminvcv" => { validate_finite_parameter("WMINVCV", value)?; self.params.p437 = value; self.mark_param_given(437); Ok(()) }
-            "pminvcv" => { validate_finite_parameter("PMINVCV", value)?; self.params.p438 = value; self.mark_param_given(438); Ok(()) }
-            "voffcv" => { validate_finite_parameter("VOFFCV", value)?; self.params.p439 = value; self.mark_param_given(439); Ok(()) }
-            "lvoffcv" => { validate_finite_parameter("LVOFFCV", value)?; self.params.p440 = value; self.mark_param_given(440); Ok(()) }
-            "wvoffcv" => { validate_finite_parameter("WVOFFCV", value)?; self.params.p441 = value; self.mark_param_given(441); Ok(()) }
-            "pvoffcv" => { validate_finite_parameter("PVOFFCV", value)?; self.params.p442 = value; self.mark_param_given(442); Ok(()) }
-            "lxj" => { validate_finite_parameter("LXJ", value)?; self.params.p443 = value; self.mark_param_given(443); Ok(()) }
-            "lalphagb1" => { validate_finite_parameter("LALPHAGB1", value)?; self.params.p444 = value; self.mark_param_given(444); Ok(()) }
-            "lalphagb1_t" => { validate_finite_parameter("LALPHAGB1_T", value)?; self.params.p445 = value; self.mark_param_given(445); Ok(()) }
-            "lbetagb1" => { validate_finite_parameter("LBETAGB1", value)?; self.params.p446 = value; self.mark_param_given(446); Ok(()) }
-            "lalphagb2" => { validate_finite_parameter("LALPHAGB2", value)?; self.params.p447 = value; self.mark_param_given(447); Ok(()) }
-            "lalphagb2_t" => { validate_finite_parameter("LALPHAGB2_T", value)?; self.params.p448 = value; self.mark_param_given(448); Ok(()) }
-            "lbetagb2" => { validate_finite_parameter("LBETAGB2", value)?; self.params.p449 = value; self.mark_param_given(449); Ok(()) }
-            "laigbcp2" => { validate_finite_parameter("LAIGBCP2", value)?; self.params.p450 = value; self.mark_param_given(450); Ok(()) }
-            "laigbcp2_t" => { validate_finite_parameter("LAIGBCP2_T", value)?; self.params.p451 = value; self.mark_param_given(451); Ok(()) }
-            "lbigbcp2" => { validate_finite_parameter("LBIGBCP2", value)?; self.params.p452 = value; self.mark_param_given(452); Ok(()) }
-            "lcigbcp2" => { validate_finite_parameter("LCIGBCP2", value)?; self.params.p453 = value; self.mark_param_given(453); Ok(()) }
-            "lcgsl" => { validate_finite_parameter("LCGSL", value)?; self.params.p454 = value; self.mark_param_given(454); Ok(()) }
-            "lcgdl" => { validate_finite_parameter("LCGDL", value)?; self.params.p455 = value; self.mark_param_given(455); Ok(()) }
-            "lckappa" => { validate_finite_parameter("LCKAPPA", value)?; self.params.p456 = value; self.mark_param_given(456); Ok(()) }
-            "lndif" => { validate_finite_parameter("LNDIF", value)?; self.params.p457 = value; self.mark_param_given(457); Ok(()) }
-            "lute" => { validate_finite_parameter("LUTE", value)?; self.params.p458 = value; self.mark_param_given(458); Ok(()) }
-            "lkt1" => { validate_finite_parameter("LKT1", value)?; self.params.p459 = value; self.mark_param_given(459); Ok(()) }
-            "lkt1l" => { validate_finite_parameter("LKT1L", value)?; self.params.p460 = value; self.mark_param_given(460); Ok(()) }
-            "lkt2" => { validate_finite_parameter("LKT2", value)?; self.params.p461 = value; self.mark_param_given(461); Ok(()) }
-            "lua1" => { validate_finite_parameter("LUA1", value)?; self.params.p462 = value; self.mark_param_given(462); Ok(()) }
-            "lub1" => { validate_finite_parameter("LUB1", value)?; self.params.p463 = value; self.mark_param_given(463); Ok(()) }
-            "luc1" => { validate_finite_parameter("LUC1", value)?; self.params.p464 = value; self.mark_param_given(464); Ok(()) }
-            "lat" => { validate_finite_parameter("LAT", value)?; self.params.p465 = value; self.mark_param_given(465); Ok(()) }
-            "lprt" => { validate_finite_parameter("LPRT", value)?; self.params.p466 = value; self.mark_param_given(466); Ok(()) }
-            "lntrecf" => { validate_finite_parameter("LNTRECF", value)?; self.params.p467 = value; self.mark_param_given(467); Ok(()) }
-            "lntrecr" => { validate_finite_parameter("LNTRECR", value)?; self.params.p468 = value; self.mark_param_given(468); Ok(()) }
-            "lxbjt" => { validate_finite_parameter("LXBJT", value)?; self.params.p469 = value; self.mark_param_given(469); Ok(()) }
-            "lxdif" => { validate_finite_parameter("LXDIF", value)?; self.params.p470 = value; self.mark_param_given(470); Ok(()) }
-            "lxrec" => { validate_finite_parameter("LXREC", value)?; self.params.p471 = value; self.mark_param_given(471); Ok(()) }
-            "lxtun" => { validate_finite_parameter("LXTUN", value)?; self.params.p472 = value; self.mark_param_given(472); Ok(()) }
-            "lxdifd" => { validate_finite_parameter("LXDIFD", value)?; self.params.p473 = value; self.mark_param_given(473); Ok(()) }
-            "lxrecd" => { validate_finite_parameter("LXRECD", value)?; self.params.p474 = value; self.mark_param_given(474); Ok(()) }
-            "lxtund" => { validate_finite_parameter("LXTUND", value)?; self.params.p475 = value; self.mark_param_given(475); Ok(()) }
-            "laigc" => { validate_finite_parameter("LAIGC", value)?; self.params.p476 = value; self.mark_param_given(476); Ok(()) }
-            "laigc1" => { validate_finite_parameter("LAIGC1", value)?; self.params.p477 = value; self.mark_param_given(477); Ok(()) }
-            "lbigc" => { validate_finite_parameter("LBIGC", value)?; self.params.p478 = value; self.mark_param_given(478); Ok(()) }
-            "lcigc" => { validate_finite_parameter("LCIGC", value)?; self.params.p479 = value; self.mark_param_given(479); Ok(()) }
-            "laigsd" => { validate_finite_parameter("LAIGSD", value)?; self.params.p480 = value; self.mark_param_given(480); Ok(()) }
-            "laigsd1" => { validate_finite_parameter("LAIGSD1", value)?; self.params.p481 = value; self.mark_param_given(481); Ok(()) }
-            "lbigsd" => { validate_finite_parameter("LBIGSD", value)?; self.params.p482 = value; self.mark_param_given(482); Ok(()) }
-            "lcigsd" => { validate_finite_parameter("LCIGSD", value)?; self.params.p483 = value; self.mark_param_given(483); Ok(()) }
-            "lnigc" => { validate_finite_parameter("LNIGC", value)?; self.params.p484 = value; self.mark_param_given(484); Ok(()) }
-            "lpigcd" => { validate_finite_parameter("LPIGCD", value)?; self.params.p485 = value; self.mark_param_given(485); Ok(()) }
-            "lpoxedge" => { validate_finite_parameter("LPOXEDGE", value)?; self.params.p486 = value; self.mark_param_given(486); Ok(()) }
-            "ligt" => { validate_finite_parameter("LIGT", value)?; self.params.p487 = value; self.mark_param_given(487); Ok(()) }
-            "lnch" => { validate_finite_parameter("LNCH", value)?; self.params.p488 = value; self.mark_param_given(488); Ok(()) }
-            "lnsub" => { validate_finite_parameter("LNSUB", value)?; self.params.p489 = value; self.mark_param_given(489); Ok(()) }
-            "lngate" => { validate_finite_parameter("LNGATE", value)?; self.params.p490 = value; self.mark_param_given(490); Ok(()) }
-            "lnsd" => { validate_finite_parameter("LNSD", value)?; self.params.p491 = value; self.mark_param_given(491); Ok(()) }
-            "lvth0" => { validate_finite_parameter("LVTH0", value)?; self.params.p492 = value; self.mark_param_given(492); Ok(()) }
-            "lvfb" => { validate_finite_parameter("LVFB", value)?; self.params.p493 = value; self.mark_param_given(493); Ok(()) }
-            "lk1" => { validate_finite_parameter("LK1", value)?; self.params.p494 = value; self.mark_param_given(494); Ok(()) }
-            "lk1w1" => { validate_finite_parameter("LK1W1", value)?; self.params.p495 = value; self.mark_param_given(495); Ok(()) }
-            "lk1w2" => { validate_finite_parameter("LK1W2", value)?; self.params.p496 = value; self.mark_param_given(496); Ok(()) }
-            "lk2" => { validate_finite_parameter("LK2", value)?; self.params.p497 = value; self.mark_param_given(497); Ok(()) }
-            "lk3" => { validate_finite_parameter("LK3", value)?; self.params.p498 = value; self.mark_param_given(498); Ok(()) }
-            "lk3b" => { validate_finite_parameter("LK3B", value)?; self.params.p499 = value; self.mark_param_given(499); Ok(()) }
-            "lkb1" => { validate_finite_parameter("LKB1", value)?; self.params.p500 = value; self.mark_param_given(500); Ok(()) }
-            "lw0" => { validate_finite_parameter("LW0", value)?; self.params.p501 = value; self.mark_param_given(501); Ok(()) }
-            "llpeb" => { validate_finite_parameter("LLPEB", value)?; self.params.p502 = value; self.mark_param_given(502); Ok(()) }
-            "ldvt0" => { validate_finite_parameter("LDVT0", value)?; self.params.p503 = value; self.mark_param_given(503); Ok(()) }
-            "ldvt1" => { validate_finite_parameter("LDVT1", value)?; self.params.p504 = value; self.mark_param_given(504); Ok(()) }
-            "ldvt2" => { validate_finite_parameter("LDVT2", value)?; self.params.p505 = value; self.mark_param_given(505); Ok(()) }
-            "ldvt0w" => { validate_finite_parameter("LDVT0W", value)?; self.params.p506 = value; self.mark_param_given(506); Ok(()) }
-            "ldvt1w" => { validate_finite_parameter("LDVT1W", value)?; self.params.p507 = value; self.mark_param_given(507); Ok(()) }
-            "ldvt2w" => { validate_finite_parameter("LDVT2W", value)?; self.params.p508 = value; self.mark_param_given(508); Ok(()) }
-            "lu0" => { validate_finite_parameter("LU0", value)?; self.params.p509 = value; self.mark_param_given(509); Ok(()) }
-            "leu" => { validate_finite_parameter("LEU", value)?; self.params.p510 = value; self.mark_param_given(510); Ok(()) }
-            "lua" => { validate_finite_parameter("LUA", value)?; self.params.p511 = value; self.mark_param_given(511); Ok(()) }
-            "lub" => { validate_finite_parameter("LUB", value)?; self.params.p512 = value; self.mark_param_given(512); Ok(()) }
-            "luc" => { validate_finite_parameter("LUC", value)?; self.params.p513 = value; self.mark_param_given(513); Ok(()) }
-            "lud" => { validate_finite_parameter("LUD", value)?; self.params.p514 = value; self.mark_param_given(514); Ok(()) }
-            "lud1" => { validate_finite_parameter("LUD1", value)?; self.params.p515 = value; self.mark_param_given(515); Ok(()) }
-            "lucste" => { validate_finite_parameter("LUCSTE", value)?; self.params.p516 = value; self.mark_param_given(516); Ok(()) }
-            "lucs" => { validate_finite_parameter("LUCS", value)?; self.params.p517 = value; self.mark_param_given(517); Ok(()) }
-            "lvsat" => { validate_finite_parameter("LVSAT", value)?; self.params.p518 = value; self.mark_param_given(518); Ok(()) }
-            "la0" => { validate_finite_parameter("LA0", value)?; self.params.p519 = value; self.mark_param_given(519); Ok(()) }
-            "lags" => { validate_finite_parameter("LAGS", value)?; self.params.p520 = value; self.mark_param_given(520); Ok(()) }
-            "lb0" => { validate_finite_parameter("LB0", value)?; self.params.p521 = value; self.mark_param_given(521); Ok(()) }
-            "lb1" => { validate_finite_parameter("LB1", value)?; self.params.p522 = value; self.mark_param_given(522); Ok(()) }
-            "lketa" => { validate_finite_parameter("LKETA", value)?; self.params.p523 = value; self.mark_param_given(523); Ok(()) }
-            "lketas" => { validate_finite_parameter("LKETAS", value)?; self.params.p524 = value; self.mark_param_given(524); Ok(()) }
-            "la1" => { validate_finite_parameter("LA1", value)?; self.params.p525 = value; self.mark_param_given(525); Ok(()) }
-            "la2" => { validate_finite_parameter("LA2", value)?; self.params.p526 = value; self.mark_param_given(526); Ok(()) }
-            "lrdsw" => { validate_finite_parameter("LRDSW", value)?; self.params.p527 = value; self.mark_param_given(527); Ok(()) }
-            "lrsw" => { validate_finite_parameter("LRSW", value)?; self.params.p528 = value; self.mark_param_given(528); Ok(()) }
-            "lrdw" => { validate_finite_parameter("LRDW", value)?; self.params.p529 = value; self.mark_param_given(529); Ok(()) }
-            "lprwb" => { validate_finite_parameter("LPRWB", value)?; self.params.p530 = value; self.mark_param_given(530); Ok(()) }
-            "lprwe" => { validate_finite_parameter("LPRWE", value)?; self.params.p531 = value; self.mark_param_given(531); Ok(()) }
-            "lprwg" => { validate_finite_parameter("LPRWG", value)?; self.params.p532 = value; self.mark_param_given(532); Ok(()) }
-            "lwr" => { validate_finite_parameter("LWR", value)?; self.params.p533 = value; self.mark_param_given(533); Ok(()) }
-            "lnfactor" => { validate_finite_parameter("LNFACTOR", value)?; self.params.p534 = value; self.mark_param_given(534); Ok(()) }
-            "ldwg" => { validate_finite_parameter("LDWG", value)?; self.params.p535 = value; self.mark_param_given(535); Ok(()) }
-            "ldwb" => { validate_finite_parameter("LDWB", value)?; self.params.p536 = value; self.mark_param_given(536); Ok(()) }
-            "lvoff" => { validate_finite_parameter("LVOFF", value)?; self.params.p537 = value; self.mark_param_given(537); Ok(()) }
-            "leta0" => { validate_finite_parameter("LETA0", value)?; self.params.p538 = value; self.mark_param_given(538); Ok(()) }
-            "letab" => { validate_finite_parameter("LETAB", value)?; self.params.p539 = value; self.mark_param_given(539); Ok(()) }
-            "leta0cv" => { validate_finite_parameter("LETA0CV", value)?; self.params.p540 = value; self.mark_param_given(540); Ok(()) }
-            "letabcv" => { validate_finite_parameter("LETABCV", value)?; self.params.p541 = value; self.mark_param_given(541); Ok(()) }
-            "ldsub" => { validate_finite_parameter("LDSUB", value)?; self.params.p542 = value; self.mark_param_given(542); Ok(()) }
-            "lcit" => { validate_finite_parameter("LCIT", value)?; self.params.p543 = value; self.mark_param_given(543); Ok(()) }
-            "lcdsc" => { validate_finite_parameter("LCDSC", value)?; self.params.p544 = value; self.mark_param_given(544); Ok(()) }
-            "lcdscb" => { validate_finite_parameter("LCDSCB", value)?; self.params.p545 = value; self.mark_param_given(545); Ok(()) }
-            "lcdscd" => { validate_finite_parameter("LCDSCD", value)?; self.params.p546 = value; self.mark_param_given(546); Ok(()) }
-            "lpclm" => { validate_finite_parameter("LPCLM", value)?; self.params.p547 = value; self.mark_param_given(547); Ok(()) }
-            "lpdiblc1" => { validate_finite_parameter("LPDIBLC1", value)?; self.params.p548 = value; self.mark_param_given(548); Ok(()) }
-            "lpdiblc2" => { validate_finite_parameter("LPDIBLC2", value)?; self.params.p549 = value; self.mark_param_given(549); Ok(()) }
-            "lpdiblcb" => { validate_finite_parameter("LPDIBLCB", value)?; self.params.p550 = value; self.mark_param_given(550); Ok(()) }
-            "ldrout" => { validate_finite_parameter("LDROUT", value)?; self.params.p551 = value; self.mark_param_given(551); Ok(()) }
-            "lpvag" => { validate_finite_parameter("LPVAG", value)?; self.params.p552 = value; self.mark_param_given(552); Ok(()) }
-            "ldelta" => { validate_finite_parameter("LDELTA", value)?; self.params.p553 = value; self.mark_param_given(553); Ok(()) }
-            "lalpha0" => { validate_finite_parameter("LALPHA0", value)?; self.params.p554 = value; self.mark_param_given(554); Ok(()) }
-            "lfbjtii" => { validate_finite_parameter("LFBJTII", value)?; self.params.p555 = value; self.mark_param_given(555); Ok(()) }
-            "labjtii" => { validate_finite_parameter("LABJTII", value)?; self.params.p556 = value; self.mark_param_given(556); Ok(()) }
-            "lcbjtii" => { validate_finite_parameter("LCBJTII", value)?; self.params.p557 = value; self.mark_param_given(557); Ok(()) }
-            "lebjtii" => { validate_finite_parameter("LEBJTII", value)?; self.params.p558 = value; self.mark_param_given(558); Ok(()) }
-            "lmbjtii" => { validate_finite_parameter("LMBJTII", value)?; self.params.p559 = value; self.mark_param_given(559); Ok(()) }
-            "lvbci" => { validate_finite_parameter("LVBCI", value)?; self.params.p560 = value; self.mark_param_given(560); Ok(()) }
-            "lbeta0" => { validate_finite_parameter("LBETA0", value)?; self.params.p561 = value; self.mark_param_given(561); Ok(()) }
-            "lbeta1" => { validate_finite_parameter("LBETA1", value)?; self.params.p562 = value; self.mark_param_given(562); Ok(()) }
-            "lbeta2" => { validate_finite_parameter("LBETA2", value)?; self.params.p563 = value; self.mark_param_given(563); Ok(()) }
-            "lvdsatii0" => { validate_finite_parameter("LVDSATII0", value)?; self.params.p564 = value; self.mark_param_given(564); Ok(()) }
-            "llii" => { validate_finite_parameter("LLII", value)?; self.params.p565 = value; self.mark_param_given(565); Ok(()) }
-            "lesatii" => { validate_finite_parameter("LESATII", value)?; self.params.p566 = value; self.mark_param_given(566); Ok(()) }
-            "lsii0" => { validate_finite_parameter("LSII0", value)?; self.params.p567 = value; self.mark_param_given(567); Ok(()) }
-            "lsii1" => { validate_finite_parameter("LSII1", value)?; self.params.p568 = value; self.mark_param_given(568); Ok(()) }
-            "lsii2" => { validate_finite_parameter("LSII2", value)?; self.params.p569 = value; self.mark_param_given(569); Ok(()) }
-            "lsiid" => { validate_finite_parameter("LSIID", value)?; self.params.p570 = value; self.mark_param_given(570); Ok(()) }
-            "lagidl" => { validate_finite_parameter("LAGIDL", value)?; self.params.p571 = value; self.mark_param_given(571); Ok(()) }
-            "lbgidl" => { validate_finite_parameter("LBGIDL", value)?; self.params.p572 = value; self.mark_param_given(572); Ok(()) }
-            "lbgidl1" => { validate_finite_parameter("LBGIDL1", value)?; self.params.p573 = value; self.mark_param_given(573); Ok(()) }
-            "lcgidl" => { validate_finite_parameter("LCGIDL", value)?; self.params.p574 = value; self.mark_param_given(574); Ok(()) }
-            "lrgidl" => { validate_finite_parameter("LRGIDL", value)?; self.params.p575 = value; self.mark_param_given(575); Ok(()) }
-            "lkgidl" => { validate_finite_parameter("LKGIDL", value)?; self.params.p576 = value; self.mark_param_given(576); Ok(()) }
-            "lfgidl" => { validate_finite_parameter("LFGIDL", value)?; self.params.p577 = value; self.mark_param_given(577); Ok(()) }
-            "lagisl" => { validate_finite_parameter("LAGISL", value)?; self.params.p578 = value; self.mark_param_given(578); Ok(()) }
-            "lbgisl" => { validate_finite_parameter("LBGISL", value)?; self.params.p579 = value; self.mark_param_given(579); Ok(()) }
-            "lbgisl1" => { validate_finite_parameter("LBGISL1", value)?; self.params.p580 = value; self.mark_param_given(580); Ok(()) }
-            "lcgisl" => { validate_finite_parameter("LCGISL", value)?; self.params.p581 = value; self.mark_param_given(581); Ok(()) }
-            "lrgisl" => { validate_finite_parameter("LRGISL", value)?; self.params.p582 = value; self.mark_param_given(582); Ok(()) }
-            "lkgisl" => { validate_finite_parameter("LKGISL", value)?; self.params.p583 = value; self.mark_param_given(583); Ok(()) }
-            "lfgisl" => { validate_finite_parameter("LFGISL", value)?; self.params.p584 = value; self.mark_param_given(584); Ok(()) }
-            "lntun" => { validate_finite_parameter("LNTUN", value)?; self.params.p585 = value; self.mark_param_given(585); Ok(()) }
-            "lntund" => { validate_finite_parameter("LNTUND", value)?; self.params.p586 = value; self.mark_param_given(586); Ok(()) }
-            "lndiode" => { validate_finite_parameter("LNDIODE", value)?; self.params.p587 = value; self.mark_param_given(587); Ok(()) }
-            "lndioded" => { validate_finite_parameter("LNDIODED", value)?; self.params.p588 = value; self.mark_param_given(588); Ok(()) }
-            "lnrecf0" => { validate_finite_parameter("LNRECF0", value)?; self.params.p589 = value; self.mark_param_given(589); Ok(()) }
-            "lnrecf0d" => { validate_finite_parameter("LNRECF0D", value)?; self.params.p590 = value; self.mark_param_given(590); Ok(()) }
-            "lnrecr0" => { validate_finite_parameter("LNRECR0", value)?; self.params.p591 = value; self.mark_param_given(591); Ok(()) }
-            "lnrecr0d" => { validate_finite_parameter("LNRECR0D", value)?; self.params.p592 = value; self.mark_param_given(592); Ok(()) }
-            "lisbjt" => { validate_finite_parameter("LISBJT", value)?; self.params.p593 = value; self.mark_param_given(593); Ok(()) }
-            "lidbjt" => { validate_finite_parameter("LIDBJT", value)?; self.params.p594 = value; self.mark_param_given(594); Ok(()) }
-            "lisdif" => { validate_finite_parameter("LISDIF", value)?; self.params.p595 = value; self.mark_param_given(595); Ok(()) }
-            "liddif" => { validate_finite_parameter("LIDDIF", value)?; self.params.p596 = value; self.mark_param_given(596); Ok(()) }
-            "lisrec" => { validate_finite_parameter("LISREC", value)?; self.params.p597 = value; self.mark_param_given(597); Ok(()) }
-            "lidrec" => { validate_finite_parameter("LIDREC", value)?; self.params.p598 = value; self.mark_param_given(598); Ok(()) }
-            "listun" => { validate_finite_parameter("LISTUN", value)?; self.params.p599 = value; self.mark_param_given(599); Ok(()) }
-            "lidtun" => { validate_finite_parameter("LIDTUN", value)?; self.params.p600 = value; self.mark_param_given(600); Ok(()) }
-            "lvrec0" => { validate_finite_parameter("LVREC0", value)?; self.params.p601 = value; self.mark_param_given(601); Ok(()) }
-            "lvrec0d" => { validate_finite_parameter("LVREC0D", value)?; self.params.p602 = value; self.mark_param_given(602); Ok(()) }
-            "lvtun0" => { validate_finite_parameter("LVTUN0", value)?; self.params.p603 = value; self.mark_param_given(603); Ok(()) }
-            "lvtun0d" => { validate_finite_parameter("LVTUN0D", value)?; self.params.p604 = value; self.mark_param_given(604); Ok(()) }
-            "lnbjt" => { validate_finite_parameter("LNBJT", value)?; self.params.p605 = value; self.mark_param_given(605); Ok(()) }
-            "llbjt0" => { validate_finite_parameter("LLBJT0", value)?; self.params.p606 = value; self.mark_param_given(606); Ok(()) }
-            "lvabjt" => { validate_finite_parameter("LVABJT", value)?; self.params.p607 = value; self.mark_param_given(607); Ok(()) }
-            "laely" => { validate_finite_parameter("LAELY", value)?; self.params.p608 = value; self.mark_param_given(608); Ok(()) }
-            "lahli" => { validate_finite_parameter("LAHLI", value)?; self.params.p609 = value; self.mark_param_given(609); Ok(()) }
-            "lahlid" => { validate_finite_parameter("LAHLID", value)?; self.params.p610 = value; self.mark_param_given(610); Ok(()) }
-            "lvsdfb" => { validate_finite_parameter("LVSDFB", value)?; self.params.p611 = value; self.mark_param_given(611); Ok(()) }
-            "lvsdth" => { validate_finite_parameter("LVSDTH", value)?; self.params.p612 = value; self.mark_param_given(612); Ok(()) }
-            "ldelvt" => { validate_finite_parameter("LDELVT", value)?; self.params.p613 = value; self.mark_param_given(613); Ok(()) }
-            "lacde" => { validate_finite_parameter("LACDE", value)?; self.params.p614 = value; self.mark_param_given(614); Ok(()) }
-            "lmoin" => { validate_finite_parameter("LMOIN", value)?; self.params.p615 = value; self.mark_param_given(615); Ok(()) }
-            "lnoff" => { validate_finite_parameter("LNOFF", value)?; self.params.p616 = value; self.mark_param_given(616); Ok(()) }
-            "lnoff2" => { validate_finite_parameter("LNOFF2", value)?; self.params.p617 = value; self.mark_param_given(617); Ok(()) }
-            "lxrcrg1" => { validate_finite_parameter("LXRCRG1", value)?; self.params.p618 = value; self.mark_param_given(618); Ok(()) }
-            "lxrcrg2" => { validate_finite_parameter("LXRCRG2", value)?; self.params.p619 = value; self.mark_param_given(619); Ok(()) }
-            "lvbsa" => { validate_finite_parameter("LVBSA", value)?; self.params.p620 = value; self.mark_param_given(620); Ok(()) }
-            "lvsce" => { validate_finite_parameter("LVSCE", value)?; self.params.p621 = value; self.mark_param_given(621); Ok(()) }
-            "lcdsbs" => { validate_finite_parameter("LCDSBS", value)?; self.params.p622 = value; self.mark_param_given(622); Ok(()) }
-            "lnofffd" => { validate_finite_parameter("LNOFFFD", value)?; self.params.p623 = value; self.mark_param_given(623); Ok(()) }
-            "lvofffd" => { validate_finite_parameter("LVOFFFD", value)?; self.params.p624 = value; self.mark_param_given(624); Ok(()) }
-            "lk1b" => { validate_finite_parameter("LK1B", value)?; self.params.p625 = value; self.mark_param_given(625); Ok(()) }
-            "lk2b" => { validate_finite_parameter("LK2B", value)?; self.params.p626 = value; self.mark_param_given(626); Ok(()) }
-            "ldk2b" => { validate_finite_parameter("LDK2B", value)?; self.params.p627 = value; self.mark_param_given(627); Ok(()) }
-            "ldvbd0" => { validate_finite_parameter("LDVBD0", value)?; self.params.p628 = value; self.mark_param_given(628); Ok(()) }
-            "ldvbd1" => { validate_finite_parameter("LDVBD1", value)?; self.params.p629 = value; self.mark_param_given(629); Ok(()) }
-            "lmoinfd" => { validate_finite_parameter("LMOINFD", value)?; self.params.p630 = value; self.mark_param_given(630); Ok(()) }
-            "lvbs0pd" => { validate_finite_parameter("LVBS0PD", value)?; self.params.p631 = value; self.mark_param_given(631); Ok(()) }
-            "lvbs0fd" => { validate_finite_parameter("LVBS0FD", value)?; self.params.p632 = value; self.mark_param_given(632); Ok(()) }
-            "wxj" => { validate_finite_parameter("WXJ", value)?; self.params.p633 = value; self.mark_param_given(633); Ok(()) }
-            "walphagb1" => { validate_finite_parameter("WALPHAGB1", value)?; self.params.p634 = value; self.mark_param_given(634); Ok(()) }
-            "walphagb1_t" => { validate_finite_parameter("WALPHAGB1_T", value)?; self.params.p635 = value; self.mark_param_given(635); Ok(()) }
-            "wbetagb1" => { validate_finite_parameter("WBETAGB1", value)?; self.params.p636 = value; self.mark_param_given(636); Ok(()) }
-            "walphagb2" => { validate_finite_parameter("WALPHAGB2", value)?; self.params.p637 = value; self.mark_param_given(637); Ok(()) }
-            "walphagb2_t" => { validate_finite_parameter("WALPHAGB2_T", value)?; self.params.p638 = value; self.mark_param_given(638); Ok(()) }
-            "wbetagb2" => { validate_finite_parameter("WBETAGB2", value)?; self.params.p639 = value; self.mark_param_given(639); Ok(()) }
-            "waigbcp2" => { validate_finite_parameter("WAIGBCP2", value)?; self.params.p640 = value; self.mark_param_given(640); Ok(()) }
-            "waigbcp2_t" => { validate_finite_parameter("WAIGBCP2_T", value)?; self.params.p641 = value; self.mark_param_given(641); Ok(()) }
-            "wbigbcp2" => { validate_finite_parameter("WBIGBCP2", value)?; self.params.p642 = value; self.mark_param_given(642); Ok(()) }
-            "wcigbcp2" => { validate_finite_parameter("WCIGBCP2", value)?; self.params.p643 = value; self.mark_param_given(643); Ok(()) }
-            "wcgsl" => { validate_finite_parameter("WCGSL", value)?; self.params.p644 = value; self.mark_param_given(644); Ok(()) }
-            "wcgdl" => { validate_finite_parameter("WCGDL", value)?; self.params.p645 = value; self.mark_param_given(645); Ok(()) }
-            "wckappa" => { validate_finite_parameter("WCKAPPA", value)?; self.params.p646 = value; self.mark_param_given(646); Ok(()) }
-            "wndif" => { validate_finite_parameter("WNDIF", value)?; self.params.p647 = value; self.mark_param_given(647); Ok(()) }
-            "wute" => { validate_finite_parameter("WUTE", value)?; self.params.p648 = value; self.mark_param_given(648); Ok(()) }
-            "wkt1" => { validate_finite_parameter("WKT1", value)?; self.params.p649 = value; self.mark_param_given(649); Ok(()) }
-            "wkt1l" => { validate_finite_parameter("WKT1L", value)?; self.params.p650 = value; self.mark_param_given(650); Ok(()) }
-            "wkt2" => { validate_finite_parameter("WKT2", value)?; self.params.p651 = value; self.mark_param_given(651); Ok(()) }
-            "wua1" => { validate_finite_parameter("WUA1", value)?; self.params.p652 = value; self.mark_param_given(652); Ok(()) }
-            "wub1" => { validate_finite_parameter("WUB1", value)?; self.params.p653 = value; self.mark_param_given(653); Ok(()) }
-            "wuc1" => { validate_finite_parameter("WUC1", value)?; self.params.p654 = value; self.mark_param_given(654); Ok(()) }
-            "wat" => { validate_finite_parameter("WAT", value)?; self.params.p655 = value; self.mark_param_given(655); Ok(()) }
-            "wprt" => { validate_finite_parameter("WPRT", value)?; self.params.p656 = value; self.mark_param_given(656); Ok(()) }
-            "wntrecf" => { validate_finite_parameter("WNTRECF", value)?; self.params.p657 = value; self.mark_param_given(657); Ok(()) }
-            "wntrecr" => { validate_finite_parameter("WNTRECR", value)?; self.params.p658 = value; self.mark_param_given(658); Ok(()) }
-            "wxbjt" => { validate_finite_parameter("WXBJT", value)?; self.params.p659 = value; self.mark_param_given(659); Ok(()) }
-            "wxdif" => { validate_finite_parameter("WXDIF", value)?; self.params.p660 = value; self.mark_param_given(660); Ok(()) }
-            "wxrec" => { validate_finite_parameter("WXREC", value)?; self.params.p661 = value; self.mark_param_given(661); Ok(()) }
-            "wxtun" => { validate_finite_parameter("WXTUN", value)?; self.params.p662 = value; self.mark_param_given(662); Ok(()) }
-            "wxdifd" => { validate_finite_parameter("WXDIFD", value)?; self.params.p663 = value; self.mark_param_given(663); Ok(()) }
-            "wxrecd" => { validate_finite_parameter("WXRECD", value)?; self.params.p664 = value; self.mark_param_given(664); Ok(()) }
-            "wxtund" => { validate_finite_parameter("WXTUND", value)?; self.params.p665 = value; self.mark_param_given(665); Ok(()) }
-            "waigc" => { validate_finite_parameter("WAIGC", value)?; self.params.p666 = value; self.mark_param_given(666); Ok(()) }
-            "waigc1" => { validate_finite_parameter("WAIGC1", value)?; self.params.p667 = value; self.mark_param_given(667); Ok(()) }
-            "wbigc" => { validate_finite_parameter("WBIGC", value)?; self.params.p668 = value; self.mark_param_given(668); Ok(()) }
-            "wcigc" => { validate_finite_parameter("WCIGC", value)?; self.params.p669 = value; self.mark_param_given(669); Ok(()) }
-            "waigsd" => { validate_finite_parameter("WAIGSD", value)?; self.params.p670 = value; self.mark_param_given(670); Ok(()) }
-            "waigsd1" => { validate_finite_parameter("WAIGSD1", value)?; self.params.p671 = value; self.mark_param_given(671); Ok(()) }
-            "wbigsd" => { validate_finite_parameter("WBIGSD", value)?; self.params.p672 = value; self.mark_param_given(672); Ok(()) }
-            "wcigsd" => { validate_finite_parameter("WCIGSD", value)?; self.params.p673 = value; self.mark_param_given(673); Ok(()) }
-            "wnigc" => { validate_finite_parameter("WNIGC", value)?; self.params.p674 = value; self.mark_param_given(674); Ok(()) }
-            "wpigcd" => { validate_finite_parameter("WPIGCD", value)?; self.params.p675 = value; self.mark_param_given(675); Ok(()) }
-            "wpoxedge" => { validate_finite_parameter("WPOXEDGE", value)?; self.params.p676 = value; self.mark_param_given(676); Ok(()) }
-            "wigt" => { validate_finite_parameter("WIGT", value)?; self.params.p677 = value; self.mark_param_given(677); Ok(()) }
-            "wnch" => { validate_finite_parameter("WNCH", value)?; self.params.p678 = value; self.mark_param_given(678); Ok(()) }
-            "wnsub" => { validate_finite_parameter("WNSUB", value)?; self.params.p679 = value; self.mark_param_given(679); Ok(()) }
-            "wngate" => { validate_finite_parameter("WNGATE", value)?; self.params.p680 = value; self.mark_param_given(680); Ok(()) }
-            "wnsd" => { validate_finite_parameter("WNSD", value)?; self.params.p681 = value; self.mark_param_given(681); Ok(()) }
-            "wvth0" => { validate_finite_parameter("WVTH0", value)?; self.params.p682 = value; self.mark_param_given(682); Ok(()) }
-            "wvfb" => { validate_finite_parameter("WVFB", value)?; self.params.p683 = value; self.mark_param_given(683); Ok(()) }
-            "wk1" => { validate_finite_parameter("WK1", value)?; self.params.p684 = value; self.mark_param_given(684); Ok(()) }
-            "wk1w1" => { validate_finite_parameter("WK1W1", value)?; self.params.p685 = value; self.mark_param_given(685); Ok(()) }
-            "wk1w2" => { validate_finite_parameter("WK1W2", value)?; self.params.p686 = value; self.mark_param_given(686); Ok(()) }
-            "wk2" => { validate_finite_parameter("WK2", value)?; self.params.p687 = value; self.mark_param_given(687); Ok(()) }
-            "wk3" => { validate_finite_parameter("WK3", value)?; self.params.p688 = value; self.mark_param_given(688); Ok(()) }
-            "wk3b" => { validate_finite_parameter("WK3B", value)?; self.params.p689 = value; self.mark_param_given(689); Ok(()) }
-            "wkb1" => { validate_finite_parameter("WKB1", value)?; self.params.p690 = value; self.mark_param_given(690); Ok(()) }
-            "ww0" => { validate_finite_parameter("WW0", value)?; self.params.p691 = value; self.mark_param_given(691); Ok(()) }
-            "wlpeb" => { validate_finite_parameter("WLPEB", value)?; self.params.p692 = value; self.mark_param_given(692); Ok(()) }
-            "wdvt0" => { validate_finite_parameter("WDVT0", value)?; self.params.p693 = value; self.mark_param_given(693); Ok(()) }
-            "wdvt1" => { validate_finite_parameter("WDVT1", value)?; self.params.p694 = value; self.mark_param_given(694); Ok(()) }
-            "wdvt2" => { validate_finite_parameter("WDVT2", value)?; self.params.p695 = value; self.mark_param_given(695); Ok(()) }
-            "wdvt0w" => { validate_finite_parameter("WDVT0W", value)?; self.params.p696 = value; self.mark_param_given(696); Ok(()) }
-            "wdvt1w" => { validate_finite_parameter("WDVT1W", value)?; self.params.p697 = value; self.mark_param_given(697); Ok(()) }
-            "wdvt2w" => { validate_finite_parameter("WDVT2W", value)?; self.params.p698 = value; self.mark_param_given(698); Ok(()) }
-            "wu0" => { validate_finite_parameter("WU0", value)?; self.params.p699 = value; self.mark_param_given(699); Ok(()) }
-            "weu" => { validate_finite_parameter("WEU", value)?; self.params.p700 = value; self.mark_param_given(700); Ok(()) }
-            "wua" => { validate_finite_parameter("WUA", value)?; self.params.p701 = value; self.mark_param_given(701); Ok(()) }
-            "wub" => { validate_finite_parameter("WUB", value)?; self.params.p702 = value; self.mark_param_given(702); Ok(()) }
-            "wuc" => { validate_finite_parameter("WUC", value)?; self.params.p703 = value; self.mark_param_given(703); Ok(()) }
-            "wud" => { validate_finite_parameter("WUD", value)?; self.params.p704 = value; self.mark_param_given(704); Ok(()) }
-            "wud1" => { validate_finite_parameter("WUD1", value)?; self.params.p705 = value; self.mark_param_given(705); Ok(()) }
-            "wucste" => { validate_finite_parameter("WUCSTE", value)?; self.params.p706 = value; self.mark_param_given(706); Ok(()) }
-            "wucs" => { validate_finite_parameter("WUCS", value)?; self.params.p707 = value; self.mark_param_given(707); Ok(()) }
-            "wvsat" => { validate_finite_parameter("WVSAT", value)?; self.params.p708 = value; self.mark_param_given(708); Ok(()) }
-            "wa0" => { validate_finite_parameter("WA0", value)?; self.params.p709 = value; self.mark_param_given(709); Ok(()) }
-            "wags" => { validate_finite_parameter("WAGS", value)?; self.params.p710 = value; self.mark_param_given(710); Ok(()) }
-            "wb0" => { validate_finite_parameter("WB0", value)?; self.params.p711 = value; self.mark_param_given(711); Ok(()) }
-            "wb1" => { validate_finite_parameter("WB1", value)?; self.params.p712 = value; self.mark_param_given(712); Ok(()) }
-            "wketa" => { validate_finite_parameter("WKETA", value)?; self.params.p713 = value; self.mark_param_given(713); Ok(()) }
-            "wketas" => { validate_finite_parameter("WKETAS", value)?; self.params.p714 = value; self.mark_param_given(714); Ok(()) }
-            "wa1" => { validate_finite_parameter("WA1", value)?; self.params.p715 = value; self.mark_param_given(715); Ok(()) }
-            "wa2" => { validate_finite_parameter("WA2", value)?; self.params.p716 = value; self.mark_param_given(716); Ok(()) }
-            "wrdsw" => { validate_finite_parameter("WRDSW", value)?; self.params.p717 = value; self.mark_param_given(717); Ok(()) }
-            "wrsw" => { validate_finite_parameter("WRSW", value)?; self.params.p718 = value; self.mark_param_given(718); Ok(()) }
-            "wrdw" => { validate_finite_parameter("WRDW", value)?; self.params.p719 = value; self.mark_param_given(719); Ok(()) }
-            "wprwb" => { validate_finite_parameter("WPRWB", value)?; self.params.p720 = value; self.mark_param_given(720); Ok(()) }
-            "wprwe" => { validate_finite_parameter("WPRWE", value)?; self.params.p721 = value; self.mark_param_given(721); Ok(()) }
-            "wprwg" => { validate_finite_parameter("WPRWG", value)?; self.params.p722 = value; self.mark_param_given(722); Ok(()) }
-            "wwr" => { validate_finite_parameter("WWR", value)?; self.params.p723 = value; self.mark_param_given(723); Ok(()) }
-            "wnfactor" => { validate_finite_parameter("WNFACTOR", value)?; self.params.p724 = value; self.mark_param_given(724); Ok(()) }
-            "wdwg" => { validate_finite_parameter("WDWG", value)?; self.params.p725 = value; self.mark_param_given(725); Ok(()) }
-            "wdwb" => { validate_finite_parameter("WDWB", value)?; self.params.p726 = value; self.mark_param_given(726); Ok(()) }
-            "wvoff" => { validate_finite_parameter("WVOFF", value)?; self.params.p727 = value; self.mark_param_given(727); Ok(()) }
-            "weta0" => { validate_finite_parameter("WETA0", value)?; self.params.p728 = value; self.mark_param_given(728); Ok(()) }
-            "wetab" => { validate_finite_parameter("WETAB", value)?; self.params.p729 = value; self.mark_param_given(729); Ok(()) }
-            "weta0cv" => { validate_finite_parameter("WETA0CV", value)?; self.params.p730 = value; self.mark_param_given(730); Ok(()) }
-            "wetabcv" => { validate_finite_parameter("WETABCV", value)?; self.params.p731 = value; self.mark_param_given(731); Ok(()) }
-            "wdsub" => { validate_finite_parameter("WDSUB", value)?; self.params.p732 = value; self.mark_param_given(732); Ok(()) }
-            "wcit" => { validate_finite_parameter("WCIT", value)?; self.params.p733 = value; self.mark_param_given(733); Ok(()) }
-            "wcdsc" => { validate_finite_parameter("WCDSC", value)?; self.params.p734 = value; self.mark_param_given(734); Ok(()) }
-            "wcdscb" => { validate_finite_parameter("WCDSCB", value)?; self.params.p735 = value; self.mark_param_given(735); Ok(()) }
-            "wcdscd" => { validate_finite_parameter("WCDSCD", value)?; self.params.p736 = value; self.mark_param_given(736); Ok(()) }
-            "wpclm" => { validate_finite_parameter("WPCLM", value)?; self.params.p737 = value; self.mark_param_given(737); Ok(()) }
-            "wpdiblc1" => { validate_finite_parameter("WPDIBLC1", value)?; self.params.p738 = value; self.mark_param_given(738); Ok(()) }
-            "wpdiblc2" => { validate_finite_parameter("WPDIBLC2", value)?; self.params.p739 = value; self.mark_param_given(739); Ok(()) }
-            "wpdiblcb" => { validate_finite_parameter("WPDIBLCB", value)?; self.params.p740 = value; self.mark_param_given(740); Ok(()) }
-            "wdrout" => { validate_finite_parameter("WDROUT", value)?; self.params.p741 = value; self.mark_param_given(741); Ok(()) }
-            "wpvag" => { validate_finite_parameter("WPVAG", value)?; self.params.p742 = value; self.mark_param_given(742); Ok(()) }
-            "wdelta" => { validate_finite_parameter("WDELTA", value)?; self.params.p743 = value; self.mark_param_given(743); Ok(()) }
-            "walpha0" => { validate_finite_parameter("WALPHA0", value)?; self.params.p744 = value; self.mark_param_given(744); Ok(()) }
-            "wfbjtii" => { validate_finite_parameter("WFBJTII", value)?; self.params.p745 = value; self.mark_param_given(745); Ok(()) }
-            "wabjtii" => { validate_finite_parameter("WABJTII", value)?; self.params.p746 = value; self.mark_param_given(746); Ok(()) }
-            "wcbjtii" => { validate_finite_parameter("WCBJTII", value)?; self.params.p747 = value; self.mark_param_given(747); Ok(()) }
-            "webjtii" => { validate_finite_parameter("WEBJTII", value)?; self.params.p748 = value; self.mark_param_given(748); Ok(()) }
-            "wmbjtii" => { validate_finite_parameter("WMBJTII", value)?; self.params.p749 = value; self.mark_param_given(749); Ok(()) }
-            "wvbci" => { validate_finite_parameter("WVBCI", value)?; self.params.p750 = value; self.mark_param_given(750); Ok(()) }
-            "wbeta0" => { validate_finite_parameter("WBETA0", value)?; self.params.p751 = value; self.mark_param_given(751); Ok(()) }
-            "wbeta1" => { validate_finite_parameter("WBETA1", value)?; self.params.p752 = value; self.mark_param_given(752); Ok(()) }
-            "wbeta2" => { validate_finite_parameter("WBETA2", value)?; self.params.p753 = value; self.mark_param_given(753); Ok(()) }
-            "wvdsatii0" => { validate_finite_parameter("WVDSATII0", value)?; self.params.p754 = value; self.mark_param_given(754); Ok(()) }
-            "wlii" => { validate_finite_parameter("WLII", value)?; self.params.p755 = value; self.mark_param_given(755); Ok(()) }
-            "wesatii" => { validate_finite_parameter("WESATII", value)?; self.params.p756 = value; self.mark_param_given(756); Ok(()) }
-            "wsii0" => { validate_finite_parameter("WSII0", value)?; self.params.p757 = value; self.mark_param_given(757); Ok(()) }
-            "wsii1" => { validate_finite_parameter("WSII1", value)?; self.params.p758 = value; self.mark_param_given(758); Ok(()) }
-            "wsii2" => { validate_finite_parameter("WSII2", value)?; self.params.p759 = value; self.mark_param_given(759); Ok(()) }
-            "wsiid" => { validate_finite_parameter("WSIID", value)?; self.params.p760 = value; self.mark_param_given(760); Ok(()) }
-            "wagidl" => { validate_finite_parameter("WAGIDL", value)?; self.params.p761 = value; self.mark_param_given(761); Ok(()) }
-            "wbgidl" => { validate_finite_parameter("WBGIDL", value)?; self.params.p762 = value; self.mark_param_given(762); Ok(()) }
-            "wbgidl1" => { validate_finite_parameter("WBGIDL1", value)?; self.params.p763 = value; self.mark_param_given(763); Ok(()) }
-            "wcgidl" => { validate_finite_parameter("WCGIDL", value)?; self.params.p764 = value; self.mark_param_given(764); Ok(()) }
-            "wrgidl" => { validate_finite_parameter("WRGIDL", value)?; self.params.p765 = value; self.mark_param_given(765); Ok(()) }
-            "wkgidl" => { validate_finite_parameter("WKGIDL", value)?; self.params.p766 = value; self.mark_param_given(766); Ok(()) }
-            "wfgidl" => { validate_finite_parameter("WFGIDL", value)?; self.params.p767 = value; self.mark_param_given(767); Ok(()) }
-            "wagisl" => { validate_finite_parameter("WAGISL", value)?; self.params.p768 = value; self.mark_param_given(768); Ok(()) }
-            "wbgisl" => { validate_finite_parameter("WBGISL", value)?; self.params.p769 = value; self.mark_param_given(769); Ok(()) }
-            "wbgisl1" => { validate_finite_parameter("WBGISL1", value)?; self.params.p770 = value; self.mark_param_given(770); Ok(()) }
-            "wcgisl" => { validate_finite_parameter("WCGISL", value)?; self.params.p771 = value; self.mark_param_given(771); Ok(()) }
-            "wrgisl" => { validate_finite_parameter("WRGISL", value)?; self.params.p772 = value; self.mark_param_given(772); Ok(()) }
-            "wkgisl" => { validate_finite_parameter("WKGISL", value)?; self.params.p773 = value; self.mark_param_given(773); Ok(()) }
-            "wfgisl" => { validate_finite_parameter("WFGISL", value)?; self.params.p774 = value; self.mark_param_given(774); Ok(()) }
-            "wntun" => { validate_finite_parameter("WNTUN", value)?; self.params.p775 = value; self.mark_param_given(775); Ok(()) }
-            "wntund" => { validate_finite_parameter("WNTUND", value)?; self.params.p776 = value; self.mark_param_given(776); Ok(()) }
-            "wndiode" => { validate_finite_parameter("WNDIODE", value)?; self.params.p777 = value; self.mark_param_given(777); Ok(()) }
-            "wndioded" => { validate_finite_parameter("WNDIODED", value)?; self.params.p778 = value; self.mark_param_given(778); Ok(()) }
-            "wnrecf0" => { validate_finite_parameter("WNRECF0", value)?; self.params.p779 = value; self.mark_param_given(779); Ok(()) }
-            "wnrecf0d" => { validate_finite_parameter("WNRECF0D", value)?; self.params.p780 = value; self.mark_param_given(780); Ok(()) }
-            "wnrecr0" => { validate_finite_parameter("WNRECR0", value)?; self.params.p781 = value; self.mark_param_given(781); Ok(()) }
-            "wnrecr0d" => { validate_finite_parameter("WNRECR0D", value)?; self.params.p782 = value; self.mark_param_given(782); Ok(()) }
-            "wisbjt" => { validate_finite_parameter("WISBJT", value)?; self.params.p783 = value; self.mark_param_given(783); Ok(()) }
-            "widbjt" => { validate_finite_parameter("WIDBJT", value)?; self.params.p784 = value; self.mark_param_given(784); Ok(()) }
-            "wisdif" => { validate_finite_parameter("WISDIF", value)?; self.params.p785 = value; self.mark_param_given(785); Ok(()) }
-            "widdif" => { validate_finite_parameter("WIDDIF", value)?; self.params.p786 = value; self.mark_param_given(786); Ok(()) }
-            "wisrec" => { validate_finite_parameter("WISREC", value)?; self.params.p787 = value; self.mark_param_given(787); Ok(()) }
-            "widrec" => { validate_finite_parameter("WIDREC", value)?; self.params.p788 = value; self.mark_param_given(788); Ok(()) }
-            "wistun" => { validate_finite_parameter("WISTUN", value)?; self.params.p789 = value; self.mark_param_given(789); Ok(()) }
-            "widtun" => { validate_finite_parameter("WIDTUN", value)?; self.params.p790 = value; self.mark_param_given(790); Ok(()) }
-            "wvrec0" => { validate_finite_parameter("WVREC0", value)?; self.params.p791 = value; self.mark_param_given(791); Ok(()) }
-            "wvrec0d" => { validate_finite_parameter("WVREC0D", value)?; self.params.p792 = value; self.mark_param_given(792); Ok(()) }
-            "wvtun0" => { validate_finite_parameter("WVTUN0", value)?; self.params.p793 = value; self.mark_param_given(793); Ok(()) }
-            "wvtun0d" => { validate_finite_parameter("WVTUN0D", value)?; self.params.p794 = value; self.mark_param_given(794); Ok(()) }
-            "wnbjt" => { validate_finite_parameter("WNBJT", value)?; self.params.p795 = value; self.mark_param_given(795); Ok(()) }
-            "wlbjt0" => { validate_finite_parameter("WLBJT0", value)?; self.params.p796 = value; self.mark_param_given(796); Ok(()) }
-            "wvabjt" => { validate_finite_parameter("WVABJT", value)?; self.params.p797 = value; self.mark_param_given(797); Ok(()) }
-            "waely" => { validate_finite_parameter("WAELY", value)?; self.params.p798 = value; self.mark_param_given(798); Ok(()) }
-            "wahli" => { validate_finite_parameter("WAHLI", value)?; self.params.p799 = value; self.mark_param_given(799); Ok(()) }
-            "wahlid" => { validate_finite_parameter("WAHLID", value)?; self.params.p800 = value; self.mark_param_given(800); Ok(()) }
-            "wvsdfb" => { validate_finite_parameter("WVSDFB", value)?; self.params.p801 = value; self.mark_param_given(801); Ok(()) }
-            "wvsdth" => { validate_finite_parameter("WVSDTH", value)?; self.params.p802 = value; self.mark_param_given(802); Ok(()) }
-            "wdelvt" => { validate_finite_parameter("WDELVT", value)?; self.params.p803 = value; self.mark_param_given(803); Ok(()) }
-            "wacde" => { validate_finite_parameter("WACDE", value)?; self.params.p804 = value; self.mark_param_given(804); Ok(()) }
-            "wmoin" => { validate_finite_parameter("WMOIN", value)?; self.params.p805 = value; self.mark_param_given(805); Ok(()) }
-            "wnoff" => { validate_finite_parameter("WNOFF", value)?; self.params.p806 = value; self.mark_param_given(806); Ok(()) }
-            "wnoff2" => { validate_finite_parameter("WNOFF2", value)?; self.params.p807 = value; self.mark_param_given(807); Ok(()) }
-            "wxrcrg1" => { validate_finite_parameter("WXRCRG1", value)?; self.params.p808 = value; self.mark_param_given(808); Ok(()) }
-            "wxrcrg2" => { validate_finite_parameter("WXRCRG2", value)?; self.params.p809 = value; self.mark_param_given(809); Ok(()) }
-            "wvbsa" => { validate_finite_parameter("WVBSA", value)?; self.params.p810 = value; self.mark_param_given(810); Ok(()) }
-            "wvsce" => { validate_finite_parameter("WVSCE", value)?; self.params.p811 = value; self.mark_param_given(811); Ok(()) }
-            "wcdsbs" => { validate_finite_parameter("WCDSBS", value)?; self.params.p812 = value; self.mark_param_given(812); Ok(()) }
-            "wnofffd" => { validate_finite_parameter("WNOFFFD", value)?; self.params.p813 = value; self.mark_param_given(813); Ok(()) }
-            "wvofffd" => { validate_finite_parameter("WVOFFFD", value)?; self.params.p814 = value; self.mark_param_given(814); Ok(()) }
-            "wk1b" => { validate_finite_parameter("WK1B", value)?; self.params.p815 = value; self.mark_param_given(815); Ok(()) }
-            "wk2b" => { validate_finite_parameter("WK2B", value)?; self.params.p816 = value; self.mark_param_given(816); Ok(()) }
-            "wdk2b" => { validate_finite_parameter("WDK2B", value)?; self.params.p817 = value; self.mark_param_given(817); Ok(()) }
-            "wdvbd0" => { validate_finite_parameter("WDVBD0", value)?; self.params.p818 = value; self.mark_param_given(818); Ok(()) }
-            "wdvbd1" => { validate_finite_parameter("WDVBD1", value)?; self.params.p819 = value; self.mark_param_given(819); Ok(()) }
-            "wmoinfd" => { validate_finite_parameter("WMOINFD", value)?; self.params.p820 = value; self.mark_param_given(820); Ok(()) }
-            "wvbs0pd" => { validate_finite_parameter("WVBS0PD", value)?; self.params.p821 = value; self.mark_param_given(821); Ok(()) }
-            "wvbs0fd" => { validate_finite_parameter("WVBS0FD", value)?; self.params.p822 = value; self.mark_param_given(822); Ok(()) }
-            "pxj" => { validate_finite_parameter("PXJ", value)?; self.params.p823 = value; self.mark_param_given(823); Ok(()) }
-            "palphagb1" => { validate_finite_parameter("PALPHAGB1", value)?; self.params.p824 = value; self.mark_param_given(824); Ok(()) }
-            "palphagb1_t" => { validate_finite_parameter("PALPHAGB1_T", value)?; self.params.p825 = value; self.mark_param_given(825); Ok(()) }
-            "pbetagb1" => { validate_finite_parameter("PBETAGB1", value)?; self.params.p826 = value; self.mark_param_given(826); Ok(()) }
-            "palphagb2" => { validate_finite_parameter("PALPHAGB2", value)?; self.params.p827 = value; self.mark_param_given(827); Ok(()) }
-            "palphagb2_t" => { validate_finite_parameter("PALPHAGB2_T", value)?; self.params.p828 = value; self.mark_param_given(828); Ok(()) }
-            "pbetagb2" => { validate_finite_parameter("PBETAGB2", value)?; self.params.p829 = value; self.mark_param_given(829); Ok(()) }
-            "paigbcp2" => { validate_finite_parameter("PAIGBCP2", value)?; self.params.p830 = value; self.mark_param_given(830); Ok(()) }
-            "paigbcp2_t" => { validate_finite_parameter("PAIGBCP2_T", value)?; self.params.p831 = value; self.mark_param_given(831); Ok(()) }
-            "pbigbcp2" => { validate_finite_parameter("PBIGBCP2", value)?; self.params.p832 = value; self.mark_param_given(832); Ok(()) }
-            "pcigbcp2" => { validate_finite_parameter("PCIGBCP2", value)?; self.params.p833 = value; self.mark_param_given(833); Ok(()) }
-            "pcgsl" => { validate_finite_parameter("PCGSL", value)?; self.params.p834 = value; self.mark_param_given(834); Ok(()) }
-            "pcgdl" => { validate_finite_parameter("PCGDL", value)?; self.params.p835 = value; self.mark_param_given(835); Ok(()) }
-            "pckappa" => { validate_finite_parameter("PCKAPPA", value)?; self.params.p836 = value; self.mark_param_given(836); Ok(()) }
-            "pndif" => { validate_finite_parameter("PNDIF", value)?; self.params.p837 = value; self.mark_param_given(837); Ok(()) }
-            "pute" => { validate_finite_parameter("PUTE", value)?; self.params.p838 = value; self.mark_param_given(838); Ok(()) }
-            "pkt1" => { validate_finite_parameter("PKT1", value)?; self.params.p839 = value; self.mark_param_given(839); Ok(()) }
-            "pkt1l" => { validate_finite_parameter("PKT1L", value)?; self.params.p840 = value; self.mark_param_given(840); Ok(()) }
-            "pkt2" => { validate_finite_parameter("PKT2", value)?; self.params.p841 = value; self.mark_param_given(841); Ok(()) }
-            "pua1" => { validate_finite_parameter("PUA1", value)?; self.params.p842 = value; self.mark_param_given(842); Ok(()) }
-            "pub1" => { validate_finite_parameter("PUB1", value)?; self.params.p843 = value; self.mark_param_given(843); Ok(()) }
-            "puc1" => { validate_finite_parameter("PUC1", value)?; self.params.p844 = value; self.mark_param_given(844); Ok(()) }
-            "pat" => { validate_finite_parameter("PAT", value)?; self.params.p845 = value; self.mark_param_given(845); Ok(()) }
-            "pprt" => { validate_finite_parameter("PPRT", value)?; self.params.p846 = value; self.mark_param_given(846); Ok(()) }
-            "pntrecf" => { validate_finite_parameter("PNTRECF", value)?; self.params.p847 = value; self.mark_param_given(847); Ok(()) }
-            "pntrecr" => { validate_finite_parameter("PNTRECR", value)?; self.params.p848 = value; self.mark_param_given(848); Ok(()) }
-            "pxbjt" => { validate_finite_parameter("PXBJT", value)?; self.params.p849 = value; self.mark_param_given(849); Ok(()) }
-            "pxdif" => { validate_finite_parameter("PXDIF", value)?; self.params.p850 = value; self.mark_param_given(850); Ok(()) }
-            "pxrec" => { validate_finite_parameter("PXREC", value)?; self.params.p851 = value; self.mark_param_given(851); Ok(()) }
-            "pxtun" => { validate_finite_parameter("PXTUN", value)?; self.params.p852 = value; self.mark_param_given(852); Ok(()) }
-            "pxdifd" => { validate_finite_parameter("PXDIFD", value)?; self.params.p853 = value; self.mark_param_given(853); Ok(()) }
-            "pxrecd" => { validate_finite_parameter("PXRECD", value)?; self.params.p854 = value; self.mark_param_given(854); Ok(()) }
-            "pxtund" => { validate_finite_parameter("PXTUND", value)?; self.params.p855 = value; self.mark_param_given(855); Ok(()) }
-            "paigc" => { validate_finite_parameter("PAIGC", value)?; self.params.p856 = value; self.mark_param_given(856); Ok(()) }
-            "paigc1" => { validate_finite_parameter("PAIGC1", value)?; self.params.p857 = value; self.mark_param_given(857); Ok(()) }
-            "pbigc" => { validate_finite_parameter("PBIGC", value)?; self.params.p858 = value; self.mark_param_given(858); Ok(()) }
-            "pcigc" => { validate_finite_parameter("PCIGC", value)?; self.params.p859 = value; self.mark_param_given(859); Ok(()) }
-            "paigsd" => { validate_finite_parameter("PAIGSD", value)?; self.params.p860 = value; self.mark_param_given(860); Ok(()) }
-            "paigsd1" => { validate_finite_parameter("PAIGSD1", value)?; self.params.p861 = value; self.mark_param_given(861); Ok(()) }
-            "pbigsd" => { validate_finite_parameter("PBIGSD", value)?; self.params.p862 = value; self.mark_param_given(862); Ok(()) }
-            "pcigsd" => { validate_finite_parameter("PCIGSD", value)?; self.params.p863 = value; self.mark_param_given(863); Ok(()) }
-            "pnigc" => { validate_finite_parameter("PNIGC", value)?; self.params.p864 = value; self.mark_param_given(864); Ok(()) }
-            "ppigcd" => { validate_finite_parameter("PPIGCD", value)?; self.params.p865 = value; self.mark_param_given(865); Ok(()) }
-            "ppoxedge" => { validate_finite_parameter("PPOXEDGE", value)?; self.params.p866 = value; self.mark_param_given(866); Ok(()) }
-            "pigt" => { validate_finite_parameter("PIGT", value)?; self.params.p867 = value; self.mark_param_given(867); Ok(()) }
-            "pnch" => { validate_finite_parameter("PNCH", value)?; self.params.p868 = value; self.mark_param_given(868); Ok(()) }
-            "pnsub" => { validate_finite_parameter("PNSUB", value)?; self.params.p869 = value; self.mark_param_given(869); Ok(()) }
-            "pnsd" => { validate_finite_parameter("PNSD", value)?; self.params.p870 = value; self.mark_param_given(870); Ok(()) }
-            "pngate" => { validate_finite_parameter("PNGATE", value)?; self.params.p871 = value; self.mark_param_given(871); Ok(()) }
-            "pvth0" => { validate_finite_parameter("PVTH0", value)?; self.params.p872 = value; self.mark_param_given(872); Ok(()) }
-            "pvfb" => { validate_finite_parameter("PVFB", value)?; self.params.p873 = value; self.mark_param_given(873); Ok(()) }
-            "pk1" => { validate_finite_parameter("PK1", value)?; self.params.p874 = value; self.mark_param_given(874); Ok(()) }
-            "pk1w1" => { validate_finite_parameter("PK1W1", value)?; self.params.p875 = value; self.mark_param_given(875); Ok(()) }
-            "pk1w2" => { validate_finite_parameter("PK1W2", value)?; self.params.p876 = value; self.mark_param_given(876); Ok(()) }
-            "pk2" => { validate_finite_parameter("PK2", value)?; self.params.p877 = value; self.mark_param_given(877); Ok(()) }
-            "pk3" => { validate_finite_parameter("PK3", value)?; self.params.p878 = value; self.mark_param_given(878); Ok(()) }
-            "pk3b" => { validate_finite_parameter("PK3B", value)?; self.params.p879 = value; self.mark_param_given(879); Ok(()) }
-            "pkb1" => { validate_finite_parameter("PKB1", value)?; self.params.p880 = value; self.mark_param_given(880); Ok(()) }
-            "pw0" => { validate_finite_parameter("PW0", value)?; self.params.p881 = value; self.mark_param_given(881); Ok(()) }
-            "plpeb" => { validate_finite_parameter("PLPEB", value)?; self.params.p882 = value; self.mark_param_given(882); Ok(()) }
-            "pdvt0" => { validate_finite_parameter("PDVT0", value)?; self.params.p883 = value; self.mark_param_given(883); Ok(()) }
-            "pdvt1" => { validate_finite_parameter("PDVT1", value)?; self.params.p884 = value; self.mark_param_given(884); Ok(()) }
-            "pdvt2" => { validate_finite_parameter("PDVT2", value)?; self.params.p885 = value; self.mark_param_given(885); Ok(()) }
-            "pdvt0w" => { validate_finite_parameter("PDVT0W", value)?; self.params.p886 = value; self.mark_param_given(886); Ok(()) }
-            "pdvt1w" => { validate_finite_parameter("PDVT1W", value)?; self.params.p887 = value; self.mark_param_given(887); Ok(()) }
-            "pdvt2w" => { validate_finite_parameter("PDVT2W", value)?; self.params.p888 = value; self.mark_param_given(888); Ok(()) }
-            "pu0" => { validate_finite_parameter("PU0", value)?; self.params.p889 = value; self.mark_param_given(889); Ok(()) }
-            "peu" => { validate_finite_parameter("PEU", value)?; self.params.p890 = value; self.mark_param_given(890); Ok(()) }
-            "pua" => { validate_finite_parameter("PUA", value)?; self.params.p891 = value; self.mark_param_given(891); Ok(()) }
-            "pub" => { validate_finite_parameter("PUB", value)?; self.params.p892 = value; self.mark_param_given(892); Ok(()) }
-            "puc" => { validate_finite_parameter("PUC", value)?; self.params.p893 = value; self.mark_param_given(893); Ok(()) }
-            "pud" => { validate_finite_parameter("PUD", value)?; self.params.p894 = value; self.mark_param_given(894); Ok(()) }
-            "pud1" => { validate_finite_parameter("PUD1", value)?; self.params.p895 = value; self.mark_param_given(895); Ok(()) }
-            "pucste" => { validate_finite_parameter("PUCSTE", value)?; self.params.p896 = value; self.mark_param_given(896); Ok(()) }
-            "pucs" => { validate_finite_parameter("PUCS", value)?; self.params.p897 = value; self.mark_param_given(897); Ok(()) }
-            "pvsat" => { validate_finite_parameter("PVSAT", value)?; self.params.p898 = value; self.mark_param_given(898); Ok(()) }
-            "pa0" => { validate_finite_parameter("PA0", value)?; self.params.p899 = value; self.mark_param_given(899); Ok(()) }
-            "pags" => { validate_finite_parameter("PAGS", value)?; self.params.p900 = value; self.mark_param_given(900); Ok(()) }
-            "pb0" => { validate_finite_parameter("PB0", value)?; self.params.p901 = value; self.mark_param_given(901); Ok(()) }
-            "pb1" => { validate_finite_parameter("PB1", value)?; self.params.p902 = value; self.mark_param_given(902); Ok(()) }
-            "pketa" => { validate_finite_parameter("PKETA", value)?; self.params.p903 = value; self.mark_param_given(903); Ok(()) }
-            "pketas" => { validate_finite_parameter("PKETAS", value)?; self.params.p904 = value; self.mark_param_given(904); Ok(()) }
-            "pa1" => { validate_finite_parameter("PA1", value)?; self.params.p905 = value; self.mark_param_given(905); Ok(()) }
-            "pa2" => { validate_finite_parameter("PA2", value)?; self.params.p906 = value; self.mark_param_given(906); Ok(()) }
-            "prdsw" => { validate_finite_parameter("PRDSW", value)?; self.params.p907 = value; self.mark_param_given(907); Ok(()) }
-            "prsw" => { validate_finite_parameter("PRSW", value)?; self.params.p908 = value; self.mark_param_given(908); Ok(()) }
-            "prdw" => { validate_finite_parameter("PRDW", value)?; self.params.p909 = value; self.mark_param_given(909); Ok(()) }
-            "pprwb" => { validate_finite_parameter("PPRWB", value)?; self.params.p910 = value; self.mark_param_given(910); Ok(()) }
-            "pprwe" => { validate_finite_parameter("PPRWE", value)?; self.params.p911 = value; self.mark_param_given(911); Ok(()) }
-            "pprwg" => { validate_finite_parameter("PPRWG", value)?; self.params.p912 = value; self.mark_param_given(912); Ok(()) }
-            "pwr" => { validate_finite_parameter("PWR", value)?; self.params.p913 = value; self.mark_param_given(913); Ok(()) }
-            "pnfactor" => { validate_finite_parameter("PNFACTOR", value)?; self.params.p914 = value; self.mark_param_given(914); Ok(()) }
-            "pdwg" => { validate_finite_parameter("PDWG", value)?; self.params.p915 = value; self.mark_param_given(915); Ok(()) }
-            "pdwb" => { validate_finite_parameter("PDWB", value)?; self.params.p916 = value; self.mark_param_given(916); Ok(()) }
-            "pvoff" => { validate_finite_parameter("PVOFF", value)?; self.params.p917 = value; self.mark_param_given(917); Ok(()) }
-            "peta0" => { validate_finite_parameter("PETA0", value)?; self.params.p918 = value; self.mark_param_given(918); Ok(()) }
-            "petab" => { validate_finite_parameter("PETAB", value)?; self.params.p919 = value; self.mark_param_given(919); Ok(()) }
-            "peta0cv" => { validate_finite_parameter("PETA0CV", value)?; self.params.p920 = value; self.mark_param_given(920); Ok(()) }
-            "petabcv" => { validate_finite_parameter("PETABCV", value)?; self.params.p921 = value; self.mark_param_given(921); Ok(()) }
-            "pdsub" => { validate_finite_parameter("PDSUB", value)?; self.params.p922 = value; self.mark_param_given(922); Ok(()) }
-            "pcit" => { validate_finite_parameter("PCIT", value)?; self.params.p923 = value; self.mark_param_given(923); Ok(()) }
-            "pcdsc" => { validate_finite_parameter("PCDSC", value)?; self.params.p924 = value; self.mark_param_given(924); Ok(()) }
-            "pcdscb" => { validate_finite_parameter("PCDSCB", value)?; self.params.p925 = value; self.mark_param_given(925); Ok(()) }
-            "pcdscd" => { validate_finite_parameter("PCDSCD", value)?; self.params.p926 = value; self.mark_param_given(926); Ok(()) }
-            "ppclm" => { validate_finite_parameter("PPCLM", value)?; self.params.p927 = value; self.mark_param_given(927); Ok(()) }
-            "ppdiblc1" => { validate_finite_parameter("PPDIBLC1", value)?; self.params.p928 = value; self.mark_param_given(928); Ok(()) }
-            "ppdiblc2" => { validate_finite_parameter("PPDIBLC2", value)?; self.params.p929 = value; self.mark_param_given(929); Ok(()) }
-            "ppdiblcb" => { validate_finite_parameter("PPDIBLCB", value)?; self.params.p930 = value; self.mark_param_given(930); Ok(()) }
-            "pdrout" => { validate_finite_parameter("PDROUT", value)?; self.params.p931 = value; self.mark_param_given(931); Ok(()) }
-            "ppvag" => { validate_finite_parameter("PPVAG", value)?; self.params.p932 = value; self.mark_param_given(932); Ok(()) }
-            "pdelta" => { validate_finite_parameter("PDELTA", value)?; self.params.p933 = value; self.mark_param_given(933); Ok(()) }
-            "palpha0" => { validate_finite_parameter("PALPHA0", value)?; self.params.p934 = value; self.mark_param_given(934); Ok(()) }
-            "pfbjtii" => { validate_finite_parameter("PFBJTII", value)?; self.params.p935 = value; self.mark_param_given(935); Ok(()) }
-            "pabjtii" => { validate_finite_parameter("PABJTII", value)?; self.params.p936 = value; self.mark_param_given(936); Ok(()) }
-            "pcbjtii" => { validate_finite_parameter("PCBJTII", value)?; self.params.p937 = value; self.mark_param_given(937); Ok(()) }
-            "pebjtii" => { validate_finite_parameter("PEBJTII", value)?; self.params.p938 = value; self.mark_param_given(938); Ok(()) }
-            "pmbjtii" => { validate_finite_parameter("PMBJTII", value)?; self.params.p939 = value; self.mark_param_given(939); Ok(()) }
-            "pvbci" => { validate_finite_parameter("PVBCI", value)?; self.params.p940 = value; self.mark_param_given(940); Ok(()) }
-            "pbeta0" => { validate_finite_parameter("PBETA0", value)?; self.params.p941 = value; self.mark_param_given(941); Ok(()) }
-            "pbeta1" => { validate_finite_parameter("PBETA1", value)?; self.params.p942 = value; self.mark_param_given(942); Ok(()) }
-            "pbeta2" => { validate_finite_parameter("PBETA2", value)?; self.params.p943 = value; self.mark_param_given(943); Ok(()) }
-            "pvdsatii0" => { validate_finite_parameter("PVDSATII0", value)?; self.params.p944 = value; self.mark_param_given(944); Ok(()) }
-            "plii" => { validate_finite_parameter("PLII", value)?; self.params.p945 = value; self.mark_param_given(945); Ok(()) }
-            "pesatii" => { validate_finite_parameter("PESATII", value)?; self.params.p946 = value; self.mark_param_given(946); Ok(()) }
-            "psii0" => { validate_finite_parameter("PSII0", value)?; self.params.p947 = value; self.mark_param_given(947); Ok(()) }
-            "psii1" => { validate_finite_parameter("PSII1", value)?; self.params.p948 = value; self.mark_param_given(948); Ok(()) }
-            "psii2" => { validate_finite_parameter("PSII2", value)?; self.params.p949 = value; self.mark_param_given(949); Ok(()) }
-            "psiid" => { validate_finite_parameter("PSIID", value)?; self.params.p950 = value; self.mark_param_given(950); Ok(()) }
-            "pagidl" => { validate_finite_parameter("PAGIDL", value)?; self.params.p951 = value; self.mark_param_given(951); Ok(()) }
-            "pbgidl" => { validate_finite_parameter("PBGIDL", value)?; self.params.p952 = value; self.mark_param_given(952); Ok(()) }
-            "pbgidl1" => { validate_finite_parameter("PBGIDL1", value)?; self.params.p953 = value; self.mark_param_given(953); Ok(()) }
-            "pcgidl" => { validate_finite_parameter("PCGIDL", value)?; self.params.p954 = value; self.mark_param_given(954); Ok(()) }
-            "prgidl" => { validate_finite_parameter("PRGIDL", value)?; self.params.p955 = value; self.mark_param_given(955); Ok(()) }
-            "pkgidl" => { validate_finite_parameter("PKGIDL", value)?; self.params.p956 = value; self.mark_param_given(956); Ok(()) }
-            "pfgidl" => { validate_finite_parameter("PFGIDL", value)?; self.params.p957 = value; self.mark_param_given(957); Ok(()) }
-            "pagisl" => { validate_finite_parameter("PAGISL", value)?; self.params.p958 = value; self.mark_param_given(958); Ok(()) }
-            "pbgisl" => { validate_finite_parameter("PBGISL", value)?; self.params.p959 = value; self.mark_param_given(959); Ok(()) }
-            "pbgisl1" => { validate_finite_parameter("PBGISL1", value)?; self.params.p960 = value; self.mark_param_given(960); Ok(()) }
-            "pcgisl" => { validate_finite_parameter("PCGISL", value)?; self.params.p961 = value; self.mark_param_given(961); Ok(()) }
-            "prgisl" => { validate_finite_parameter("PRGISL", value)?; self.params.p962 = value; self.mark_param_given(962); Ok(()) }
-            "pkgisl" => { validate_finite_parameter("PKGISL", value)?; self.params.p963 = value; self.mark_param_given(963); Ok(()) }
-            "pfgisl" => { validate_finite_parameter("PFGISL", value)?; self.params.p964 = value; self.mark_param_given(964); Ok(()) }
-            "pntun" => { validate_finite_parameter("PNTUN", value)?; self.params.p965 = value; self.mark_param_given(965); Ok(()) }
-            "pntund" => { validate_finite_parameter("PNTUND", value)?; self.params.p966 = value; self.mark_param_given(966); Ok(()) }
-            "pndiode" => { validate_finite_parameter("PNDIODE", value)?; self.params.p967 = value; self.mark_param_given(967); Ok(()) }
-            "pndioded" => { validate_finite_parameter("PNDIODED", value)?; self.params.p968 = value; self.mark_param_given(968); Ok(()) }
-            "pnrecf0" => { validate_finite_parameter("PNRECF0", value)?; self.params.p969 = value; self.mark_param_given(969); Ok(()) }
-            "pnrecf0d" => { validate_finite_parameter("PNRECF0D", value)?; self.params.p970 = value; self.mark_param_given(970); Ok(()) }
-            "pnrecr0" => { validate_finite_parameter("PNRECR0", value)?; self.params.p971 = value; self.mark_param_given(971); Ok(()) }
-            "pnrecr0d" => { validate_finite_parameter("PNRECR0D", value)?; self.params.p972 = value; self.mark_param_given(972); Ok(()) }
-            "pisbjt" => { validate_finite_parameter("PISBJT", value)?; self.params.p973 = value; self.mark_param_given(973); Ok(()) }
-            "pidbjt" => { validate_finite_parameter("PIDBJT", value)?; self.params.p974 = value; self.mark_param_given(974); Ok(()) }
-            "pisdif" => { validate_finite_parameter("PISDIF", value)?; self.params.p975 = value; self.mark_param_given(975); Ok(()) }
-            "piddif" => { validate_finite_parameter("PIDDIF", value)?; self.params.p976 = value; self.mark_param_given(976); Ok(()) }
-            "pisrec" => { validate_finite_parameter("PISREC", value)?; self.params.p977 = value; self.mark_param_given(977); Ok(()) }
-            "pidrec" => { validate_finite_parameter("PIDREC", value)?; self.params.p978 = value; self.mark_param_given(978); Ok(()) }
-            "pistun" => { validate_finite_parameter("PISTUN", value)?; self.params.p979 = value; self.mark_param_given(979); Ok(()) }
-            "pidtun" => { validate_finite_parameter("PIDTUN", value)?; self.params.p980 = value; self.mark_param_given(980); Ok(()) }
-            "pvrec0" => { validate_finite_parameter("PVREC0", value)?; self.params.p981 = value; self.mark_param_given(981); Ok(()) }
-            "pvrec0d" => { validate_finite_parameter("PVREC0D", value)?; self.params.p982 = value; self.mark_param_given(982); Ok(()) }
-            "pvtun0" => { validate_finite_parameter("PVTUN0", value)?; self.params.p983 = value; self.mark_param_given(983); Ok(()) }
-            "pvtun0d" => { validate_finite_parameter("PVTUN0D", value)?; self.params.p984 = value; self.mark_param_given(984); Ok(()) }
-            "pnbjt" => { validate_finite_parameter("PNBJT", value)?; self.params.p985 = value; self.mark_param_given(985); Ok(()) }
-            "plbjt0" => { validate_finite_parameter("PLBJT0", value)?; self.params.p986 = value; self.mark_param_given(986); Ok(()) }
-            "pvabjt" => { validate_finite_parameter("PVABJT", value)?; self.params.p987 = value; self.mark_param_given(987); Ok(()) }
-            "paely" => { validate_finite_parameter("PAELY", value)?; self.params.p988 = value; self.mark_param_given(988); Ok(()) }
-            "pahli" => { validate_finite_parameter("PAHLI", value)?; self.params.p989 = value; self.mark_param_given(989); Ok(()) }
-            "pahlid" => { validate_finite_parameter("PAHLID", value)?; self.params.p990 = value; self.mark_param_given(990); Ok(()) }
-            "pvsdfb" => { validate_finite_parameter("PVSDFB", value)?; self.params.p991 = value; self.mark_param_given(991); Ok(()) }
-            "pvsdth" => { validate_finite_parameter("PVSDTH", value)?; self.params.p992 = value; self.mark_param_given(992); Ok(()) }
-            "pdelvt" => { validate_finite_parameter("PDELVT", value)?; self.params.p993 = value; self.mark_param_given(993); Ok(()) }
-            "pacde" => { validate_finite_parameter("PACDE", value)?; self.params.p994 = value; self.mark_param_given(994); Ok(()) }
-            "pmoin" => { validate_finite_parameter("PMOIN", value)?; self.params.p995 = value; self.mark_param_given(995); Ok(()) }
-            "pnoff" => { validate_finite_parameter("PNOFF", value)?; self.params.p996 = value; self.mark_param_given(996); Ok(()) }
-            "pnoff2" => { validate_finite_parameter("PNOFF2", value)?; self.params.p997 = value; self.mark_param_given(997); Ok(()) }
-            "pxrcrg1" => { validate_finite_parameter("PXRCRG1", value)?; self.params.p998 = value; self.mark_param_given(998); Ok(()) }
-            "pxrcrg2" => { validate_finite_parameter("PXRCRG2", value)?; self.params.p999 = value; self.mark_param_given(999); Ok(()) }
-            "pvbsa" => { validate_finite_parameter("PVBSA", value)?; self.params.p1000 = value; self.mark_param_given(1000); Ok(()) }
-            "pvsce" => { validate_finite_parameter("PVSCE", value)?; self.params.p1001 = value; self.mark_param_given(1001); Ok(()) }
-            "pcdsbs" => { validate_finite_parameter("PCDSBS", value)?; self.params.p1002 = value; self.mark_param_given(1002); Ok(()) }
-            "pnofffd" => { validate_finite_parameter("PNOFFFD", value)?; self.params.p1003 = value; self.mark_param_given(1003); Ok(()) }
-            "pvofffd" => { validate_finite_parameter("PVOFFFD", value)?; self.params.p1004 = value; self.mark_param_given(1004); Ok(()) }
-            "pk1b" => { validate_finite_parameter("PK1B", value)?; self.params.p1005 = value; self.mark_param_given(1005); Ok(()) }
-            "pk2b" => { validate_finite_parameter("PK2B", value)?; self.params.p1006 = value; self.mark_param_given(1006); Ok(()) }
-            "pdk2b" => { validate_finite_parameter("PDK2B", value)?; self.params.p1007 = value; self.mark_param_given(1007); Ok(()) }
-            "pdvbd0" => { validate_finite_parameter("PDVBD0", value)?; self.params.p1008 = value; self.mark_param_given(1008); Ok(()) }
-            "pdvbd1" => { validate_finite_parameter("PDVBD1", value)?; self.params.p1009 = value; self.mark_param_given(1009); Ok(()) }
-            "pmoinfd" => { validate_finite_parameter("PMOINFD", value)?; self.params.p1010 = value; self.mark_param_given(1010); Ok(()) }
-            "pvbs0pd" => { validate_finite_parameter("PVBS0PD", value)?; self.params.p1011 = value; self.mark_param_given(1011); Ok(()) }
-            "pvbs0fd" => { validate_finite_parameter("PVBS0FD", value)?; self.params.p1012 = value; self.mark_param_given(1012); Ok(()) }
-            "nlx" => { validate_finite_parameter("NLX", value)?; self.params.p1013 = value; self.mark_param_given(1013); Ok(()) }
-            "lnlx" => { validate_finite_parameter("LNLX", value)?; self.params.p1014 = value; self.mark_param_given(1014); Ok(()) }
-            "wnlx" => { validate_finite_parameter("WNLX", value)?; self.params.p1015 = value; self.mark_param_given(1015); Ok(()) }
-            "pnlx" => { validate_finite_parameter("PNLX", value)?; self.params.p1016 = value; self.mark_param_given(1016); Ok(()) }
-            "ngidl" => { validate_finite_parameter("NGIDL", value)?; self.params.p1017 = value; self.mark_param_given(1017); Ok(()) }
-            "lngidl" => { validate_finite_parameter("LNGIDL", value)?; self.params.p1018 = value; self.mark_param_given(1018); Ok(()) }
-            "wngidl" => { validate_finite_parameter("WNGIDL", value)?; self.params.p1019 = value; self.mark_param_given(1019); Ok(()) }
-            "pngidl" => { validate_finite_parameter("PNGIDL", value)?; self.params.p1020 = value; self.mark_param_given(1020); Ok(()) }
-            "lpe0" => { validate_finite_parameter("LPE0", value)?; self.params.p1021 = value; self.mark_param_given(1021); Ok(()) }
-            "egidl" => { validate_finite_parameter("EGIDL", value)?; self.params.p1022 = value; self.mark_param_given(1022); Ok(()) }
-            "egisl" => { validate_finite_parameter("EGISL", value)?; self.params.p1023 = value; self.mark_param_given(1023); Ok(()) }
-            "llpe0" => { validate_finite_parameter("LLPE0", value)?; self.params.p1024 = value; self.mark_param_given(1024); Ok(()) }
-            "legidl" => { validate_finite_parameter("LEGIDL", value)?; self.params.p1025 = value; self.mark_param_given(1025); Ok(()) }
-            "legisl" => { validate_finite_parameter("LEGISL", value)?; self.params.p1026 = value; self.mark_param_given(1026); Ok(()) }
-            "wlpe0" => { validate_finite_parameter("WLPE0", value)?; self.params.p1027 = value; self.mark_param_given(1027); Ok(()) }
-            "wegidl" => { validate_finite_parameter("WEGIDL", value)?; self.params.p1028 = value; self.mark_param_given(1028); Ok(()) }
-            "wegisl" => { validate_finite_parameter("WEGISL", value)?; self.params.p1029 = value; self.mark_param_given(1029); Ok(()) }
-            "plpe0" => { validate_finite_parameter("PLPE0", value)?; self.params.p1030 = value; self.mark_param_given(1030); Ok(()) }
-            "pegidl" => { validate_finite_parameter("PEGIDL", value)?; self.params.p1031 = value; self.mark_param_given(1031); Ok(()) }
-            "pegisl" => { validate_finite_parameter("PEGISL", value)?; self.params.p1032 = value; self.mark_param_given(1032); Ok(()) }
-            "eggbcp2" => { validate_finite_parameter("EGGBCP2", value)?; self.params.p1033 = value; self.mark_param_given(1033); Ok(()) }
-            "eggdep" => { validate_finite_parameter("EGGDEP", value)?; self.params.p1034 = value; self.mark_param_given(1034); Ok(()) }
-            "agb1" => { validate_finite_parameter("AGB1", value)?; self.params.p1035 = value; self.mark_param_given(1035); Ok(()) }
-            "bgb1" => { validate_finite_parameter("BGB1", value)?; self.params.p1036 = value; self.mark_param_given(1036); Ok(()) }
-            "agb2" => { validate_finite_parameter("AGB2", value)?; self.params.p1037 = value; self.mark_param_given(1037); Ok(()) }
-            "bgb2" => { validate_finite_parameter("BGB2", value)?; self.params.p1038 = value; self.mark_param_given(1038); Ok(()) }
-            "agbc2n" => { validate_finite_parameter("AGBC2N", value)?; self.params.p1039 = value; self.mark_param_given(1039); Ok(()) }
-            "agbc2p" => { validate_finite_parameter("AGBC2P", value)?; self.params.p1040 = value; self.mark_param_given(1040); Ok(()) }
-            "bgbc2n" => { validate_finite_parameter("BGBC2N", value)?; self.params.p1041 = value; self.mark_param_given(1041); Ok(()) }
-            "bgbc2p" => { validate_finite_parameter("BGBC2P", value)?; self.params.p1042 = value; self.mark_param_given(1042); Ok(()) }
-            "vtm00" => { validate_parameter("VTM00", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p1043 = value; self.mark_param_given(1043); Ok(()) }
+            "dtemp" => { validate_finite_parameter("DTEMP", value)?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); Ok(()) }
+            "l" => { validate_parameter("L", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p1 = value; self.mark_param_given(1); self.recompute_instance_static(); Ok(()) }
+            "w" => { validate_parameter("W", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); self.recompute_instance_static(); Ok(()) }
+            "nf" => { validate_parameter("NF", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); Ok(()) }
+            "sa" => { validate_parameter("SA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); Ok(()) }
+            "sb" => { validate_parameter("SB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p5 = value; self.mark_param_given(5); self.recompute_instance_static(); Ok(()) }
+            "sd" => { validate_parameter("SD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p6 = value; self.mark_param_given(6); self.recompute_instance_static(); Ok(()) }
+            "ad" => { validate_parameter("AD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p7 = value; self.mark_param_given(7); self.recompute_instance_static(); Ok(()) }
+            "as" => { validate_parameter("AS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p8 = value; self.mark_param_given(8); self.recompute_instance_static(); Ok(()) }
+            "pd" => { validate_parameter("PD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p9 = value; self.mark_param_given(9); self.recompute_instance_static(); Ok(()) }
+            "ps" => { validate_parameter("PS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p10 = value; self.mark_param_given(10); self.recompute_instance_static(); Ok(()) }
+            "nrd" => { validate_parameter("NRD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p11 = value; self.mark_param_given(11); self.recompute_instance_static(); Ok(()) }
+            "nrs" => { validate_parameter("NRS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p12 = value; self.mark_param_given(12); self.recompute_instance_static(); Ok(()) }
+            "bjtoff" => { validate_parameter("BJTOFF", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p13 = value; self.mark_param_given(13); self.recompute_instance_static(); Ok(()) }
+            "rth0" => { validate_parameter("RTH0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p14 = value; self.mark_param_given(14); self.recompute_instance_static(); Ok(()) }
+            "cth0" => { validate_parameter("CTH0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); Ok(()) }
+            "nrb" => { validate_parameter("NRB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p16 = value; self.mark_param_given(16); self.recompute_instance_static(); Ok(()) }
+            "frbody" => { validate_finite_parameter("FRBODY", value)?; self.params.p17 = value; self.mark_param_given(17); self.recompute_instance_static(); Ok(()) }
+            "rbdb" => { validate_parameter("RBDB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p18 = value; self.mark_param_given(18); self.recompute_instance_static(); Ok(()) }
+            "rbsb" => { validate_parameter("RBSB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p19 = value; self.mark_param_given(19); self.recompute_instance_static(); Ok(()) }
+            "delvto" => { validate_finite_parameter("DELVTO", value)?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); Ok(()) }
+            "soimod" => { validate_parameter("SOIMOD", value, Some((0.0, "0.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p21 = value; self.mark_param_given(21); self.recompute_instance_static(); Ok(()) }
+            "nbc" => { validate_parameter("NBC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); Ok(()) }
+            "nseg" => { validate_parameter("NSEG", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p23 = value; self.mark_param_given(23); self.recompute_instance_static(); Ok(()) }
+            "pdbcp" => { validate_parameter("PDBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p24 = value; self.mark_param_given(24); self.recompute_instance_static(); Ok(()) }
+            "psbcp" => { validate_parameter("PSBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p25 = value; self.mark_param_given(25); self.recompute_instance_static(); Ok(()) }
+            "agbcp" => { validate_parameter("AGBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p26 = value; self.mark_param_given(26); self.recompute_instance_static(); Ok(()) }
+            "agbcp2" => { validate_parameter("AGBCP2", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p27 = value; self.mark_param_given(27); self.recompute_instance_static(); Ok(()) }
+            "agbcpd" => { validate_parameter("AGBCPD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p28 = value; self.mark_param_given(28); self.recompute_instance_static(); Ok(()) }
+            "aebcp" => { validate_parameter("AEBCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p29 = value; self.mark_param_given(29); self.recompute_instance_static(); Ok(()) }
+            "ids0mult" => { validate_parameter("IDS0MULT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p30 = value; self.mark_param_given(30); self.recompute_instance_static(); Ok(()) }
+            "u0mult" => { validate_parameter("U0MULT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p31 = value; self.mark_param_given(31); self.recompute_instance_static(); Ok(()) }
+            "mult_i" => { validate_parameter("MULT_I", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p32 = value; self.mark_param_given(32); self.recompute_instance_static(); Ok(()) }
+            "mult_q" => { validate_parameter("MULT_Q", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p33 = value; self.mark_param_given(33); self.recompute_instance_static(); Ok(()) }
+            "mult_fn" => { validate_parameter("MULT_FN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p34 = value; self.mark_param_given(34); self.recompute_instance_static(); Ok(()) }
+            "tnodeout" => { validate_parameter("TNODEOUT", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p35 = value; self.mark_param_given(35); self.recompute_instance_static(); Ok(()) }
+            "shmod" => { validate_parameter("SHMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p36 = value; self.mark_param_given(36); self.recompute_instance_static(); Ok(()) }
+            "type" => { validate_parameter("TYPE", value, Some((-1.0, "-1.0")), false, Some((1.0, "1.0")), false, &[(0.0, "0.0")])?; self.params.p37 = value; self.mark_param_given(37); self.recompute_instance_static(); Ok(()) }
+            "version" => { validate_parameter("VERSION", value, Some((4.0, "4.0")), false, Some((5.0, "5.0")), true, &[])?; self.params.p38 = value; self.mark_param_given(38); self.recompute_instance_static(); Ok(()) }
+            "rgatemod" => { validate_parameter("RGATEMOD", value, Some((0.0, "0.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p39 = value; self.mark_param_given(39); self.recompute_instance_static(); Ok(()) }
+            "rbodymod" => { validate_parameter("RBODYMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p40 = value; self.mark_param_given(40); self.recompute_instance_static(); Ok(()) }
+            "mtrlmod" => { validate_parameter("MTRLMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p41 = value; self.mark_param_given(41); self.recompute_instance_static(); Ok(()) }
+            "vgstcvmod" => { validate_parameter("VGSTCVMOD", value, Some((0.0, "0.0")), false, Some((2.0, "2.0")), false, &[])?; self.params.p42 = value; self.mark_param_given(42); self.recompute_instance_static(); Ok(()) }
+            "gidlmod" => { validate_parameter("GIDLMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p43 = value; self.mark_param_given(43); self.recompute_instance_static(); Ok(()) }
+            "iiimod" => { validate_parameter("IIIMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p44 = value; self.mark_param_given(44); self.recompute_instance_static(); Ok(()) }
+            "eot" => { validate_parameter("EOT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p45 = value; self.mark_param_given(45); self.recompute_instance_static(); Ok(()) }
+            "epsrox" => { validate_parameter("EPSROX", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p46 = value; self.mark_param_given(46); self.recompute_instance_static(); Ok(()) }
+            "epsrsub" => { validate_parameter("EPSRSUB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p47 = value; self.mark_param_given(47); self.recompute_instance_static(); Ok(()) }
+            "ni0sub" => { validate_parameter("NI0SUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p48 = value; self.mark_param_given(48); self.recompute_instance_static(); Ok(()) }
+            "bg0sub" => { validate_parameter("BG0SUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p49 = value; self.mark_param_given(49); self.recompute_instance_static(); Ok(()) }
+            "tbgasub" => { validate_parameter("TBGASUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p50 = value; self.mark_param_given(50); self.recompute_instance_static(); Ok(()) }
+            "tbgbsub" => { validate_parameter("TBGBSUB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p51 = value; self.mark_param_given(51); self.recompute_instance_static(); Ok(()) }
+            "phig" => { validate_parameter("PHIG", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p52 = value; self.mark_param_given(52); self.recompute_instance_static(); Ok(()) }
+            "easub" => { validate_finite_parameter("EASUB", value)?; self.params.p53 = value; self.mark_param_given(53); self.recompute_instance_static(); Ok(()) }
+            "leffeot" => { validate_parameter("LEFFEOT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p54 = value; self.mark_param_given(54); self.recompute_instance_static(); Ok(()) }
+            "weffeot" => { validate_finite_parameter("WEFFEOT", value)?; self.params.p55 = value; self.mark_param_given(55); self.recompute_instance_static(); Ok(()) }
+            "vddeot" => { validate_finite_parameter("VDDEOT", value)?; self.params.p56 = value; self.mark_param_given(56); self.recompute_instance_static(); Ok(()) }
+            "tempeot" => { validate_parameter("TEMPEOT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p57 = value; self.mark_param_given(57); self.recompute_instance_static(); Ok(()) }
+            "ados" => { validate_parameter("ADOS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p58 = value; self.mark_param_given(58); self.recompute_instance_static(); Ok(()) }
+            "bdos" => { validate_parameter("BDOS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p59 = value; self.mark_param_given(59); self.recompute_instance_static(); Ok(()) }
+            "epsrgate" => { validate_parameter("EPSRGATE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p60 = value; self.mark_param_given(60); self.recompute_instance_static(); Ok(()) }
+            "capmod" => { validate_parameter("CAPMOD", value, Some((2.0, "2.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p61 = value; self.mark_param_given(61); self.recompute_instance_static(); Ok(()) }
+            "mobmod" => { validate_parameter("MOBMOD", value, Some((1.0, "1.0")), false, Some((4.0, "4.0")), false, &[])?; self.params.p62 = value; self.mark_param_given(62); self.recompute_instance_static(); Ok(()) }
+            "paramchk" => { validate_parameter("PARAMCHK", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p63 = value; self.mark_param_given(63); self.recompute_instance_static(); Ok(()) }
+            "nodechk" => { validate_parameter("NODECHK", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p64 = value; self.mark_param_given(64); self.recompute_instance_static(); Ok(()) }
+            "binunit" => { validate_parameter("BINUNIT", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p65 = value; self.mark_param_given(65); self.recompute_instance_static(); Ok(()) }
+            "tox" => { validate_parameter("TOX", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p66 = value; self.mark_param_given(66); self.recompute_instance_static(); Ok(()) }
+            "toxm" => { validate_parameter("TOXM", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p67 = value; self.mark_param_given(67); self.recompute_instance_static(); Ok(()) }
+            "dtoxcv" => { validate_finite_parameter("DTOXCV", value)?; self.params.p68 = value; self.mark_param_given(68); self.recompute_instance_static(); Ok(()) }
+            "cdsc" => { validate_finite_parameter("CDSC", value)?; self.params.p69 = value; self.mark_param_given(69); self.recompute_instance_static(); Ok(()) }
+            "cdscb" => { validate_finite_parameter("CDSCB", value)?; self.params.p70 = value; self.mark_param_given(70); self.recompute_instance_static(); Ok(()) }
+            "cdscd" => { validate_finite_parameter("CDSCD", value)?; self.params.p71 = value; self.mark_param_given(71); self.recompute_instance_static(); Ok(()) }
+            "cit" => { validate_finite_parameter("CIT", value)?; self.params.p72 = value; self.mark_param_given(72); self.recompute_instance_static(); Ok(()) }
+            "nfactor" => { validate_finite_parameter("NFACTOR", value)?; self.params.p73 = value; self.mark_param_given(73); self.recompute_instance_static(); Ok(()) }
+            "vsat" => { validate_parameter("VSAT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p74 = value; self.mark_param_given(74); self.recompute_instance_static(); Ok(()) }
+            "at" => { validate_finite_parameter("AT", value)?; self.params.p75 = value; self.mark_param_given(75); self.recompute_instance_static(); Ok(()) }
+            "a0" => { validate_finite_parameter("A0", value)?; self.params.p76 = value; self.mark_param_given(76); self.recompute_instance_static(); Ok(()) }
+            "ags" => { validate_finite_parameter("AGS", value)?; self.params.p77 = value; self.mark_param_given(77); self.recompute_instance_static(); Ok(()) }
+            "a1" => { validate_finite_parameter("A1", value)?; self.params.p78 = value; self.mark_param_given(78); self.recompute_instance_static(); Ok(()) }
+            "a2" => { validate_finite_parameter("A2", value)?; self.params.p79 = value; self.mark_param_given(79); self.recompute_instance_static(); Ok(()) }
+            "keta" => { validate_finite_parameter("KETA", value)?; self.params.p80 = value; self.mark_param_given(80); self.recompute_instance_static(); Ok(()) }
+            "nsub" => { validate_parameter("NSUB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p81 = value; self.mark_param_given(81); self.recompute_instance_static(); Ok(()) }
+            "nch" => { validate_parameter("NCH", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p82 = value; self.mark_param_given(82); self.recompute_instance_static(); Ok(()) }
+            "ngate" => { validate_parameter("NGATE", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p83 = value; self.mark_param_given(83); self.recompute_instance_static(); Ok(()) }
+            "nsd" => { validate_parameter("NSD", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p84 = value; self.mark_param_given(84); self.recompute_instance_static(); Ok(()) }
+            "gamma1" => { validate_finite_parameter("GAMMA1", value)?; self.params.p85 = value; self.mark_param_given(85); self.recompute_instance_static(); Ok(()) }
+            "gamma2" => { validate_finite_parameter("GAMMA2", value)?; self.params.p86 = value; self.mark_param_given(86); self.recompute_instance_static(); Ok(()) }
+            "vbx" => { validate_finite_parameter("VBX", value)?; self.params.p87 = value; self.mark_param_given(87); self.recompute_instance_static(); Ok(()) }
+            "vbm" => { validate_finite_parameter("VBM", value)?; self.params.p88 = value; self.mark_param_given(88); self.recompute_instance_static(); Ok(()) }
+            "xt" => { validate_parameter("XT", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p89 = value; self.mark_param_given(89); self.recompute_instance_static(); Ok(()) }
+            "k1" => { validate_finite_parameter("K1", value)?; self.params.p90 = value; self.mark_param_given(90); self.recompute_instance_static(); Ok(()) }
+            "kt1" => { validate_finite_parameter("KT1", value)?; self.params.p91 = value; self.mark_param_given(91); self.recompute_instance_static(); Ok(()) }
+            "kt1l" => { validate_finite_parameter("KT1L", value)?; self.params.p92 = value; self.mark_param_given(92); self.recompute_instance_static(); Ok(()) }
+            "kt2" => { validate_finite_parameter("KT2", value)?; self.params.p93 = value; self.mark_param_given(93); self.recompute_instance_static(); Ok(()) }
+            "k2" => { validate_finite_parameter("K2", value)?; self.params.p94 = value; self.mark_param_given(94); self.recompute_instance_static(); Ok(()) }
+            "k3" => { validate_finite_parameter("K3", value)?; self.params.p95 = value; self.mark_param_given(95); self.recompute_instance_static(); Ok(()) }
+            "k3b" => { validate_finite_parameter("K3B", value)?; self.params.p96 = value; self.mark_param_given(96); self.recompute_instance_static(); Ok(()) }
+            "w0" => { validate_finite_parameter("W0", value)?; self.params.p97 = value; self.mark_param_given(97); self.recompute_instance_static(); Ok(()) }
+            "lpeb" => { validate_finite_parameter("LPEB", value)?; self.params.p98 = value; self.mark_param_given(98); self.recompute_instance_static(); Ok(()) }
+            "dvt0" => { validate_finite_parameter("DVT0", value)?; self.params.p99 = value; self.mark_param_given(99); self.recompute_instance_static(); Ok(()) }
+            "dvt1" => { validate_finite_parameter("DVT1", value)?; self.params.p100 = value; self.mark_param_given(100); self.recompute_instance_static(); Ok(()) }
+            "dvt2" => { validate_finite_parameter("DVT2", value)?; self.params.p101 = value; self.mark_param_given(101); self.recompute_instance_static(); Ok(()) }
+            "dvt0w" => { validate_finite_parameter("DVT0W", value)?; self.params.p102 = value; self.mark_param_given(102); self.recompute_instance_static(); Ok(()) }
+            "dvt1w" => { validate_finite_parameter("DVT1W", value)?; self.params.p103 = value; self.mark_param_given(103); self.recompute_instance_static(); Ok(()) }
+            "dvt2w" => { validate_finite_parameter("DVT2W", value)?; self.params.p104 = value; self.mark_param_given(104); self.recompute_instance_static(); Ok(()) }
+            "drout" => { validate_finite_parameter("DROUT", value)?; self.params.p105 = value; self.mark_param_given(105); self.recompute_instance_static(); Ok(()) }
+            "dsub" => { validate_finite_parameter("DSUB", value)?; self.params.p106 = value; self.mark_param_given(106); self.recompute_instance_static(); Ok(()) }
+            "vtho" => { validate_finite_parameter("VTHO", value)?; self.params.p107 = value; self.mark_param_given(107); self.recompute_instance_static(); Ok(()) }
+            "vth0" => { validate_finite_parameter("VTH0", value)?; self.params.p108 = value; self.mark_param_given(108); self.recompute_instance_static(); Ok(()) }
+            "vfb" => { validate_finite_parameter("VFB", value)?; self.params.p109 = value; self.mark_param_given(109); self.recompute_instance_static(); Ok(()) }
+            "ua" => { validate_finite_parameter("UA", value)?; self.params.p110 = value; self.mark_param_given(110); self.recompute_instance_static(); Ok(()) }
+            "ua1" => { validate_finite_parameter("UA1", value)?; self.params.p111 = value; self.mark_param_given(111); self.recompute_instance_static(); Ok(()) }
+            "ub" => { validate_finite_parameter("UB", value)?; self.params.p112 = value; self.mark_param_given(112); self.recompute_instance_static(); Ok(()) }
+            "ub1" => { validate_finite_parameter("UB1", value)?; self.params.p113 = value; self.mark_param_given(113); self.recompute_instance_static(); Ok(()) }
+            "uc" => { validate_finite_parameter("UC", value)?; self.params.p114 = value; self.mark_param_given(114); self.recompute_instance_static(); Ok(()) }
+            "uc1" => { validate_finite_parameter("UC1", value)?; self.params.p115 = value; self.mark_param_given(115); self.recompute_instance_static(); Ok(()) }
+            "u0" => { validate_finite_parameter("U0", value)?; self.params.p116 = value; self.mark_param_given(116); self.recompute_instance_static(); Ok(()) }
+            "eu" => { validate_finite_parameter("EU", value)?; self.params.p117 = value; self.mark_param_given(117); self.recompute_instance_static(); Ok(()) }
+            "ute" => { validate_finite_parameter("UTE", value)?; self.params.p118 = value; self.mark_param_given(118); self.recompute_instance_static(); Ok(()) }
+            "ucs" => { validate_finite_parameter("UCS", value)?; self.params.p119 = value; self.mark_param_given(119); self.recompute_instance_static(); Ok(()) }
+            "ucste" => { validate_finite_parameter("UCSTE", value)?; self.params.p120 = value; self.mark_param_given(120); self.recompute_instance_static(); Ok(()) }
+            "ud" => { validate_finite_parameter("UD", value)?; self.params.p121 = value; self.mark_param_given(121); self.recompute_instance_static(); Ok(()) }
+            "ud1" => { validate_finite_parameter("UD1", value)?; self.params.p122 = value; self.mark_param_given(122); self.recompute_instance_static(); Ok(()) }
+            "ubg1" => { validate_finite_parameter("UBG1", value)?; self.params.p123 = value; self.mark_param_given(123); self.recompute_instance_static(); Ok(()) }
+            "ubg2" => { validate_finite_parameter("UBG2", value)?; self.params.p124 = value; self.mark_param_given(124); self.recompute_instance_static(); Ok(()) }
+            "voff" => { validate_finite_parameter("VOFF", value)?; self.params.p125 = value; self.mark_param_given(125); self.recompute_instance_static(); Ok(()) }
+            "tnom" => { validate_finite_parameter("TNOM", value)?; self.params.p126 = value; self.mark_param_given(126); self.recompute_instance_static(); Ok(()) }
+            "cgso" => { validate_parameter("CGSO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p127 = value; self.mark_param_given(127); self.recompute_instance_static(); Ok(()) }
+            "cgdo" => { validate_parameter("CGDO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p128 = value; self.mark_param_given(128); self.recompute_instance_static(); Ok(()) }
+            "xpart" => { validate_finite_parameter("XPART", value)?; self.params.p129 = value; self.mark_param_given(129); self.recompute_instance_static(); Ok(()) }
+            "delta" => { validate_finite_parameter("DELTA", value)?; self.params.p130 = value; self.mark_param_given(130); self.recompute_instance_static(); Ok(()) }
+            "rsh" => { validate_parameter("RSH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p131 = value; self.mark_param_given(131); self.recompute_instance_static(); Ok(()) }
+            "rdsw" => { validate_parameter("RDSW", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p132 = value; self.mark_param_given(132); self.recompute_instance_static(); Ok(()) }
+            "rsw" => { validate_parameter("RSW", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p133 = value; self.mark_param_given(133); self.recompute_instance_static(); Ok(()) }
+            "rdw" => { validate_parameter("RDW", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p134 = value; self.mark_param_given(134); self.recompute_instance_static(); Ok(()) }
+            "rsc" => { validate_parameter("RSC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p135 = value; self.mark_param_given(135); self.recompute_instance_static(); Ok(()) }
+            "rdc" => { validate_parameter("RDC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p136 = value; self.mark_param_given(136); self.recompute_instance_static(); Ok(()) }
+            "trs" => { validate_finite_parameter("TRS", value)?; self.params.p137 = value; self.mark_param_given(137); self.recompute_instance_static(); Ok(()) }
+            "trd" => { validate_finite_parameter("TRD", value)?; self.params.p138 = value; self.mark_param_given(138); self.recompute_instance_static(); Ok(()) }
+            "rswmin" => { validate_parameter("RSWMIN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p139 = value; self.mark_param_given(139); self.recompute_instance_static(); Ok(()) }
+            "rdwmin" => { validate_parameter("RDWMIN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p140 = value; self.mark_param_given(140); self.recompute_instance_static(); Ok(()) }
+            "prwg" => { validate_finite_parameter("PRWG", value)?; self.params.p141 = value; self.mark_param_given(141); self.recompute_instance_static(); Ok(()) }
+            "prwb" => { validate_finite_parameter("PRWB", value)?; self.params.p142 = value; self.mark_param_given(142); self.recompute_instance_static(); Ok(()) }
+            "prwe" => { validate_finite_parameter("PRWE", value)?; self.params.p143 = value; self.mark_param_given(143); self.recompute_instance_static(); Ok(()) }
+            "prt" => { validate_finite_parameter("PRT", value)?; self.params.p144 = value; self.mark_param_given(144); self.recompute_instance_static(); Ok(()) }
+            "eta0" => { validate_finite_parameter("ETA0", value)?; self.params.p145 = value; self.mark_param_given(145); self.recompute_instance_static(); Ok(()) }
+            "etab" => { validate_finite_parameter("ETAB", value)?; self.params.p146 = value; self.mark_param_given(146); self.recompute_instance_static(); Ok(()) }
+            "eta0cv" => { validate_finite_parameter("ETA0CV", value)?; self.params.p147 = value; self.mark_param_given(147); self.recompute_instance_static(); Ok(()) }
+            "etabcv" => { validate_finite_parameter("ETABCV", value)?; self.params.p148 = value; self.mark_param_given(148); self.recompute_instance_static(); Ok(()) }
+            "pclm" => { validate_finite_parameter("PCLM", value)?; self.params.p149 = value; self.mark_param_given(149); self.recompute_instance_static(); Ok(()) }
+            "pdiblc1" => { validate_finite_parameter("PDIBLC1", value)?; self.params.p150 = value; self.mark_param_given(150); self.recompute_instance_static(); Ok(()) }
+            "pdiblc2" => { validate_finite_parameter("PDIBLC2", value)?; self.params.p151 = value; self.mark_param_given(151); self.recompute_instance_static(); Ok(()) }
+            "pdiblcb" => { validate_finite_parameter("PDIBLCB", value)?; self.params.p152 = value; self.mark_param_given(152); self.recompute_instance_static(); Ok(()) }
+            "pvag" => { validate_finite_parameter("PVAG", value)?; self.params.p153 = value; self.mark_param_given(153); self.recompute_instance_static(); Ok(()) }
+            "tbox" => { validate_parameter("TBOX", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p154 = value; self.mark_param_given(154); self.recompute_instance_static(); Ok(()) }
+            "tsi" => { validate_parameter("TSI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p155 = value; self.mark_param_given(155); self.recompute_instance_static(); Ok(()) }
+            "etsi" => { validate_parameter("ETSI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p156 = value; self.mark_param_given(156); self.recompute_instance_static(); Ok(()) }
+            "xj" => { validate_parameter("XJ", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p157 = value; self.mark_param_given(157); self.recompute_instance_static(); Ok(()) }
+            "agidl" => { validate_finite_parameter("AGIDL", value)?; self.params.p158 = value; self.mark_param_given(158); self.recompute_instance_static(); Ok(()) }
+            "bgidl" => { validate_finite_parameter("BGIDL", value)?; self.params.p159 = value; self.mark_param_given(159); self.recompute_instance_static(); Ok(()) }
+            "bgidl1" => { validate_finite_parameter("BGIDL1", value)?; self.params.p160 = value; self.mark_param_given(160); self.recompute_instance_static(); Ok(()) }
+            "cgidl" => { validate_finite_parameter("CGIDL", value)?; self.params.p161 = value; self.mark_param_given(161); self.recompute_instance_static(); Ok(()) }
+            "rgidl" => { validate_finite_parameter("RGIDL", value)?; self.params.p162 = value; self.mark_param_given(162); self.recompute_instance_static(); Ok(()) }
+            "kgidl" => { validate_finite_parameter("KGIDL", value)?; self.params.p163 = value; self.mark_param_given(163); self.recompute_instance_static(); Ok(()) }
+            "fgidl" => { validate_finite_parameter("FGIDL", value)?; self.params.p164 = value; self.mark_param_given(164); self.recompute_instance_static(); Ok(()) }
+            "agisl" => { validate_finite_parameter("AGISL", value)?; self.params.p165 = value; self.mark_param_given(165); self.recompute_instance_static(); Ok(()) }
+            "bgisl" => { validate_finite_parameter("BGISL", value)?; self.params.p166 = value; self.mark_param_given(166); self.recompute_instance_static(); Ok(()) }
+            "bgisl1" => { validate_finite_parameter("BGISL1", value)?; self.params.p167 = value; self.mark_param_given(167); self.recompute_instance_static(); Ok(()) }
+            "cgisl" => { validate_finite_parameter("CGISL", value)?; self.params.p168 = value; self.mark_param_given(168); self.recompute_instance_static(); Ok(()) }
+            "rgisl" => { validate_finite_parameter("RGISL", value)?; self.params.p169 = value; self.mark_param_given(169); self.recompute_instance_static(); Ok(()) }
+            "kgisl" => { validate_finite_parameter("KGISL", value)?; self.params.p170 = value; self.mark_param_given(170); self.recompute_instance_static(); Ok(()) }
+            "fgisl" => { validate_finite_parameter("FGISL", value)?; self.params.p171 = value; self.mark_param_given(171); self.recompute_instance_static(); Ok(()) }
+            "ndiode" => { validate_parameter("NDIODE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p172 = value; self.mark_param_given(172); self.recompute_instance_static(); Ok(()) }
+            "ndioded" => { validate_parameter("NDIODED", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p173 = value; self.mark_param_given(173); self.recompute_instance_static(); Ok(()) }
+            "xbjt" => { validate_finite_parameter("XBJT", value)?; self.params.p174 = value; self.mark_param_given(174); self.recompute_instance_static(); Ok(()) }
+            "xdif" => { validate_finite_parameter("XDIF", value)?; self.params.p175 = value; self.mark_param_given(175); self.recompute_instance_static(); Ok(()) }
+            "xrec" => { validate_finite_parameter("XREC", value)?; self.params.p176 = value; self.mark_param_given(176); self.recompute_instance_static(); Ok(()) }
+            "xtun" => { validate_finite_parameter("XTUN", value)?; self.params.p177 = value; self.mark_param_given(177); self.recompute_instance_static(); Ok(()) }
+            "xdifd" => { validate_finite_parameter("XDIFD", value)?; self.params.p178 = value; self.mark_param_given(178); self.recompute_instance_static(); Ok(()) }
+            "xrecd" => { validate_finite_parameter("XRECD", value)?; self.params.p179 = value; self.mark_param_given(179); self.recompute_instance_static(); Ok(()) }
+            "xtund" => { validate_finite_parameter("XTUND", value)?; self.params.p180 = value; self.mark_param_given(180); self.recompute_instance_static(); Ok(()) }
+            "pbswg" => { validate_parameter("PBSWG", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p181 = value; self.mark_param_given(181); self.recompute_instance_static(); Ok(()) }
+            "pbswgd" => { validate_parameter("PBSWGD", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p182 = value; self.mark_param_given(182); self.recompute_instance_static(); Ok(()) }
+            "mjswg" => { validate_finite_parameter("MJSWG", value)?; self.params.p183 = value; self.mark_param_given(183); self.recompute_instance_static(); Ok(()) }
+            "mjswgd" => { validate_finite_parameter("MJSWGD", value)?; self.params.p184 = value; self.mark_param_given(184); self.recompute_instance_static(); Ok(()) }
+            "cjswg" => { validate_parameter("CJSWG", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p185 = value; self.mark_param_given(185); self.recompute_instance_static(); Ok(()) }
+            "cjswgd" => { validate_parameter("CJSWGD", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p186 = value; self.mark_param_given(186); self.recompute_instance_static(); Ok(()) }
+            "lint" => { validate_finite_parameter("LINT", value)?; self.params.p187 = value; self.mark_param_given(187); self.recompute_instance_static(); Ok(()) }
+            "ll" => { validate_finite_parameter("LL", value)?; self.params.p188 = value; self.mark_param_given(188); self.recompute_instance_static(); Ok(()) }
+            "llc" => { validate_finite_parameter("LLC", value)?; self.params.p189 = value; self.mark_param_given(189); self.recompute_instance_static(); Ok(()) }
+            "lln" => { validate_finite_parameter("LLN", value)?; self.params.p190 = value; self.mark_param_given(190); self.recompute_instance_static(); Ok(()) }
+            "lw" => { validate_finite_parameter("LW", value)?; self.params.p191 = value; self.mark_param_given(191); self.recompute_instance_static(); Ok(()) }
+            "lwc" => { validate_finite_parameter("LWC", value)?; self.params.p192 = value; self.mark_param_given(192); self.recompute_instance_static(); Ok(()) }
+            "lwn" => { validate_finite_parameter("LWN", value)?; self.params.p193 = value; self.mark_param_given(193); self.recompute_instance_static(); Ok(()) }
+            "lwl" => { validate_finite_parameter("LWL", value)?; self.params.p194 = value; self.mark_param_given(194); self.recompute_instance_static(); Ok(()) }
+            "lwlc" => { validate_finite_parameter("LWLC", value)?; self.params.p195 = value; self.mark_param_given(195); self.recompute_instance_static(); Ok(()) }
+            "wr" => { validate_finite_parameter("WR", value)?; self.params.p196 = value; self.mark_param_given(196); self.recompute_instance_static(); Ok(()) }
+            "wint" => { validate_finite_parameter("WINT", value)?; self.params.p197 = value; self.mark_param_given(197); self.recompute_instance_static(); Ok(()) }
+            "dwg" => { validate_finite_parameter("DWG", value)?; self.params.p198 = value; self.mark_param_given(198); self.recompute_instance_static(); Ok(()) }
+            "dwb" => { validate_finite_parameter("DWB", value)?; self.params.p199 = value; self.mark_param_given(199); self.recompute_instance_static(); Ok(()) }
+            "wl" => { validate_finite_parameter("WL", value)?; self.params.p200 = value; self.mark_param_given(200); self.recompute_instance_static(); Ok(()) }
+            "wlc" => { validate_finite_parameter("WLC", value)?; self.params.p201 = value; self.mark_param_given(201); self.recompute_instance_static(); Ok(()) }
+            "wln" => { validate_finite_parameter("WLN", value)?; self.params.p202 = value; self.mark_param_given(202); self.recompute_instance_static(); Ok(()) }
+            "ww" => { validate_finite_parameter("WW", value)?; self.params.p203 = value; self.mark_param_given(203); self.recompute_instance_static(); Ok(()) }
+            "wwc" => { validate_finite_parameter("WWC", value)?; self.params.p204 = value; self.mark_param_given(204); self.recompute_instance_static(); Ok(()) }
+            "wwn" => { validate_finite_parameter("WWN", value)?; self.params.p205 = value; self.mark_param_given(205); self.recompute_instance_static(); Ok(()) }
+            "wwl" => { validate_finite_parameter("WWL", value)?; self.params.p206 = value; self.mark_param_given(206); self.recompute_instance_static(); Ok(()) }
+            "wwlc" => { validate_finite_parameter("WWLC", value)?; self.params.p207 = value; self.mark_param_given(207); self.recompute_instance_static(); Ok(()) }
+            "b0" => { validate_finite_parameter("B0", value)?; self.params.p208 = value; self.mark_param_given(208); self.recompute_instance_static(); Ok(()) }
+            "b1" => { validate_finite_parameter("B1", value)?; self.params.p209 = value; self.mark_param_given(209); self.recompute_instance_static(); Ok(()) }
+            "cgsl" => { validate_finite_parameter("CGSL", value)?; self.params.p210 = value; self.mark_param_given(210); self.recompute_instance_static(); Ok(()) }
+            "cgdl" => { validate_finite_parameter("CGDL", value)?; self.params.p211 = value; self.mark_param_given(211); self.recompute_instance_static(); Ok(()) }
+            "ckappa" => { validate_parameter("CKAPPA", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p212 = value; self.mark_param_given(212); self.recompute_instance_static(); Ok(()) }
+            "cf" => { validate_parameter("CF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p213 = value; self.mark_param_given(213); self.recompute_instance_static(); Ok(()) }
+            "clc" => { validate_parameter("CLC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p214 = value; self.mark_param_given(214); self.recompute_instance_static(); Ok(()) }
+            "cle" => { validate_finite_parameter("CLE", value)?; self.params.p215 = value; self.mark_param_given(215); self.recompute_instance_static(); Ok(()) }
+            "dwc" => { validate_finite_parameter("DWC", value)?; self.params.p216 = value; self.mark_param_given(216); self.recompute_instance_static(); Ok(()) }
+            "dlc" => { validate_finite_parameter("DLC", value)?; self.params.p217 = value; self.mark_param_given(217); self.recompute_instance_static(); Ok(()) }
+            "alpha0" => { validate_finite_parameter("ALPHA0", value)?; self.params.p218 = value; self.mark_param_given(218); self.recompute_instance_static(); Ok(()) }
+            "noia" => { validate_finite_parameter("NOIA", value)?; self.params.p219 = value; self.mark_param_given(219); self.recompute_instance_static(); Ok(()) }
+            "noib" => { validate_finite_parameter("NOIB", value)?; self.params.p220 = value; self.mark_param_given(220); self.recompute_instance_static(); Ok(()) }
+            "noic" => { validate_finite_parameter("NOIC", value)?; self.params.p221 = value; self.mark_param_given(221); self.recompute_instance_static(); Ok(()) }
+            "fnoimod" => { validate_parameter("FNOIMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p222 = value; self.mark_param_given(222); self.recompute_instance_static(); Ok(()) }
+            "tnoimod" => { validate_parameter("TNOIMOD", value, Some((0.0, "0.0")), false, Some((3.0, "3.0")), false, &[])?; self.params.p223 = value; self.mark_param_given(223); self.recompute_instance_static(); Ok(()) }
+            "tnoic" => { validate_finite_parameter("TNOIC", value)?; self.params.p224 = value; self.mark_param_given(224); self.recompute_instance_static(); Ok(()) }
+            "rnoic" => { validate_finite_parameter("RNOIC", value)?; self.params.p225 = value; self.mark_param_given(225); self.recompute_instance_static(); Ok(()) }
+            "scalen" => { validate_parameter("SCALEN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p226 = value; self.mark_param_given(226); self.recompute_instance_static(); Ok(()) }
+            "tnoia" => { validate_finite_parameter("TNOIA", value)?; self.params.p227 = value; self.mark_param_given(227); self.recompute_instance_static(); Ok(()) }
+            "tnoib" => { validate_finite_parameter("TNOIB", value)?; self.params.p228 = value; self.mark_param_given(228); self.recompute_instance_static(); Ok(()) }
+            "rnoia" => { validate_finite_parameter("RNOIA", value)?; self.params.p229 = value; self.mark_param_given(229); self.recompute_instance_static(); Ok(()) }
+            "rnoib" => { validate_finite_parameter("RNOIB", value)?; self.params.p230 = value; self.mark_param_given(230); self.recompute_instance_static(); Ok(()) }
+            "ntnoi" => { validate_parameter("NTNOI", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p231 = value; self.mark_param_given(231); self.recompute_instance_static(); Ok(()) }
+            "saref" => { validate_parameter("SAREF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p232 = value; self.mark_param_given(232); self.recompute_instance_static(); Ok(()) }
+            "sbref" => { validate_parameter("SBREF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p233 = value; self.mark_param_given(233); self.recompute_instance_static(); Ok(()) }
+            "wlod" => { validate_finite_parameter("WLOD", value)?; self.params.p234 = value; self.mark_param_given(234); self.recompute_instance_static(); Ok(()) }
+            "ku0" => { validate_finite_parameter("KU0", value)?; self.params.p235 = value; self.mark_param_given(235); self.recompute_instance_static(); Ok(()) }
+            "kvsat" => { validate_finite_parameter("KVSAT", value)?; self.params.p236 = value; self.mark_param_given(236); self.recompute_instance_static(); Ok(()) }
+            "kvth0" => { validate_finite_parameter("KVTH0", value)?; self.params.p237 = value; self.mark_param_given(237); self.recompute_instance_static(); Ok(()) }
+            "tku0" => { validate_finite_parameter("TKU0", value)?; self.params.p238 = value; self.mark_param_given(238); self.recompute_instance_static(); Ok(()) }
+            "llodku0" => { validate_finite_parameter("LLODKU0", value)?; self.params.p239 = value; self.mark_param_given(239); self.recompute_instance_static(); Ok(()) }
+            "wlodku0" => { validate_finite_parameter("WLODKU0", value)?; self.params.p240 = value; self.mark_param_given(240); self.recompute_instance_static(); Ok(()) }
+            "llodvth" => { validate_finite_parameter("LLODVTH", value)?; self.params.p241 = value; self.mark_param_given(241); self.recompute_instance_static(); Ok(()) }
+            "wlodvth" => { validate_finite_parameter("WLODVTH", value)?; self.params.p242 = value; self.mark_param_given(242); self.recompute_instance_static(); Ok(()) }
+            "lku0" => { validate_finite_parameter("LKU0", value)?; self.params.p243 = value; self.mark_param_given(243); self.recompute_instance_static(); Ok(()) }
+            "wku0" => { validate_finite_parameter("WKU0", value)?; self.params.p244 = value; self.mark_param_given(244); self.recompute_instance_static(); Ok(()) }
+            "pku0" => { validate_finite_parameter("PKU0", value)?; self.params.p245 = value; self.mark_param_given(245); self.recompute_instance_static(); Ok(()) }
+            "lkvth0" => { validate_finite_parameter("LKVTH0", value)?; self.params.p246 = value; self.mark_param_given(246); self.recompute_instance_static(); Ok(()) }
+            "wkvth0" => { validate_finite_parameter("WKVTH0", value)?; self.params.p247 = value; self.mark_param_given(247); self.recompute_instance_static(); Ok(()) }
+            "pkvth0" => { validate_finite_parameter("PKVTH0", value)?; self.params.p248 = value; self.mark_param_given(248); self.recompute_instance_static(); Ok(()) }
+            "stk2" => { validate_finite_parameter("STK2", value)?; self.params.p249 = value; self.mark_param_given(249); self.recompute_instance_static(); Ok(()) }
+            "lodk2" => { validate_finite_parameter("LODK2", value)?; self.params.p250 = value; self.mark_param_given(250); self.recompute_instance_static(); Ok(()) }
+            "steta0" => { validate_finite_parameter("STETA0", value)?; self.params.p251 = value; self.mark_param_given(251); self.recompute_instance_static(); Ok(()) }
+            "lodeta0" => { validate_finite_parameter("LODETA0", value)?; self.params.p252 = value; self.mark_param_given(252); self.recompute_instance_static(); Ok(()) }
+            "steta0cv" => { validate_finite_parameter("STETA0CV", value)?; self.params.p253 = value; self.mark_param_given(253); self.recompute_instance_static(); Ok(()) }
+            "lodeta0cv" => { validate_finite_parameter("LODETA0CV", value)?; self.params.p254 = value; self.mark_param_given(254); self.recompute_instance_static(); Ok(()) }
+            "gbmin" => { validate_finite_parameter("GBMIN", value)?; self.params.p255 = value; self.mark_param_given(255); self.recompute_instance_static(); Ok(()) }
+            "bf" => { validate_finite_parameter("BF", value)?; self.params.p256 = value; self.mark_param_given(256); self.recompute_instance_static(); Ok(()) }
+            "w0flk" => { validate_finite_parameter("W0FLK", value)?; self.params.p257 = value; self.mark_param_given(257); self.recompute_instance_static(); Ok(()) }
+            "dvtp0" => { validate_finite_parameter("DVTP0", value)?; self.params.p258 = value; self.mark_param_given(258); self.recompute_instance_static(); Ok(()) }
+            "ldvtp0" => { validate_finite_parameter("LDVTP0", value)?; self.params.p259 = value; self.mark_param_given(259); self.recompute_instance_static(); Ok(()) }
+            "wdvtp0" => { validate_finite_parameter("WDVTP0", value)?; self.params.p260 = value; self.mark_param_given(260); self.recompute_instance_static(); Ok(()) }
+            "pdvtp0" => { validate_finite_parameter("PDVTP0", value)?; self.params.p261 = value; self.mark_param_given(261); self.recompute_instance_static(); Ok(()) }
+            "dvtp1" => { validate_finite_parameter("DVTP1", value)?; self.params.p262 = value; self.mark_param_given(262); self.recompute_instance_static(); Ok(()) }
+            "ldvtp1" => { validate_finite_parameter("LDVTP1", value)?; self.params.p263 = value; self.mark_param_given(263); self.recompute_instance_static(); Ok(()) }
+            "wdvtp1" => { validate_finite_parameter("WDVTP1", value)?; self.params.p264 = value; self.mark_param_given(264); self.recompute_instance_static(); Ok(()) }
+            "pdvtp1" => { validate_finite_parameter("PDVTP1", value)?; self.params.p265 = value; self.mark_param_given(265); self.recompute_instance_static(); Ok(()) }
+            "dvtp2" => { validate_finite_parameter("DVTP2", value)?; self.params.p266 = value; self.mark_param_given(266); self.recompute_instance_static(); Ok(()) }
+            "ldvtp2" => { validate_finite_parameter("LDVTP2", value)?; self.params.p267 = value; self.mark_param_given(267); self.recompute_instance_static(); Ok(()) }
+            "wdvtp2" => { validate_finite_parameter("WDVTP2", value)?; self.params.p268 = value; self.mark_param_given(268); self.recompute_instance_static(); Ok(()) }
+            "pdvtp2" => { validate_finite_parameter("PDVTP2", value)?; self.params.p269 = value; self.mark_param_given(269); self.recompute_instance_static(); Ok(()) }
+            "dvtp3" => { validate_finite_parameter("DVTP3", value)?; self.params.p270 = value; self.mark_param_given(270); self.recompute_instance_static(); Ok(()) }
+            "ldvtp3" => { validate_finite_parameter("LDVTP3", value)?; self.params.p271 = value; self.mark_param_given(271); self.recompute_instance_static(); Ok(()) }
+            "wdvtp3" => { validate_finite_parameter("WDVTP3", value)?; self.params.p272 = value; self.mark_param_given(272); self.recompute_instance_static(); Ok(()) }
+            "pdvtp3" => { validate_finite_parameter("PDVTP3", value)?; self.params.p273 = value; self.mark_param_given(273); self.recompute_instance_static(); Ok(()) }
+            "dvtp4" => { validate_finite_parameter("DVTP4", value)?; self.params.p274 = value; self.mark_param_given(274); self.recompute_instance_static(); Ok(()) }
+            "ldvtp4" => { validate_finite_parameter("LDVTP4", value)?; self.params.p275 = value; self.mark_param_given(275); self.recompute_instance_static(); Ok(()) }
+            "wdvtp4" => { validate_finite_parameter("WDVTP4", value)?; self.params.p276 = value; self.mark_param_given(276); self.recompute_instance_static(); Ok(()) }
+            "pdvtp4" => { validate_finite_parameter("PDVTP4", value)?; self.params.p277 = value; self.mark_param_given(277); self.recompute_instance_static(); Ok(()) }
+            "minv" => { validate_finite_parameter("MINV", value)?; self.params.p278 = value; self.mark_param_given(278); self.recompute_instance_static(); Ok(()) }
+            "lminv" => { validate_finite_parameter("LMINV", value)?; self.params.p279 = value; self.mark_param_given(279); self.recompute_instance_static(); Ok(()) }
+            "wminv" => { validate_finite_parameter("WMINV", value)?; self.params.p280 = value; self.mark_param_given(280); self.recompute_instance_static(); Ok(()) }
+            "pminv" => { validate_finite_parameter("PMINV", value)?; self.params.p281 = value; self.mark_param_given(281); self.recompute_instance_static(); Ok(()) }
+            "pdits" => { validate_finite_parameter("PDITS", value)?; self.params.p282 = value; self.mark_param_given(282); self.recompute_instance_static(); Ok(()) }
+            "pditsl" => { validate_finite_parameter("PDITSL", value)?; self.params.p283 = value; self.mark_param_given(283); self.recompute_instance_static(); Ok(()) }
+            "pditsd" => { validate_finite_parameter("PDITSD", value)?; self.params.p284 = value; self.mark_param_given(284); self.recompute_instance_static(); Ok(()) }
+            "fprout" => { validate_finite_parameter("FPROUT", value)?; self.params.p285 = value; self.mark_param_given(285); self.recompute_instance_static(); Ok(()) }
+            "lfprout" => { validate_finite_parameter("LFPROUT", value)?; self.params.p286 = value; self.mark_param_given(286); self.recompute_instance_static(); Ok(()) }
+            "lpdits" => { validate_finite_parameter("LPDITS", value)?; self.params.p287 = value; self.mark_param_given(287); self.recompute_instance_static(); Ok(()) }
+            "lpditsd" => { validate_finite_parameter("LPDITSD", value)?; self.params.p288 = value; self.mark_param_given(288); self.recompute_instance_static(); Ok(()) }
+            "wfprout" => { validate_finite_parameter("WFPROUT", value)?; self.params.p289 = value; self.mark_param_given(289); self.recompute_instance_static(); Ok(()) }
+            "wpdits" => { validate_finite_parameter("WPDITS", value)?; self.params.p290 = value; self.mark_param_given(290); self.recompute_instance_static(); Ok(()) }
+            "wpditsd" => { validate_finite_parameter("WPDITSD", value)?; self.params.p291 = value; self.mark_param_given(291); self.recompute_instance_static(); Ok(()) }
+            "pfprout" => { validate_finite_parameter("PFPROUT", value)?; self.params.p292 = value; self.mark_param_given(292); self.recompute_instance_static(); Ok(()) }
+            "ppdits" => { validate_finite_parameter("PPDITS", value)?; self.params.p293 = value; self.mark_param_given(293); self.recompute_instance_static(); Ok(()) }
+            "ppditsd" => { validate_finite_parameter("PPDITSD", value)?; self.params.p294 = value; self.mark_param_given(294); self.recompute_instance_static(); Ok(()) }
+            "em" => { validate_finite_parameter("EM", value)?; self.params.p295 = value; self.mark_param_given(295); self.recompute_instance_static(); Ok(()) }
+            "ef" => { validate_parameter("EF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p296 = value; self.mark_param_given(296); self.recompute_instance_static(); Ok(()) }
+            "af" => { validate_finite_parameter("AF", value)?; self.params.p297 = value; self.mark_param_given(297); self.recompute_instance_static(); Ok(()) }
+            "kf" => { validate_parameter("KF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p298 = value; self.mark_param_given(298); self.recompute_instance_static(); Ok(()) }
+            "noif" => { validate_parameter("NOIF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p299 = value; self.mark_param_given(299); self.recompute_instance_static(); Ok(()) }
+            "k1w1" => { validate_finite_parameter("K1W1", value)?; self.params.p300 = value; self.mark_param_given(300); self.recompute_instance_static(); Ok(()) }
+            "k1w2" => { validate_finite_parameter("K1W2", value)?; self.params.p301 = value; self.mark_param_given(301); self.recompute_instance_static(); Ok(()) }
+            "ketas" => { validate_finite_parameter("KETAS", value)?; self.params.p302 = value; self.mark_param_given(302); self.recompute_instance_static(); Ok(()) }
+            "dwbc" => { validate_finite_parameter("DWBC", value)?; self.params.p303 = value; self.mark_param_given(303); self.recompute_instance_static(); Ok(()) }
+            "beta0" => { validate_finite_parameter("BETA0", value)?; self.params.p304 = value; self.mark_param_given(304); self.recompute_instance_static(); Ok(()) }
+            "beta1" => { validate_finite_parameter("BETA1", value)?; self.params.p305 = value; self.mark_param_given(305); self.recompute_instance_static(); Ok(()) }
+            "beta2" => { validate_finite_parameter("BETA2", value)?; self.params.p306 = value; self.mark_param_given(306); self.recompute_instance_static(); Ok(()) }
+            "vdsatii0" => { validate_finite_parameter("VDSATII0", value)?; self.params.p307 = value; self.mark_param_given(307); self.recompute_instance_static(); Ok(()) }
+            "tii" => { validate_finite_parameter("TII", value)?; self.params.p308 = value; self.mark_param_given(308); self.recompute_instance_static(); Ok(()) }
+            "lii" => { validate_finite_parameter("LII", value)?; self.params.p309 = value; self.mark_param_given(309); self.recompute_instance_static(); Ok(()) }
+            "sii0" => { validate_finite_parameter("SII0", value)?; self.params.p310 = value; self.mark_param_given(310); self.recompute_instance_static(); Ok(()) }
+            "sii1" => { validate_finite_parameter("SII1", value)?; self.params.p311 = value; self.mark_param_given(311); self.recompute_instance_static(); Ok(()) }
+            "sii2" => { validate_finite_parameter("SII2", value)?; self.params.p312 = value; self.mark_param_given(312); self.recompute_instance_static(); Ok(()) }
+            "siid" => { validate_finite_parameter("SIID", value)?; self.params.p313 = value; self.mark_param_given(313); self.recompute_instance_static(); Ok(()) }
+            "fbjtii" => { validate_finite_parameter("FBJTII", value)?; self.params.p314 = value; self.mark_param_given(314); self.recompute_instance_static(); Ok(()) }
+            "ebjtii" => { validate_finite_parameter("EBJTII", value)?; self.params.p315 = value; self.mark_param_given(315); self.recompute_instance_static(); Ok(()) }
+            "cbjtii" => { validate_finite_parameter("CBJTII", value)?; self.params.p316 = value; self.mark_param_given(316); self.recompute_instance_static(); Ok(()) }
+            "vbci" => { validate_finite_parameter("VBCI", value)?; self.params.p317 = value; self.mark_param_given(317); self.recompute_instance_static(); Ok(()) }
+            "abjtii" => { validate_finite_parameter("ABJTII", value)?; self.params.p318 = value; self.mark_param_given(318); self.recompute_instance_static(); Ok(()) }
+            "mbjtii" => { validate_finite_parameter("MBJTII", value)?; self.params.p319 = value; self.mark_param_given(319); self.recompute_instance_static(); Ok(()) }
+            "tvbci" => { validate_finite_parameter("TVBCI", value)?; self.params.p320 = value; self.mark_param_given(320); self.recompute_instance_static(); Ok(()) }
+            "esatii" => { validate_finite_parameter("ESATII", value)?; self.params.p321 = value; self.mark_param_given(321); self.recompute_instance_static(); Ok(()) }
+            "ntun" => { validate_parameter("NTUN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p322 = value; self.mark_param_given(322); self.recompute_instance_static(); Ok(()) }
+            "ntund" => { validate_parameter("NTUND", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p323 = value; self.mark_param_given(323); self.recompute_instance_static(); Ok(()) }
+            "nrecf0" => { validate_parameter("NRECF0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p324 = value; self.mark_param_given(324); self.recompute_instance_static(); Ok(()) }
+            "nrecf0d" => { validate_parameter("NRECF0D", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p325 = value; self.mark_param_given(325); self.recompute_instance_static(); Ok(()) }
+            "nrecr0" => { validate_parameter("NRECR0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p326 = value; self.mark_param_given(326); self.recompute_instance_static(); Ok(()) }
+            "nrecr0d" => { validate_parameter("NRECR0D", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p327 = value; self.mark_param_given(327); self.recompute_instance_static(); Ok(()) }
+            "isbjt" => { validate_parameter("ISBJT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p328 = value; self.mark_param_given(328); self.recompute_instance_static(); Ok(()) }
+            "idbjt" => { validate_parameter("IDBJT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p329 = value; self.mark_param_given(329); self.recompute_instance_static(); Ok(()) }
+            "isdif" => { validate_parameter("ISDIF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p330 = value; self.mark_param_given(330); self.recompute_instance_static(); Ok(()) }
+            "iddif" => { validate_parameter("IDDIF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p331 = value; self.mark_param_given(331); self.recompute_instance_static(); Ok(()) }
+            "isrec" => { validate_parameter("ISREC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p332 = value; self.mark_param_given(332); self.recompute_instance_static(); Ok(()) }
+            "idrec" => { validate_parameter("IDREC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p333 = value; self.mark_param_given(333); self.recompute_instance_static(); Ok(()) }
+            "istun" => { validate_parameter("ISTUN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p334 = value; self.mark_param_given(334); self.recompute_instance_static(); Ok(()) }
+            "idtun" => { validate_parameter("IDTUN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p335 = value; self.mark_param_given(335); self.recompute_instance_static(); Ok(()) }
+            "ln" => { validate_parameter("LN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p336 = value; self.mark_param_given(336); self.recompute_instance_static(); Ok(()) }
+            "vrec0" => { validate_finite_parameter("VREC0", value)?; self.params.p337 = value; self.mark_param_given(337); self.recompute_instance_static(); Ok(()) }
+            "vrec0d" => { validate_finite_parameter("VREC0D", value)?; self.params.p338 = value; self.mark_param_given(338); self.recompute_instance_static(); Ok(()) }
+            "vtun0" => { validate_finite_parameter("VTUN0", value)?; self.params.p339 = value; self.mark_param_given(339); self.recompute_instance_static(); Ok(()) }
+            "vtun0d" => { validate_finite_parameter("VTUN0D", value)?; self.params.p340 = value; self.mark_param_given(340); self.recompute_instance_static(); Ok(()) }
+            "nbjt" => { validate_finite_parameter("NBJT", value)?; self.params.p341 = value; self.mark_param_given(341); self.recompute_instance_static(); Ok(()) }
+            "lbjt0" => { validate_finite_parameter("LBJT0", value)?; self.params.p342 = value; self.mark_param_given(342); self.recompute_instance_static(); Ok(()) }
+            "ldif0" => { validate_finite_parameter("LDIF0", value)?; self.params.p343 = value; self.mark_param_given(343); self.recompute_instance_static(); Ok(()) }
+            "vabjt" => { validate_finite_parameter("VABJT", value)?; self.params.p344 = value; self.mark_param_given(344); self.recompute_instance_static(); Ok(()) }
+            "aely" => { validate_finite_parameter("AELY", value)?; self.params.p345 = value; self.mark_param_given(345); self.recompute_instance_static(); Ok(()) }
+            "ahli" => { validate_finite_parameter("AHLI", value)?; self.params.p346 = value; self.mark_param_given(346); self.recompute_instance_static(); Ok(()) }
+            "ahlid" => { validate_finite_parameter("AHLID", value)?; self.params.p347 = value; self.mark_param_given(347); self.recompute_instance_static(); Ok(()) }
+            "rbody" => { validate_parameter("RBODY", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p348 = value; self.mark_param_given(348); self.recompute_instance_static(); Ok(()) }
+            "rbsh" => { validate_parameter("RBSH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p349 = value; self.mark_param_given(349); self.recompute_instance_static(); Ok(()) }
+            "cgeo" => { validate_finite_parameter("CGEO", value)?; self.params.p350 = value; self.mark_param_given(350); self.recompute_instance_static(); Ok(()) }
+            "tt" => { validate_parameter("TT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p351 = value; self.mark_param_given(351); self.recompute_instance_static(); Ok(()) }
+            "ndif" => { validate_finite_parameter("NDIF", value)?; self.params.p352 = value; self.mark_param_given(352); self.recompute_instance_static(); Ok(()) }
+            "vsdfb" => { validate_finite_parameter("VSDFB", value)?; self.params.p353 = value; self.mark_param_given(353); self.recompute_instance_static(); Ok(()) }
+            "vsdth" => { validate_finite_parameter("VSDTH", value)?; self.params.p354 = value; self.mark_param_given(354); self.recompute_instance_static(); Ok(()) }
+            "csdmin" => { validate_finite_parameter("CSDMIN", value)?; self.params.p355 = value; self.mark_param_given(355); self.recompute_instance_static(); Ok(()) }
+            "asd" => { validate_parameter("ASD", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p356 = value; self.mark_param_given(356); self.recompute_instance_static(); Ok(()) }
+            "csdesw" => { validate_finite_parameter("CSDESW", value)?; self.params.p357 = value; self.mark_param_given(357); self.recompute_instance_static(); Ok(()) }
+            "ntrecf" => { validate_finite_parameter("NTRECF", value)?; self.params.p358 = value; self.mark_param_given(358); self.recompute_instance_static(); Ok(()) }
+            "ntrecr" => { validate_finite_parameter("NTRECR", value)?; self.params.p359 = value; self.mark_param_given(359); self.recompute_instance_static(); Ok(()) }
+            "dlcb" => { validate_finite_parameter("DLCB", value)?; self.params.p360 = value; self.mark_param_given(360); self.recompute_instance_static(); Ok(()) }
+            "fbody" => { validate_finite_parameter("FBODY", value)?; self.params.p361 = value; self.mark_param_given(361); self.recompute_instance_static(); Ok(()) }
+            "tcjswg" => { validate_finite_parameter("TCJSWG", value)?; self.params.p362 = value; self.mark_param_given(362); self.recompute_instance_static(); Ok(()) }
+            "tpbswg" => { validate_finite_parameter("TPBSWG", value)?; self.params.p363 = value; self.mark_param_given(363); self.recompute_instance_static(); Ok(()) }
+            "tcjswgd" => { validate_finite_parameter("TCJSWGD", value)?; self.params.p364 = value; self.mark_param_given(364); self.recompute_instance_static(); Ok(()) }
+            "tpbswgd" => { validate_finite_parameter("TPBSWGD", value)?; self.params.p365 = value; self.mark_param_given(365); self.recompute_instance_static(); Ok(()) }
+            "acde" => { validate_finite_parameter("ACDE", value)?; self.params.p366 = value; self.mark_param_given(366); self.recompute_instance_static(); Ok(()) }
+            "moin" => { validate_finite_parameter("MOIN", value)?; self.params.p367 = value; self.mark_param_given(367); self.recompute_instance_static(); Ok(()) }
+            "noff" => { validate_parameter("NOFF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p368 = value; self.mark_param_given(368); self.recompute_instance_static(); Ok(()) }
+            "noff2" => { validate_parameter("NOFF2", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p369 = value; self.mark_param_given(369); self.recompute_instance_static(); Ok(()) }
+            "delvt" => { validate_finite_parameter("DELVT", value)?; self.params.p370 = value; self.mark_param_given(370); self.recompute_instance_static(); Ok(()) }
+            "kb1" => { validate_finite_parameter("KB1", value)?; self.params.p371 = value; self.mark_param_given(371); self.recompute_instance_static(); Ok(()) }
+            "dlbg" => { validate_finite_parameter("DLBG", value)?; self.params.p372 = value; self.mark_param_given(372); self.recompute_instance_static(); Ok(()) }
+            "cfrcoeff" => { validate_finite_parameter("CFRCOEFF", value)?; self.params.p373 = value; self.mark_param_given(373); self.recompute_instance_static(); Ok(()) }
+            "igbmod" => { validate_parameter("IGBMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p374 = value; self.mark_param_given(374); self.recompute_instance_static(); Ok(()) }
+            "igcmod" => { validate_parameter("IGCMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p375 = value; self.mark_param_given(375); self.recompute_instance_static(); Ok(()) }
+            "toxqm" => { validate_parameter("TOXQM", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p376 = value; self.mark_param_given(376); self.recompute_instance_static(); Ok(()) }
+            "wth0" => { validate_parameter("WTH0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p377 = value; self.mark_param_given(377); self.recompute_instance_static(); Ok(()) }
+            "rhalo" => { validate_parameter("RHALO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p378 = value; self.mark_param_given(378); self.recompute_instance_static(); Ok(()) }
+            "ntox" => { validate_finite_parameter("NTOX", value)?; self.params.p379 = value; self.mark_param_given(379); self.recompute_instance_static(); Ok(()) }
+            "toxref" => { validate_parameter("TOXREF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p380 = value; self.mark_param_given(380); self.recompute_instance_static(); Ok(()) }
+            "ebg" => { validate_finite_parameter("EBG", value)?; self.params.p381 = value; self.mark_param_given(381); self.recompute_instance_static(); Ok(()) }
+            "vevb" => { validate_parameter("VEVB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p382 = value; self.mark_param_given(382); self.recompute_instance_static(); Ok(()) }
+            "alphagb1" => { validate_finite_parameter("ALPHAGB1", value)?; self.params.p383 = value; self.mark_param_given(383); self.recompute_instance_static(); Ok(()) }
+            "alphagb1_t" => { validate_finite_parameter("ALPHAGB1_T", value)?; self.params.p384 = value; self.mark_param_given(384); self.recompute_instance_static(); Ok(()) }
+            "betagb1" => { validate_finite_parameter("BETAGB1", value)?; self.params.p385 = value; self.mark_param_given(385); self.recompute_instance_static(); Ok(()) }
+            "vgb1" => { validate_finite_parameter("VGB1", value)?; self.params.p386 = value; self.mark_param_given(386); self.recompute_instance_static(); Ok(()) }
+            "vecb" => { validate_parameter("VECB", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p387 = value; self.mark_param_given(387); self.recompute_instance_static(); Ok(()) }
+            "alphagb2" => { validate_finite_parameter("ALPHAGB2", value)?; self.params.p388 = value; self.mark_param_given(388); self.recompute_instance_static(); Ok(()) }
+            "alphagb2_t" => { validate_finite_parameter("ALPHAGB2_T", value)?; self.params.p389 = value; self.mark_param_given(389); self.recompute_instance_static(); Ok(()) }
+            "betagb2" => { validate_finite_parameter("BETAGB2", value)?; self.params.p390 = value; self.mark_param_given(390); self.recompute_instance_static(); Ok(()) }
+            "vgb2" => { validate_finite_parameter("VGB2", value)?; self.params.p391 = value; self.mark_param_given(391); self.recompute_instance_static(); Ok(()) }
+            "aigbcp2" => { validate_finite_parameter("AIGBCP2", value)?; self.params.p392 = value; self.mark_param_given(392); self.recompute_instance_static(); Ok(()) }
+            "aigbcp2_t" => { validate_finite_parameter("AIGBCP2_T", value)?; self.params.p393 = value; self.mark_param_given(393); self.recompute_instance_static(); Ok(()) }
+            "bigbcp2" => { validate_finite_parameter("BIGBCP2", value)?; self.params.p394 = value; self.mark_param_given(394); self.recompute_instance_static(); Ok(()) }
+            "cigbcp2" => { validate_finite_parameter("CIGBCP2", value)?; self.params.p395 = value; self.mark_param_given(395); self.recompute_instance_static(); Ok(()) }
+            "voxh" => { validate_finite_parameter("VOXH", value)?; self.params.p396 = value; self.mark_param_given(396); self.recompute_instance_static(); Ok(()) }
+            "deltavox" => { validate_finite_parameter("DELTAVOX", value)?; self.params.p397 = value; self.mark_param_given(397); self.recompute_instance_static(); Ok(()) }
+            "aigc" => { validate_finite_parameter("AIGC", value)?; self.params.p398 = value; self.mark_param_given(398); self.recompute_instance_static(); Ok(()) }
+            "aigc1" => { validate_finite_parameter("AIGC1", value)?; self.params.p399 = value; self.mark_param_given(399); self.recompute_instance_static(); Ok(()) }
+            "bigc" => { validate_finite_parameter("BIGC", value)?; self.params.p400 = value; self.mark_param_given(400); self.recompute_instance_static(); Ok(()) }
+            "cigc" => { validate_finite_parameter("CIGC", value)?; self.params.p401 = value; self.mark_param_given(401); self.recompute_instance_static(); Ok(()) }
+            "aigsd" => { validate_finite_parameter("AIGSD", value)?; self.params.p402 = value; self.mark_param_given(402); self.recompute_instance_static(); Ok(()) }
+            "aigsd1" => { validate_finite_parameter("AIGSD1", value)?; self.params.p403 = value; self.mark_param_given(403); self.recompute_instance_static(); Ok(()) }
+            "bigsd" => { validate_finite_parameter("BIGSD", value)?; self.params.p404 = value; self.mark_param_given(404); self.recompute_instance_static(); Ok(()) }
+            "cigsd" => { validate_finite_parameter("CIGSD", value)?; self.params.p405 = value; self.mark_param_given(405); self.recompute_instance_static(); Ok(()) }
+            "nigc" => { validate_finite_parameter("NIGC", value)?; self.params.p406 = value; self.mark_param_given(406); self.recompute_instance_static(); Ok(()) }
+            "pigcd" => { validate_finite_parameter("PIGCD", value)?; self.params.p407 = value; self.mark_param_given(407); self.recompute_instance_static(); Ok(()) }
+            "poxedge" => { validate_finite_parameter("POXEDGE", value)?; self.params.p408 = value; self.mark_param_given(408); self.recompute_instance_static(); Ok(()) }
+            "igt" => { validate_finite_parameter("IGT", value)?; self.params.p409 = value; self.mark_param_given(409); self.recompute_instance_static(); Ok(()) }
+            "dlcig" => { validate_finite_parameter("DLCIG", value)?; self.params.p410 = value; self.mark_param_given(410); self.recompute_instance_static(); Ok(()) }
+            "vbs0pd" => { validate_finite_parameter("VBS0PD", value)?; self.params.p411 = value; self.mark_param_given(411); self.recompute_instance_static(); Ok(()) }
+            "vbs0fd" => { validate_finite_parameter("VBS0FD", value)?; self.params.p412 = value; self.mark_param_given(412); self.recompute_instance_static(); Ok(()) }
+            "vbsa" => { validate_finite_parameter("VBSA", value)?; self.params.p413 = value; self.mark_param_given(413); self.recompute_instance_static(); Ok(()) }
+            "nofffd" => { validate_finite_parameter("NOFFFD", value)?; self.params.p414 = value; self.mark_param_given(414); self.recompute_instance_static(); Ok(()) }
+            "vofffd" => { validate_finite_parameter("VOFFFD", value)?; self.params.p415 = value; self.mark_param_given(415); self.recompute_instance_static(); Ok(()) }
+            "k1b" => { validate_finite_parameter("K1B", value)?; self.params.p416 = value; self.mark_param_given(416); self.recompute_instance_static(); Ok(()) }
+            "k2b" => { validate_finite_parameter("K2B", value)?; self.params.p417 = value; self.mark_param_given(417); self.recompute_instance_static(); Ok(()) }
+            "dk2b" => { validate_finite_parameter("DK2B", value)?; self.params.p418 = value; self.mark_param_given(418); self.recompute_instance_static(); Ok(()) }
+            "dvbd0" => { validate_finite_parameter("DVBD0", value)?; self.params.p419 = value; self.mark_param_given(419); self.recompute_instance_static(); Ok(()) }
+            "dvbd1" => { validate_finite_parameter("DVBD1", value)?; self.params.p420 = value; self.mark_param_given(420); self.recompute_instance_static(); Ok(()) }
+            "moinfd" => { validate_finite_parameter("MOINFD", value)?; self.params.p421 = value; self.mark_param_given(421); self.recompute_instance_static(); Ok(()) }
+            "xrcrg1" => { validate_finite_parameter("XRCRG1", value)?; self.params.p422 = value; self.mark_param_given(422); self.recompute_instance_static(); Ok(()) }
+            "xrcrg2" => { validate_finite_parameter("XRCRG2", value)?; self.params.p423 = value; self.mark_param_given(423); self.recompute_instance_static(); Ok(()) }
+            "rshg" => { validate_parameter("RSHG", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p424 = value; self.mark_param_given(424); self.recompute_instance_static(); Ok(()) }
+            "ngcon" => { validate_parameter("NGCON", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p425 = value; self.mark_param_given(425); self.recompute_instance_static(); Ok(()) }
+            "rver" => { validate_parameter("RVER", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p426 = value; self.mark_param_given(426); self.recompute_instance_static(); Ok(()) }
+            "xgw" => { validate_finite_parameter("XGW", value)?; self.params.p427 = value; self.mark_param_given(427); self.recompute_instance_static(); Ok(()) }
+            "xgl" => { validate_finite_parameter("XGL", value)?; self.params.p428 = value; self.mark_param_given(428); self.recompute_instance_static(); Ok(()) }
+            "rdsmod" => { validate_parameter("RDSMOD", value, Some((0.0, "0.0")), false, Some((2.0, "2.0")), false, &[])?; self.params.p429 = value; self.mark_param_given(429); self.recompute_instance_static(); Ok(()) }
+            "ids0multmod" => { validate_parameter("IDS0MULTMOD", value, Some((0.0, "0.0")), false, Some((2.0, "2.0")), false, &[])?; self.params.p430 = value; self.mark_param_given(430); self.recompute_instance_static(); Ok(()) }
+            "minr" => { validate_parameter("MINR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p431 = value; self.mark_param_given(431); self.recompute_instance_static(); Ok(()) }
+            "fdmod" => { validate_parameter("FDMOD", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p432 = value; self.mark_param_given(432); self.recompute_instance_static(); Ok(()) }
+            "vsce" => { validate_finite_parameter("VSCE", value)?; self.params.p433 = value; self.mark_param_given(433); self.recompute_instance_static(); Ok(()) }
+            "cdsbs" => { validate_finite_parameter("CDSBS", value)?; self.params.p434 = value; self.mark_param_given(434); self.recompute_instance_static(); Ok(()) }
+            "minvcv" => { validate_finite_parameter("MINVCV", value)?; self.params.p435 = value; self.mark_param_given(435); self.recompute_instance_static(); Ok(()) }
+            "lminvcv" => { validate_finite_parameter("LMINVCV", value)?; self.params.p436 = value; self.mark_param_given(436); self.recompute_instance_static(); Ok(()) }
+            "wminvcv" => { validate_finite_parameter("WMINVCV", value)?; self.params.p437 = value; self.mark_param_given(437); self.recompute_instance_static(); Ok(()) }
+            "pminvcv" => { validate_finite_parameter("PMINVCV", value)?; self.params.p438 = value; self.mark_param_given(438); self.recompute_instance_static(); Ok(()) }
+            "voffcv" => { validate_finite_parameter("VOFFCV", value)?; self.params.p439 = value; self.mark_param_given(439); self.recompute_instance_static(); Ok(()) }
+            "lvoffcv" => { validate_finite_parameter("LVOFFCV", value)?; self.params.p440 = value; self.mark_param_given(440); self.recompute_instance_static(); Ok(()) }
+            "wvoffcv" => { validate_finite_parameter("WVOFFCV", value)?; self.params.p441 = value; self.mark_param_given(441); self.recompute_instance_static(); Ok(()) }
+            "pvoffcv" => { validate_finite_parameter("PVOFFCV", value)?; self.params.p442 = value; self.mark_param_given(442); self.recompute_instance_static(); Ok(()) }
+            "lxj" => { validate_finite_parameter("LXJ", value)?; self.params.p443 = value; self.mark_param_given(443); self.recompute_instance_static(); Ok(()) }
+            "lalphagb1" => { validate_finite_parameter("LALPHAGB1", value)?; self.params.p444 = value; self.mark_param_given(444); self.recompute_instance_static(); Ok(()) }
+            "lalphagb1_t" => { validate_finite_parameter("LALPHAGB1_T", value)?; self.params.p445 = value; self.mark_param_given(445); self.recompute_instance_static(); Ok(()) }
+            "lbetagb1" => { validate_finite_parameter("LBETAGB1", value)?; self.params.p446 = value; self.mark_param_given(446); self.recompute_instance_static(); Ok(()) }
+            "lalphagb2" => { validate_finite_parameter("LALPHAGB2", value)?; self.params.p447 = value; self.mark_param_given(447); self.recompute_instance_static(); Ok(()) }
+            "lalphagb2_t" => { validate_finite_parameter("LALPHAGB2_T", value)?; self.params.p448 = value; self.mark_param_given(448); self.recompute_instance_static(); Ok(()) }
+            "lbetagb2" => { validate_finite_parameter("LBETAGB2", value)?; self.params.p449 = value; self.mark_param_given(449); self.recompute_instance_static(); Ok(()) }
+            "laigbcp2" => { validate_finite_parameter("LAIGBCP2", value)?; self.params.p450 = value; self.mark_param_given(450); self.recompute_instance_static(); Ok(()) }
+            "laigbcp2_t" => { validate_finite_parameter("LAIGBCP2_T", value)?; self.params.p451 = value; self.mark_param_given(451); self.recompute_instance_static(); Ok(()) }
+            "lbigbcp2" => { validate_finite_parameter("LBIGBCP2", value)?; self.params.p452 = value; self.mark_param_given(452); self.recompute_instance_static(); Ok(()) }
+            "lcigbcp2" => { validate_finite_parameter("LCIGBCP2", value)?; self.params.p453 = value; self.mark_param_given(453); self.recompute_instance_static(); Ok(()) }
+            "lcgsl" => { validate_finite_parameter("LCGSL", value)?; self.params.p454 = value; self.mark_param_given(454); self.recompute_instance_static(); Ok(()) }
+            "lcgdl" => { validate_finite_parameter("LCGDL", value)?; self.params.p455 = value; self.mark_param_given(455); self.recompute_instance_static(); Ok(()) }
+            "lckappa" => { validate_finite_parameter("LCKAPPA", value)?; self.params.p456 = value; self.mark_param_given(456); self.recompute_instance_static(); Ok(()) }
+            "lndif" => { validate_finite_parameter("LNDIF", value)?; self.params.p457 = value; self.mark_param_given(457); self.recompute_instance_static(); Ok(()) }
+            "lute" => { validate_finite_parameter("LUTE", value)?; self.params.p458 = value; self.mark_param_given(458); self.recompute_instance_static(); Ok(()) }
+            "lkt1" => { validate_finite_parameter("LKT1", value)?; self.params.p459 = value; self.mark_param_given(459); self.recompute_instance_static(); Ok(()) }
+            "lkt1l" => { validate_finite_parameter("LKT1L", value)?; self.params.p460 = value; self.mark_param_given(460); self.recompute_instance_static(); Ok(()) }
+            "lkt2" => { validate_finite_parameter("LKT2", value)?; self.params.p461 = value; self.mark_param_given(461); self.recompute_instance_static(); Ok(()) }
+            "lua1" => { validate_finite_parameter("LUA1", value)?; self.params.p462 = value; self.mark_param_given(462); self.recompute_instance_static(); Ok(()) }
+            "lub1" => { validate_finite_parameter("LUB1", value)?; self.params.p463 = value; self.mark_param_given(463); self.recompute_instance_static(); Ok(()) }
+            "luc1" => { validate_finite_parameter("LUC1", value)?; self.params.p464 = value; self.mark_param_given(464); self.recompute_instance_static(); Ok(()) }
+            "lat" => { validate_finite_parameter("LAT", value)?; self.params.p465 = value; self.mark_param_given(465); self.recompute_instance_static(); Ok(()) }
+            "lprt" => { validate_finite_parameter("LPRT", value)?; self.params.p466 = value; self.mark_param_given(466); self.recompute_instance_static(); Ok(()) }
+            "lntrecf" => { validate_finite_parameter("LNTRECF", value)?; self.params.p467 = value; self.mark_param_given(467); self.recompute_instance_static(); Ok(()) }
+            "lntrecr" => { validate_finite_parameter("LNTRECR", value)?; self.params.p468 = value; self.mark_param_given(468); self.recompute_instance_static(); Ok(()) }
+            "lxbjt" => { validate_finite_parameter("LXBJT", value)?; self.params.p469 = value; self.mark_param_given(469); self.recompute_instance_static(); Ok(()) }
+            "lxdif" => { validate_finite_parameter("LXDIF", value)?; self.params.p470 = value; self.mark_param_given(470); self.recompute_instance_static(); Ok(()) }
+            "lxrec" => { validate_finite_parameter("LXREC", value)?; self.params.p471 = value; self.mark_param_given(471); self.recompute_instance_static(); Ok(()) }
+            "lxtun" => { validate_finite_parameter("LXTUN", value)?; self.params.p472 = value; self.mark_param_given(472); self.recompute_instance_static(); Ok(()) }
+            "lxdifd" => { validate_finite_parameter("LXDIFD", value)?; self.params.p473 = value; self.mark_param_given(473); self.recompute_instance_static(); Ok(()) }
+            "lxrecd" => { validate_finite_parameter("LXRECD", value)?; self.params.p474 = value; self.mark_param_given(474); self.recompute_instance_static(); Ok(()) }
+            "lxtund" => { validate_finite_parameter("LXTUND", value)?; self.params.p475 = value; self.mark_param_given(475); self.recompute_instance_static(); Ok(()) }
+            "laigc" => { validate_finite_parameter("LAIGC", value)?; self.params.p476 = value; self.mark_param_given(476); self.recompute_instance_static(); Ok(()) }
+            "laigc1" => { validate_finite_parameter("LAIGC1", value)?; self.params.p477 = value; self.mark_param_given(477); self.recompute_instance_static(); Ok(()) }
+            "lbigc" => { validate_finite_parameter("LBIGC", value)?; self.params.p478 = value; self.mark_param_given(478); self.recompute_instance_static(); Ok(()) }
+            "lcigc" => { validate_finite_parameter("LCIGC", value)?; self.params.p479 = value; self.mark_param_given(479); self.recompute_instance_static(); Ok(()) }
+            "laigsd" => { validate_finite_parameter("LAIGSD", value)?; self.params.p480 = value; self.mark_param_given(480); self.recompute_instance_static(); Ok(()) }
+            "laigsd1" => { validate_finite_parameter("LAIGSD1", value)?; self.params.p481 = value; self.mark_param_given(481); self.recompute_instance_static(); Ok(()) }
+            "lbigsd" => { validate_finite_parameter("LBIGSD", value)?; self.params.p482 = value; self.mark_param_given(482); self.recompute_instance_static(); Ok(()) }
+            "lcigsd" => { validate_finite_parameter("LCIGSD", value)?; self.params.p483 = value; self.mark_param_given(483); self.recompute_instance_static(); Ok(()) }
+            "lnigc" => { validate_finite_parameter("LNIGC", value)?; self.params.p484 = value; self.mark_param_given(484); self.recompute_instance_static(); Ok(()) }
+            "lpigcd" => { validate_finite_parameter("LPIGCD", value)?; self.params.p485 = value; self.mark_param_given(485); self.recompute_instance_static(); Ok(()) }
+            "lpoxedge" => { validate_finite_parameter("LPOXEDGE", value)?; self.params.p486 = value; self.mark_param_given(486); self.recompute_instance_static(); Ok(()) }
+            "ligt" => { validate_finite_parameter("LIGT", value)?; self.params.p487 = value; self.mark_param_given(487); self.recompute_instance_static(); Ok(()) }
+            "lnch" => { validate_finite_parameter("LNCH", value)?; self.params.p488 = value; self.mark_param_given(488); self.recompute_instance_static(); Ok(()) }
+            "lnsub" => { validate_finite_parameter("LNSUB", value)?; self.params.p489 = value; self.mark_param_given(489); self.recompute_instance_static(); Ok(()) }
+            "lngate" => { validate_finite_parameter("LNGATE", value)?; self.params.p490 = value; self.mark_param_given(490); self.recompute_instance_static(); Ok(()) }
+            "lnsd" => { validate_finite_parameter("LNSD", value)?; self.params.p491 = value; self.mark_param_given(491); self.recompute_instance_static(); Ok(()) }
+            "lvth0" => { validate_finite_parameter("LVTH0", value)?; self.params.p492 = value; self.mark_param_given(492); self.recompute_instance_static(); Ok(()) }
+            "lvfb" => { validate_finite_parameter("LVFB", value)?; self.params.p493 = value; self.mark_param_given(493); self.recompute_instance_static(); Ok(()) }
+            "lk1" => { validate_finite_parameter("LK1", value)?; self.params.p494 = value; self.mark_param_given(494); self.recompute_instance_static(); Ok(()) }
+            "lk1w1" => { validate_finite_parameter("LK1W1", value)?; self.params.p495 = value; self.mark_param_given(495); self.recompute_instance_static(); Ok(()) }
+            "lk1w2" => { validate_finite_parameter("LK1W2", value)?; self.params.p496 = value; self.mark_param_given(496); self.recompute_instance_static(); Ok(()) }
+            "lk2" => { validate_finite_parameter("LK2", value)?; self.params.p497 = value; self.mark_param_given(497); self.recompute_instance_static(); Ok(()) }
+            "lk3" => { validate_finite_parameter("LK3", value)?; self.params.p498 = value; self.mark_param_given(498); self.recompute_instance_static(); Ok(()) }
+            "lk3b" => { validate_finite_parameter("LK3B", value)?; self.params.p499 = value; self.mark_param_given(499); self.recompute_instance_static(); Ok(()) }
+            "lkb1" => { validate_finite_parameter("LKB1", value)?; self.params.p500 = value; self.mark_param_given(500); self.recompute_instance_static(); Ok(()) }
+            "lw0" => { validate_finite_parameter("LW0", value)?; self.params.p501 = value; self.mark_param_given(501); self.recompute_instance_static(); Ok(()) }
+            "llpeb" => { validate_finite_parameter("LLPEB", value)?; self.params.p502 = value; self.mark_param_given(502); self.recompute_instance_static(); Ok(()) }
+            "ldvt0" => { validate_finite_parameter("LDVT0", value)?; self.params.p503 = value; self.mark_param_given(503); self.recompute_instance_static(); Ok(()) }
+            "ldvt1" => { validate_finite_parameter("LDVT1", value)?; self.params.p504 = value; self.mark_param_given(504); self.recompute_instance_static(); Ok(()) }
+            "ldvt2" => { validate_finite_parameter("LDVT2", value)?; self.params.p505 = value; self.mark_param_given(505); self.recompute_instance_static(); Ok(()) }
+            "ldvt0w" => { validate_finite_parameter("LDVT0W", value)?; self.params.p506 = value; self.mark_param_given(506); self.recompute_instance_static(); Ok(()) }
+            "ldvt1w" => { validate_finite_parameter("LDVT1W", value)?; self.params.p507 = value; self.mark_param_given(507); self.recompute_instance_static(); Ok(()) }
+            "ldvt2w" => { validate_finite_parameter("LDVT2W", value)?; self.params.p508 = value; self.mark_param_given(508); self.recompute_instance_static(); Ok(()) }
+            "lu0" => { validate_finite_parameter("LU0", value)?; self.params.p509 = value; self.mark_param_given(509); self.recompute_instance_static(); Ok(()) }
+            "leu" => { validate_finite_parameter("LEU", value)?; self.params.p510 = value; self.mark_param_given(510); self.recompute_instance_static(); Ok(()) }
+            "lua" => { validate_finite_parameter("LUA", value)?; self.params.p511 = value; self.mark_param_given(511); self.recompute_instance_static(); Ok(()) }
+            "lub" => { validate_finite_parameter("LUB", value)?; self.params.p512 = value; self.mark_param_given(512); self.recompute_instance_static(); Ok(()) }
+            "luc" => { validate_finite_parameter("LUC", value)?; self.params.p513 = value; self.mark_param_given(513); self.recompute_instance_static(); Ok(()) }
+            "lud" => { validate_finite_parameter("LUD", value)?; self.params.p514 = value; self.mark_param_given(514); self.recompute_instance_static(); Ok(()) }
+            "lud1" => { validate_finite_parameter("LUD1", value)?; self.params.p515 = value; self.mark_param_given(515); self.recompute_instance_static(); Ok(()) }
+            "lucste" => { validate_finite_parameter("LUCSTE", value)?; self.params.p516 = value; self.mark_param_given(516); self.recompute_instance_static(); Ok(()) }
+            "lucs" => { validate_finite_parameter("LUCS", value)?; self.params.p517 = value; self.mark_param_given(517); self.recompute_instance_static(); Ok(()) }
+            "lvsat" => { validate_finite_parameter("LVSAT", value)?; self.params.p518 = value; self.mark_param_given(518); self.recompute_instance_static(); Ok(()) }
+            "la0" => { validate_finite_parameter("LA0", value)?; self.params.p519 = value; self.mark_param_given(519); self.recompute_instance_static(); Ok(()) }
+            "lags" => { validate_finite_parameter("LAGS", value)?; self.params.p520 = value; self.mark_param_given(520); self.recompute_instance_static(); Ok(()) }
+            "lb0" => { validate_finite_parameter("LB0", value)?; self.params.p521 = value; self.mark_param_given(521); self.recompute_instance_static(); Ok(()) }
+            "lb1" => { validate_finite_parameter("LB1", value)?; self.params.p522 = value; self.mark_param_given(522); self.recompute_instance_static(); Ok(()) }
+            "lketa" => { validate_finite_parameter("LKETA", value)?; self.params.p523 = value; self.mark_param_given(523); self.recompute_instance_static(); Ok(()) }
+            "lketas" => { validate_finite_parameter("LKETAS", value)?; self.params.p524 = value; self.mark_param_given(524); self.recompute_instance_static(); Ok(()) }
+            "la1" => { validate_finite_parameter("LA1", value)?; self.params.p525 = value; self.mark_param_given(525); self.recompute_instance_static(); Ok(()) }
+            "la2" => { validate_finite_parameter("LA2", value)?; self.params.p526 = value; self.mark_param_given(526); self.recompute_instance_static(); Ok(()) }
+            "lrdsw" => { validate_finite_parameter("LRDSW", value)?; self.params.p527 = value; self.mark_param_given(527); self.recompute_instance_static(); Ok(()) }
+            "lrsw" => { validate_finite_parameter("LRSW", value)?; self.params.p528 = value; self.mark_param_given(528); self.recompute_instance_static(); Ok(()) }
+            "lrdw" => { validate_finite_parameter("LRDW", value)?; self.params.p529 = value; self.mark_param_given(529); self.recompute_instance_static(); Ok(()) }
+            "lprwb" => { validate_finite_parameter("LPRWB", value)?; self.params.p530 = value; self.mark_param_given(530); self.recompute_instance_static(); Ok(()) }
+            "lprwe" => { validate_finite_parameter("LPRWE", value)?; self.params.p531 = value; self.mark_param_given(531); self.recompute_instance_static(); Ok(()) }
+            "lprwg" => { validate_finite_parameter("LPRWG", value)?; self.params.p532 = value; self.mark_param_given(532); self.recompute_instance_static(); Ok(()) }
+            "lwr" => { validate_finite_parameter("LWR", value)?; self.params.p533 = value; self.mark_param_given(533); self.recompute_instance_static(); Ok(()) }
+            "lnfactor" => { validate_finite_parameter("LNFACTOR", value)?; self.params.p534 = value; self.mark_param_given(534); self.recompute_instance_static(); Ok(()) }
+            "ldwg" => { validate_finite_parameter("LDWG", value)?; self.params.p535 = value; self.mark_param_given(535); self.recompute_instance_static(); Ok(()) }
+            "ldwb" => { validate_finite_parameter("LDWB", value)?; self.params.p536 = value; self.mark_param_given(536); self.recompute_instance_static(); Ok(()) }
+            "lvoff" => { validate_finite_parameter("LVOFF", value)?; self.params.p537 = value; self.mark_param_given(537); self.recompute_instance_static(); Ok(()) }
+            "leta0" => { validate_finite_parameter("LETA0", value)?; self.params.p538 = value; self.mark_param_given(538); self.recompute_instance_static(); Ok(()) }
+            "letab" => { validate_finite_parameter("LETAB", value)?; self.params.p539 = value; self.mark_param_given(539); self.recompute_instance_static(); Ok(()) }
+            "leta0cv" => { validate_finite_parameter("LETA0CV", value)?; self.params.p540 = value; self.mark_param_given(540); self.recompute_instance_static(); Ok(()) }
+            "letabcv" => { validate_finite_parameter("LETABCV", value)?; self.params.p541 = value; self.mark_param_given(541); self.recompute_instance_static(); Ok(()) }
+            "ldsub" => { validate_finite_parameter("LDSUB", value)?; self.params.p542 = value; self.mark_param_given(542); self.recompute_instance_static(); Ok(()) }
+            "lcit" => { validate_finite_parameter("LCIT", value)?; self.params.p543 = value; self.mark_param_given(543); self.recompute_instance_static(); Ok(()) }
+            "lcdsc" => { validate_finite_parameter("LCDSC", value)?; self.params.p544 = value; self.mark_param_given(544); self.recompute_instance_static(); Ok(()) }
+            "lcdscb" => { validate_finite_parameter("LCDSCB", value)?; self.params.p545 = value; self.mark_param_given(545); self.recompute_instance_static(); Ok(()) }
+            "lcdscd" => { validate_finite_parameter("LCDSCD", value)?; self.params.p546 = value; self.mark_param_given(546); self.recompute_instance_static(); Ok(()) }
+            "lpclm" => { validate_finite_parameter("LPCLM", value)?; self.params.p547 = value; self.mark_param_given(547); self.recompute_instance_static(); Ok(()) }
+            "lpdiblc1" => { validate_finite_parameter("LPDIBLC1", value)?; self.params.p548 = value; self.mark_param_given(548); self.recompute_instance_static(); Ok(()) }
+            "lpdiblc2" => { validate_finite_parameter("LPDIBLC2", value)?; self.params.p549 = value; self.mark_param_given(549); self.recompute_instance_static(); Ok(()) }
+            "lpdiblcb" => { validate_finite_parameter("LPDIBLCB", value)?; self.params.p550 = value; self.mark_param_given(550); self.recompute_instance_static(); Ok(()) }
+            "ldrout" => { validate_finite_parameter("LDROUT", value)?; self.params.p551 = value; self.mark_param_given(551); self.recompute_instance_static(); Ok(()) }
+            "lpvag" => { validate_finite_parameter("LPVAG", value)?; self.params.p552 = value; self.mark_param_given(552); self.recompute_instance_static(); Ok(()) }
+            "ldelta" => { validate_finite_parameter("LDELTA", value)?; self.params.p553 = value; self.mark_param_given(553); self.recompute_instance_static(); Ok(()) }
+            "lalpha0" => { validate_finite_parameter("LALPHA0", value)?; self.params.p554 = value; self.mark_param_given(554); self.recompute_instance_static(); Ok(()) }
+            "lfbjtii" => { validate_finite_parameter("LFBJTII", value)?; self.params.p555 = value; self.mark_param_given(555); self.recompute_instance_static(); Ok(()) }
+            "labjtii" => { validate_finite_parameter("LABJTII", value)?; self.params.p556 = value; self.mark_param_given(556); self.recompute_instance_static(); Ok(()) }
+            "lcbjtii" => { validate_finite_parameter("LCBJTII", value)?; self.params.p557 = value; self.mark_param_given(557); self.recompute_instance_static(); Ok(()) }
+            "lebjtii" => { validate_finite_parameter("LEBJTII", value)?; self.params.p558 = value; self.mark_param_given(558); self.recompute_instance_static(); Ok(()) }
+            "lmbjtii" => { validate_finite_parameter("LMBJTII", value)?; self.params.p559 = value; self.mark_param_given(559); self.recompute_instance_static(); Ok(()) }
+            "lvbci" => { validate_finite_parameter("LVBCI", value)?; self.params.p560 = value; self.mark_param_given(560); self.recompute_instance_static(); Ok(()) }
+            "lbeta0" => { validate_finite_parameter("LBETA0", value)?; self.params.p561 = value; self.mark_param_given(561); self.recompute_instance_static(); Ok(()) }
+            "lbeta1" => { validate_finite_parameter("LBETA1", value)?; self.params.p562 = value; self.mark_param_given(562); self.recompute_instance_static(); Ok(()) }
+            "lbeta2" => { validate_finite_parameter("LBETA2", value)?; self.params.p563 = value; self.mark_param_given(563); self.recompute_instance_static(); Ok(()) }
+            "lvdsatii0" => { validate_finite_parameter("LVDSATII0", value)?; self.params.p564 = value; self.mark_param_given(564); self.recompute_instance_static(); Ok(()) }
+            "llii" => { validate_finite_parameter("LLII", value)?; self.params.p565 = value; self.mark_param_given(565); self.recompute_instance_static(); Ok(()) }
+            "lesatii" => { validate_finite_parameter("LESATII", value)?; self.params.p566 = value; self.mark_param_given(566); self.recompute_instance_static(); Ok(()) }
+            "lsii0" => { validate_finite_parameter("LSII0", value)?; self.params.p567 = value; self.mark_param_given(567); self.recompute_instance_static(); Ok(()) }
+            "lsii1" => { validate_finite_parameter("LSII1", value)?; self.params.p568 = value; self.mark_param_given(568); self.recompute_instance_static(); Ok(()) }
+            "lsii2" => { validate_finite_parameter("LSII2", value)?; self.params.p569 = value; self.mark_param_given(569); self.recompute_instance_static(); Ok(()) }
+            "lsiid" => { validate_finite_parameter("LSIID", value)?; self.params.p570 = value; self.mark_param_given(570); self.recompute_instance_static(); Ok(()) }
+            "lagidl" => { validate_finite_parameter("LAGIDL", value)?; self.params.p571 = value; self.mark_param_given(571); self.recompute_instance_static(); Ok(()) }
+            "lbgidl" => { validate_finite_parameter("LBGIDL", value)?; self.params.p572 = value; self.mark_param_given(572); self.recompute_instance_static(); Ok(()) }
+            "lbgidl1" => { validate_finite_parameter("LBGIDL1", value)?; self.params.p573 = value; self.mark_param_given(573); self.recompute_instance_static(); Ok(()) }
+            "lcgidl" => { validate_finite_parameter("LCGIDL", value)?; self.params.p574 = value; self.mark_param_given(574); self.recompute_instance_static(); Ok(()) }
+            "lrgidl" => { validate_finite_parameter("LRGIDL", value)?; self.params.p575 = value; self.mark_param_given(575); self.recompute_instance_static(); Ok(()) }
+            "lkgidl" => { validate_finite_parameter("LKGIDL", value)?; self.params.p576 = value; self.mark_param_given(576); self.recompute_instance_static(); Ok(()) }
+            "lfgidl" => { validate_finite_parameter("LFGIDL", value)?; self.params.p577 = value; self.mark_param_given(577); self.recompute_instance_static(); Ok(()) }
+            "lagisl" => { validate_finite_parameter("LAGISL", value)?; self.params.p578 = value; self.mark_param_given(578); self.recompute_instance_static(); Ok(()) }
+            "lbgisl" => { validate_finite_parameter("LBGISL", value)?; self.params.p579 = value; self.mark_param_given(579); self.recompute_instance_static(); Ok(()) }
+            "lbgisl1" => { validate_finite_parameter("LBGISL1", value)?; self.params.p580 = value; self.mark_param_given(580); self.recompute_instance_static(); Ok(()) }
+            "lcgisl" => { validate_finite_parameter("LCGISL", value)?; self.params.p581 = value; self.mark_param_given(581); self.recompute_instance_static(); Ok(()) }
+            "lrgisl" => { validate_finite_parameter("LRGISL", value)?; self.params.p582 = value; self.mark_param_given(582); self.recompute_instance_static(); Ok(()) }
+            "lkgisl" => { validate_finite_parameter("LKGISL", value)?; self.params.p583 = value; self.mark_param_given(583); self.recompute_instance_static(); Ok(()) }
+            "lfgisl" => { validate_finite_parameter("LFGISL", value)?; self.params.p584 = value; self.mark_param_given(584); self.recompute_instance_static(); Ok(()) }
+            "lntun" => { validate_finite_parameter("LNTUN", value)?; self.params.p585 = value; self.mark_param_given(585); self.recompute_instance_static(); Ok(()) }
+            "lntund" => { validate_finite_parameter("LNTUND", value)?; self.params.p586 = value; self.mark_param_given(586); self.recompute_instance_static(); Ok(()) }
+            "lndiode" => { validate_finite_parameter("LNDIODE", value)?; self.params.p587 = value; self.mark_param_given(587); self.recompute_instance_static(); Ok(()) }
+            "lndioded" => { validate_finite_parameter("LNDIODED", value)?; self.params.p588 = value; self.mark_param_given(588); self.recompute_instance_static(); Ok(()) }
+            "lnrecf0" => { validate_finite_parameter("LNRECF0", value)?; self.params.p589 = value; self.mark_param_given(589); self.recompute_instance_static(); Ok(()) }
+            "lnrecf0d" => { validate_finite_parameter("LNRECF0D", value)?; self.params.p590 = value; self.mark_param_given(590); self.recompute_instance_static(); Ok(()) }
+            "lnrecr0" => { validate_finite_parameter("LNRECR0", value)?; self.params.p591 = value; self.mark_param_given(591); self.recompute_instance_static(); Ok(()) }
+            "lnrecr0d" => { validate_finite_parameter("LNRECR0D", value)?; self.params.p592 = value; self.mark_param_given(592); self.recompute_instance_static(); Ok(()) }
+            "lisbjt" => { validate_finite_parameter("LISBJT", value)?; self.params.p593 = value; self.mark_param_given(593); self.recompute_instance_static(); Ok(()) }
+            "lidbjt" => { validate_finite_parameter("LIDBJT", value)?; self.params.p594 = value; self.mark_param_given(594); self.recompute_instance_static(); Ok(()) }
+            "lisdif" => { validate_finite_parameter("LISDIF", value)?; self.params.p595 = value; self.mark_param_given(595); self.recompute_instance_static(); Ok(()) }
+            "liddif" => { validate_finite_parameter("LIDDIF", value)?; self.params.p596 = value; self.mark_param_given(596); self.recompute_instance_static(); Ok(()) }
+            "lisrec" => { validate_finite_parameter("LISREC", value)?; self.params.p597 = value; self.mark_param_given(597); self.recompute_instance_static(); Ok(()) }
+            "lidrec" => { validate_finite_parameter("LIDREC", value)?; self.params.p598 = value; self.mark_param_given(598); self.recompute_instance_static(); Ok(()) }
+            "listun" => { validate_finite_parameter("LISTUN", value)?; self.params.p599 = value; self.mark_param_given(599); self.recompute_instance_static(); Ok(()) }
+            "lidtun" => { validate_finite_parameter("LIDTUN", value)?; self.params.p600 = value; self.mark_param_given(600); self.recompute_instance_static(); Ok(()) }
+            "lvrec0" => { validate_finite_parameter("LVREC0", value)?; self.params.p601 = value; self.mark_param_given(601); self.recompute_instance_static(); Ok(()) }
+            "lvrec0d" => { validate_finite_parameter("LVREC0D", value)?; self.params.p602 = value; self.mark_param_given(602); self.recompute_instance_static(); Ok(()) }
+            "lvtun0" => { validate_finite_parameter("LVTUN0", value)?; self.params.p603 = value; self.mark_param_given(603); self.recompute_instance_static(); Ok(()) }
+            "lvtun0d" => { validate_finite_parameter("LVTUN0D", value)?; self.params.p604 = value; self.mark_param_given(604); self.recompute_instance_static(); Ok(()) }
+            "lnbjt" => { validate_finite_parameter("LNBJT", value)?; self.params.p605 = value; self.mark_param_given(605); self.recompute_instance_static(); Ok(()) }
+            "llbjt0" => { validate_finite_parameter("LLBJT0", value)?; self.params.p606 = value; self.mark_param_given(606); self.recompute_instance_static(); Ok(()) }
+            "lvabjt" => { validate_finite_parameter("LVABJT", value)?; self.params.p607 = value; self.mark_param_given(607); self.recompute_instance_static(); Ok(()) }
+            "laely" => { validate_finite_parameter("LAELY", value)?; self.params.p608 = value; self.mark_param_given(608); self.recompute_instance_static(); Ok(()) }
+            "lahli" => { validate_finite_parameter("LAHLI", value)?; self.params.p609 = value; self.mark_param_given(609); self.recompute_instance_static(); Ok(()) }
+            "lahlid" => { validate_finite_parameter("LAHLID", value)?; self.params.p610 = value; self.mark_param_given(610); self.recompute_instance_static(); Ok(()) }
+            "lvsdfb" => { validate_finite_parameter("LVSDFB", value)?; self.params.p611 = value; self.mark_param_given(611); self.recompute_instance_static(); Ok(()) }
+            "lvsdth" => { validate_finite_parameter("LVSDTH", value)?; self.params.p612 = value; self.mark_param_given(612); self.recompute_instance_static(); Ok(()) }
+            "ldelvt" => { validate_finite_parameter("LDELVT", value)?; self.params.p613 = value; self.mark_param_given(613); self.recompute_instance_static(); Ok(()) }
+            "lacde" => { validate_finite_parameter("LACDE", value)?; self.params.p614 = value; self.mark_param_given(614); self.recompute_instance_static(); Ok(()) }
+            "lmoin" => { validate_finite_parameter("LMOIN", value)?; self.params.p615 = value; self.mark_param_given(615); self.recompute_instance_static(); Ok(()) }
+            "lnoff" => { validate_finite_parameter("LNOFF", value)?; self.params.p616 = value; self.mark_param_given(616); self.recompute_instance_static(); Ok(()) }
+            "lnoff2" => { validate_finite_parameter("LNOFF2", value)?; self.params.p617 = value; self.mark_param_given(617); self.recompute_instance_static(); Ok(()) }
+            "lxrcrg1" => { validate_finite_parameter("LXRCRG1", value)?; self.params.p618 = value; self.mark_param_given(618); self.recompute_instance_static(); Ok(()) }
+            "lxrcrg2" => { validate_finite_parameter("LXRCRG2", value)?; self.params.p619 = value; self.mark_param_given(619); self.recompute_instance_static(); Ok(()) }
+            "lvbsa" => { validate_finite_parameter("LVBSA", value)?; self.params.p620 = value; self.mark_param_given(620); self.recompute_instance_static(); Ok(()) }
+            "lvsce" => { validate_finite_parameter("LVSCE", value)?; self.params.p621 = value; self.mark_param_given(621); self.recompute_instance_static(); Ok(()) }
+            "lcdsbs" => { validate_finite_parameter("LCDSBS", value)?; self.params.p622 = value; self.mark_param_given(622); self.recompute_instance_static(); Ok(()) }
+            "lnofffd" => { validate_finite_parameter("LNOFFFD", value)?; self.params.p623 = value; self.mark_param_given(623); self.recompute_instance_static(); Ok(()) }
+            "lvofffd" => { validate_finite_parameter("LVOFFFD", value)?; self.params.p624 = value; self.mark_param_given(624); self.recompute_instance_static(); Ok(()) }
+            "lk1b" => { validate_finite_parameter("LK1B", value)?; self.params.p625 = value; self.mark_param_given(625); self.recompute_instance_static(); Ok(()) }
+            "lk2b" => { validate_finite_parameter("LK2B", value)?; self.params.p626 = value; self.mark_param_given(626); self.recompute_instance_static(); Ok(()) }
+            "ldk2b" => { validate_finite_parameter("LDK2B", value)?; self.params.p627 = value; self.mark_param_given(627); self.recompute_instance_static(); Ok(()) }
+            "ldvbd0" => { validate_finite_parameter("LDVBD0", value)?; self.params.p628 = value; self.mark_param_given(628); self.recompute_instance_static(); Ok(()) }
+            "ldvbd1" => { validate_finite_parameter("LDVBD1", value)?; self.params.p629 = value; self.mark_param_given(629); self.recompute_instance_static(); Ok(()) }
+            "lmoinfd" => { validate_finite_parameter("LMOINFD", value)?; self.params.p630 = value; self.mark_param_given(630); self.recompute_instance_static(); Ok(()) }
+            "lvbs0pd" => { validate_finite_parameter("LVBS0PD", value)?; self.params.p631 = value; self.mark_param_given(631); self.recompute_instance_static(); Ok(()) }
+            "lvbs0fd" => { validate_finite_parameter("LVBS0FD", value)?; self.params.p632 = value; self.mark_param_given(632); self.recompute_instance_static(); Ok(()) }
+            "wxj" => { validate_finite_parameter("WXJ", value)?; self.params.p633 = value; self.mark_param_given(633); self.recompute_instance_static(); Ok(()) }
+            "walphagb1" => { validate_finite_parameter("WALPHAGB1", value)?; self.params.p634 = value; self.mark_param_given(634); self.recompute_instance_static(); Ok(()) }
+            "walphagb1_t" => { validate_finite_parameter("WALPHAGB1_T", value)?; self.params.p635 = value; self.mark_param_given(635); self.recompute_instance_static(); Ok(()) }
+            "wbetagb1" => { validate_finite_parameter("WBETAGB1", value)?; self.params.p636 = value; self.mark_param_given(636); self.recompute_instance_static(); Ok(()) }
+            "walphagb2" => { validate_finite_parameter("WALPHAGB2", value)?; self.params.p637 = value; self.mark_param_given(637); self.recompute_instance_static(); Ok(()) }
+            "walphagb2_t" => { validate_finite_parameter("WALPHAGB2_T", value)?; self.params.p638 = value; self.mark_param_given(638); self.recompute_instance_static(); Ok(()) }
+            "wbetagb2" => { validate_finite_parameter("WBETAGB2", value)?; self.params.p639 = value; self.mark_param_given(639); self.recompute_instance_static(); Ok(()) }
+            "waigbcp2" => { validate_finite_parameter("WAIGBCP2", value)?; self.params.p640 = value; self.mark_param_given(640); self.recompute_instance_static(); Ok(()) }
+            "waigbcp2_t" => { validate_finite_parameter("WAIGBCP2_T", value)?; self.params.p641 = value; self.mark_param_given(641); self.recompute_instance_static(); Ok(()) }
+            "wbigbcp2" => { validate_finite_parameter("WBIGBCP2", value)?; self.params.p642 = value; self.mark_param_given(642); self.recompute_instance_static(); Ok(()) }
+            "wcigbcp2" => { validate_finite_parameter("WCIGBCP2", value)?; self.params.p643 = value; self.mark_param_given(643); self.recompute_instance_static(); Ok(()) }
+            "wcgsl" => { validate_finite_parameter("WCGSL", value)?; self.params.p644 = value; self.mark_param_given(644); self.recompute_instance_static(); Ok(()) }
+            "wcgdl" => { validate_finite_parameter("WCGDL", value)?; self.params.p645 = value; self.mark_param_given(645); self.recompute_instance_static(); Ok(()) }
+            "wckappa" => { validate_finite_parameter("WCKAPPA", value)?; self.params.p646 = value; self.mark_param_given(646); self.recompute_instance_static(); Ok(()) }
+            "wndif" => { validate_finite_parameter("WNDIF", value)?; self.params.p647 = value; self.mark_param_given(647); self.recompute_instance_static(); Ok(()) }
+            "wute" => { validate_finite_parameter("WUTE", value)?; self.params.p648 = value; self.mark_param_given(648); self.recompute_instance_static(); Ok(()) }
+            "wkt1" => { validate_finite_parameter("WKT1", value)?; self.params.p649 = value; self.mark_param_given(649); self.recompute_instance_static(); Ok(()) }
+            "wkt1l" => { validate_finite_parameter("WKT1L", value)?; self.params.p650 = value; self.mark_param_given(650); self.recompute_instance_static(); Ok(()) }
+            "wkt2" => { validate_finite_parameter("WKT2", value)?; self.params.p651 = value; self.mark_param_given(651); self.recompute_instance_static(); Ok(()) }
+            "wua1" => { validate_finite_parameter("WUA1", value)?; self.params.p652 = value; self.mark_param_given(652); self.recompute_instance_static(); Ok(()) }
+            "wub1" => { validate_finite_parameter("WUB1", value)?; self.params.p653 = value; self.mark_param_given(653); self.recompute_instance_static(); Ok(()) }
+            "wuc1" => { validate_finite_parameter("WUC1", value)?; self.params.p654 = value; self.mark_param_given(654); self.recompute_instance_static(); Ok(()) }
+            "wat" => { validate_finite_parameter("WAT", value)?; self.params.p655 = value; self.mark_param_given(655); self.recompute_instance_static(); Ok(()) }
+            "wprt" => { validate_finite_parameter("WPRT", value)?; self.params.p656 = value; self.mark_param_given(656); self.recompute_instance_static(); Ok(()) }
+            "wntrecf" => { validate_finite_parameter("WNTRECF", value)?; self.params.p657 = value; self.mark_param_given(657); self.recompute_instance_static(); Ok(()) }
+            "wntrecr" => { validate_finite_parameter("WNTRECR", value)?; self.params.p658 = value; self.mark_param_given(658); self.recompute_instance_static(); Ok(()) }
+            "wxbjt" => { validate_finite_parameter("WXBJT", value)?; self.params.p659 = value; self.mark_param_given(659); self.recompute_instance_static(); Ok(()) }
+            "wxdif" => { validate_finite_parameter("WXDIF", value)?; self.params.p660 = value; self.mark_param_given(660); self.recompute_instance_static(); Ok(()) }
+            "wxrec" => { validate_finite_parameter("WXREC", value)?; self.params.p661 = value; self.mark_param_given(661); self.recompute_instance_static(); Ok(()) }
+            "wxtun" => { validate_finite_parameter("WXTUN", value)?; self.params.p662 = value; self.mark_param_given(662); self.recompute_instance_static(); Ok(()) }
+            "wxdifd" => { validate_finite_parameter("WXDIFD", value)?; self.params.p663 = value; self.mark_param_given(663); self.recompute_instance_static(); Ok(()) }
+            "wxrecd" => { validate_finite_parameter("WXRECD", value)?; self.params.p664 = value; self.mark_param_given(664); self.recompute_instance_static(); Ok(()) }
+            "wxtund" => { validate_finite_parameter("WXTUND", value)?; self.params.p665 = value; self.mark_param_given(665); self.recompute_instance_static(); Ok(()) }
+            "waigc" => { validate_finite_parameter("WAIGC", value)?; self.params.p666 = value; self.mark_param_given(666); self.recompute_instance_static(); Ok(()) }
+            "waigc1" => { validate_finite_parameter("WAIGC1", value)?; self.params.p667 = value; self.mark_param_given(667); self.recompute_instance_static(); Ok(()) }
+            "wbigc" => { validate_finite_parameter("WBIGC", value)?; self.params.p668 = value; self.mark_param_given(668); self.recompute_instance_static(); Ok(()) }
+            "wcigc" => { validate_finite_parameter("WCIGC", value)?; self.params.p669 = value; self.mark_param_given(669); self.recompute_instance_static(); Ok(()) }
+            "waigsd" => { validate_finite_parameter("WAIGSD", value)?; self.params.p670 = value; self.mark_param_given(670); self.recompute_instance_static(); Ok(()) }
+            "waigsd1" => { validate_finite_parameter("WAIGSD1", value)?; self.params.p671 = value; self.mark_param_given(671); self.recompute_instance_static(); Ok(()) }
+            "wbigsd" => { validate_finite_parameter("WBIGSD", value)?; self.params.p672 = value; self.mark_param_given(672); self.recompute_instance_static(); Ok(()) }
+            "wcigsd" => { validate_finite_parameter("WCIGSD", value)?; self.params.p673 = value; self.mark_param_given(673); self.recompute_instance_static(); Ok(()) }
+            "wnigc" => { validate_finite_parameter("WNIGC", value)?; self.params.p674 = value; self.mark_param_given(674); self.recompute_instance_static(); Ok(()) }
+            "wpigcd" => { validate_finite_parameter("WPIGCD", value)?; self.params.p675 = value; self.mark_param_given(675); self.recompute_instance_static(); Ok(()) }
+            "wpoxedge" => { validate_finite_parameter("WPOXEDGE", value)?; self.params.p676 = value; self.mark_param_given(676); self.recompute_instance_static(); Ok(()) }
+            "wigt" => { validate_finite_parameter("WIGT", value)?; self.params.p677 = value; self.mark_param_given(677); self.recompute_instance_static(); Ok(()) }
+            "wnch" => { validate_finite_parameter("WNCH", value)?; self.params.p678 = value; self.mark_param_given(678); self.recompute_instance_static(); Ok(()) }
+            "wnsub" => { validate_finite_parameter("WNSUB", value)?; self.params.p679 = value; self.mark_param_given(679); self.recompute_instance_static(); Ok(()) }
+            "wngate" => { validate_finite_parameter("WNGATE", value)?; self.params.p680 = value; self.mark_param_given(680); self.recompute_instance_static(); Ok(()) }
+            "wnsd" => { validate_finite_parameter("WNSD", value)?; self.params.p681 = value; self.mark_param_given(681); self.recompute_instance_static(); Ok(()) }
+            "wvth0" => { validate_finite_parameter("WVTH0", value)?; self.params.p682 = value; self.mark_param_given(682); self.recompute_instance_static(); Ok(()) }
+            "wvfb" => { validate_finite_parameter("WVFB", value)?; self.params.p683 = value; self.mark_param_given(683); self.recompute_instance_static(); Ok(()) }
+            "wk1" => { validate_finite_parameter("WK1", value)?; self.params.p684 = value; self.mark_param_given(684); self.recompute_instance_static(); Ok(()) }
+            "wk1w1" => { validate_finite_parameter("WK1W1", value)?; self.params.p685 = value; self.mark_param_given(685); self.recompute_instance_static(); Ok(()) }
+            "wk1w2" => { validate_finite_parameter("WK1W2", value)?; self.params.p686 = value; self.mark_param_given(686); self.recompute_instance_static(); Ok(()) }
+            "wk2" => { validate_finite_parameter("WK2", value)?; self.params.p687 = value; self.mark_param_given(687); self.recompute_instance_static(); Ok(()) }
+            "wk3" => { validate_finite_parameter("WK3", value)?; self.params.p688 = value; self.mark_param_given(688); self.recompute_instance_static(); Ok(()) }
+            "wk3b" => { validate_finite_parameter("WK3B", value)?; self.params.p689 = value; self.mark_param_given(689); self.recompute_instance_static(); Ok(()) }
+            "wkb1" => { validate_finite_parameter("WKB1", value)?; self.params.p690 = value; self.mark_param_given(690); self.recompute_instance_static(); Ok(()) }
+            "ww0" => { validate_finite_parameter("WW0", value)?; self.params.p691 = value; self.mark_param_given(691); self.recompute_instance_static(); Ok(()) }
+            "wlpeb" => { validate_finite_parameter("WLPEB", value)?; self.params.p692 = value; self.mark_param_given(692); self.recompute_instance_static(); Ok(()) }
+            "wdvt0" => { validate_finite_parameter("WDVT0", value)?; self.params.p693 = value; self.mark_param_given(693); self.recompute_instance_static(); Ok(()) }
+            "wdvt1" => { validate_finite_parameter("WDVT1", value)?; self.params.p694 = value; self.mark_param_given(694); self.recompute_instance_static(); Ok(()) }
+            "wdvt2" => { validate_finite_parameter("WDVT2", value)?; self.params.p695 = value; self.mark_param_given(695); self.recompute_instance_static(); Ok(()) }
+            "wdvt0w" => { validate_finite_parameter("WDVT0W", value)?; self.params.p696 = value; self.mark_param_given(696); self.recompute_instance_static(); Ok(()) }
+            "wdvt1w" => { validate_finite_parameter("WDVT1W", value)?; self.params.p697 = value; self.mark_param_given(697); self.recompute_instance_static(); Ok(()) }
+            "wdvt2w" => { validate_finite_parameter("WDVT2W", value)?; self.params.p698 = value; self.mark_param_given(698); self.recompute_instance_static(); Ok(()) }
+            "wu0" => { validate_finite_parameter("WU0", value)?; self.params.p699 = value; self.mark_param_given(699); self.recompute_instance_static(); Ok(()) }
+            "weu" => { validate_finite_parameter("WEU", value)?; self.params.p700 = value; self.mark_param_given(700); self.recompute_instance_static(); Ok(()) }
+            "wua" => { validate_finite_parameter("WUA", value)?; self.params.p701 = value; self.mark_param_given(701); self.recompute_instance_static(); Ok(()) }
+            "wub" => { validate_finite_parameter("WUB", value)?; self.params.p702 = value; self.mark_param_given(702); self.recompute_instance_static(); Ok(()) }
+            "wuc" => { validate_finite_parameter("WUC", value)?; self.params.p703 = value; self.mark_param_given(703); self.recompute_instance_static(); Ok(()) }
+            "wud" => { validate_finite_parameter("WUD", value)?; self.params.p704 = value; self.mark_param_given(704); self.recompute_instance_static(); Ok(()) }
+            "wud1" => { validate_finite_parameter("WUD1", value)?; self.params.p705 = value; self.mark_param_given(705); self.recompute_instance_static(); Ok(()) }
+            "wucste" => { validate_finite_parameter("WUCSTE", value)?; self.params.p706 = value; self.mark_param_given(706); self.recompute_instance_static(); Ok(()) }
+            "wucs" => { validate_finite_parameter("WUCS", value)?; self.params.p707 = value; self.mark_param_given(707); self.recompute_instance_static(); Ok(()) }
+            "wvsat" => { validate_finite_parameter("WVSAT", value)?; self.params.p708 = value; self.mark_param_given(708); self.recompute_instance_static(); Ok(()) }
+            "wa0" => { validate_finite_parameter("WA0", value)?; self.params.p709 = value; self.mark_param_given(709); self.recompute_instance_static(); Ok(()) }
+            "wags" => { validate_finite_parameter("WAGS", value)?; self.params.p710 = value; self.mark_param_given(710); self.recompute_instance_static(); Ok(()) }
+            "wb0" => { validate_finite_parameter("WB0", value)?; self.params.p711 = value; self.mark_param_given(711); self.recompute_instance_static(); Ok(()) }
+            "wb1" => { validate_finite_parameter("WB1", value)?; self.params.p712 = value; self.mark_param_given(712); self.recompute_instance_static(); Ok(()) }
+            "wketa" => { validate_finite_parameter("WKETA", value)?; self.params.p713 = value; self.mark_param_given(713); self.recompute_instance_static(); Ok(()) }
+            "wketas" => { validate_finite_parameter("WKETAS", value)?; self.params.p714 = value; self.mark_param_given(714); self.recompute_instance_static(); Ok(()) }
+            "wa1" => { validate_finite_parameter("WA1", value)?; self.params.p715 = value; self.mark_param_given(715); self.recompute_instance_static(); Ok(()) }
+            "wa2" => { validate_finite_parameter("WA2", value)?; self.params.p716 = value; self.mark_param_given(716); self.recompute_instance_static(); Ok(()) }
+            "wrdsw" => { validate_finite_parameter("WRDSW", value)?; self.params.p717 = value; self.mark_param_given(717); self.recompute_instance_static(); Ok(()) }
+            "wrsw" => { validate_finite_parameter("WRSW", value)?; self.params.p718 = value; self.mark_param_given(718); self.recompute_instance_static(); Ok(()) }
+            "wrdw" => { validate_finite_parameter("WRDW", value)?; self.params.p719 = value; self.mark_param_given(719); self.recompute_instance_static(); Ok(()) }
+            "wprwb" => { validate_finite_parameter("WPRWB", value)?; self.params.p720 = value; self.mark_param_given(720); self.recompute_instance_static(); Ok(()) }
+            "wprwe" => { validate_finite_parameter("WPRWE", value)?; self.params.p721 = value; self.mark_param_given(721); self.recompute_instance_static(); Ok(()) }
+            "wprwg" => { validate_finite_parameter("WPRWG", value)?; self.params.p722 = value; self.mark_param_given(722); self.recompute_instance_static(); Ok(()) }
+            "wwr" => { validate_finite_parameter("WWR", value)?; self.params.p723 = value; self.mark_param_given(723); self.recompute_instance_static(); Ok(()) }
+            "wnfactor" => { validate_finite_parameter("WNFACTOR", value)?; self.params.p724 = value; self.mark_param_given(724); self.recompute_instance_static(); Ok(()) }
+            "wdwg" => { validate_finite_parameter("WDWG", value)?; self.params.p725 = value; self.mark_param_given(725); self.recompute_instance_static(); Ok(()) }
+            "wdwb" => { validate_finite_parameter("WDWB", value)?; self.params.p726 = value; self.mark_param_given(726); self.recompute_instance_static(); Ok(()) }
+            "wvoff" => { validate_finite_parameter("WVOFF", value)?; self.params.p727 = value; self.mark_param_given(727); self.recompute_instance_static(); Ok(()) }
+            "weta0" => { validate_finite_parameter("WETA0", value)?; self.params.p728 = value; self.mark_param_given(728); self.recompute_instance_static(); Ok(()) }
+            "wetab" => { validate_finite_parameter("WETAB", value)?; self.params.p729 = value; self.mark_param_given(729); self.recompute_instance_static(); Ok(()) }
+            "weta0cv" => { validate_finite_parameter("WETA0CV", value)?; self.params.p730 = value; self.mark_param_given(730); self.recompute_instance_static(); Ok(()) }
+            "wetabcv" => { validate_finite_parameter("WETABCV", value)?; self.params.p731 = value; self.mark_param_given(731); self.recompute_instance_static(); Ok(()) }
+            "wdsub" => { validate_finite_parameter("WDSUB", value)?; self.params.p732 = value; self.mark_param_given(732); self.recompute_instance_static(); Ok(()) }
+            "wcit" => { validate_finite_parameter("WCIT", value)?; self.params.p733 = value; self.mark_param_given(733); self.recompute_instance_static(); Ok(()) }
+            "wcdsc" => { validate_finite_parameter("WCDSC", value)?; self.params.p734 = value; self.mark_param_given(734); self.recompute_instance_static(); Ok(()) }
+            "wcdscb" => { validate_finite_parameter("WCDSCB", value)?; self.params.p735 = value; self.mark_param_given(735); self.recompute_instance_static(); Ok(()) }
+            "wcdscd" => { validate_finite_parameter("WCDSCD", value)?; self.params.p736 = value; self.mark_param_given(736); self.recompute_instance_static(); Ok(()) }
+            "wpclm" => { validate_finite_parameter("WPCLM", value)?; self.params.p737 = value; self.mark_param_given(737); self.recompute_instance_static(); Ok(()) }
+            "wpdiblc1" => { validate_finite_parameter("WPDIBLC1", value)?; self.params.p738 = value; self.mark_param_given(738); self.recompute_instance_static(); Ok(()) }
+            "wpdiblc2" => { validate_finite_parameter("WPDIBLC2", value)?; self.params.p739 = value; self.mark_param_given(739); self.recompute_instance_static(); Ok(()) }
+            "wpdiblcb" => { validate_finite_parameter("WPDIBLCB", value)?; self.params.p740 = value; self.mark_param_given(740); self.recompute_instance_static(); Ok(()) }
+            "wdrout" => { validate_finite_parameter("WDROUT", value)?; self.params.p741 = value; self.mark_param_given(741); self.recompute_instance_static(); Ok(()) }
+            "wpvag" => { validate_finite_parameter("WPVAG", value)?; self.params.p742 = value; self.mark_param_given(742); self.recompute_instance_static(); Ok(()) }
+            "wdelta" => { validate_finite_parameter("WDELTA", value)?; self.params.p743 = value; self.mark_param_given(743); self.recompute_instance_static(); Ok(()) }
+            "walpha0" => { validate_finite_parameter("WALPHA0", value)?; self.params.p744 = value; self.mark_param_given(744); self.recompute_instance_static(); Ok(()) }
+            "wfbjtii" => { validate_finite_parameter("WFBJTII", value)?; self.params.p745 = value; self.mark_param_given(745); self.recompute_instance_static(); Ok(()) }
+            "wabjtii" => { validate_finite_parameter("WABJTII", value)?; self.params.p746 = value; self.mark_param_given(746); self.recompute_instance_static(); Ok(()) }
+            "wcbjtii" => { validate_finite_parameter("WCBJTII", value)?; self.params.p747 = value; self.mark_param_given(747); self.recompute_instance_static(); Ok(()) }
+            "webjtii" => { validate_finite_parameter("WEBJTII", value)?; self.params.p748 = value; self.mark_param_given(748); self.recompute_instance_static(); Ok(()) }
+            "wmbjtii" => { validate_finite_parameter("WMBJTII", value)?; self.params.p749 = value; self.mark_param_given(749); self.recompute_instance_static(); Ok(()) }
+            "wvbci" => { validate_finite_parameter("WVBCI", value)?; self.params.p750 = value; self.mark_param_given(750); self.recompute_instance_static(); Ok(()) }
+            "wbeta0" => { validate_finite_parameter("WBETA0", value)?; self.params.p751 = value; self.mark_param_given(751); self.recompute_instance_static(); Ok(()) }
+            "wbeta1" => { validate_finite_parameter("WBETA1", value)?; self.params.p752 = value; self.mark_param_given(752); self.recompute_instance_static(); Ok(()) }
+            "wbeta2" => { validate_finite_parameter("WBETA2", value)?; self.params.p753 = value; self.mark_param_given(753); self.recompute_instance_static(); Ok(()) }
+            "wvdsatii0" => { validate_finite_parameter("WVDSATII0", value)?; self.params.p754 = value; self.mark_param_given(754); self.recompute_instance_static(); Ok(()) }
+            "wlii" => { validate_finite_parameter("WLII", value)?; self.params.p755 = value; self.mark_param_given(755); self.recompute_instance_static(); Ok(()) }
+            "wesatii" => { validate_finite_parameter("WESATII", value)?; self.params.p756 = value; self.mark_param_given(756); self.recompute_instance_static(); Ok(()) }
+            "wsii0" => { validate_finite_parameter("WSII0", value)?; self.params.p757 = value; self.mark_param_given(757); self.recompute_instance_static(); Ok(()) }
+            "wsii1" => { validate_finite_parameter("WSII1", value)?; self.params.p758 = value; self.mark_param_given(758); self.recompute_instance_static(); Ok(()) }
+            "wsii2" => { validate_finite_parameter("WSII2", value)?; self.params.p759 = value; self.mark_param_given(759); self.recompute_instance_static(); Ok(()) }
+            "wsiid" => { validate_finite_parameter("WSIID", value)?; self.params.p760 = value; self.mark_param_given(760); self.recompute_instance_static(); Ok(()) }
+            "wagidl" => { validate_finite_parameter("WAGIDL", value)?; self.params.p761 = value; self.mark_param_given(761); self.recompute_instance_static(); Ok(()) }
+            "wbgidl" => { validate_finite_parameter("WBGIDL", value)?; self.params.p762 = value; self.mark_param_given(762); self.recompute_instance_static(); Ok(()) }
+            "wbgidl1" => { validate_finite_parameter("WBGIDL1", value)?; self.params.p763 = value; self.mark_param_given(763); self.recompute_instance_static(); Ok(()) }
+            "wcgidl" => { validate_finite_parameter("WCGIDL", value)?; self.params.p764 = value; self.mark_param_given(764); self.recompute_instance_static(); Ok(()) }
+            "wrgidl" => { validate_finite_parameter("WRGIDL", value)?; self.params.p765 = value; self.mark_param_given(765); self.recompute_instance_static(); Ok(()) }
+            "wkgidl" => { validate_finite_parameter("WKGIDL", value)?; self.params.p766 = value; self.mark_param_given(766); self.recompute_instance_static(); Ok(()) }
+            "wfgidl" => { validate_finite_parameter("WFGIDL", value)?; self.params.p767 = value; self.mark_param_given(767); self.recompute_instance_static(); Ok(()) }
+            "wagisl" => { validate_finite_parameter("WAGISL", value)?; self.params.p768 = value; self.mark_param_given(768); self.recompute_instance_static(); Ok(()) }
+            "wbgisl" => { validate_finite_parameter("WBGISL", value)?; self.params.p769 = value; self.mark_param_given(769); self.recompute_instance_static(); Ok(()) }
+            "wbgisl1" => { validate_finite_parameter("WBGISL1", value)?; self.params.p770 = value; self.mark_param_given(770); self.recompute_instance_static(); Ok(()) }
+            "wcgisl" => { validate_finite_parameter("WCGISL", value)?; self.params.p771 = value; self.mark_param_given(771); self.recompute_instance_static(); Ok(()) }
+            "wrgisl" => { validate_finite_parameter("WRGISL", value)?; self.params.p772 = value; self.mark_param_given(772); self.recompute_instance_static(); Ok(()) }
+            "wkgisl" => { validate_finite_parameter("WKGISL", value)?; self.params.p773 = value; self.mark_param_given(773); self.recompute_instance_static(); Ok(()) }
+            "wfgisl" => { validate_finite_parameter("WFGISL", value)?; self.params.p774 = value; self.mark_param_given(774); self.recompute_instance_static(); Ok(()) }
+            "wntun" => { validate_finite_parameter("WNTUN", value)?; self.params.p775 = value; self.mark_param_given(775); self.recompute_instance_static(); Ok(()) }
+            "wntund" => { validate_finite_parameter("WNTUND", value)?; self.params.p776 = value; self.mark_param_given(776); self.recompute_instance_static(); Ok(()) }
+            "wndiode" => { validate_finite_parameter("WNDIODE", value)?; self.params.p777 = value; self.mark_param_given(777); self.recompute_instance_static(); Ok(()) }
+            "wndioded" => { validate_finite_parameter("WNDIODED", value)?; self.params.p778 = value; self.mark_param_given(778); self.recompute_instance_static(); Ok(()) }
+            "wnrecf0" => { validate_finite_parameter("WNRECF0", value)?; self.params.p779 = value; self.mark_param_given(779); self.recompute_instance_static(); Ok(()) }
+            "wnrecf0d" => { validate_finite_parameter("WNRECF0D", value)?; self.params.p780 = value; self.mark_param_given(780); self.recompute_instance_static(); Ok(()) }
+            "wnrecr0" => { validate_finite_parameter("WNRECR0", value)?; self.params.p781 = value; self.mark_param_given(781); self.recompute_instance_static(); Ok(()) }
+            "wnrecr0d" => { validate_finite_parameter("WNRECR0D", value)?; self.params.p782 = value; self.mark_param_given(782); self.recompute_instance_static(); Ok(()) }
+            "wisbjt" => { validate_finite_parameter("WISBJT", value)?; self.params.p783 = value; self.mark_param_given(783); self.recompute_instance_static(); Ok(()) }
+            "widbjt" => { validate_finite_parameter("WIDBJT", value)?; self.params.p784 = value; self.mark_param_given(784); self.recompute_instance_static(); Ok(()) }
+            "wisdif" => { validate_finite_parameter("WISDIF", value)?; self.params.p785 = value; self.mark_param_given(785); self.recompute_instance_static(); Ok(()) }
+            "widdif" => { validate_finite_parameter("WIDDIF", value)?; self.params.p786 = value; self.mark_param_given(786); self.recompute_instance_static(); Ok(()) }
+            "wisrec" => { validate_finite_parameter("WISREC", value)?; self.params.p787 = value; self.mark_param_given(787); self.recompute_instance_static(); Ok(()) }
+            "widrec" => { validate_finite_parameter("WIDREC", value)?; self.params.p788 = value; self.mark_param_given(788); self.recompute_instance_static(); Ok(()) }
+            "wistun" => { validate_finite_parameter("WISTUN", value)?; self.params.p789 = value; self.mark_param_given(789); self.recompute_instance_static(); Ok(()) }
+            "widtun" => { validate_finite_parameter("WIDTUN", value)?; self.params.p790 = value; self.mark_param_given(790); self.recompute_instance_static(); Ok(()) }
+            "wvrec0" => { validate_finite_parameter("WVREC0", value)?; self.params.p791 = value; self.mark_param_given(791); self.recompute_instance_static(); Ok(()) }
+            "wvrec0d" => { validate_finite_parameter("WVREC0D", value)?; self.params.p792 = value; self.mark_param_given(792); self.recompute_instance_static(); Ok(()) }
+            "wvtun0" => { validate_finite_parameter("WVTUN0", value)?; self.params.p793 = value; self.mark_param_given(793); self.recompute_instance_static(); Ok(()) }
+            "wvtun0d" => { validate_finite_parameter("WVTUN0D", value)?; self.params.p794 = value; self.mark_param_given(794); self.recompute_instance_static(); Ok(()) }
+            "wnbjt" => { validate_finite_parameter("WNBJT", value)?; self.params.p795 = value; self.mark_param_given(795); self.recompute_instance_static(); Ok(()) }
+            "wlbjt0" => { validate_finite_parameter("WLBJT0", value)?; self.params.p796 = value; self.mark_param_given(796); self.recompute_instance_static(); Ok(()) }
+            "wvabjt" => { validate_finite_parameter("WVABJT", value)?; self.params.p797 = value; self.mark_param_given(797); self.recompute_instance_static(); Ok(()) }
+            "waely" => { validate_finite_parameter("WAELY", value)?; self.params.p798 = value; self.mark_param_given(798); self.recompute_instance_static(); Ok(()) }
+            "wahli" => { validate_finite_parameter("WAHLI", value)?; self.params.p799 = value; self.mark_param_given(799); self.recompute_instance_static(); Ok(()) }
+            "wahlid" => { validate_finite_parameter("WAHLID", value)?; self.params.p800 = value; self.mark_param_given(800); self.recompute_instance_static(); Ok(()) }
+            "wvsdfb" => { validate_finite_parameter("WVSDFB", value)?; self.params.p801 = value; self.mark_param_given(801); self.recompute_instance_static(); Ok(()) }
+            "wvsdth" => { validate_finite_parameter("WVSDTH", value)?; self.params.p802 = value; self.mark_param_given(802); self.recompute_instance_static(); Ok(()) }
+            "wdelvt" => { validate_finite_parameter("WDELVT", value)?; self.params.p803 = value; self.mark_param_given(803); self.recompute_instance_static(); Ok(()) }
+            "wacde" => { validate_finite_parameter("WACDE", value)?; self.params.p804 = value; self.mark_param_given(804); self.recompute_instance_static(); Ok(()) }
+            "wmoin" => { validate_finite_parameter("WMOIN", value)?; self.params.p805 = value; self.mark_param_given(805); self.recompute_instance_static(); Ok(()) }
+            "wnoff" => { validate_finite_parameter("WNOFF", value)?; self.params.p806 = value; self.mark_param_given(806); self.recompute_instance_static(); Ok(()) }
+            "wnoff2" => { validate_finite_parameter("WNOFF2", value)?; self.params.p807 = value; self.mark_param_given(807); self.recompute_instance_static(); Ok(()) }
+            "wxrcrg1" => { validate_finite_parameter("WXRCRG1", value)?; self.params.p808 = value; self.mark_param_given(808); self.recompute_instance_static(); Ok(()) }
+            "wxrcrg2" => { validate_finite_parameter("WXRCRG2", value)?; self.params.p809 = value; self.mark_param_given(809); self.recompute_instance_static(); Ok(()) }
+            "wvbsa" => { validate_finite_parameter("WVBSA", value)?; self.params.p810 = value; self.mark_param_given(810); self.recompute_instance_static(); Ok(()) }
+            "wvsce" => { validate_finite_parameter("WVSCE", value)?; self.params.p811 = value; self.mark_param_given(811); self.recompute_instance_static(); Ok(()) }
+            "wcdsbs" => { validate_finite_parameter("WCDSBS", value)?; self.params.p812 = value; self.mark_param_given(812); self.recompute_instance_static(); Ok(()) }
+            "wnofffd" => { validate_finite_parameter("WNOFFFD", value)?; self.params.p813 = value; self.mark_param_given(813); self.recompute_instance_static(); Ok(()) }
+            "wvofffd" => { validate_finite_parameter("WVOFFFD", value)?; self.params.p814 = value; self.mark_param_given(814); self.recompute_instance_static(); Ok(()) }
+            "wk1b" => { validate_finite_parameter("WK1B", value)?; self.params.p815 = value; self.mark_param_given(815); self.recompute_instance_static(); Ok(()) }
+            "wk2b" => { validate_finite_parameter("WK2B", value)?; self.params.p816 = value; self.mark_param_given(816); self.recompute_instance_static(); Ok(()) }
+            "wdk2b" => { validate_finite_parameter("WDK2B", value)?; self.params.p817 = value; self.mark_param_given(817); self.recompute_instance_static(); Ok(()) }
+            "wdvbd0" => { validate_finite_parameter("WDVBD0", value)?; self.params.p818 = value; self.mark_param_given(818); self.recompute_instance_static(); Ok(()) }
+            "wdvbd1" => { validate_finite_parameter("WDVBD1", value)?; self.params.p819 = value; self.mark_param_given(819); self.recompute_instance_static(); Ok(()) }
+            "wmoinfd" => { validate_finite_parameter("WMOINFD", value)?; self.params.p820 = value; self.mark_param_given(820); self.recompute_instance_static(); Ok(()) }
+            "wvbs0pd" => { validate_finite_parameter("WVBS0PD", value)?; self.params.p821 = value; self.mark_param_given(821); self.recompute_instance_static(); Ok(()) }
+            "wvbs0fd" => { validate_finite_parameter("WVBS0FD", value)?; self.params.p822 = value; self.mark_param_given(822); self.recompute_instance_static(); Ok(()) }
+            "pxj" => { validate_finite_parameter("PXJ", value)?; self.params.p823 = value; self.mark_param_given(823); self.recompute_instance_static(); Ok(()) }
+            "palphagb1" => { validate_finite_parameter("PALPHAGB1", value)?; self.params.p824 = value; self.mark_param_given(824); self.recompute_instance_static(); Ok(()) }
+            "palphagb1_t" => { validate_finite_parameter("PALPHAGB1_T", value)?; self.params.p825 = value; self.mark_param_given(825); self.recompute_instance_static(); Ok(()) }
+            "pbetagb1" => { validate_finite_parameter("PBETAGB1", value)?; self.params.p826 = value; self.mark_param_given(826); self.recompute_instance_static(); Ok(()) }
+            "palphagb2" => { validate_finite_parameter("PALPHAGB2", value)?; self.params.p827 = value; self.mark_param_given(827); self.recompute_instance_static(); Ok(()) }
+            "palphagb2_t" => { validate_finite_parameter("PALPHAGB2_T", value)?; self.params.p828 = value; self.mark_param_given(828); self.recompute_instance_static(); Ok(()) }
+            "pbetagb2" => { validate_finite_parameter("PBETAGB2", value)?; self.params.p829 = value; self.mark_param_given(829); self.recompute_instance_static(); Ok(()) }
+            "paigbcp2" => { validate_finite_parameter("PAIGBCP2", value)?; self.params.p830 = value; self.mark_param_given(830); self.recompute_instance_static(); Ok(()) }
+            "paigbcp2_t" => { validate_finite_parameter("PAIGBCP2_T", value)?; self.params.p831 = value; self.mark_param_given(831); self.recompute_instance_static(); Ok(()) }
+            "pbigbcp2" => { validate_finite_parameter("PBIGBCP2", value)?; self.params.p832 = value; self.mark_param_given(832); self.recompute_instance_static(); Ok(()) }
+            "pcigbcp2" => { validate_finite_parameter("PCIGBCP2", value)?; self.params.p833 = value; self.mark_param_given(833); self.recompute_instance_static(); Ok(()) }
+            "pcgsl" => { validate_finite_parameter("PCGSL", value)?; self.params.p834 = value; self.mark_param_given(834); self.recompute_instance_static(); Ok(()) }
+            "pcgdl" => { validate_finite_parameter("PCGDL", value)?; self.params.p835 = value; self.mark_param_given(835); self.recompute_instance_static(); Ok(()) }
+            "pckappa" => { validate_finite_parameter("PCKAPPA", value)?; self.params.p836 = value; self.mark_param_given(836); self.recompute_instance_static(); Ok(()) }
+            "pndif" => { validate_finite_parameter("PNDIF", value)?; self.params.p837 = value; self.mark_param_given(837); self.recompute_instance_static(); Ok(()) }
+            "pute" => { validate_finite_parameter("PUTE", value)?; self.params.p838 = value; self.mark_param_given(838); self.recompute_instance_static(); Ok(()) }
+            "pkt1" => { validate_finite_parameter("PKT1", value)?; self.params.p839 = value; self.mark_param_given(839); self.recompute_instance_static(); Ok(()) }
+            "pkt1l" => { validate_finite_parameter("PKT1L", value)?; self.params.p840 = value; self.mark_param_given(840); self.recompute_instance_static(); Ok(()) }
+            "pkt2" => { validate_finite_parameter("PKT2", value)?; self.params.p841 = value; self.mark_param_given(841); self.recompute_instance_static(); Ok(()) }
+            "pua1" => { validate_finite_parameter("PUA1", value)?; self.params.p842 = value; self.mark_param_given(842); self.recompute_instance_static(); Ok(()) }
+            "pub1" => { validate_finite_parameter("PUB1", value)?; self.params.p843 = value; self.mark_param_given(843); self.recompute_instance_static(); Ok(()) }
+            "puc1" => { validate_finite_parameter("PUC1", value)?; self.params.p844 = value; self.mark_param_given(844); self.recompute_instance_static(); Ok(()) }
+            "pat" => { validate_finite_parameter("PAT", value)?; self.params.p845 = value; self.mark_param_given(845); self.recompute_instance_static(); Ok(()) }
+            "pprt" => { validate_finite_parameter("PPRT", value)?; self.params.p846 = value; self.mark_param_given(846); self.recompute_instance_static(); Ok(()) }
+            "pntrecf" => { validate_finite_parameter("PNTRECF", value)?; self.params.p847 = value; self.mark_param_given(847); self.recompute_instance_static(); Ok(()) }
+            "pntrecr" => { validate_finite_parameter("PNTRECR", value)?; self.params.p848 = value; self.mark_param_given(848); self.recompute_instance_static(); Ok(()) }
+            "pxbjt" => { validate_finite_parameter("PXBJT", value)?; self.params.p849 = value; self.mark_param_given(849); self.recompute_instance_static(); Ok(()) }
+            "pxdif" => { validate_finite_parameter("PXDIF", value)?; self.params.p850 = value; self.mark_param_given(850); self.recompute_instance_static(); Ok(()) }
+            "pxrec" => { validate_finite_parameter("PXREC", value)?; self.params.p851 = value; self.mark_param_given(851); self.recompute_instance_static(); Ok(()) }
+            "pxtun" => { validate_finite_parameter("PXTUN", value)?; self.params.p852 = value; self.mark_param_given(852); self.recompute_instance_static(); Ok(()) }
+            "pxdifd" => { validate_finite_parameter("PXDIFD", value)?; self.params.p853 = value; self.mark_param_given(853); self.recompute_instance_static(); Ok(()) }
+            "pxrecd" => { validate_finite_parameter("PXRECD", value)?; self.params.p854 = value; self.mark_param_given(854); self.recompute_instance_static(); Ok(()) }
+            "pxtund" => { validate_finite_parameter("PXTUND", value)?; self.params.p855 = value; self.mark_param_given(855); self.recompute_instance_static(); Ok(()) }
+            "paigc" => { validate_finite_parameter("PAIGC", value)?; self.params.p856 = value; self.mark_param_given(856); self.recompute_instance_static(); Ok(()) }
+            "paigc1" => { validate_finite_parameter("PAIGC1", value)?; self.params.p857 = value; self.mark_param_given(857); self.recompute_instance_static(); Ok(()) }
+            "pbigc" => { validate_finite_parameter("PBIGC", value)?; self.params.p858 = value; self.mark_param_given(858); self.recompute_instance_static(); Ok(()) }
+            "pcigc" => { validate_finite_parameter("PCIGC", value)?; self.params.p859 = value; self.mark_param_given(859); self.recompute_instance_static(); Ok(()) }
+            "paigsd" => { validate_finite_parameter("PAIGSD", value)?; self.params.p860 = value; self.mark_param_given(860); self.recompute_instance_static(); Ok(()) }
+            "paigsd1" => { validate_finite_parameter("PAIGSD1", value)?; self.params.p861 = value; self.mark_param_given(861); self.recompute_instance_static(); Ok(()) }
+            "pbigsd" => { validate_finite_parameter("PBIGSD", value)?; self.params.p862 = value; self.mark_param_given(862); self.recompute_instance_static(); Ok(()) }
+            "pcigsd" => { validate_finite_parameter("PCIGSD", value)?; self.params.p863 = value; self.mark_param_given(863); self.recompute_instance_static(); Ok(()) }
+            "pnigc" => { validate_finite_parameter("PNIGC", value)?; self.params.p864 = value; self.mark_param_given(864); self.recompute_instance_static(); Ok(()) }
+            "ppigcd" => { validate_finite_parameter("PPIGCD", value)?; self.params.p865 = value; self.mark_param_given(865); self.recompute_instance_static(); Ok(()) }
+            "ppoxedge" => { validate_finite_parameter("PPOXEDGE", value)?; self.params.p866 = value; self.mark_param_given(866); self.recompute_instance_static(); Ok(()) }
+            "pigt" => { validate_finite_parameter("PIGT", value)?; self.params.p867 = value; self.mark_param_given(867); self.recompute_instance_static(); Ok(()) }
+            "pnch" => { validate_finite_parameter("PNCH", value)?; self.params.p868 = value; self.mark_param_given(868); self.recompute_instance_static(); Ok(()) }
+            "pnsub" => { validate_finite_parameter("PNSUB", value)?; self.params.p869 = value; self.mark_param_given(869); self.recompute_instance_static(); Ok(()) }
+            "pnsd" => { validate_finite_parameter("PNSD", value)?; self.params.p870 = value; self.mark_param_given(870); self.recompute_instance_static(); Ok(()) }
+            "pngate" => { validate_finite_parameter("PNGATE", value)?; self.params.p871 = value; self.mark_param_given(871); self.recompute_instance_static(); Ok(()) }
+            "pvth0" => { validate_finite_parameter("PVTH0", value)?; self.params.p872 = value; self.mark_param_given(872); self.recompute_instance_static(); Ok(()) }
+            "pvfb" => { validate_finite_parameter("PVFB", value)?; self.params.p873 = value; self.mark_param_given(873); self.recompute_instance_static(); Ok(()) }
+            "pk1" => { validate_finite_parameter("PK1", value)?; self.params.p874 = value; self.mark_param_given(874); self.recompute_instance_static(); Ok(()) }
+            "pk1w1" => { validate_finite_parameter("PK1W1", value)?; self.params.p875 = value; self.mark_param_given(875); self.recompute_instance_static(); Ok(()) }
+            "pk1w2" => { validate_finite_parameter("PK1W2", value)?; self.params.p876 = value; self.mark_param_given(876); self.recompute_instance_static(); Ok(()) }
+            "pk2" => { validate_finite_parameter("PK2", value)?; self.params.p877 = value; self.mark_param_given(877); self.recompute_instance_static(); Ok(()) }
+            "pk3" => { validate_finite_parameter("PK3", value)?; self.params.p878 = value; self.mark_param_given(878); self.recompute_instance_static(); Ok(()) }
+            "pk3b" => { validate_finite_parameter("PK3B", value)?; self.params.p879 = value; self.mark_param_given(879); self.recompute_instance_static(); Ok(()) }
+            "pkb1" => { validate_finite_parameter("PKB1", value)?; self.params.p880 = value; self.mark_param_given(880); self.recompute_instance_static(); Ok(()) }
+            "pw0" => { validate_finite_parameter("PW0", value)?; self.params.p881 = value; self.mark_param_given(881); self.recompute_instance_static(); Ok(()) }
+            "plpeb" => { validate_finite_parameter("PLPEB", value)?; self.params.p882 = value; self.mark_param_given(882); self.recompute_instance_static(); Ok(()) }
+            "pdvt0" => { validate_finite_parameter("PDVT0", value)?; self.params.p883 = value; self.mark_param_given(883); self.recompute_instance_static(); Ok(()) }
+            "pdvt1" => { validate_finite_parameter("PDVT1", value)?; self.params.p884 = value; self.mark_param_given(884); self.recompute_instance_static(); Ok(()) }
+            "pdvt2" => { validate_finite_parameter("PDVT2", value)?; self.params.p885 = value; self.mark_param_given(885); self.recompute_instance_static(); Ok(()) }
+            "pdvt0w" => { validate_finite_parameter("PDVT0W", value)?; self.params.p886 = value; self.mark_param_given(886); self.recompute_instance_static(); Ok(()) }
+            "pdvt1w" => { validate_finite_parameter("PDVT1W", value)?; self.params.p887 = value; self.mark_param_given(887); self.recompute_instance_static(); Ok(()) }
+            "pdvt2w" => { validate_finite_parameter("PDVT2W", value)?; self.params.p888 = value; self.mark_param_given(888); self.recompute_instance_static(); Ok(()) }
+            "pu0" => { validate_finite_parameter("PU0", value)?; self.params.p889 = value; self.mark_param_given(889); self.recompute_instance_static(); Ok(()) }
+            "peu" => { validate_finite_parameter("PEU", value)?; self.params.p890 = value; self.mark_param_given(890); self.recompute_instance_static(); Ok(()) }
+            "pua" => { validate_finite_parameter("PUA", value)?; self.params.p891 = value; self.mark_param_given(891); self.recompute_instance_static(); Ok(()) }
+            "pub" => { validate_finite_parameter("PUB", value)?; self.params.p892 = value; self.mark_param_given(892); self.recompute_instance_static(); Ok(()) }
+            "puc" => { validate_finite_parameter("PUC", value)?; self.params.p893 = value; self.mark_param_given(893); self.recompute_instance_static(); Ok(()) }
+            "pud" => { validate_finite_parameter("PUD", value)?; self.params.p894 = value; self.mark_param_given(894); self.recompute_instance_static(); Ok(()) }
+            "pud1" => { validate_finite_parameter("PUD1", value)?; self.params.p895 = value; self.mark_param_given(895); self.recompute_instance_static(); Ok(()) }
+            "pucste" => { validate_finite_parameter("PUCSTE", value)?; self.params.p896 = value; self.mark_param_given(896); self.recompute_instance_static(); Ok(()) }
+            "pucs" => { validate_finite_parameter("PUCS", value)?; self.params.p897 = value; self.mark_param_given(897); self.recompute_instance_static(); Ok(()) }
+            "pvsat" => { validate_finite_parameter("PVSAT", value)?; self.params.p898 = value; self.mark_param_given(898); self.recompute_instance_static(); Ok(()) }
+            "pa0" => { validate_finite_parameter("PA0", value)?; self.params.p899 = value; self.mark_param_given(899); self.recompute_instance_static(); Ok(()) }
+            "pags" => { validate_finite_parameter("PAGS", value)?; self.params.p900 = value; self.mark_param_given(900); self.recompute_instance_static(); Ok(()) }
+            "pb0" => { validate_finite_parameter("PB0", value)?; self.params.p901 = value; self.mark_param_given(901); self.recompute_instance_static(); Ok(()) }
+            "pb1" => { validate_finite_parameter("PB1", value)?; self.params.p902 = value; self.mark_param_given(902); self.recompute_instance_static(); Ok(()) }
+            "pketa" => { validate_finite_parameter("PKETA", value)?; self.params.p903 = value; self.mark_param_given(903); self.recompute_instance_static(); Ok(()) }
+            "pketas" => { validate_finite_parameter("PKETAS", value)?; self.params.p904 = value; self.mark_param_given(904); self.recompute_instance_static(); Ok(()) }
+            "pa1" => { validate_finite_parameter("PA1", value)?; self.params.p905 = value; self.mark_param_given(905); self.recompute_instance_static(); Ok(()) }
+            "pa2" => { validate_finite_parameter("PA2", value)?; self.params.p906 = value; self.mark_param_given(906); self.recompute_instance_static(); Ok(()) }
+            "prdsw" => { validate_finite_parameter("PRDSW", value)?; self.params.p907 = value; self.mark_param_given(907); self.recompute_instance_static(); Ok(()) }
+            "prsw" => { validate_finite_parameter("PRSW", value)?; self.params.p908 = value; self.mark_param_given(908); self.recompute_instance_static(); Ok(()) }
+            "prdw" => { validate_finite_parameter("PRDW", value)?; self.params.p909 = value; self.mark_param_given(909); self.recompute_instance_static(); Ok(()) }
+            "pprwb" => { validate_finite_parameter("PPRWB", value)?; self.params.p910 = value; self.mark_param_given(910); self.recompute_instance_static(); Ok(()) }
+            "pprwe" => { validate_finite_parameter("PPRWE", value)?; self.params.p911 = value; self.mark_param_given(911); self.recompute_instance_static(); Ok(()) }
+            "pprwg" => { validate_finite_parameter("PPRWG", value)?; self.params.p912 = value; self.mark_param_given(912); self.recompute_instance_static(); Ok(()) }
+            "pwr" => { validate_finite_parameter("PWR", value)?; self.params.p913 = value; self.mark_param_given(913); self.recompute_instance_static(); Ok(()) }
+            "pnfactor" => { validate_finite_parameter("PNFACTOR", value)?; self.params.p914 = value; self.mark_param_given(914); self.recompute_instance_static(); Ok(()) }
+            "pdwg" => { validate_finite_parameter("PDWG", value)?; self.params.p915 = value; self.mark_param_given(915); self.recompute_instance_static(); Ok(()) }
+            "pdwb" => { validate_finite_parameter("PDWB", value)?; self.params.p916 = value; self.mark_param_given(916); self.recompute_instance_static(); Ok(()) }
+            "pvoff" => { validate_finite_parameter("PVOFF", value)?; self.params.p917 = value; self.mark_param_given(917); self.recompute_instance_static(); Ok(()) }
+            "peta0" => { validate_finite_parameter("PETA0", value)?; self.params.p918 = value; self.mark_param_given(918); self.recompute_instance_static(); Ok(()) }
+            "petab" => { validate_finite_parameter("PETAB", value)?; self.params.p919 = value; self.mark_param_given(919); self.recompute_instance_static(); Ok(()) }
+            "peta0cv" => { validate_finite_parameter("PETA0CV", value)?; self.params.p920 = value; self.mark_param_given(920); self.recompute_instance_static(); Ok(()) }
+            "petabcv" => { validate_finite_parameter("PETABCV", value)?; self.params.p921 = value; self.mark_param_given(921); self.recompute_instance_static(); Ok(()) }
+            "pdsub" => { validate_finite_parameter("PDSUB", value)?; self.params.p922 = value; self.mark_param_given(922); self.recompute_instance_static(); Ok(()) }
+            "pcit" => { validate_finite_parameter("PCIT", value)?; self.params.p923 = value; self.mark_param_given(923); self.recompute_instance_static(); Ok(()) }
+            "pcdsc" => { validate_finite_parameter("PCDSC", value)?; self.params.p924 = value; self.mark_param_given(924); self.recompute_instance_static(); Ok(()) }
+            "pcdscb" => { validate_finite_parameter("PCDSCB", value)?; self.params.p925 = value; self.mark_param_given(925); self.recompute_instance_static(); Ok(()) }
+            "pcdscd" => { validate_finite_parameter("PCDSCD", value)?; self.params.p926 = value; self.mark_param_given(926); self.recompute_instance_static(); Ok(()) }
+            "ppclm" => { validate_finite_parameter("PPCLM", value)?; self.params.p927 = value; self.mark_param_given(927); self.recompute_instance_static(); Ok(()) }
+            "ppdiblc1" => { validate_finite_parameter("PPDIBLC1", value)?; self.params.p928 = value; self.mark_param_given(928); self.recompute_instance_static(); Ok(()) }
+            "ppdiblc2" => { validate_finite_parameter("PPDIBLC2", value)?; self.params.p929 = value; self.mark_param_given(929); self.recompute_instance_static(); Ok(()) }
+            "ppdiblcb" => { validate_finite_parameter("PPDIBLCB", value)?; self.params.p930 = value; self.mark_param_given(930); self.recompute_instance_static(); Ok(()) }
+            "pdrout" => { validate_finite_parameter("PDROUT", value)?; self.params.p931 = value; self.mark_param_given(931); self.recompute_instance_static(); Ok(()) }
+            "ppvag" => { validate_finite_parameter("PPVAG", value)?; self.params.p932 = value; self.mark_param_given(932); self.recompute_instance_static(); Ok(()) }
+            "pdelta" => { validate_finite_parameter("PDELTA", value)?; self.params.p933 = value; self.mark_param_given(933); self.recompute_instance_static(); Ok(()) }
+            "palpha0" => { validate_finite_parameter("PALPHA0", value)?; self.params.p934 = value; self.mark_param_given(934); self.recompute_instance_static(); Ok(()) }
+            "pfbjtii" => { validate_finite_parameter("PFBJTII", value)?; self.params.p935 = value; self.mark_param_given(935); self.recompute_instance_static(); Ok(()) }
+            "pabjtii" => { validate_finite_parameter("PABJTII", value)?; self.params.p936 = value; self.mark_param_given(936); self.recompute_instance_static(); Ok(()) }
+            "pcbjtii" => { validate_finite_parameter("PCBJTII", value)?; self.params.p937 = value; self.mark_param_given(937); self.recompute_instance_static(); Ok(()) }
+            "pebjtii" => { validate_finite_parameter("PEBJTII", value)?; self.params.p938 = value; self.mark_param_given(938); self.recompute_instance_static(); Ok(()) }
+            "pmbjtii" => { validate_finite_parameter("PMBJTII", value)?; self.params.p939 = value; self.mark_param_given(939); self.recompute_instance_static(); Ok(()) }
+            "pvbci" => { validate_finite_parameter("PVBCI", value)?; self.params.p940 = value; self.mark_param_given(940); self.recompute_instance_static(); Ok(()) }
+            "pbeta0" => { validate_finite_parameter("PBETA0", value)?; self.params.p941 = value; self.mark_param_given(941); self.recompute_instance_static(); Ok(()) }
+            "pbeta1" => { validate_finite_parameter("PBETA1", value)?; self.params.p942 = value; self.mark_param_given(942); self.recompute_instance_static(); Ok(()) }
+            "pbeta2" => { validate_finite_parameter("PBETA2", value)?; self.params.p943 = value; self.mark_param_given(943); self.recompute_instance_static(); Ok(()) }
+            "pvdsatii0" => { validate_finite_parameter("PVDSATII0", value)?; self.params.p944 = value; self.mark_param_given(944); self.recompute_instance_static(); Ok(()) }
+            "plii" => { validate_finite_parameter("PLII", value)?; self.params.p945 = value; self.mark_param_given(945); self.recompute_instance_static(); Ok(()) }
+            "pesatii" => { validate_finite_parameter("PESATII", value)?; self.params.p946 = value; self.mark_param_given(946); self.recompute_instance_static(); Ok(()) }
+            "psii0" => { validate_finite_parameter("PSII0", value)?; self.params.p947 = value; self.mark_param_given(947); self.recompute_instance_static(); Ok(()) }
+            "psii1" => { validate_finite_parameter("PSII1", value)?; self.params.p948 = value; self.mark_param_given(948); self.recompute_instance_static(); Ok(()) }
+            "psii2" => { validate_finite_parameter("PSII2", value)?; self.params.p949 = value; self.mark_param_given(949); self.recompute_instance_static(); Ok(()) }
+            "psiid" => { validate_finite_parameter("PSIID", value)?; self.params.p950 = value; self.mark_param_given(950); self.recompute_instance_static(); Ok(()) }
+            "pagidl" => { validate_finite_parameter("PAGIDL", value)?; self.params.p951 = value; self.mark_param_given(951); self.recompute_instance_static(); Ok(()) }
+            "pbgidl" => { validate_finite_parameter("PBGIDL", value)?; self.params.p952 = value; self.mark_param_given(952); self.recompute_instance_static(); Ok(()) }
+            "pbgidl1" => { validate_finite_parameter("PBGIDL1", value)?; self.params.p953 = value; self.mark_param_given(953); self.recompute_instance_static(); Ok(()) }
+            "pcgidl" => { validate_finite_parameter("PCGIDL", value)?; self.params.p954 = value; self.mark_param_given(954); self.recompute_instance_static(); Ok(()) }
+            "prgidl" => { validate_finite_parameter("PRGIDL", value)?; self.params.p955 = value; self.mark_param_given(955); self.recompute_instance_static(); Ok(()) }
+            "pkgidl" => { validate_finite_parameter("PKGIDL", value)?; self.params.p956 = value; self.mark_param_given(956); self.recompute_instance_static(); Ok(()) }
+            "pfgidl" => { validate_finite_parameter("PFGIDL", value)?; self.params.p957 = value; self.mark_param_given(957); self.recompute_instance_static(); Ok(()) }
+            "pagisl" => { validate_finite_parameter("PAGISL", value)?; self.params.p958 = value; self.mark_param_given(958); self.recompute_instance_static(); Ok(()) }
+            "pbgisl" => { validate_finite_parameter("PBGISL", value)?; self.params.p959 = value; self.mark_param_given(959); self.recompute_instance_static(); Ok(()) }
+            "pbgisl1" => { validate_finite_parameter("PBGISL1", value)?; self.params.p960 = value; self.mark_param_given(960); self.recompute_instance_static(); Ok(()) }
+            "pcgisl" => { validate_finite_parameter("PCGISL", value)?; self.params.p961 = value; self.mark_param_given(961); self.recompute_instance_static(); Ok(()) }
+            "prgisl" => { validate_finite_parameter("PRGISL", value)?; self.params.p962 = value; self.mark_param_given(962); self.recompute_instance_static(); Ok(()) }
+            "pkgisl" => { validate_finite_parameter("PKGISL", value)?; self.params.p963 = value; self.mark_param_given(963); self.recompute_instance_static(); Ok(()) }
+            "pfgisl" => { validate_finite_parameter("PFGISL", value)?; self.params.p964 = value; self.mark_param_given(964); self.recompute_instance_static(); Ok(()) }
+            "pntun" => { validate_finite_parameter("PNTUN", value)?; self.params.p965 = value; self.mark_param_given(965); self.recompute_instance_static(); Ok(()) }
+            "pntund" => { validate_finite_parameter("PNTUND", value)?; self.params.p966 = value; self.mark_param_given(966); self.recompute_instance_static(); Ok(()) }
+            "pndiode" => { validate_finite_parameter("PNDIODE", value)?; self.params.p967 = value; self.mark_param_given(967); self.recompute_instance_static(); Ok(()) }
+            "pndioded" => { validate_finite_parameter("PNDIODED", value)?; self.params.p968 = value; self.mark_param_given(968); self.recompute_instance_static(); Ok(()) }
+            "pnrecf0" => { validate_finite_parameter("PNRECF0", value)?; self.params.p969 = value; self.mark_param_given(969); self.recompute_instance_static(); Ok(()) }
+            "pnrecf0d" => { validate_finite_parameter("PNRECF0D", value)?; self.params.p970 = value; self.mark_param_given(970); self.recompute_instance_static(); Ok(()) }
+            "pnrecr0" => { validate_finite_parameter("PNRECR0", value)?; self.params.p971 = value; self.mark_param_given(971); self.recompute_instance_static(); Ok(()) }
+            "pnrecr0d" => { validate_finite_parameter("PNRECR0D", value)?; self.params.p972 = value; self.mark_param_given(972); self.recompute_instance_static(); Ok(()) }
+            "pisbjt" => { validate_finite_parameter("PISBJT", value)?; self.params.p973 = value; self.mark_param_given(973); self.recompute_instance_static(); Ok(()) }
+            "pidbjt" => { validate_finite_parameter("PIDBJT", value)?; self.params.p974 = value; self.mark_param_given(974); self.recompute_instance_static(); Ok(()) }
+            "pisdif" => { validate_finite_parameter("PISDIF", value)?; self.params.p975 = value; self.mark_param_given(975); self.recompute_instance_static(); Ok(()) }
+            "piddif" => { validate_finite_parameter("PIDDIF", value)?; self.params.p976 = value; self.mark_param_given(976); self.recompute_instance_static(); Ok(()) }
+            "pisrec" => { validate_finite_parameter("PISREC", value)?; self.params.p977 = value; self.mark_param_given(977); self.recompute_instance_static(); Ok(()) }
+            "pidrec" => { validate_finite_parameter("PIDREC", value)?; self.params.p978 = value; self.mark_param_given(978); self.recompute_instance_static(); Ok(()) }
+            "pistun" => { validate_finite_parameter("PISTUN", value)?; self.params.p979 = value; self.mark_param_given(979); self.recompute_instance_static(); Ok(()) }
+            "pidtun" => { validate_finite_parameter("PIDTUN", value)?; self.params.p980 = value; self.mark_param_given(980); self.recompute_instance_static(); Ok(()) }
+            "pvrec0" => { validate_finite_parameter("PVREC0", value)?; self.params.p981 = value; self.mark_param_given(981); self.recompute_instance_static(); Ok(()) }
+            "pvrec0d" => { validate_finite_parameter("PVREC0D", value)?; self.params.p982 = value; self.mark_param_given(982); self.recompute_instance_static(); Ok(()) }
+            "pvtun0" => { validate_finite_parameter("PVTUN0", value)?; self.params.p983 = value; self.mark_param_given(983); self.recompute_instance_static(); Ok(()) }
+            "pvtun0d" => { validate_finite_parameter("PVTUN0D", value)?; self.params.p984 = value; self.mark_param_given(984); self.recompute_instance_static(); Ok(()) }
+            "pnbjt" => { validate_finite_parameter("PNBJT", value)?; self.params.p985 = value; self.mark_param_given(985); self.recompute_instance_static(); Ok(()) }
+            "plbjt0" => { validate_finite_parameter("PLBJT0", value)?; self.params.p986 = value; self.mark_param_given(986); self.recompute_instance_static(); Ok(()) }
+            "pvabjt" => { validate_finite_parameter("PVABJT", value)?; self.params.p987 = value; self.mark_param_given(987); self.recompute_instance_static(); Ok(()) }
+            "paely" => { validate_finite_parameter("PAELY", value)?; self.params.p988 = value; self.mark_param_given(988); self.recompute_instance_static(); Ok(()) }
+            "pahli" => { validate_finite_parameter("PAHLI", value)?; self.params.p989 = value; self.mark_param_given(989); self.recompute_instance_static(); Ok(()) }
+            "pahlid" => { validate_finite_parameter("PAHLID", value)?; self.params.p990 = value; self.mark_param_given(990); self.recompute_instance_static(); Ok(()) }
+            "pvsdfb" => { validate_finite_parameter("PVSDFB", value)?; self.params.p991 = value; self.mark_param_given(991); self.recompute_instance_static(); Ok(()) }
+            "pvsdth" => { validate_finite_parameter("PVSDTH", value)?; self.params.p992 = value; self.mark_param_given(992); self.recompute_instance_static(); Ok(()) }
+            "pdelvt" => { validate_finite_parameter("PDELVT", value)?; self.params.p993 = value; self.mark_param_given(993); self.recompute_instance_static(); Ok(()) }
+            "pacde" => { validate_finite_parameter("PACDE", value)?; self.params.p994 = value; self.mark_param_given(994); self.recompute_instance_static(); Ok(()) }
+            "pmoin" => { validate_finite_parameter("PMOIN", value)?; self.params.p995 = value; self.mark_param_given(995); self.recompute_instance_static(); Ok(()) }
+            "pnoff" => { validate_finite_parameter("PNOFF", value)?; self.params.p996 = value; self.mark_param_given(996); self.recompute_instance_static(); Ok(()) }
+            "pnoff2" => { validate_finite_parameter("PNOFF2", value)?; self.params.p997 = value; self.mark_param_given(997); self.recompute_instance_static(); Ok(()) }
+            "pxrcrg1" => { validate_finite_parameter("PXRCRG1", value)?; self.params.p998 = value; self.mark_param_given(998); self.recompute_instance_static(); Ok(()) }
+            "pxrcrg2" => { validate_finite_parameter("PXRCRG2", value)?; self.params.p999 = value; self.mark_param_given(999); self.recompute_instance_static(); Ok(()) }
+            "pvbsa" => { validate_finite_parameter("PVBSA", value)?; self.params.p1000 = value; self.mark_param_given(1000); self.recompute_instance_static(); Ok(()) }
+            "pvsce" => { validate_finite_parameter("PVSCE", value)?; self.params.p1001 = value; self.mark_param_given(1001); self.recompute_instance_static(); Ok(()) }
+            "pcdsbs" => { validate_finite_parameter("PCDSBS", value)?; self.params.p1002 = value; self.mark_param_given(1002); self.recompute_instance_static(); Ok(()) }
+            "pnofffd" => { validate_finite_parameter("PNOFFFD", value)?; self.params.p1003 = value; self.mark_param_given(1003); self.recompute_instance_static(); Ok(()) }
+            "pvofffd" => { validate_finite_parameter("PVOFFFD", value)?; self.params.p1004 = value; self.mark_param_given(1004); self.recompute_instance_static(); Ok(()) }
+            "pk1b" => { validate_finite_parameter("PK1B", value)?; self.params.p1005 = value; self.mark_param_given(1005); self.recompute_instance_static(); Ok(()) }
+            "pk2b" => { validate_finite_parameter("PK2B", value)?; self.params.p1006 = value; self.mark_param_given(1006); self.recompute_instance_static(); Ok(()) }
+            "pdk2b" => { validate_finite_parameter("PDK2B", value)?; self.params.p1007 = value; self.mark_param_given(1007); self.recompute_instance_static(); Ok(()) }
+            "pdvbd0" => { validate_finite_parameter("PDVBD0", value)?; self.params.p1008 = value; self.mark_param_given(1008); self.recompute_instance_static(); Ok(()) }
+            "pdvbd1" => { validate_finite_parameter("PDVBD1", value)?; self.params.p1009 = value; self.mark_param_given(1009); self.recompute_instance_static(); Ok(()) }
+            "pmoinfd" => { validate_finite_parameter("PMOINFD", value)?; self.params.p1010 = value; self.mark_param_given(1010); self.recompute_instance_static(); Ok(()) }
+            "pvbs0pd" => { validate_finite_parameter("PVBS0PD", value)?; self.params.p1011 = value; self.mark_param_given(1011); self.recompute_instance_static(); Ok(()) }
+            "pvbs0fd" => { validate_finite_parameter("PVBS0FD", value)?; self.params.p1012 = value; self.mark_param_given(1012); self.recompute_instance_static(); Ok(()) }
+            "nlx" => { validate_finite_parameter("NLX", value)?; self.params.p1013 = value; self.mark_param_given(1013); self.recompute_instance_static(); Ok(()) }
+            "lnlx" => { validate_finite_parameter("LNLX", value)?; self.params.p1014 = value; self.mark_param_given(1014); self.recompute_instance_static(); Ok(()) }
+            "wnlx" => { validate_finite_parameter("WNLX", value)?; self.params.p1015 = value; self.mark_param_given(1015); self.recompute_instance_static(); Ok(()) }
+            "pnlx" => { validate_finite_parameter("PNLX", value)?; self.params.p1016 = value; self.mark_param_given(1016); self.recompute_instance_static(); Ok(()) }
+            "ngidl" => { validate_finite_parameter("NGIDL", value)?; self.params.p1017 = value; self.mark_param_given(1017); self.recompute_instance_static(); Ok(()) }
+            "lngidl" => { validate_finite_parameter("LNGIDL", value)?; self.params.p1018 = value; self.mark_param_given(1018); self.recompute_instance_static(); Ok(()) }
+            "wngidl" => { validate_finite_parameter("WNGIDL", value)?; self.params.p1019 = value; self.mark_param_given(1019); self.recompute_instance_static(); Ok(()) }
+            "pngidl" => { validate_finite_parameter("PNGIDL", value)?; self.params.p1020 = value; self.mark_param_given(1020); self.recompute_instance_static(); Ok(()) }
+            "lpe0" => { validate_finite_parameter("LPE0", value)?; self.params.p1021 = value; self.mark_param_given(1021); self.recompute_instance_static(); Ok(()) }
+            "egidl" => { validate_finite_parameter("EGIDL", value)?; self.params.p1022 = value; self.mark_param_given(1022); self.recompute_instance_static(); Ok(()) }
+            "egisl" => { validate_finite_parameter("EGISL", value)?; self.params.p1023 = value; self.mark_param_given(1023); self.recompute_instance_static(); Ok(()) }
+            "llpe0" => { validate_finite_parameter("LLPE0", value)?; self.params.p1024 = value; self.mark_param_given(1024); self.recompute_instance_static(); Ok(()) }
+            "legidl" => { validate_finite_parameter("LEGIDL", value)?; self.params.p1025 = value; self.mark_param_given(1025); self.recompute_instance_static(); Ok(()) }
+            "legisl" => { validate_finite_parameter("LEGISL", value)?; self.params.p1026 = value; self.mark_param_given(1026); self.recompute_instance_static(); Ok(()) }
+            "wlpe0" => { validate_finite_parameter("WLPE0", value)?; self.params.p1027 = value; self.mark_param_given(1027); self.recompute_instance_static(); Ok(()) }
+            "wegidl" => { validate_finite_parameter("WEGIDL", value)?; self.params.p1028 = value; self.mark_param_given(1028); self.recompute_instance_static(); Ok(()) }
+            "wegisl" => { validate_finite_parameter("WEGISL", value)?; self.params.p1029 = value; self.mark_param_given(1029); self.recompute_instance_static(); Ok(()) }
+            "plpe0" => { validate_finite_parameter("PLPE0", value)?; self.params.p1030 = value; self.mark_param_given(1030); self.recompute_instance_static(); Ok(()) }
+            "pegidl" => { validate_finite_parameter("PEGIDL", value)?; self.params.p1031 = value; self.mark_param_given(1031); self.recompute_instance_static(); Ok(()) }
+            "pegisl" => { validate_finite_parameter("PEGISL", value)?; self.params.p1032 = value; self.mark_param_given(1032); self.recompute_instance_static(); Ok(()) }
+            "eggbcp2" => { validate_finite_parameter("EGGBCP2", value)?; self.params.p1033 = value; self.mark_param_given(1033); self.recompute_instance_static(); Ok(()) }
+            "eggdep" => { validate_finite_parameter("EGGDEP", value)?; self.params.p1034 = value; self.mark_param_given(1034); self.recompute_instance_static(); Ok(()) }
+            "agb1" => { validate_finite_parameter("AGB1", value)?; self.params.p1035 = value; self.mark_param_given(1035); self.recompute_instance_static(); Ok(()) }
+            "bgb1" => { validate_finite_parameter("BGB1", value)?; self.params.p1036 = value; self.mark_param_given(1036); self.recompute_instance_static(); Ok(()) }
+            "agb2" => { validate_finite_parameter("AGB2", value)?; self.params.p1037 = value; self.mark_param_given(1037); self.recompute_instance_static(); Ok(()) }
+            "bgb2" => { validate_finite_parameter("BGB2", value)?; self.params.p1038 = value; self.mark_param_given(1038); self.recompute_instance_static(); Ok(()) }
+            "agbc2n" => { validate_finite_parameter("AGBC2N", value)?; self.params.p1039 = value; self.mark_param_given(1039); self.recompute_instance_static(); Ok(()) }
+            "agbc2p" => { validate_finite_parameter("AGBC2P", value)?; self.params.p1040 = value; self.mark_param_given(1040); self.recompute_instance_static(); Ok(()) }
+            "bgbc2n" => { validate_finite_parameter("BGBC2N", value)?; self.params.p1041 = value; self.mark_param_given(1041); self.recompute_instance_static(); Ok(()) }
+            "bgbc2p" => { validate_finite_parameter("BGBC2P", value)?; self.params.p1042 = value; self.mark_param_given(1042); self.recompute_instance_static(); Ok(()) }
+            "vtm00" => { validate_parameter("VTM00", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p1043 = value; self.mark_param_given(1043); self.recompute_instance_static(); Ok(()) }
             _ => Err(format!("unknown parameter '{}' for generated Verilog-A model 'bsimsoi'", name)),
         }
     }
@@ -3554,5 +3876,138 @@ impl Instance {
         } else {
             0.0
         }
+    }
+
+    #[inline]
+    fn recompute_instance_static(&mut self) {
+        let p = &(*self.params);
+        let v2: f64 = p.p1;
+        self.scalar_v2 = v2;
+        let v3: f64 = p.p2;
+        self.scalar_v3 = v3;
+        let v4: f64 = p.p3;
+        self.scalar_v4 = v4;
+        let v5: f64 = (p.p2 / p.p3);
+        self.scalar_v5 = v5;
+        let v6: f64 = p.p202;
+        self.scalar_v6 = v6;
+        let v7: f64 = p.p1.powf(p.p202);
+        self.scalar_v7 = v7;
+        let v8: f64 = p.p205;
+        self.scalar_v8 = v8;
+        let v9: f64 = v5.powf(p.p205);
+        self.scalar_v9 = v9;
+        let v10: f64 = p.p200;
+        self.scalar_v10 = v10;
+        let v11: f64 = (p.p200 / v7);
+        self.scalar_v11 = v11;
+        let v12: f64 = p.p203;
+        self.scalar_v12 = v12;
+        let v13: f64 = (p.p203 / v9);
+        self.scalar_v13 = v13;
+        let v14: f64 = (v11 + v13);
+        self.scalar_v14 = v14;
+        let v15: f64 = p.p206;
+        self.scalar_v15 = v15;
+        let v16: f64 = (v7 * v9);
+        self.scalar_v16 = v16;
+        let v17: f64 = (p.p206 / v16);
+        self.scalar_v17 = v17;
+        let v18: f64 = (v14 + v17);
+        self.scalar_v18 = v18;
+        let v19: f64 = p.p197;
+        self.scalar_v19 = v19;
+        let v20: f64 = (p.p197 + v18);
+        self.scalar_v20 = v20;
+        let v21: f64 = p.p22;
+        self.scalar_v21 = v21;
+        let v22: f64 = p.p303;
+        self.scalar_v22 = v22;
+        let v23: f64 = (p.p22 * p.p303);
+        self.scalar_v23 = v23;
+        let v24: f64 = (v5 - v23);
+        self.scalar_v24 = v24;
+        let v25: f64 = (2.0 - p.p22);
+        self.scalar_v25 = v25;
+        let v26: f64 = (v25 * v20);
+        self.scalar_v26 = v26;
+        let v27: f64 = (v24 - v26);
+        self.scalar_v27 = v27;
+        let v28: f64 = p.p23;
+        self.scalar_v28 = v28;
+        let v29: f64 = (v27 / p.p23);
+        self.scalar_v29 = v29;
+        let v47: f64 = p.p424;
+        self.scalar_v47 = v47;
+        let v48: f64 = p.p427;
+        self.scalar_v48 = v48;
+        let v49: f64 = (v29 / 3.0);
+        self.scalar_v49 = v49;
+        let v50: f64 = p.p425;
+        self.scalar_v50 = v50;
+        let v51: f64 = (v49 / p.p425);
+        self.scalar_v51 = v51;
+        let v52: f64 = (p.p427 + v51);
+        self.scalar_v52 = v52;
+        let v53: f64 = (p.p424 * v52);
+        self.scalar_v53 = v53;
+        let v54: f64 = (p.p425 * p.p3);
+        self.scalar_v54 = v54;
+        let v55: f64 = p.p428;
+        self.scalar_v55 = v55;
+        let v56: f64 = (p.p1 - p.p428);
+        self.scalar_v56 = v56;
+        let v57: f64 = (v54 * v56);
+        self.scalar_v57 = v57;
+        let v58: f64 = (v53 / v57);
+        self.scalar_v58 = v58;
+        let v59: f64 = p.p426;
+        self.scalar_v59 = v59;
+        let v60: f64 = (p.p1 * v27);
+        self.scalar_v60 = v60;
+        let v61: f64 = (v60 * p.p3);
+        self.scalar_v61 = v61;
+        let v62: f64 = (p.p426 / v61);
+        self.scalar_v62 = v62;
+        let v63: f64 = (v58 + v62);
+        self.scalar_v63 = v63;
+        let v64: bool = (v63 > 0.0);
+        self.scalar_v64 = v64;
+        let v65: f64 = (1.0 / v63);
+        self.scalar_v65 = v65;
+        let v66: f64 = (if v64 { v65 } else { v63 });
+        self.scalar_v66 = v66;
+        let v67: bool = (!v64);
+        self.scalar_v67 = v67;
+        let v69: f64 = (if v67 { 1000.0 } else { v66 });
+        self.scalar_v69 = v69;
+        let v70: f64 = p.p39;
+        self.scalar_v70 = v70;
+        let v76: bool = (p.p39 == 2.0);
+        self.scalar_v76 = v76;
+        let v79: f64 = p.p223;
+        self.scalar_v79 = v79;
+        let v80: bool = (p.p223 != 3.0);
+        self.scalar_v80 = v80;
+        let v86: bool = (p.p39 == 0.0);
+        self.scalar_v86 = v86;
+        let v87: bool = (v86 || v76);
+        self.scalar_v87 = v87;
+        let v90: f64 = p.p32;
+        self.scalar_v90 = v90;
+        let v98: bool = (!v87);
+        self.scalar_v98 = v98;
+        let v106: f64 = (if v80 { 1.0 } else { 0.0 });
+        self.scalar_v106 = v106;
+        let v107: f64 = (p.p32 * -1.0);
+        self.scalar_v107 = v107;
+        let v108: f64 = (p.p32 * v69);
+        self.scalar_v108 = v108;
+        let v109: f64 = (v107 * v69);
+        self.scalar_v109 = v109;
+        let v110: f64 = (if v98 { v108 } else { 0.0 });
+        self.scalar_v110 = v110;
+        let v111: f64 = (if v98 { v109 } else { 0.0 });
+        self.scalar_v111 = v111;
     }
 }

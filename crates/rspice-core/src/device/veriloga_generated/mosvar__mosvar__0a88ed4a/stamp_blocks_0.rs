@@ -3142,15 +3142,6 @@ impl Instance {
         let nv3 = ctx.node_voltage(nodes[3]);
         let nv4 = ctx.node_voltage(nodes[4]);
         let nv5 = ctx.node_voltage(nodes[5]);
-        let nv6 = ctx.node_voltage(nodes[6]);
-        let eq0_value: f64 = (nv6 - 0.0);
-        stamper.stamp_current_node1_local(
-            Some(6),
-            None,
-            multiplicity * (eq0_value),
-            6,
-            multiplicity * (1.0),
-        );
         let (eq1_e76, eq1_e76_d_n0, eq1_e76_d_n1, eq1_e76_d_n2, eq1_e76_d_n3, eq1_e76_d_n4, eq1_e76_d_n5, eq1_e76_d_n6, eq1_e76_d_b0, eq1_e76_d_b1, eq1_e76_d_b2, eq1_e76_d_b3,) = {
     if (p.p16 != 0.0) {
         let eq1_e74: f64 = ((nv0 - nv3) * s.v[63]);

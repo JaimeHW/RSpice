@@ -3246,15 +3246,6 @@ impl Instance {
             Some(7),
             multiplicity * (eq35_value),
         );
-        let eq36_e1214: f64 = (nv14 - 0.0);
-        let eq36_value: f64 = eq36_e1214;
-        stamper.stamp_current_node1_local(
-            Some(14),
-            None,
-            multiplicity * (eq36_value),
-            14,
-            multiplicity * (1.0),
-        );
         let eq37_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(14),
@@ -3863,23 +3854,6 @@ impl Instance {
             &eq56_node_derivatives,
             &eq56_branch_derivatives,
             multiplicity,
-        );
-        let (eq57_e1339, eq57_e1339_d_n4,) = {
-    if (!s.b[3409]) {
-        let eq57_e1337: f64 = ((nv4 - 0.0) * 10000.0);
-        let eq57_e1337_d_n4: f64 = 10000.0;
-        (eq57_e1337, eq57_e1337_d_n4,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq57_value: f64 = eq57_e1339;
-        stamper.stamp_current_node1_local(
-            Some(4),
-            None,
-            multiplicity * (eq57_value),
-            4,
-            multiplicity * (eq57_e1339_d_n4),
         );
     }
 

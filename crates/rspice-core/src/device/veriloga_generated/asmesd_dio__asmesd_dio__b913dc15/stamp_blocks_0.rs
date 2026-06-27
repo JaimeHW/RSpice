@@ -73,22 +73,6 @@ impl Instance {
             &eq0_branch_derivatives,
             multiplicity,
         );
-        let (eq1_e66, eq1_e66_d_n6,) = {
-    if s.b[68] {
-        let eq1_e64: f64 = (nv6 - 0.0);
-        (eq1_e64, 1.0,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq1_value: f64 = eq1_e66;
-        stamper.stamp_current_node1_local(
-            Some(6),
-            None,
-            multiplicity * (eq1_value),
-            6,
-            multiplicity * (eq1_e66_d_n6),
-        );
         let (eq2_e73, eq2_e73_d_n0, eq2_e73_d_n1, eq2_e73_d_n2, eq2_e73_d_n3, eq2_e73_d_n4, eq2_e73_d_n5, eq2_e73_d_n6, eq2_e73_d_b0, eq2_e73_d_b1, eq2_e73_d_b2, eq2_e73_d_b3, eq2_e73_d_b4, eq2_e73_d_b5, eq2_e73_d_b6,) = {
     if s.b[68] {
         let eq2_e70: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, (nv6 - 0.0));

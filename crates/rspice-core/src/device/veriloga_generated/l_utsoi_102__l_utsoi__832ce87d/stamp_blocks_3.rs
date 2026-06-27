@@ -4437,24 +4437,6 @@ impl Instance {
             &eq4_branch_derivatives,
             multiplicity,
         );
-        let eq5_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(6),
-            Some(8),
-            multiplicity * (eq5_value),
-        );
-        let eq6_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(8),
-            multiplicity * (eq6_value),
-        );
-        let eq7_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(9),
-            Some(8),
-            multiplicity * (eq7_value),
-        );
         let eq8_e524: f64 = (p.p31 * s.v[471]);
         let eq8_e526: f64 = (eq8_e524 * (nv7 - nv6));
         let eq8_e526_d_n6: f64 = (-eq8_e524);

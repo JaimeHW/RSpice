@@ -3647,15 +3647,6 @@ impl Instance {
             Some(12),
             multiplicity * (eq13_value),
         );
-        let eq14_e412: f64 = (nv7 - 0.0);
-        let eq14_value: f64 = eq14_e412;
-        stamper.stamp_current_node1_local(
-            Some(7),
-            None,
-            multiplicity * (eq14_value),
-            7,
-            multiplicity * (1.0),
-        );
         let eq15_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(7),

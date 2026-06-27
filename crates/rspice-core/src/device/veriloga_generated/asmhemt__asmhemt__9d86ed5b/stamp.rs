@@ -108,6 +108,10 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv0 = ctx.node_voltage(nodes[0]);
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv6 = ctx.node_voltage(nodes[6]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
@@ -116,6 +120,67 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let v0: f64 = 0.0;
+        let v10: f64 = -1.0;
+        let v11: f64 = nv0;
+        let v12: f64 = nv2;
+        let v13: f64 = (v11 - v12);
+        let v27: f64 = nv5;
+        let v31: f64 = nv6;
+        let v90: f64 = (v27 / self.scalar_v89);
+        let v91: f64 = (if self.scalar_v26 { v90 } else { v0 });
+        let v94: f64 = (v27 / self.scalar_v93);
+        let v95: f64 = (if self.scalar_v30 { v94 } else { v0 });
+        let v97: f64 = (v31 / self.scalar_v96);
+        let v98: f64 = (if self.scalar_v30 { v97 } else { v0 });
+        let v99: f64 = (v10 * v13);
+        let v100: f64 = (if self.scalar_v30 { v99 } else { v0 });
+        let v103: f64 = (v27 / self.scalar_v102);
+        let v104: f64 = (if self.scalar_v34 { v103 } else { v0 });
+
+        let d91_dn5: f64 = self.scalar_v132;
+        stamper.stamp_current_node1_local(
+            Some(5),
+            None,
+            multiplicity * (v91),
+            5,
+            multiplicity * (d91_dn5),
+        );
+        let d95_dn5: f64 = self.scalar_v134;
+        stamper.stamp_current_node1_local(
+            Some(5),
+            None,
+            multiplicity * (v95),
+            5,
+            multiplicity * (d95_dn5),
+        );
+        let d98_dn6: f64 = self.scalar_v136;
+        stamper.stamp_current_node1_local(
+            Some(6),
+            None,
+            multiplicity * (v98),
+            6,
+            multiplicity * (d98_dn6),
+        );
+        let d100_dn0: f64 = self.scalar_v137;
+        let d100_dn2: f64 = self.scalar_v138;
+        stamper.stamp_current_node2_local(
+            Some(6),
+            None,
+            multiplicity * (v100),
+            0,
+            multiplicity * (d100_dn0),
+            2,
+            multiplicity * (d100_dn2),
+        );
+        let d104_dn5: f64 = self.scalar_v140;
+        stamper.stamp_current_node1_local(
+            Some(5),
+            None,
+            multiplicity * (v104),
+            5,
+            multiplicity * (d104_dn5),
+        );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),

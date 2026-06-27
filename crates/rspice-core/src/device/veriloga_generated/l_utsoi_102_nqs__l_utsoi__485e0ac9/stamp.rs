@@ -102,6 +102,23 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let v0: f64 = 0.0;
+
+        stamper.stamp_current_const_local(
+            Some(6),
+            Some(8),
+            multiplicity * (v0),
+        );
+        stamper.stamp_current_const_local(
+            Some(7),
+            Some(8),
+            multiplicity * (v0),
+        );
+        stamper.stamp_current_const_local(
+            Some(9),
+            Some(8),
+            multiplicity * (v0),
+        );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),

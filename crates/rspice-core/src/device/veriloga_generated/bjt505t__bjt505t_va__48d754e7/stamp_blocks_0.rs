@@ -5623,14 +5623,6 @@ impl Instance {
             None,
             multiplicity * (eq33_value),
         );
-        let eq34_value: f64 = (nv12 - 0.0);
-        stamper.stamp_current_node1_local(
-            Some(12),
-            None,
-            multiplicity * (eq34_value),
-            12,
-            multiplicity * (1.0),
-        );
         let eq35_e406: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 10, (nv12 - 0.0));
         let eq35_e407: f64 = (s.v[336] * eq35_e406);
         let eq35_e407_d_n0: f64 = (s.dn[336][0] * eq35_e406);
@@ -5686,14 +5678,6 @@ impl Instance {
             &eq36_branch_derivatives,
             multiplicity,
         );
-        let eq37_value: f64 = (nv12 - 0.0);
-        stamper.stamp_current_node1_local(
-            Some(9),
-            Some(5),
-            multiplicity * (eq37_value),
-            12,
-            multiplicity * (1.0),
-        );
         let eq38_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(9),
@@ -5730,13 +5714,6 @@ impl Instance {
             Some(5),
             multiplicity * (eq43_value),
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_4(
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        multiplicity: f64,
-    ) {
         let eq44_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(6),
@@ -5755,6 +5732,13 @@ impl Instance {
             Some(11),
             multiplicity * (eq46_value),
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_4(
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        multiplicity: f64,
+    ) {
         let eq47_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(6),

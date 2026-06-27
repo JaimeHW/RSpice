@@ -5190,7 +5190,6 @@ impl Instance {
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv15 = ctx.node_voltage(nodes[15]);
-        let nv16 = ctx.node_voltage(nodes[16]);
         let (eq12_e1370, eq12_e1370_d_n0, eq12_e1370_d_n1, eq12_e1370_d_n2, eq12_e1370_d_n3, eq12_e1370_d_n4, eq12_e1370_d_n5, eq12_e1370_d_n6, eq12_e1370_d_n7, eq12_e1370_d_n8, eq12_e1370_d_n9, eq12_e1370_d_n10, eq12_e1370_d_n11, eq12_e1370_d_n12, eq12_e1370_d_n13, eq12_e1370_d_n14, eq12_e1370_d_n15, eq12_e1370_d_n16, eq12_e1370_d_b0, eq12_e1370_d_b1, eq12_e1370_d_b2, eq12_e1370_d_b3, eq12_e1370_d_b4, eq12_e1370_d_b5, eq12_e1370_d_b6, eq12_e1370_d_b7, eq12_e1370_d_b8, eq12_e1370_d_b9, eq12_e1370_d_b10, eq12_e1370_d_b11, eq12_e1370_d_b12, eq12_e1370_d_b13,) = {
     if (s.b[1556] && (!s.b[1555])) {
         let eq12_e1353: f64 = (1.0 - s.v[57]);
@@ -5528,22 +5527,6 @@ impl Instance {
             &eq12_node_derivatives,
             &eq12_branch_derivatives,
             multiplicity,
-        );
-        let eq13_value: f64 = (nv16 - 0.0);
-        stamper.stamp_current_node1_local(
-            Some(16),
-            None,
-            multiplicity * (eq13_value),
-            16,
-            multiplicity * (1.0),
-        );
-        let eq14_value: f64 = (nv15 - 0.0);
-        stamper.stamp_current_node1_local(
-            Some(15),
-            None,
-            multiplicity * (eq14_value),
-            15,
-            multiplicity * (1.0),
         );
         let (eq15_e1387,) = {
     if s.b[1560] {

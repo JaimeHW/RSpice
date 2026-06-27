@@ -601,6 +601,8 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
+        let nv1 = ctx.node_voltage(nodes[1]);
+        let nv11 = ctx.node_voltage(nodes[11]);
         let nv14 = ctx.node_voltage(nodes[14]);
         let eq11_e363: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, s.v[198]);
         let eq11_e363_d_n0: f64 = (s.dn[198][0] * ddt_scale);
@@ -769,15 +771,6 @@ impl Instance {
             Some(6),
             Some(7),
             multiplicity * (eq13_value),
-        );
-        let eq14_e379: f64 = (nv14 - 0.0);
-        let eq14_value: f64 = eq14_e379;
-        stamper.stamp_current_node1_local(
-            Some(14),
-            None,
-            multiplicity * (eq14_value),
-            14,
-            multiplicity * (1.0),
         );
         let eq15_value: f64 = 0.0;
         stamper.stamp_current_const_local(
@@ -1064,24 +1057,6 @@ impl Instance {
             Some(12),
             multiplicity * (eq24_value),
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_2(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv1 = ctx.node_voltage(nodes[1]);
-        let nv10 = ctx.node_voltage(nodes[10]);
-        let nv11 = ctx.node_voltage(nodes[11]);
         let (eq25_e454, eq25_e454_d_n0, eq25_e454_d_n1, eq25_e454_d_n2, eq25_e454_d_n3, eq25_e454_d_n4, eq25_e454_d_n5, eq25_e454_d_n6, eq25_e454_d_n7, eq25_e454_d_n8, eq25_e454_d_n9, eq25_e454_d_n10, eq25_e454_d_n11, eq25_e454_d_n12, eq25_e454_d_n13, eq25_e454_d_n14, eq25_e454_d_n15, eq25_e454_d_n16, eq25_e454_d_n17, eq25_e454_d_n18, eq25_e454_d_b0, eq25_e454_d_b1, eq25_e454_d_b2, eq25_e454_d_b3, eq25_e454_d_b4, eq25_e454_d_b5, eq25_e454_d_b6, eq25_e454_d_b7, eq25_e454_d_b8, eq25_e454_d_b9, eq25_e454_d_b10, eq25_e454_d_b11, eq25_e454_d_b12, eq25_e454_d_b13, eq25_e454_d_b14,) = {
     if (p.p35 != 0.0) {
         let eq25_e452: f64 = (s.v[551] * (nv1 - nv11));
@@ -1135,6 +1110,22 @@ impl Instance {
             &eq25_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_2(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
+        let nv10 = ctx.node_voltage(nodes[10]);
         let (eq26_e459,) = {
     if (p.p35 == 0.0) {
         (0.0,)
@@ -1253,23 +1244,6 @@ impl Instance {
             &eq28_branch_derivatives,
             multiplicity,
         );
-        let (eq29_e476, eq29_e476_d_n10,) = {
-    if s.b[1848] {
-        let eq29_e474: f64 = ((nv10 - 0.0) * 1e-12);
-        let eq29_e474_d_n10: f64 = 1e-12;
-        (eq29_e474, eq29_e474_d_n10,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq29_value: f64 = eq29_e476;
-        stamper.stamp_current_node1_local(
-            Some(10),
-            None,
-            multiplicity * (eq29_value),
-            10,
-            multiplicity * (eq29_e476_d_n10),
-        );
         let (eq30_e483, eq30_e483_d_n0, eq30_e483_d_n1, eq30_e483_d_n2, eq30_e483_d_n3, eq30_e483_d_n4, eq30_e483_d_n5, eq30_e483_d_n6, eq30_e483_d_n7, eq30_e483_d_n8, eq30_e483_d_n9, eq30_e483_d_n10, eq30_e483_d_n11, eq30_e483_d_n12, eq30_e483_d_n13, eq30_e483_d_n14, eq30_e483_d_n15, eq30_e483_d_n16, eq30_e483_d_n17, eq30_e483_d_n18, eq30_e483_d_b0, eq30_e483_d_b1, eq30_e483_d_b2, eq30_e483_d_b3, eq30_e483_d_b4, eq30_e483_d_b5, eq30_e483_d_b6, eq30_e483_d_b7, eq30_e483_d_b8, eq30_e483_d_b9, eq30_e483_d_b10, eq30_e483_d_b11, eq30_e483_d_b12, eq30_e483_d_b13, eq30_e483_d_b14,) = {
     if s.b[1848] {
         let eq30_e480: f64 = (s.v[563] * (nv10 - 0.0));
@@ -1357,23 +1331,6 @@ impl Instance {
             &eq30_node_derivatives,
             &eq30_branch_derivatives,
             multiplicity,
-        );
-        let (eq31_e490, eq31_e490_d_n10,) = {
-    if (!s.b[1848]) {
-        let eq31_e488: f64 = ((nv10 - 0.0) * 10000.0);
-        let eq31_e488_d_n10: f64 = 10000.0;
-        (eq31_e488, eq31_e488_d_n10,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq31_value: f64 = eq31_e490;
-        stamper.stamp_current_node1_local(
-            Some(10),
-            None,
-            multiplicity * (eq31_value),
-            10,
-            multiplicity * (eq31_e490_d_n10),
         );
         let (eq32_e498, eq32_e498_d_n0, eq32_e498_d_n1, eq32_e498_d_n2, eq32_e498_d_n3, eq32_e498_d_n4, eq32_e498_d_n5, eq32_e498_d_n6, eq32_e498_d_n7, eq32_e498_d_n8, eq32_e498_d_n9, eq32_e498_d_n10, eq32_e498_d_n11, eq32_e498_d_n12, eq32_e498_d_n13, eq32_e498_d_n14, eq32_e498_d_n15, eq32_e498_d_n16, eq32_e498_d_n17, eq32_e498_d_n18, eq32_e498_d_b0, eq32_e498_d_b1, eq32_e498_d_b2, eq32_e498_d_b3, eq32_e498_d_b4, eq32_e498_d_b5, eq32_e498_d_b6, eq32_e498_d_b7, eq32_e498_d_b8, eq32_e498_d_b9, eq32_e498_d_b10, eq32_e498_d_b11, eq32_e498_d_b12, eq32_e498_d_b13, eq32_e498_d_b14,) = {
     if s.b[1849] {
@@ -1551,27 +1508,6 @@ impl Instance {
             &eq33_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_3(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv4 = ctx.node_voltage(nodes[4]);
-        let nv8 = ctx.node_voltage(nodes[8]);
-        let nv9 = ctx.node_voltage(nodes[9]);
-        let nv12 = ctx.node_voltage(nodes[12]);
-        let nv13 = ctx.node_voltage(nodes[13]);
-        let nv18 = ctx.node_voltage(nodes[18]);
         let (eq34_e515, eq34_e515_d_n0, eq34_e515_d_n1, eq34_e515_d_n2, eq34_e515_d_n3, eq34_e515_d_n4, eq34_e515_d_n5, eq34_e515_d_n6, eq34_e515_d_n7, eq34_e515_d_n8, eq34_e515_d_n9, eq34_e515_d_n10, eq34_e515_d_n11, eq34_e515_d_n12, eq34_e515_d_n13, eq34_e515_d_n14, eq34_e515_d_n15, eq34_e515_d_n16, eq34_e515_d_n17, eq34_e515_d_n18, eq34_e515_d_b0, eq34_e515_d_b1, eq34_e515_d_b2, eq34_e515_d_b3, eq34_e515_d_b4, eq34_e515_d_b5, eq34_e515_d_b6, eq34_e515_d_b7, eq34_e515_d_b8, eq34_e515_d_b9, eq34_e515_d_b10, eq34_e515_d_b11, eq34_e515_d_b12, eq34_e515_d_b13, eq34_e515_d_b14,) = {
     if s.b[1849] {
         let eq34_e511: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 6, s.v[283]);
@@ -1695,6 +1631,26 @@ impl Instance {
             &eq34_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_3(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
+        let nv4 = ctx.node_voltage(nodes[4]);
+        let nv12 = ctx.node_voltage(nodes[12]);
+        let nv13 = ctx.node_voltage(nodes[13]);
+        let nv17 = ctx.node_voltage(nodes[17]);
+        let nv18 = ctx.node_voltage(nodes[18]);
         let (eq35_e524, eq35_e524_d_n0, eq35_e524_d_n1, eq35_e524_d_n2, eq35_e524_d_n3, eq35_e524_d_n4, eq35_e524_d_n5, eq35_e524_d_n6, eq35_e524_d_n7, eq35_e524_d_n8, eq35_e524_d_n9, eq35_e524_d_n10, eq35_e524_d_n11, eq35_e524_d_n12, eq35_e524_d_n13, eq35_e524_d_n14, eq35_e524_d_n15, eq35_e524_d_n16, eq35_e524_d_n17, eq35_e524_d_n18, eq35_e524_d_b0, eq35_e524_d_b1, eq35_e524_d_b2, eq35_e524_d_b3, eq35_e524_d_b4, eq35_e524_d_b5, eq35_e524_d_b6, eq35_e524_d_b7, eq35_e524_d_b8, eq35_e524_d_b9, eq35_e524_d_b10, eq35_e524_d_b11, eq35_e524_d_b12, eq35_e524_d_b13, eq35_e524_d_b14,) = {
     if s.b[1849] {
         let eq35_e520: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 7, s.v[284]);
@@ -1883,112 +1839,6 @@ impl Instance {
             5,
             eq37_value,
         );
-        let (eq38_e547, eq38_e547_d_n0, eq38_e547_d_n1, eq38_e547_d_n2, eq38_e547_d_n3, eq38_e547_d_n4, eq38_e547_d_n5, eq38_e547_d_n6, eq38_e547_d_n7, eq38_e547_d_n8, eq38_e547_d_n9, eq38_e547_d_n10, eq38_e547_d_n11, eq38_e547_d_n12, eq38_e547_d_n13, eq38_e547_d_n14, eq38_e547_d_n15, eq38_e547_d_n16, eq38_e547_d_n17, eq38_e547_d_n18, eq38_e547_d_b0, eq38_e547_d_b1, eq38_e547_d_b2, eq38_e547_d_b3, eq38_e547_d_b4, eq38_e547_d_b5, eq38_e547_d_b6, eq38_e547_d_b7, eq38_e547_d_b8, eq38_e547_d_b9, eq38_e547_d_b10, eq38_e547_d_b11, eq38_e547_d_b12, eq38_e547_d_b13, eq38_e547_d_b14,) = {
-    if (s.b[1849] && (p.p262 != 0.0)) {
-        let eq38_e545: f64 = (s.v[553] * (nv9 - nv12));
-        let eq38_e545_d_n0: f64 = (s.dn[553][0] * (nv9 - nv12));
-        let eq38_e545_d_n1: f64 = (s.dn[553][1] * (nv9 - nv12));
-        let eq38_e545_d_n2: f64 = (s.dn[553][2] * (nv9 - nv12));
-        let eq38_e545_d_n3: f64 = (s.dn[553][3] * (nv9 - nv12));
-        let eq38_e545_d_n4: f64 = (s.dn[553][4] * (nv9 - nv12));
-        let eq38_e545_d_n5: f64 = (s.dn[553][5] * (nv9 - nv12));
-        let eq38_e545_d_n6: f64 = (s.dn[553][6] * (nv9 - nv12));
-        let eq38_e545_d_n7: f64 = (s.dn[553][7] * (nv9 - nv12));
-        let eq38_e545_d_n8: f64 = (s.dn[553][8] * (nv9 - nv12));
-        let eq38_e545_d_n9: f64 = ((s.dn[553][9] * (nv9 - nv12)) + s.v[553]);
-        let eq38_e545_d_n10: f64 = (s.dn[553][10] * (nv9 - nv12));
-        let eq38_e545_d_n11: f64 = (s.dn[553][11] * (nv9 - nv12));
-        let eq38_e545_d_n12: f64 = ((s.dn[553][12] * (nv9 - nv12)) + (-s.v[553]));
-        let eq38_e545_d_n13: f64 = (s.dn[553][13] * (nv9 - nv12));
-        let eq38_e545_d_n14: f64 = (s.dn[553][14] * (nv9 - nv12));
-        let eq38_e545_d_n15: f64 = (s.dn[553][15] * (nv9 - nv12));
-        let eq38_e545_d_n16: f64 = (s.dn[553][16] * (nv9 - nv12));
-        let eq38_e545_d_n17: f64 = (s.dn[553][17] * (nv9 - nv12));
-        let eq38_e545_d_n18: f64 = (s.dn[553][18] * (nv9 - nv12));
-        let eq38_e545_d_b0: f64 = (s.db[553][0] * (nv9 - nv12));
-        let eq38_e545_d_b1: f64 = (s.db[553][1] * (nv9 - nv12));
-        let eq38_e545_d_b2: f64 = (s.db[553][2] * (nv9 - nv12));
-        let eq38_e545_d_b3: f64 = (s.db[553][3] * (nv9 - nv12));
-        let eq38_e545_d_b4: f64 = (s.db[553][4] * (nv9 - nv12));
-        let eq38_e545_d_b5: f64 = (s.db[553][5] * (nv9 - nv12));
-        let eq38_e545_d_b6: f64 = (s.db[553][6] * (nv9 - nv12));
-        let eq38_e545_d_b7: f64 = (s.db[553][7] * (nv9 - nv12));
-        let eq38_e545_d_b8: f64 = (s.db[553][8] * (nv9 - nv12));
-        let eq38_e545_d_b9: f64 = (s.db[553][9] * (nv9 - nv12));
-        let eq38_e545_d_b10: f64 = (s.db[553][10] * (nv9 - nv12));
-        let eq38_e545_d_b11: f64 = (s.db[553][11] * (nv9 - nv12));
-        let eq38_e545_d_b12: f64 = (s.db[553][12] * (nv9 - nv12));
-        let eq38_e545_d_b13: f64 = (s.db[553][13] * (nv9 - nv12));
-        let eq38_e545_d_b14: f64 = (s.db[553][14] * (nv9 - nv12));
-        (eq38_e545, eq38_e545_d_n0, eq38_e545_d_n1, eq38_e545_d_n2, eq38_e545_d_n3, eq38_e545_d_n4, eq38_e545_d_n5, eq38_e545_d_n6, eq38_e545_d_n7, eq38_e545_d_n8, eq38_e545_d_n9, eq38_e545_d_n10, eq38_e545_d_n11, eq38_e545_d_n12, eq38_e545_d_n13, eq38_e545_d_n14, eq38_e545_d_n15, eq38_e545_d_n16, eq38_e545_d_n17, eq38_e545_d_n18, eq38_e545_d_b0, eq38_e545_d_b1, eq38_e545_d_b2, eq38_e545_d_b3, eq38_e545_d_b4, eq38_e545_d_b5, eq38_e545_d_b6, eq38_e545_d_b7, eq38_e545_d_b8, eq38_e545_d_b9, eq38_e545_d_b10, eq38_e545_d_b11, eq38_e545_d_b12, eq38_e545_d_b13, eq38_e545_d_b14,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq38_value: f64 = eq38_e547;
-        let eq38_node_derivatives: [f64; 19] = [eq38_e547_d_n0, eq38_e547_d_n1, eq38_e547_d_n2, eq38_e547_d_n3, eq38_e547_d_n4, eq38_e547_d_n5, eq38_e547_d_n6, eq38_e547_d_n7, eq38_e547_d_n8, eq38_e547_d_n9, eq38_e547_d_n10, eq38_e547_d_n11, eq38_e547_d_n12, eq38_e547_d_n13, eq38_e547_d_n14, eq38_e547_d_n15, eq38_e547_d_n16, eq38_e547_d_n17, eq38_e547_d_n18];
-        let eq38_branch_derivatives: [f64; 15] = [eq38_e547_d_b0, eq38_e547_d_b1, eq38_e547_d_b2, eq38_e547_d_b3, eq38_e547_d_b4, eq38_e547_d_b5, eq38_e547_d_b6, eq38_e547_d_b7, eq38_e547_d_b8, eq38_e547_d_b9, eq38_e547_d_b10, eq38_e547_d_b11, eq38_e547_d_b12, eq38_e547_d_b13, eq38_e547_d_b14];
-        stamper.stamp_current_dense_local(
-            Some(9),
-            Some(12),
-            multiplicity * (eq38_value),
-            &eq38_node_derivatives,
-            &eq38_branch_derivatives,
-            multiplicity,
-        );
-        let (eq39_e555, eq39_e555_d_n0, eq39_e555_d_n1, eq39_e555_d_n2, eq39_e555_d_n3, eq39_e555_d_n4, eq39_e555_d_n5, eq39_e555_d_n6, eq39_e555_d_n7, eq39_e555_d_n8, eq39_e555_d_n9, eq39_e555_d_n10, eq39_e555_d_n11, eq39_e555_d_n12, eq39_e555_d_n13, eq39_e555_d_n14, eq39_e555_d_n15, eq39_e555_d_n16, eq39_e555_d_n17, eq39_e555_d_n18, eq39_e555_d_b0, eq39_e555_d_b1, eq39_e555_d_b2, eq39_e555_d_b3, eq39_e555_d_b4, eq39_e555_d_b5, eq39_e555_d_b6, eq39_e555_d_b7, eq39_e555_d_b8, eq39_e555_d_b9, eq39_e555_d_b10, eq39_e555_d_b11, eq39_e555_d_b12, eq39_e555_d_b13, eq39_e555_d_b14,) = {
-    if (s.b[1849] && (p.p262 != 0.0)) {
-        let eq39_e553: f64 = (s.v[552] * (nv8 - nv12));
-        let eq39_e553_d_n0: f64 = (s.dn[552][0] * (nv8 - nv12));
-        let eq39_e553_d_n1: f64 = (s.dn[552][1] * (nv8 - nv12));
-        let eq39_e553_d_n2: f64 = (s.dn[552][2] * (nv8 - nv12));
-        let eq39_e553_d_n3: f64 = (s.dn[552][3] * (nv8 - nv12));
-        let eq39_e553_d_n4: f64 = (s.dn[552][4] * (nv8 - nv12));
-        let eq39_e553_d_n5: f64 = (s.dn[552][5] * (nv8 - nv12));
-        let eq39_e553_d_n6: f64 = (s.dn[552][6] * (nv8 - nv12));
-        let eq39_e553_d_n7: f64 = (s.dn[552][7] * (nv8 - nv12));
-        let eq39_e553_d_n8: f64 = ((s.dn[552][8] * (nv8 - nv12)) + s.v[552]);
-        let eq39_e553_d_n9: f64 = (s.dn[552][9] * (nv8 - nv12));
-        let eq39_e553_d_n10: f64 = (s.dn[552][10] * (nv8 - nv12));
-        let eq39_e553_d_n11: f64 = (s.dn[552][11] * (nv8 - nv12));
-        let eq39_e553_d_n12: f64 = ((s.dn[552][12] * (nv8 - nv12)) + (-s.v[552]));
-        let eq39_e553_d_n13: f64 = (s.dn[552][13] * (nv8 - nv12));
-        let eq39_e553_d_n14: f64 = (s.dn[552][14] * (nv8 - nv12));
-        let eq39_e553_d_n15: f64 = (s.dn[552][15] * (nv8 - nv12));
-        let eq39_e553_d_n16: f64 = (s.dn[552][16] * (nv8 - nv12));
-        let eq39_e553_d_n17: f64 = (s.dn[552][17] * (nv8 - nv12));
-        let eq39_e553_d_n18: f64 = (s.dn[552][18] * (nv8 - nv12));
-        let eq39_e553_d_b0: f64 = (s.db[552][0] * (nv8 - nv12));
-        let eq39_e553_d_b1: f64 = (s.db[552][1] * (nv8 - nv12));
-        let eq39_e553_d_b2: f64 = (s.db[552][2] * (nv8 - nv12));
-        let eq39_e553_d_b3: f64 = (s.db[552][3] * (nv8 - nv12));
-        let eq39_e553_d_b4: f64 = (s.db[552][4] * (nv8 - nv12));
-        let eq39_e553_d_b5: f64 = (s.db[552][5] * (nv8 - nv12));
-        let eq39_e553_d_b6: f64 = (s.db[552][6] * (nv8 - nv12));
-        let eq39_e553_d_b7: f64 = (s.db[552][7] * (nv8 - nv12));
-        let eq39_e553_d_b8: f64 = (s.db[552][8] * (nv8 - nv12));
-        let eq39_e553_d_b9: f64 = (s.db[552][9] * (nv8 - nv12));
-        let eq39_e553_d_b10: f64 = (s.db[552][10] * (nv8 - nv12));
-        let eq39_e553_d_b11: f64 = (s.db[552][11] * (nv8 - nv12));
-        let eq39_e553_d_b12: f64 = (s.db[552][12] * (nv8 - nv12));
-        let eq39_e553_d_b13: f64 = (s.db[552][13] * (nv8 - nv12));
-        let eq39_e553_d_b14: f64 = (s.db[552][14] * (nv8 - nv12));
-        (eq39_e553, eq39_e553_d_n0, eq39_e553_d_n1, eq39_e553_d_n2, eq39_e553_d_n3, eq39_e553_d_n4, eq39_e553_d_n5, eq39_e553_d_n6, eq39_e553_d_n7, eq39_e553_d_n8, eq39_e553_d_n9, eq39_e553_d_n10, eq39_e553_d_n11, eq39_e553_d_n12, eq39_e553_d_n13, eq39_e553_d_n14, eq39_e553_d_n15, eq39_e553_d_n16, eq39_e553_d_n17, eq39_e553_d_n18, eq39_e553_d_b0, eq39_e553_d_b1, eq39_e553_d_b2, eq39_e553_d_b3, eq39_e553_d_b4, eq39_e553_d_b5, eq39_e553_d_b6, eq39_e553_d_b7, eq39_e553_d_b8, eq39_e553_d_b9, eq39_e553_d_b10, eq39_e553_d_b11, eq39_e553_d_b12, eq39_e553_d_b13, eq39_e553_d_b14,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq39_value: f64 = eq39_e555;
-        let eq39_node_derivatives: [f64; 19] = [eq39_e555_d_n0, eq39_e555_d_n1, eq39_e555_d_n2, eq39_e555_d_n3, eq39_e555_d_n4, eq39_e555_d_n5, eq39_e555_d_n6, eq39_e555_d_n7, eq39_e555_d_n8, eq39_e555_d_n9, eq39_e555_d_n10, eq39_e555_d_n11, eq39_e555_d_n12, eq39_e555_d_n13, eq39_e555_d_n14, eq39_e555_d_n15, eq39_e555_d_n16, eq39_e555_d_n17, eq39_e555_d_n18];
-        let eq39_branch_derivatives: [f64; 15] = [eq39_e555_d_b0, eq39_e555_d_b1, eq39_e555_d_b2, eq39_e555_d_b3, eq39_e555_d_b4, eq39_e555_d_b5, eq39_e555_d_b6, eq39_e555_d_b7, eq39_e555_d_b8, eq39_e555_d_b9, eq39_e555_d_b10, eq39_e555_d_b11, eq39_e555_d_b12, eq39_e555_d_b13, eq39_e555_d_b14];
-        stamper.stamp_current_dense_local(
-            Some(8),
-            Some(12),
-            multiplicity * (eq39_value),
-            &eq39_node_derivatives,
-            &eq39_branch_derivatives,
-            multiplicity,
-        );
         let (eq40_e562,) = {
     if (s.b[1849] && (p.p262 == 0.0)) {
         (0.0,)
@@ -2049,60 +1899,6 @@ impl Instance {
             &eq43_branch_derivatives,
             multiplicity,
         );
-        let (eq44_e589, eq44_e589_d_n18,) = {
-    if (s.b[1849] && (p.p34 != 0.0)) {
-        let eq44_e587: f64 = ((nv18 - 0.0) * 1e-12);
-        let eq44_e587_d_n18: f64 = 1e-12;
-        (eq44_e587, eq44_e587_d_n18,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq44_value: f64 = eq44_e589;
-        stamper.stamp_current_node1_local(
-            Some(18),
-            None,
-            multiplicity * (eq44_value),
-            18,
-            multiplicity * (eq44_e589_d_n18),
-        );
-        let (eq45_e597, eq45_e597_d_n13,) = {
-    if (s.b[1849] && (p.p34 != 0.0)) {
-        let eq45_e595: f64 = ((nv13 - 0.0) * 1e-12);
-        let eq45_e595_d_n13: f64 = 1e-12;
-        (eq45_e595, eq45_e595_d_n13,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq45_value: f64 = eq45_e597;
-        stamper.stamp_current_node1_local(
-            Some(13),
-            None,
-            multiplicity * (eq45_value),
-            13,
-            multiplicity * (eq45_e597_d_n13),
-        );
-    }
-
-    pub(super) fn stamp_transient_equations_block_4(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv13 = ctx.node_voltage(nodes[13]);
-        let nv15 = ctx.node_voltage(nodes[15]);
-        let nv16 = ctx.node_voltage(nodes[16]);
-        let nv17 = ctx.node_voltage(nodes[17]);
-        let nv18 = ctx.node_voltage(nodes[18]);
         let (eq46_e608, eq46_e608_d_n18,) = {
     if (s.b[1849] && (p.p34 != 0.0)) {
         let eq46_e603: f64 = (1e-9 / 0.0001);
@@ -2182,23 +1978,6 @@ impl Instance {
             &eq50_node_derivatives,
             &eq50_branch_derivatives,
             multiplicity,
-        );
-        let (eq51_e647, eq51_e647_d_n17,) = {
-    if (s.b[1849] && s.b[1850]) {
-        let eq51_e645: f64 = ((nv17 - 0.0) * 1e-12);
-        let eq51_e645_d_n17: f64 = 1e-12;
-        (eq51_e645, eq51_e645_d_n17,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq51_value: f64 = eq51_e647;
-        stamper.stamp_current_node1_local(
-            Some(17),
-            None,
-            multiplicity * (eq51_value),
-            17,
-            multiplicity * (eq51_e647_d_n17),
         );
         let (eq52_e658, eq52_e658_d_n17,) = {
     if (s.b[1849] && s.b[1850]) {
@@ -2319,6 +2098,25 @@ impl Instance {
             &eq54_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_4(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
+        let nv13 = ctx.node_voltage(nodes[13]);
+        let nv15 = ctx.node_voltage(nodes[15]);
+        let nv16 = ctx.node_voltage(nodes[16]);
+        let nv17 = ctx.node_voltage(nodes[17]);
         let (eq55_e683, eq55_e683_d_n0, eq55_e683_d_n1, eq55_e683_d_n2, eq55_e683_d_n3, eq55_e683_d_n4, eq55_e683_d_n5, eq55_e683_d_n6, eq55_e683_d_n7, eq55_e683_d_n8, eq55_e683_d_n9, eq55_e683_d_n10, eq55_e683_d_n11, eq55_e683_d_n12, eq55_e683_d_n13, eq55_e683_d_n14, eq55_e683_d_n15, eq55_e683_d_n16, eq55_e683_d_n17, eq55_e683_d_n18, eq55_e683_d_b0, eq55_e683_d_b1, eq55_e683_d_b2, eq55_e683_d_b3, eq55_e683_d_b4, eq55_e683_d_b5, eq55_e683_d_b6, eq55_e683_d_b7, eq55_e683_d_b8, eq55_e683_d_b9, eq55_e683_d_b10, eq55_e683_d_b11, eq55_e683_d_b12, eq55_e683_d_b13, eq55_e683_d_b14,) = {
     if (!s.b[1849]) {
         let eq55_e680: f64 = (s.v[312] + s.v[573]);
@@ -2437,23 +2235,6 @@ impl Instance {
             &eq57_branch_derivatives,
             multiplicity,
         );
-        let (eq58_e704, eq58_e704_d_n17,) = {
-    if ((!s.b[1849]) && (p.p37 != 0.0)) {
-        let eq58_e702: f64 = ((nv17 - 0.0) * 1e-12);
-        let eq58_e702_d_n17: f64 = 1e-12;
-        (eq58_e702, eq58_e702_d_n17,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq58_value: f64 = eq58_e704;
-        stamper.stamp_current_node1_local(
-            Some(17),
-            None,
-            multiplicity * (eq58_value),
-            17,
-            multiplicity * (eq58_e704_d_n17),
-        );
         let (eq59_e716, eq59_e716_d_n17,) = {
     if ((!s.b[1849]) && (p.p37 != 0.0)) {
         let eq59_e711: f64 = (1e-9 / 0.0001);
@@ -2539,57 +2320,6 @@ impl Instance {
             &eq63_branch_derivatives,
             multiplicity,
         );
-        let (eq64_e754, eq64_e754_d_n15,) = {
-    if ((!s.b[1849]) && (p.p34 != 0.0)) {
-        let eq64_e752: f64 = ((nv15 - 0.0) * 1e-12);
-        let eq64_e752_d_n15: f64 = 1e-12;
-        (eq64_e752, eq64_e752_d_n15,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq64_value: f64 = eq64_e754;
-        stamper.stamp_current_node1_local(
-            Some(15),
-            None,
-            multiplicity * (eq64_value),
-            15,
-            multiplicity * (eq64_e754_d_n15),
-        );
-        let (eq65_e763, eq65_e763_d_n16,) = {
-    if ((!s.b[1849]) && (p.p34 != 0.0)) {
-        let eq65_e761: f64 = ((nv16 - 0.0) * 1e-12);
-        let eq65_e761_d_n16: f64 = 1e-12;
-        (eq65_e761, eq65_e761_d_n16,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq65_value: f64 = eq65_e763;
-        stamper.stamp_current_node1_local(
-            Some(16),
-            None,
-            multiplicity * (eq65_value),
-            16,
-            multiplicity * (eq65_e763_d_n16),
-        );
-        let (eq66_e772, eq66_e772_d_n13,) = {
-    if ((!s.b[1849]) && (p.p34 != 0.0)) {
-        let eq66_e770: f64 = ((nv13 - 0.0) * 1e-12);
-        let eq66_e770_d_n13: f64 = 1e-12;
-        (eq66_e770, eq66_e770_d_n13,)
-    } else {
-        (0.0, 0.0,)
-    }
-};
-        let eq66_value: f64 = eq66_e772;
-        stamper.stamp_current_node1_local(
-            Some(13),
-            None,
-            multiplicity * (eq66_value),
-            13,
-            multiplicity * (eq66_e772_d_n13),
-        );
         let (eq67_e784, eq67_e784_d_n15,) = {
     if ((!s.b[1849]) && (p.p34 != 0.0)) {
         let eq67_e779: f64 = (1e-9 / 0.0001);
@@ -2609,23 +2339,6 @@ impl Instance {
             15,
             multiplicity * (eq67_e784_d_n15),
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_5(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv13 = ctx.node_voltage(nodes[13]);
-        let nv16 = ctx.node_voltage(nodes[16]);
         let (eq68_e796, eq68_e796_d_n16,) = {
     if ((!s.b[1849]) && (p.p34 != 0.0)) {
         let eq68_e791: f64 = (1e-9 / 0.0001);

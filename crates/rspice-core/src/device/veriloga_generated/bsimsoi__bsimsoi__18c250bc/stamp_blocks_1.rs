@@ -1462,9 +1462,6 @@ impl Instance {
             s.store_div_scaled_offset_numerator(1497, s.ad_value(1499), 1.0, 1e-15, A::sqrt(A::div(s.ad_value(1493), s.ad_value(1492))), 1.0);
         }
 
-        s.b[1514] = (p.p223 != 3.0);
-        s.v[1514] = if s.b[1514] { 1.0 } else { 0.0 };
-
         s.v[1482] = (p.p3 * s.v[328]);
 
         s.b[1515] = (p.p256 == 1.0);

@@ -24,19 +24,6 @@ impl Instance {
         let nv11 = ctx.node_voltage(nodes[11]);
         let nv12 = ctx.node_voltage(nodes[12]);
         let nv13 = ctx.node_voltage(nodes[13]);
-        let (eq18_e608,) = {
-    if s.b[1770] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq18_value: f64 = eq18_e608;
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(7),
-            multiplicity * (eq18_value),
-        );
         let (eq19_e613,) = {
     if (!s.b[1770]) {
         (0.0,)

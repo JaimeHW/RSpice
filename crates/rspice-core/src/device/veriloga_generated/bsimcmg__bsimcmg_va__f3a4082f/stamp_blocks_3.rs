@@ -4893,34 +4893,10 @@ impl Instance {
     }
 
     pub(super) fn stamp_transient_equations_block_1(
-        ctx: &GeneratedEvalContext<'_>,
         stamper: &mut GeneratedStamper<'_>,
         s: &mut Scratch,
-        nodes: &[usize; Instance::NODE_COUNT],
         multiplicity: f64,
     ) {
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv7 = ctx.node_voltage(nodes[7]);
-        let (eq6_e1993, eq6_e1993_d_n5, eq6_e1993_d_n7,) = {
-    if s.b[1697] {
-        let eq6_e1991: f64 = ((nv7 - nv5) * 1000.0);
-        let eq6_e1991_d_n5: f64 = (-1000.0);
-        let eq6_e1991_d_n7: f64 = 1000.0;
-        (eq6_e1991, eq6_e1991_d_n5, eq6_e1991_d_n7,)
-    } else {
-        (0.0, 0.0, 0.0,)
-    }
-};
-        let eq6_value: f64 = eq6_e1993;
-        stamper.stamp_current_node2_local(
-            Some(7),
-            Some(5),
-            multiplicity * (eq6_value),
-            5,
-            multiplicity * (eq6_e1993_d_n5),
-            7,
-            multiplicity * (eq6_e1993_d_n7),
-        );
         let (eq7_e1998,) = {
     if (!s.b[1697]) {
         (0.0,)
@@ -5365,13 +5341,6 @@ impl Instance {
             &eq13_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_2(
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        multiplicity: f64,
-    ) {
         let (eq14_e2062, eq14_e2062_d_n0, eq14_e2062_d_n1, eq14_e2062_d_n2, eq14_e2062_d_n3, eq14_e2062_d_n4, eq14_e2062_d_n5, eq14_e2062_d_n6, eq14_e2062_d_n7, eq14_e2062_d_n8, eq14_e2062_d_n9, eq14_e2062_d_n10, eq14_e2062_d_n11, eq14_e2062_d_n12, eq14_e2062_d_n13, eq14_e2062_d_n14, eq14_e2062_d_n15, eq14_e2062_d_n16, eq14_e2062_d_b0, eq14_e2062_d_b1, eq14_e2062_d_b2, eq14_e2062_d_b3, eq14_e2062_d_b4, eq14_e2062_d_b5, eq14_e2062_d_b6, eq14_e2062_d_b7, eq14_e2062_d_b8, eq14_e2062_d_b9, eq14_e2062_d_b10, eq14_e2062_d_b11, eq14_e2062_d_b12, eq14_e2062_d_b13, eq14_e2062_d_b14, eq14_e2062_d_b15, eq14_e2062_d_b16, eq14_e2062_d_b17,) = {
     if ((s.b[1698] && s.b[1699]) && s.b[1700]) {
         let eq14_e2060: f64 = (s.v[114] * s.v[477]);
@@ -5426,6 +5395,13 @@ impl Instance {
             &eq14_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_2(
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        multiplicity: f64,
+    ) {
         let (eq15_e2075, eq15_e2075_d_n0, eq15_e2075_d_n1, eq15_e2075_d_n2, eq15_e2075_d_n3, eq15_e2075_d_n4, eq15_e2075_d_n5, eq15_e2075_d_n6, eq15_e2075_d_n7, eq15_e2075_d_n8, eq15_e2075_d_n9, eq15_e2075_d_n10, eq15_e2075_d_n11, eq15_e2075_d_n12, eq15_e2075_d_n13, eq15_e2075_d_n14, eq15_e2075_d_n15, eq15_e2075_d_n16, eq15_e2075_d_b0, eq15_e2075_d_b1, eq15_e2075_d_b2, eq15_e2075_d_b3, eq15_e2075_d_b4, eq15_e2075_d_b5, eq15_e2075_d_b6, eq15_e2075_d_b7, eq15_e2075_d_b8, eq15_e2075_d_b9, eq15_e2075_d_b10, eq15_e2075_d_b11, eq15_e2075_d_b12, eq15_e2075_d_b13, eq15_e2075_d_b14, eq15_e2075_d_b15, eq15_e2075_d_b16, eq15_e2075_d_b17,) = {
     if ((s.b[1698] && s.b[1699]) && (!s.b[1700])) {
         let eq15_e2072: f64 = (s.v[476] + s.v[488]);

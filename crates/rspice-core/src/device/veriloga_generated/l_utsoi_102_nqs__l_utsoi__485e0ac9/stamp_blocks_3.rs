@@ -4523,24 +4523,6 @@ impl Instance {
             &eq4_branch_derivatives,
             multiplicity,
         );
-        let eq5_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(6),
-            Some(8),
-            multiplicity * (eq5_value),
-        );
-        let eq6_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(7),
-            Some(8),
-            multiplicity * (eq6_value),
-        );
-        let eq7_value: f64 = 0.0;
-        stamper.stamp_current_const_local(
-            Some(9),
-            Some(8),
-            multiplicity * (eq7_value),
-        );
         let eq8_e534: f64 = (p.p31 * s.v[475]);
         let eq8_e536: f64 = (eq8_e534 * (nv7 - nv6));
         let eq8_e536_d_n6: f64 = (-eq8_e534);
@@ -4850,6 +4832,19 @@ impl Instance {
             &eq17_node_derivatives,
             &eq17_branch_derivatives,
             multiplicity,
+        );
+        let (eq18_e608,) = {
+    if s.b[1770] {
+        (0.0,)
+    } else {
+        (0.0,)
+    }
+};
+        let eq18_value: f64 = eq18_e608;
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(7),
+            multiplicity * (eq18_value),
         );
     }
 }

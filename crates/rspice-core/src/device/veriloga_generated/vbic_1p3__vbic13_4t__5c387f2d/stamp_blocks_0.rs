@@ -1340,8 +1340,6 @@ impl Instance {
 
         s.store_sub(133, 132, 76);
 
-        s.store_sub(134, 132, 131);
-
         s.store_add_scaled_product_indices(87, 87, 1.0, 165, 143, 1.0);
 
         s.store_add_scaled_product_indices(88, 88, 1.0, 165, 145, 1.0);
@@ -2646,6 +2644,7 @@ impl Instance {
     pub(super) fn stamp_transient_equations_block_0(
         stamper: &mut GeneratedStamper<'_>,
         s: &mut Scratch,
+        p: &Parameters,
         multiplicity: f64,
         ddt_active: bool,
         ddt_scale: f64,
@@ -2838,17 +2837,6 @@ impl Instance {
             multiplicity * (eq16_value),
             &eq16_node_derivatives,
             &eq16_branch_derivatives,
-            multiplicity,
-        );
-        let eq17_value: f64 = s.v[134];
-        let eq17_node_derivatives: [f64; 14] = [s.dn[134][0], s.dn[134][1], s.dn[134][2], s.dn[134][3], s.dn[134][4], s.dn[134][5], s.dn[134][6], s.dn[134][7], s.dn[134][8], s.dn[134][9], s.dn[134][10], s.dn[134][11], s.dn[134][12], s.dn[134][13]];
-        let eq17_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_dense_local(
-            Some(13),
-            None,
-            multiplicity * (eq17_value),
-            &eq17_node_derivatives,
-            &eq17_branch_derivatives,
             multiplicity,
         );
         let eq18_value: f64 = s.v[141];
@@ -3159,14 +3147,6 @@ impl Instance {
             &eq30_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_1(
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        multiplicity: f64,
-    ) {
         let (eq31_e192,) = {
     if (p.p1 != 0.0) {
         (0.0,)
@@ -3180,6 +3160,14 @@ impl Instance {
             Some(9),
             multiplicity * (eq31_value),
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_1(
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        multiplicity: f64,
+    ) {
         let (eq32_e208,) = {
     if (p.p1 != 0.0) {
         (0.0,)

@@ -5099,14 +5099,6 @@ impl Instance {
             None,
             multiplicity * (eq28_value),
         );
-        let eq29_value: f64 = (nv11 - 0.0);
-        stamper.stamp_current_node1_local(
-            Some(11),
-            None,
-            multiplicity * (eq29_value),
-            11,
-            multiplicity * (1.0),
-        );
         let eq30_e367: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 9, (nv11 - 0.0));
         let eq30_e368: f64 = (s.v[312] * eq30_e367);
         let eq30_e368_d_n0: f64 = (s.dn[312][0] * eq30_e367);
@@ -5159,14 +5151,6 @@ impl Instance {
             &eq31_node_derivatives,
             &eq31_branch_derivatives,
             multiplicity,
-        );
-        let eq32_value: f64 = (nv11 - 0.0);
-        stamper.stamp_current_node1_local(
-            Some(8),
-            Some(4),
-            multiplicity * (eq32_value),
-            11,
-            multiplicity * (1.0),
         );
         let eq33_value: f64 = 0.0;
         stamper.stamp_current_const_local(

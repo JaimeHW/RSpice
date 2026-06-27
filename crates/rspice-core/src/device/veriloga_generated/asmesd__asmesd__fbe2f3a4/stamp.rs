@@ -86,6 +86,10 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv6 = ctx.node_voltage(nodes[6]);
+        let nv8 = ctx.node_voltage(nodes[8]);
+        let nv9 = ctx.node_voltage(nodes[9]);
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
         let ddt_state_current = self.ddt_state_current.as_mut();
@@ -93,6 +97,50 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let v4: f64 = nv5;
+        let v5: f64 = 1.0;
+        let v6: f64 = 0.0;
+        let v7: f64 = nv6;
+        let v8: f64 = (v4 - v7);
+        let v9: f64 = (self.scalar_v3 * v8);
+        let v10: f64 = nv9;
+        let v53: f64 = (v9 - v10);
+        let v54: f64 = (-v53);
+        let v55: f64 = 1e-6;
+        let v56: f64 = (v10 * v55);
+        let v57: f64 = nv8;
+        let v58: f64 = (if self.scalar_v16 { v57 } else { v6 });
+
+        let d54_dn5: f64 = self.scalar_v76;
+        let d54_dn6: f64 = self.scalar_v77;
+        let d54_dn9: f64 = v5;
+        stamper.stamp_current_node3_local(
+            Some(9),
+            None,
+            multiplicity * (v54),
+            5,
+            multiplicity * (d54_dn5),
+            6,
+            multiplicity * (d54_dn6),
+            9,
+            multiplicity * (d54_dn9),
+        );
+        let d56_dn9: f64 = v55;
+        stamper.stamp_current_node1_local(
+            Some(9),
+            None,
+            multiplicity * (v56),
+            9,
+            multiplicity * (d56_dn9),
+        );
+        let d58_dn8: f64 = self.scalar_v78;
+        stamper.stamp_current_node1_local(
+            Some(8),
+            None,
+            multiplicity * (v58),
+            8,
+            multiplicity * (d58_dn8),
+        );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),

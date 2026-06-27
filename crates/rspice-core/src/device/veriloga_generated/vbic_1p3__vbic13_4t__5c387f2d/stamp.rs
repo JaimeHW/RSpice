@@ -86,6 +86,8 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv12 = ctx.node_voltage(nodes[12]);
+        let nv13 = ctx.node_voltage(nodes[13]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
@@ -94,6 +96,23 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let v0: f64 = 1.0;
+        let v6: f64 = nv12;
+        let v7: f64 = nv13;
+        let v8: f64 = (v7 - v6);
+        let v18: f64 = -1.0;
+
+        let d8_dn12: f64 = v18;
+        let d8_dn13: f64 = v0;
+        stamper.stamp_current_node2_local(
+            Some(13),
+            None,
+            multiplicity * (v8),
+            12,
+            multiplicity * (d8_dn12),
+            13,
+            multiplicity * (d8_dn13),
+        );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
@@ -104,7 +123,7 @@ impl Instance {
         Self::stamp_transient_block_2(s, p);
         Self::stamp_transient_block_3(s, p);
 
-        Self::stamp_transient_equations_block_0(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_0(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(stamper, s, p, multiplicity);
     }
 

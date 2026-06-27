@@ -92,6 +92,10 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv0 = ctx.node_voltage(nodes[0]);
+        let nv14 = ctx.node_voltage(nodes[14]);
+        let nv15 = ctx.node_voltage(nodes[15]);
+        let nv16 = ctx.node_voltage(nodes[16]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
@@ -100,6 +104,44 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let v0: f64 = 0.0;
+        let v1: f64 = 1.0;
+        let v30: f64 = nv16;
+        let v31: f64 = nv15;
+        let v39: f64 = nv14;
+        let v40: f64 = nv0;
+        let v41: f64 = (v39 - v40);
+        let v42: f64 = (v41 * self.scalar_v26);
+        let v43: f64 = (v42 * self.scalar_v21);
+        let v44: f64 = (if self.scalar_v29 { v43 } else { v0 });
+
+        let d30_dn16: f64 = v1;
+        stamper.stamp_current_node1_local(
+            Some(16),
+            None,
+            multiplicity * (v30),
+            16,
+            multiplicity * (d30_dn16),
+        );
+        let d31_dn15: f64 = v1;
+        stamper.stamp_current_node1_local(
+            Some(15),
+            None,
+            multiplicity * (v31),
+            15,
+            multiplicity * (d31_dn15),
+        );
+        let d44_dn0: f64 = self.scalar_v50;
+        let d44_dn14: f64 = self.scalar_v51;
+        stamper.stamp_current_node2_local(
+            Some(14),
+            Some(0),
+            multiplicity * (v44),
+            0,
+            multiplicity * (d44_dn0),
+            14,
+            multiplicity * (d44_dn14),
+        );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
