@@ -651,11 +651,20 @@ impl Instance {
         s.b[124] = (p.p30 == (-1.0));
         s.v[124] = if s.b[124] { 1.0 } else { 0.0 };
 
-        s.v[50] = ((p.p12 + (p.p31 * p.p13)) / s.v[3]);
+        let assign1960_e2240: f64 = (p.p31 * p.p13);
+        let assign1960_e2241: f64 = (p.p12 + assign1960_e2240);
+        let assign1960_e2243: f64 = (assign1960_e2241 / s.v[3]);
+        s.v[50] = assign1960_e2243;
 
-        s.v[48] = ((p.p14 + (p.p31 * p.p15)) / s.v[3]);
+        let assign1970_e2247: f64 = (p.p31 * p.p15);
+        let assign1970_e2248: f64 = (p.p14 + assign1970_e2247);
+        let assign1970_e2250: f64 = (assign1970_e2248 / s.v[3]);
+        s.v[48] = assign1970_e2250;
 
-        s.v[49] = ((p.p66 + (p.p31 * p.p67)) / s.v[3]);
+        let assign1980_e2254: f64 = (p.p31 * p.p67);
+        let assign1980_e2255: f64 = (p.p66 + assign1980_e2254);
+        let assign1980_e2257: f64 = (assign1980_e2255 / s.v[3]);
+        s.v[49] = assign1980_e2257;
 
         s.b[125] = ((s.v[50] > 0.0) && (s.v[50] >= p.p46));
         s.v[125] = if s.b[125] { 1.0 } else { 0.0 };

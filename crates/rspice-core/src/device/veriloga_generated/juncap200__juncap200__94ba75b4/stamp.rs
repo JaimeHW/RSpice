@@ -7045,8 +7045,8 @@ impl Instance {
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
         };
 
-        Self::stamp_transient_block_0(ctx, s, p, nodes);
-        Self::stamp_transient_block_1(s, p);
+        Self::stamp_transient_block_0(ctx, s, p);
+        Self::stamp_transient_block_1(ctx, s, p, nodes);
         Self::stamp_transient_block_2(s, p);
 
         let eq1_e78: f64 = (p.p1 * s.v[0]);

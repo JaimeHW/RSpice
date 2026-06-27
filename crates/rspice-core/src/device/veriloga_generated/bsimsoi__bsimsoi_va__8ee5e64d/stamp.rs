@@ -176,7 +176,7 @@ impl Instance {
         Self::stamp_transient_block_16(s);
         Self::stamp_transient_block_17(s);
         Self::stamp_transient_block_18(s, p);
-        Self::stamp_transient_block_19(s, p);
+        Self::stamp_transient_block_19(s);
         Self::stamp_transient_block_20(s, p);
 
         stamper.stamp_potential_branch_local(

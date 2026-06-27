@@ -109,7 +109,8 @@ impl Instance {
 
         s.v[46] = (1.0 / s.v[45]);
 
-        s.v[41] = (1e-5 * s.v[45]);
+        let assign660_e485: f64 = (1e-5 * s.v[45]);
+        s.v[41] = assign660_e485;
 
         s.v[51] = (s.v[49] * s.v[26]);
 
@@ -186,7 +187,8 @@ impl Instance {
 
         s.store_div_from_scalar(44, 1.0, 43);
 
-        s.store_scale(40, 43, 1e-5);
+        let assign1640_e1309: f64 = (1e-5 * s.v[43]);
+        s.v[40] = assign1640_e1309;
 
         s.store_scale(50, 47, s.v[26]);
 

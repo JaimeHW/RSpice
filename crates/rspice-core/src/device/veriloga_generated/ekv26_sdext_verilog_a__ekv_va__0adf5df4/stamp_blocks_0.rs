@@ -165,16 +165,30 @@ impl Instance {
         s.b[243] = ((s.v[146] - s.v[147]) < 0.0);
         s.v[243] = if s.b[243] { 1.0 } else { 0.0 };
 
+        let (assign660_e549,) = {
+    if s.b[243] {
+        let assign660_e547: f64 = (-1.0);
+        (assign660_e547,)
+    } else {
+        (s.v[44],)
+    }
+};
+        s.v[44] = assign660_e549;
+
         if s.b[243] {
-            s.store_scalar(44, (-1.0));
             s.copy_ad(38, 147);
             s.copy_ad(147, 146);
             s.copy_ad(146, 38);
         }
 
-        if (!s.b[243]) {
-            s.store_scalar(44, 1.0);
-        }
+        let (assign700_e566,) = {
+    if (!s.b[243]) {
+        (1.0,)
+    } else {
+        (s.v[44],)
+    }
+};
+        s.v[44] = assign700_e566;
 
         s.store_add_ad_lhs(143, A::add_scaled_inputs4(s.ad_value(145), 1.0, s.ad_value(57), (-1.0), s.ad_value(183), -1.0, s.ad_value(61), 1.0), 153);
 
@@ -445,18 +459,6 @@ impl Instance {
 
         s.store_mul_add_scaled_product_rhs(125, 0, s.ad_value(122), (-1.0), s.ad_value(116), s.ad_value(1), 1.0);
 
-        s.store_mul_add_scaled_product_rhs(127, 0, s.ad_value(124), (-1.0), s.ad_value(117), s.ad_value(1), 1.0);
-
-        s.store_div_from_scalar(0, 1.0, 81);
-
-        s.store_div_from_scalar(1, 1.0, 82);
-
-        s.store_sub(2, 77, 10);
-
-        s.store_add_scaled_products_mixed_aiai(128, A::add_scaled_product(s.ad_value(125), 1.0, s.ad_value(10), s.ad_value(122), 1.0), 0, 1.0, A::add(A::mul_sub_from_scalar_rhs(s.ad_value(2), 0.5, s.ad_value(122)), s.ad_value(125)), 1, (-1.0));
-
-        s.store_add_scaled_products_mixed_aiai(130, A::add_scaled_product(s.ad_value(127), 1.0, s.ad_value(10), s.ad_value(124), 1.0), 0, 1.0, A::add(A::mul_sub_from_scalar_rhs(s.ad_value(2), (-0.5), s.ad_value(124)), s.ad_value(127)), 1, (-1.0));
-
     }
 
     pub(super) fn stamp_transient_block_1(
@@ -470,6 +472,18 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
+        s.store_mul_add_scaled_product_rhs(127, 0, s.ad_value(124), (-1.0), s.ad_value(117), s.ad_value(1), 1.0);
+
+        s.store_div_from_scalar(0, 1.0, 81);
+
+        s.store_div_from_scalar(1, 1.0, 82);
+
+        s.store_sub(2, 77, 10);
+
+        s.store_add_scaled_products_mixed_aiai(128, A::add_scaled_product(s.ad_value(125), 1.0, s.ad_value(10), s.ad_value(122), 1.0), 0, 1.0, A::add(A::mul_sub_from_scalar_rhs(s.ad_value(2), 0.5, s.ad_value(122)), s.ad_value(125)), 1, (-1.0));
+
+        s.store_add_scaled_products_mixed_aiai(130, A::add_scaled_product(s.ad_value(127), 1.0, s.ad_value(10), s.ad_value(124), 1.0), 0, 1.0, A::add(A::mul_sub_from_scalar_rhs(s.ad_value(2), (-0.5), s.ad_value(124)), s.ad_value(127)), 1, (-1.0));
+
         s.store_div_scaled_product_by_product(0, s.ad_value(17), A::offset(s.ad_value(87), (-1.5)), 1.0, s.ad_value(83), s.ad_value(7), 4.0);
 
         s.store_mul(131, 0, 116);

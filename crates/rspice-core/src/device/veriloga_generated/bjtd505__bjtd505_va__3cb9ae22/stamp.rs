@@ -5374,7 +5374,7 @@ impl Instance {
         };
 
         Self::stamp_transient_block_0(ctx, s, p, nodes);
-        Self::stamp_transient_block_1(s, p);
+        Self::stamp_transient_block_1(ctx, s, p, nodes);
         Self::stamp_transient_block_2(s, p);
         Self::stamp_transient_block_3(s, p);
 

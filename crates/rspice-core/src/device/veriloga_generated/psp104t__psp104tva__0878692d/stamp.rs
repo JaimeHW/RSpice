@@ -146,7 +146,7 @@ impl Instance {
         Self::stamp_transient_block_3(s, p, param_given);
         Self::stamp_transient_block_4(s, p, param_given);
         Self::stamp_transient_block_5(s, p, param_given);
-        Self::stamp_transient_block_6(s);
+        Self::stamp_transient_block_6(s, p);
         Self::stamp_transient_block_7(s, p);
         Self::stamp_transient_block_8(s, p);
         Self::stamp_transient_block_9(s, p);
@@ -184,6 +184,7 @@ impl Instance {
         Self::stamp_transient_block_41(s, p);
         Self::stamp_transient_block_42(s, p);
         Self::stamp_transient_block_43(ctx, s, p, nodes);
+        Self::stamp_transient_block_44(s, p);
 
         stamper.stamp_potential_branch_local(
             Some(1),

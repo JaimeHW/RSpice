@@ -862,7 +862,8 @@ impl Instance {
 
         s.store_add_ad_rhs(129, 115, A::sqrt(A::add(A::square(s.ad_value(115)), s.ad_value(124))));
 
-        s.store_sub(207, 124, 123);
+        let assign4950_e5324: f64 = (s.v[124] - s.v[123]);
+        s.v[207] = assign4950_e5324;
 
         s.b[310] = (((s.v[207]) as f64).abs() > 1e-8);
         s.v[310] = if s.b[310] { 1.0 } else { 0.0 };
@@ -1000,8 +1001,6 @@ impl Instance {
 
         s.store_div(126, 120, 125);
 
-        s.store_div(127, 121, 125);
-
     }
 
     pub(super) fn stamp_transient_block_3(
@@ -1016,6 +1015,8 @@ impl Instance {
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv4 = ctx.node_voltage(nodes[4]);
+        s.store_div(127, 121, 125);
+
         s.b[320] = (s.v[126] < 1e-20);
         s.v[320] = if s.b[320] { 1.0 } else { 0.0 };
 

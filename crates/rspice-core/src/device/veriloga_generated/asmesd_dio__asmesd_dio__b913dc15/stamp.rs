@@ -369,9 +369,15 @@ impl Instance {
         s.b[72] = (p.p30 == (-1.0));
         s.v[72] = if s.b[72] { 1.0 } else { 0.0 };
 
-        s.v[28] = ((p.p12 + (p.p31 * p.p13)) / s.v[3]);
+        let assign830_e964: f64 = (p.p31 * p.p13);
+        let assign830_e965: f64 = (p.p12 + assign830_e964);
+        let assign830_e967: f64 = (assign830_e965 / s.v[3]);
+        s.v[28] = assign830_e967;
 
-        s.v[27] = ((p.p14 + (p.p31 * p.p15)) / s.v[3]);
+        let assign840_e971: f64 = (p.p31 * p.p15);
+        let assign840_e972: f64 = (p.p14 + assign840_e971);
+        let assign840_e974: f64 = (assign840_e972 / s.v[3]);
+        s.v[27] = assign840_e974;
 
         s.b[73] = ((s.v[28] > 0.0) && (s.v[28] >= p.p46));
         s.v[73] = if s.b[73] { 1.0 } else { 0.0 };

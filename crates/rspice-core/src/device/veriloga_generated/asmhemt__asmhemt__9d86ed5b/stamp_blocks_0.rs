@@ -296,9 +296,14 @@ impl Instance {
         s.b[385] = (s.v[361] == 0.0);
         s.v[385] = if s.b[385] { 1.0 } else { 0.0 };
 
-        if (s.b[384] && s.b[385]) {
-            s.store_scalar(361, 1.0);
-        }
+        let (assign1460_e2941,) = {
+    if (s.b[384] && s.b[385]) {
+        (1.0,)
+    } else {
+        (s.v[361],)
+    }
+};
+        s.v[361] = assign1460_e2941;
 
         s.v[35] = (p.p0 + 273.15);
 
@@ -403,7 +408,6 @@ impl Instance {
             s.store_sqrt_square_offset(90, 342, (p.p90 * p.p90));
             s.store_scaled_div(346, 136, 90, (((p.p94 * p.p17)) as f64).abs());
             s.store_scale(136, 337, p.p89);
-            s.store_sqrt_square_offset(90, 337, (p.p89 * p.p89));
         }
 
     }
@@ -415,6 +419,7 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
         if (s.b[391] && (!(((s.b[387] || s.b[388]) || s.b[389]) || s.b[390]))) {
+            s.store_sqrt_square_offset(90, 337, (p.p89 * p.p89));
             s.store_scaled_div(340, 136, 90, (((p.p95 * p.p36)) as f64).abs());
             s.store_scale(136, 337, p.p89);
             s.store_sqrt_square_offset(90, 337, (p.p89 * p.p89));

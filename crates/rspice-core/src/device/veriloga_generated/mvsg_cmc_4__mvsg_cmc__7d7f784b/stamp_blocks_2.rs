@@ -6,12 +6,36 @@ use super::super::state::{Instance, Parameters};
 impl Instance {
 
     pub(super) fn stamp_transient_block_32(
-        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
         p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
     ) {
         if ((s.b[1934] && s.b[2176]) && s.b[2297]) {
+            s.store_scalar(2318, p.p257);
+            s.store_scalar(2319, p.p256);
+            s.store_scalar(2320, p.p6);
+            s.store_scalar(2321, 0.0);
+            s.store_scalar(2322, 0.0);
+            s.store_scalar(2323, 0.0);
+            s.store_scalar(2324, 0.0);
+            s.store_scalar(2325, 0.0);
+            s.store_scalar(2326, 0.0);
+            s.store_scalar(2327, 0.0);
+            s.store_scalar(2328, 0.0);
+            s.store_scalar(2329, 0.0);
+            s.store_scalar(2330, 0.0);
+            s.store_scalar(2331, 0.0);
+            s.store_scalar(2332, 0.0);
+            s.store_scalar(2333, 0.0);
+            s.store_scalar(2334, 0.0);
+            s.store_scalar(2335, 0.0);
+            s.store_scalar(2336, 0.0);
+            s.store_scalar(2337, 0.0);
+            s.store_scalar(2338, 0.0);
+            s.store_scalar(2339, 0.0);
+            s.store_scalar(2340, 0.0);
+            s.store_scalar(2341, 0.0);
+            s.store_scalar(2342, 0.0);
+            s.store_scalar(2343, 0.0);
             s.store_scalar(2344, 0.0);
             s.store_scalar(2345, 0.0);
             s.store_scalar(2346, 0.0);
@@ -279,6 +303,17 @@ impl Instance {
             s.copy_ad(140, 2298);
             s.store_scalar(2358, 0.0);
             s.store_scalar(2359, 0.0);
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_33(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+    ) {
+        if ((s.b[1934] && s.b[2176]) && s.b[2297]) {
             s.store_scalar(2360, 0.0);
             s.store_scaled_voltage(2361, ctx, nodes, Some(8), Some(5), p.p6);
             s.copy_ad(2362, 113);
@@ -305,17 +340,6 @@ impl Instance {
             s.store_scalar(2383, 0.0);
             s.store_scalar(2384, 0.0);
             s.store_scalar(2385, 0.0);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_33(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-    ) {
-        if ((s.b[1934] && s.b[2176]) && s.b[2297]) {
             s.store_scalar(2386, 0.0);
             s.store_scalar(2387, 0.0);
             s.store_scalar(2388, 0.0);
@@ -556,6 +580,14 @@ impl Instance {
             s.store_add_scaled_product_value_ad(2386, A::mul_sub_from_scalar_lhs(1.0, s.ad_value(2384), s.ad_value(2413)), 1.0, 2384, 2406, 1.0);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_34(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+    ) {
         if ((s.b[1934] && s.b[2176]) && s.b[2297]) {
             let assign41230_ad_e39738: A = {
                 if (p.p52 != 0.0) {
@@ -636,15 +668,6 @@ impl Instance {
 
         if s.b[2418] {
             s.store_scaled_voltage(234, ctx, nodes, Some(8), Some(7), p.p6);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_34(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        if s.b[2418] {
             s.store_scalar(2419, 0.0);
             s.store_scalar(2420, 0.0);
             s.store_scalar(2421, 0.0);
@@ -829,6 +852,15 @@ impl Instance {
 
         if (s.b[2418] && (!s.b[2475])) {
             s.store_sub_ad_lhs(2466, A::add_scaled_product(s.ad_value(2465), 1.0, s.ad_value(2434), s.ad_value(2463), (-1.0)), 2444);
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_35(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if (s.b[2418] && (!s.b[2475])) {
             s.store_mul_sub_ad_rhs(2467, 2420, A::add_scaled_product(s.ad_value(2457), 1.0, s.ad_value(2434), s.ad_value(2446), (-1.0)), s.ad_value(2444));
         }
 
@@ -905,12 +937,6 @@ impl Instance {
             s.store_scalar(2445, 1.0);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_35(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         if (((s.b[2418] && (!s.b[2475])) && (!s.b[2477])) && (!s.b[2478])) {
             s.store_div_from_scalar_offset_ad(2445, 1.0, A::exp(s.ad_value(2455)), 1.0);
         }
@@ -1086,6 +1112,14 @@ impl Instance {
             s.store_add_scaled_product_left_ad(2517, 2515, 1.0, A::div(s.ad_value(2488), s.ad_value(2484)), 2483, 1.0);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_36(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+    ) {
         if (s.b[2418] && s.b[2479]) {
             if ((!(s.v[2517] > 50.0)) && (!(s.v[2517] < (-50.0)))) {
                 s.store_exp(2518, 2517);
@@ -1163,14 +1197,6 @@ impl Instance {
             s.store_add_scaled_product_left_ad(2529, 2515, 1.0, A::div(s.ad_value(2521), s.ad_value(2484)), 2485, 1.0);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_36(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-    ) {
         if (((s.b[2418] && s.b[2479]) && (!s.b[2536])) && s.b[2537]) {
             if ((!(s.v[2529] > 50.0)) && (!(s.v[2529] < (-50.0)))) {
                 s.store_exp(2530, 2529);
@@ -1417,6 +1443,15 @@ impl Instance {
             s.store_scalar(2574, 0.0);
             s.store_scalar(2575, 0.0);
             s.store_scalar(2576, 0.0);
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_37(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if s.b[2547] {
             s.store_scalar(2577, 0.0);
             s.store_scalar(2578, 0.0);
             s.store_scalar(2579, 0.0);
@@ -1444,15 +1479,6 @@ impl Instance {
             s.store_scalar(2601, 0.0);
             s.store_scalar(2602, 0.0);
             s.store_scalar(2603, 0.0);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_37(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        if s.b[2547] {
             s.store_scalar(2604, 0.0);
             s.store_mul_scaled_ad_lhs(2584, A::div(s.ad_value(2569), s.ad_value(2553)), 2570, -1.0);
         }
@@ -1719,6 +1745,15 @@ impl Instance {
             s.store_scalar(2616, p.p266);
             s.store_scalar(2617, 0.0);
             s.store_scalar(2618, p.p319);
+        }
+
+    }
+
+    pub(super) fn stamp_transient_block_38(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if s.b[2547] {
             s.store_scalar(2619, p.p318);
             s.copy_ad(2620, 112);
             s.store_scalar(2621, p.p0);
@@ -1746,21 +1781,6 @@ impl Instance {
             s.store_scalar(2643, 0.0);
             s.store_scalar(2644, 0.0);
             s.store_scalar(2645, 0.0);
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_38(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-    ) {
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv3 = ctx.node_voltage(nodes[3]);
-        let nv6 = ctx.node_voltage(nodes[6]);
-        if s.b[2547] {
             s.store_scalar(2646, 0.0);
             s.store_scalar(2647, 0.0);
             s.store_scalar(2648, 0.0);
@@ -2014,6 +2034,18 @@ impl Instance {
             s.store_mul_div_lhs(2648, 2628, 2613, 2638);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_39(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+    ) {
+        let nv0 = ctx.node_voltage(nodes[0]);
+        let nv2 = ctx.node_voltage(nodes[2]);
+        let nv3 = ctx.node_voltage(nodes[3]);
+        let nv6 = ctx.node_voltage(nodes[6]);
         if s.b[2547] {
             if ((!(s.v[2648] > 50.0)) && (!(s.v[2648] < (-50.0)))) {
                 s.store_exp(2649, 2648);
@@ -2110,17 +2142,6 @@ impl Instance {
         s.b[2681] = ((((nv3 - nv2) - p.p27) / p.p28) < (-50.0));
         s.v[2681] = if s.b[2681] { 1.0 } else { 0.0 };
 
-    }
-
-    pub(super) fn stamp_transient_block_39(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-    ) {
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv3 = ctx.node_voltage(nodes[3]);
-        let nv6 = ctx.node_voltage(nodes[6]);
         if ((!s.b[2680]) && s.b[2681]) {
             s.store_add_scaled_products_mixed_iaia(218, 16, A::voltage(ctx, nodes, Some(3), Some(2)), (p.p0 * p.p2), 10, A::exp_scaled_input(A::offset(A::voltage(ctx, nodes, Some(3), Some(2)), (-p.p27)), 1.0 / (p.p28)), (p.p28 * (p.p0 * p.p2)));
         }

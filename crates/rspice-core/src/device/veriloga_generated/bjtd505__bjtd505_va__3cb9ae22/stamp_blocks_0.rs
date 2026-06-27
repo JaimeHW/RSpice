@@ -71,7 +71,9 @@ impl Instance {
 
         s.v[76] = p.p71;
 
-        s.v[79] = ((2.0) as f64).powf((2.0 - s.v[76]));
+        let assign270_e676: f64 = (2.0 - s.v[76]);
+        let assign270_e677: f64 = (2.0_f64).powf(assign270_e676);
+        s.v[79] = assign270_e677;
 
         s.v[259] = (((p.p116 + (((p.p117 * s.v[3]) * s.v[3]) / (s.v[3] + p.p118))) - 0.05) / 0.1);
 
@@ -88,7 +90,8 @@ impl Instance {
 
         s.v[87] = p.p116;
 
-        s.v[86] = (1.0 / s.v[87]);
+        let assign340_e748: f64 = (1.0 / s.v[87]);
+        s.v[86] = assign340_e748;
 
         s.v[168] = 1.0;
 
@@ -138,13 +141,39 @@ impl Instance {
         s.b[444] = ((s.v[88] - (((p.p117 * s.v[2]) * s.v[2]) / (s.v[2] + p.p118))) < 0.05);
         s.v[444] = if s.b[444] { 1.0 } else { 0.0 };
 
-        if s.b[444] {
-            s.store_offset_scaled_ad(85, A::ln_one_plus_exp(s.ad_value(259)), 0.1, 0.05);
-        }
+        let (assign660_e900,) = {
+    if s.b[444] {
+        let assign660_e894: f64 = (s.v[259]).exp();
+        let assign660_e895: f64 = (1.0 + assign660_e894);
+        let assign660_e896: f64 = (assign660_e895).ln();
+        let assign660_e897: f64 = (0.1 * assign660_e896);
+        let assign660_e898: f64 = (0.05 + assign660_e897);
+        (assign660_e898,)
+    } else {
+        (s.v[85],)
+    }
+};
+        s.v[85] = assign660_e900;
 
-        if (!s.b[444]) {
-            s.store_add_scaled_inputs_ad(85, A::offset(s.ad_value(88), (-(((p.p117 * s.v[2]) * s.v[2]) / (s.v[2] + p.p118)))), 1.0, A::ln_one_plus_exp(A::neg(s.ad_value(259))), 0.1);
-        }
+        let (assign670_e924,) = {
+    if (!s.b[444]) {
+        let assign670_e906: f64 = (p.p117 * s.v[2]);
+        let assign670_e908: f64 = (assign670_e906 * s.v[2]);
+        let assign670_e911: f64 = (s.v[2] + p.p118);
+        let assign670_e912: f64 = (assign670_e908 / assign670_e911);
+        let assign670_e913: f64 = (s.v[88] - assign670_e912);
+        let assign670_e917: f64 = (-s.v[259]);
+        let assign670_e918: f64 = (assign670_e917).exp();
+        let assign670_e919: f64 = (1.0 + assign670_e918);
+        let assign670_e920: f64 = (assign670_e919).ln();
+        let assign670_e921: f64 = (0.1 * assign670_e920);
+        let assign670_e922: f64 = (assign670_e913 + assign670_e921);
+        (assign670_e922,)
+    } else {
+        (s.v[85],)
+    }
+};
+        s.v[85] = assign670_e924;
 
         s.v[13] = (((((-3.0) * s.v[6]) * s.v[254]) + (p.p65 * s.v[4])) + ((1.0 - s.v[4]) * p.p104));
 
@@ -213,13 +242,34 @@ impl Instance {
         s.b[449] = (0.05 < s.v[20]);
         s.v[449] = if s.b[449] { 1.0 } else { 0.0 };
 
-        if s.b[449] {
-            s.store_scalar(19, (s.v[20] + (s.v[6] * (((1.0 + ((s.v[259]) as f64).exp())) as f64).ln())));
-        }
+        let (assign910_e1160,) = {
+    if s.b[449] {
+        let assign910_e1154: f64 = (s.v[259]).exp();
+        let assign910_e1155: f64 = (1.0 + assign910_e1154);
+        let assign910_e1156: f64 = (assign910_e1155).ln();
+        let assign910_e1157: f64 = (s.v[6] * assign910_e1156);
+        let assign910_e1158: f64 = (s.v[20] + assign910_e1157);
+        (assign910_e1158,)
+    } else {
+        (s.v[19],)
+    }
+};
+        s.v[19] = assign910_e1160;
 
-        if (!s.b[449]) {
-            s.store_scalar(19, (0.05 + (s.v[6] * (((1.0 + (((-s.v[259])) as f64).exp())) as f64).ln())));
-        }
+        let (assign920_e1174,) = {
+    if (!s.b[449]) {
+        let assign920_e1167: f64 = (-s.v[259]);
+        let assign920_e1168: f64 = (assign920_e1167).exp();
+        let assign920_e1169: f64 = (1.0 + assign920_e1168);
+        let assign920_e1170: f64 = (assign920_e1169).ln();
+        let assign920_e1171: f64 = (s.v[6] * assign920_e1170);
+        let assign920_e1172: f64 = (0.05 + assign920_e1171);
+        (assign920_e1172,)
+    } else {
+        (s.v[19],)
+    }
+};
+        s.v[19] = assign920_e1174;
 
         s.v[56] = (((((-3.0) * s.v[6]) * s.v[254]) + (p.p26 * s.v[4])) + ((1.0 - s.v[4]) * p.p108));
 
@@ -228,21 +278,45 @@ impl Instance {
         s.b[450] = (0.05 < s.v[56]);
         s.v[450] = if s.b[450] { 1.0 } else { 0.0 };
 
-        if s.b[450] {
-            s.store_scalar(55, (s.v[56] + (s.v[6] * (((1.0 + ((s.v[259]) as f64).exp())) as f64).ln())));
-        }
+        let (assign960_e1210,) = {
+    if s.b[450] {
+        let assign960_e1204: f64 = (s.v[259]).exp();
+        let assign960_e1205: f64 = (1.0 + assign960_e1204);
+        let assign960_e1206: f64 = (assign960_e1205).ln();
+        let assign960_e1207: f64 = (s.v[6] * assign960_e1206);
+        let assign960_e1208: f64 = (s.v[56] + assign960_e1207);
+        (assign960_e1208,)
+    } else {
+        (s.v[55],)
+    }
+};
+        s.v[55] = assign960_e1210;
 
-        if (!s.b[450]) {
-            s.store_scalar(55, (0.05 + (s.v[6] * (((1.0 + (((-s.v[259])) as f64).exp())) as f64).ln())));
-        }
+        let (assign970_e1224,) = {
+    if (!s.b[450]) {
+        let assign970_e1217: f64 = (-s.v[259]);
+        let assign970_e1218: f64 = (assign970_e1217).exp();
+        let assign970_e1219: f64 = (1.0 + assign970_e1218);
+        let assign970_e1220: f64 = (assign970_e1219).ln();
+        let assign970_e1221: f64 = (s.v[6] * assign970_e1220);
+        let assign970_e1222: f64 = (0.05 + assign970_e1221);
+        (assign970_e1222,)
+    } else {
+        (s.v[55],)
+    }
+};
+        s.v[55] = assign970_e1224;
 
         s.store_div_from_scalar(65, 1.0, 14);
 
-        s.store_div_from_scalar(67, 1.0, 19);
+        let assign990_e1230: f64 = (1.0 / s.v[19]);
+        s.v[67] = assign990_e1230;
 
         s.store_powf_ad(73, A::scale(s.ad_value(65), p.p65), p.p66);
 
-        s.store_powf_ad(90, A::scale(s.ad_value(67), s.v[75]), s.v[76]);
+        let assign1010_e1238: f64 = (s.v[75] * s.v[67]);
+        let assign1010_e1240: f64 = (assign1010_e1238).powf(s.v[76]);
+        s.v[90] = assign1010_e1240;
 
         s.store_scale(23, 73, p.p64);
 
@@ -365,13 +439,26 @@ impl Instance {
 
         s.store_mul_ad_affine_product_lhs(61, A::mul3_scaled_output(s.ad_value(70), s.ad_value(70), s.ad_value(255), p.p34), s.ad_value(256), (p.p65 * (s.v[72] * s.v[72])), 0.0, 65);
 
-        s.store_div_from_scalar(67, 1.0, 19);
+        let assign1590_e1753: f64 = (1.0 / s.v[19]);
+        s.v[67] = assign1590_e1753;
 
-        s.store_powf_ad(257, A::scale(s.ad_value(85), s.v[86]), (-0.5));
+        let assign1600_e1756: f64 = (s.v[85] * s.v[86]);
+        let assign1600_e1758: f64 = (-0.5);
+        let assign1600_e1759: f64 = (assign1600_e1756).powf(assign1600_e1758);
+        s.v[257] = assign1600_e1759;
 
-        s.store_div_from_scalar(258, 1.0, 90);
+        let assign1610_e1762: f64 = (1.0 / s.v[90]);
+        s.v[258] = assign1610_e1762;
 
-        s.store_mul_ad_affine_product_lhs(83, A::mul3_scaled_output(s.ad_value(85), s.ad_value(85), s.ad_value(257), p.p36), s.ad_value(258), (s.v[75] * (s.v[86] * s.v[86])), 0.0, 67);
+        let assign1620_e1765: f64 = (p.p36 * s.v[85]);
+        let assign1620_e1767: f64 = (assign1620_e1765 * s.v[85]);
+        let assign1620_e1769: f64 = (assign1620_e1767 * s.v[257]);
+        let assign1620_e1771: f64 = (assign1620_e1769 * s.v[258]);
+        let assign1620_e1773: f64 = (assign1620_e1771 * s.v[75]);
+        let assign1620_e1775: f64 = (assign1620_e1773 * s.v[67]);
+        let assign1620_e1777: f64 = (assign1620_e1775 * s.v[86]);
+        let assign1620_e1779: f64 = (assign1620_e1777 * s.v[86]);
+        s.v[83] = assign1620_e1779;
 
         s.v[255] = (((s.v[254] * p.p95)) as f64).exp();
 
@@ -424,6 +511,14 @@ impl Instance {
 
         s.store_scaled_voltage(238, ctx, nodes, Some(9), Some(6), p.p3);
 
+    }
+
+    pub(super) fn stamp_transient_block_1(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+    ) {
         s.store_scaled_voltage(237, ctx, nodes, Some(8), Some(9), p.p3);
 
         s.store_add_scaled_inputs4(235, s.ad_value(234), 1.0, s.ad_value(231), 1.0, s.ad_value(236), -1.0, s.ad_value(238), -1.0);
@@ -496,15 +591,6 @@ impl Instance {
 
         if (!s.b[471]) {
             s.store_scalar(275, ((p.p134) as f64).exp());
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_1(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        if (!s.b[471]) {
             s.store_mul_offset_ad_rhs(252, 275, A::sub_scaled_inputs(s.ad_value(241), s.v[8], s.ad_value(16), s.v[8]), (((-p.p134)) + (1.0)));
         }
 
@@ -810,7 +896,8 @@ impl Instance {
             s.store_add_scaled_inputs_ad_rhs(276, 232, 1.0, A::ln_one_plus_exp(A::neg(s.ad_value(259))), 0.0001);
         }
 
-        s.store_scale(278, 276, 1.0 / (p.p139));
+        let assign3460_e3234: f64 = (s.v[276] / p.p139);
+        s.v[278] = assign3460_e3234;
 
         s.b[491] = (s.v[278] < p.p134);
         s.v[491] = if s.b[491] { 1.0 } else { 0.0 };
@@ -839,14 +926,41 @@ impl Instance {
         s.b[495] = (((s.v[232] - s.v[55]) * s.v[8]) < p.p134);
         s.v[495] = if s.b[495] { 1.0 } else { 0.0 };
 
-        if (s.b[494] && s.b[495]) {
-            s.store_exp_scaled_input_ad(278, A::sub(s.ad_value(232), s.ad_value(55)), s.v[8]);
-        }
+    }
+
+    pub(super) fn stamp_transient_block_2(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        let (assign3630_e3365,) = {
+    if (s.b[494] && s.b[495]) {
+        let assign3630_e3360: f64 = (s.v[232] - s.v[55]);
+        let assign3630_e3362: f64 = (assign3630_e3360 * s.v[8]);
+        let assign3630_e3363: f64 = (assign3630_e3362).exp();
+        (assign3630_e3363,)
+    } else {
+        (s.v[278],)
+    }
+};
+        s.v[278] = assign3630_e3365;
 
         if (s.b[494] && (!s.b[495])) {
             s.store_scalar(275, ((p.p134) as f64).exp());
-            s.store_mul_offset_ad_rhs(278, 275, A::sub_scaled_inputs(s.ad_value(232), s.v[8], s.ad_value(55), s.v[8]), (((-p.p134)) + (1.0)));
         }
+
+        let (assign3650_e3390,) = {
+    if (s.b[494] && (!s.b[495])) {
+        let assign3650_e3382: f64 = (s.v[232] - s.v[55]);
+        let assign3650_e3384: f64 = (assign3650_e3382 * s.v[8]);
+        let assign3650_e3386: f64 = (assign3650_e3384 - p.p134);
+        let assign3650_e3387: f64 = (1.0 + assign3650_e3386);
+        let assign3650_e3388: f64 = (s.v[275] * assign3650_e3387);
+        (assign3650_e3388,)
+    } else {
+        (s.v[278],)
+    }
+};
+        s.v[278] = assign3650_e3390;
 
         s.b[496] = (((s.v[149] / s.v[35]) - 1000.0) < 40.0);
         s.v[496] = if s.b[496] { 1.0 } else { 0.0 };
@@ -873,14 +987,35 @@ impl Instance {
         s.b[500] = (((s.v[233] - s.v[55]) * s.v[8]) < p.p134);
         s.v[500] = if s.b[500] { 1.0 } else { 0.0 };
 
-        if (s.b[499] && s.b[500]) {
-            s.store_exp_scaled_input_ad(278, A::sub(s.ad_value(233), s.ad_value(55)), s.v[8]);
-        }
+        let (assign3800_e3578,) = {
+    if (s.b[499] && s.b[500]) {
+        let assign3800_e3573: f64 = (s.v[233] - s.v[55]);
+        let assign3800_e3575: f64 = (assign3800_e3573 * s.v[8]);
+        let assign3800_e3576: f64 = (assign3800_e3575).exp();
+        (assign3800_e3576,)
+    } else {
+        (s.v[278],)
+    }
+};
+        s.v[278] = assign3800_e3578;
 
         if (s.b[499] && (!s.b[500])) {
             s.store_scalar(275, ((p.p134) as f64).exp());
-            s.store_mul_offset_ad_rhs(278, 275, A::sub_scaled_inputs(s.ad_value(233), s.v[8], s.ad_value(55), s.v[8]), (((-p.p134)) + (1.0)));
         }
+
+        let (assign3820_e3603,) = {
+    if (s.b[499] && (!s.b[500])) {
+        let assign3820_e3595: f64 = (s.v[233] - s.v[55]);
+        let assign3820_e3597: f64 = (assign3820_e3595 * s.v[8]);
+        let assign3820_e3599: f64 = (assign3820_e3597 - p.p134);
+        let assign3820_e3600: f64 = (1.0 + assign3820_e3599);
+        let assign3820_e3601: f64 = (s.v[275] * assign3820_e3600);
+        (assign3820_e3601,)
+    } else {
+        (s.v[278],)
+    }
+};
+        s.v[278] = assign3820_e3603;
 
         s.b[501] = (((s.v[232] * s.v[8]) / p.p20) < p.p134);
         s.v[501] = if s.b[501] { 1.0 } else { 0.0 };
@@ -915,15 +1050,6 @@ impl Instance {
 
         if (!s.b[503]) {
             s.store_scalar(275, ((p.p134) as f64).exp());
-        }
-
-    }
-
-    pub(super) fn stamp_transient_block_2(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        if (!s.b[503]) {
             s.store_mul_scale_offset_rhs(276, 275, 235, (s.v[8] * 1.0 / (p.p31)), (((-p.p134)) + (1.0)));
         }
 
@@ -968,9 +1094,18 @@ impl Instance {
         s.b[509] = (((p.p35 > 0.0) && (p.p36 > 0.0)) && (s.v[230] < 0.0));
         s.v[509] = if s.b[509] { 1.0 } else { 0.0 };
 
-        if s.b[509] {
-            s.store_powf_ad(77, A::sub_from_scalar(1.0, A::mul(s.ad_value(230), s.ad_value(67))), (1.0 - s.v[76]));
-        }
+        let (assign4240_e4061,) = {
+    if s.b[509] {
+        let assign4240_e4054: f64 = (s.v[230] * s.v[67]);
+        let assign4240_e4055: f64 = (1.0 - assign4240_e4054);
+        let assign4240_e4058: f64 = (1.0 - s.v[76]);
+        let assign4240_e4059: f64 = (assign4240_e4055).powf(assign4240_e4058);
+        (assign4240_e4059,)
+    } else {
+        (s.v[77],)
+    }
+};
+        s.v[77] = assign4240_e4061;
 
         s.b[510] = ((s.v[83] * (1.0 - (s.v[79] / (2.0 * s.v[77])))) < p.p134);
         s.v[510] = if s.b[510] { 1.0 } else { 0.0 };
@@ -979,11 +1114,58 @@ impl Instance {
             s.store_scalar(275, ((p.p134) as f64).exp());
         }
 
-        if s.b[509] {
-            s.store_mul(257, 230, 67);
-            s.store_scaled_mul_ad(80, A::powf(A::sqrt(A::offset(A::square(s.ad_value(257)), 1e-30)), ((-2.0) - s.v[76])), A::sub(A::scale_offset(A::scale(s.ad_value(257), (3.0 * (s.v[76] - 1.0))), (-s.v[76]), (((1.0 - (s.v[76] * s.v[76]))) * (s.v[76]))), A::mul3_scaled_output(s.ad_value(257), s.ad_value(257), A::offset(s.ad_value(257), (s.v[76] - 1.0)), 6.0)), 0.16666666666666666);
-            s.store_div_scaled_product_by_product(257, s.ad_value(230), s.ad_value(83), s.v[79], s.ad_value(85), s.ad_value(80), 1.0);
-        }
+        let (assign4290_e4122,) = {
+    if s.b[509] {
+        let assign4290_e4120: f64 = (s.v[230] * s.v[67]);
+        (assign4290_e4120,)
+    } else {
+        (s.v[257],)
+    }
+};
+        s.v[257] = assign4290_e4122;
+
+        let (assign4300_e4166,) = {
+    if s.b[509] {
+        let assign4300_e4126: f64 = (s.v[257] * s.v[257]);
+        let assign4300_e4128: f64 = (assign4300_e4126 + 1e-30);
+        let assign4300_e4129: f64 = (assign4300_e4128).sqrt();
+        let assign4300_e4131: f64 = (-2.0);
+        let assign4300_e4133: f64 = (assign4300_e4131 - s.v[76]);
+        let assign4300_e4134: f64 = (assign4300_e4129).powf(assign4300_e4133);
+        let assign4300_e4139: f64 = (s.v[76] * s.v[76]);
+        let assign4300_e4140: f64 = (1.0 - assign4300_e4139);
+        let assign4300_e4143: f64 = (3.0 * s.v[257]);
+        let assign4300_e4146: f64 = (s.v[76] - 1.0);
+        let assign4300_e4147: f64 = (assign4300_e4143 * assign4300_e4146);
+        let assign4300_e4148: f64 = (assign4300_e4140 - assign4300_e4147);
+        let assign4300_e4149: f64 = (s.v[76] * assign4300_e4148);
+        let assign4300_e4152: f64 = (6.0 * s.v[257]);
+        let assign4300_e4154: f64 = (assign4300_e4152 * s.v[257]);
+        let assign4300_e4157: f64 = (s.v[76] - 1.0);
+        let assign4300_e4159: f64 = (assign4300_e4157 + s.v[257]);
+        let assign4300_e4160: f64 = (assign4300_e4154 * assign4300_e4159);
+        let assign4300_e4161: f64 = (assign4300_e4149 - assign4300_e4160);
+        let assign4300_e4162: f64 = (assign4300_e4134 * assign4300_e4161);
+        let assign4300_e4164: f64 = (assign4300_e4162 * 0.16666666666666666);
+        (assign4300_e4164,)
+    } else {
+        (s.v[80],)
+    }
+};
+        s.v[80] = assign4300_e4166;
+
+        let (assign4310_e4178,) = {
+    if s.b[509] {
+        let assign4310_e4170: f64 = (s.v[230] * s.v[79]);
+        let assign4310_e4172: f64 = (assign4310_e4170 * s.v[83]);
+        let assign4310_e4175: f64 = (s.v[85] * s.v[80]);
+        let assign4310_e4176: f64 = (assign4310_e4172 / assign4310_e4175);
+        (assign4310_e4176,)
+    } else {
+        (s.v[257],)
+    }
+};
+        s.v[257] = assign4310_e4178;
 
         s.b[511] = (s.v[257] < (-0.001));
         s.v[511] = if s.b[511] { 1.0 } else { 0.0 };
@@ -1176,6 +1358,12 @@ impl Instance {
         s.b[530] = (((s.v[267]) as f64).abs() > 1e-7);
         s.v[530] = if s.b[530] { 1.0 } else { 0.0 };
 
+    }
+
+    pub(super) fn stamp_transient_block_3(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         if ((((s.b[521] && (!s.b[522])) && s.b[526]) && s.b[527]) && s.b[530]) {
             s.store_div_scaled_inputs(195, s.ad_value(188), 0.5, s.ad_value(267), 1.0);
             s.store_mul_ad(196, A::mul3(A::div(s.ad_value(0), s.ad_value(98)), s.ad_value(191), s.ad_value(195)), A::sub(A::exp(A::div_scaled_inputs(s.ad_value(98), -1.0, s.ad_value(191), 1.0)), A::exp(A::mul_offset_rhs(A::div_scaled_inputs(s.ad_value(98), -1.0, s.ad_value(191), 1.0), A::div(s.ad_value(187), s.ad_value(195)), 1.0))));
@@ -1343,12 +1531,6 @@ impl Instance {
 
         s.store_mul(222, 220, 276);
 
-    }
-
-    pub(super) fn stamp_transient_block_3(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         s.v[223] = (((4.0 * s.v[95]) * s.v[6]) / s.v[31]);
 
         s.store_mul_scaled_ad_rhs(224, 115, (0.5 * s.v[223]), A::offset(A::add(s.ad_value(119), s.ad_value(106)), 2.0));
