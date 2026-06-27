@@ -454,6 +454,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_immediate_generated_ad_local_stores(source);
     source = compact_direct_ad_rvalue_stores(source);
     source = compact_scaled_sqrt_square_offset_rhs_helper_calls(source);
+    source = compact_scaled_add_offset_sqrt_square_offset_helper_calls(source);
     source = compact_div_scaled_product_sqrt_square_sum_denominator_helper_calls(source);
     source = compact_div_scaled_product_add_scaled_denominator_helper_calls(source);
     for (from, to) in [
@@ -872,6 +873,74 @@ fn compact_scaled_sqrt_square_offset_rhs_helper_call_replacement(
     let scale = args[3].trim();
     let line = format!(
         "scratch.store_scaled_{op}_sqrt_square_offset_rhs({target_index}, {left}, {source_index}, {offset}, {scale});"
+    );
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_scaled_add_offset_sqrt_square_offset_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_scaled_add_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_scaled_add_offset_sqrt_square_offset_helper_call_replacement(
+                &source, call_start, indent,
+            )
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_scaled_add_offset_sqrt_square_offset_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_scaled_add_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 4 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let (left_source, left_offset) = compact_offset_scratch_arg(args[1].trim())?;
+    let (sqrt_source, square_offset, sqrt_offset) =
+        compact_sqrt_offset_square_offset_arg(args[2].trim())?;
+    if left_source != sqrt_source {
+        return None;
+    }
+    let line = format!(
+        "scratch.store_scaled_add_offset_sqrt_square_offset({target_index}, {left_source}, {left_offset}, {square_offset}, {sqrt_offset}, {});",
+        args[3].trim()
     );
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
@@ -2706,6 +2775,33 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_scaled_add_offset_sqrt_square_offset_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_scaled_add_offset_sqrt_square_offset"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_scaled_add_ad(17, AdValue::offset(scratch.ad_value(3), params.left_offset), AdValue::sqrt(AdValue::offset(AdValue::mul_offset_lhs(scratch.ad_value(3), params.square_offset, AdValue::offset(scratch.ad_value(3), params.square_offset)), params.sqrt_offset)), params.scale);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_scaled_add_offset_sqrt_square_offset(17, 3, p.left_offset, p.square_offset, p.sqrt_offset, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::offset(s.ad_value(3)"), "{compact}");
+        assert!(!compact.contains("A::sqrt("), "{compact}");
+        assert!(!compact.contains("s.store_scaled_add_ad("), "{compact}");
     }
 
     #[test]
@@ -9026,6 +9122,19 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = (left_value + rhs_sign * rhs_value) * scale;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] + rhs_sign * source_node_derivatives[axis] * rhs_derivative_scale) * scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] + rhs_sign * source_branch_derivatives[axis] * rhs_derivative_scale) * scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_add_offset_sqrt_square_offset(&mut self, index: usize, source: usize, left_offset: f64, square_offset: f64, sqrt_offset: f64, scale: f64) {",
+        "        let source_value = self.values[source];",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        let square_value = source_value + square_offset;",
+        "        let root = (square_value * square_value + sqrt_offset).sqrt();",
+        "        let derivative_scale = (1.0 + square_value / root) * scale;",
+        "        self.values[index] = (source_value + left_offset + root) * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -22949,6 +23058,15 @@ fn compact_square_scratch_arg(value: &str) -> Option<usize> {
     compact_scratch_ad_value_index(args[0])
 }
 
+fn compact_offset_scratch_arg(value: &str) -> Option<(usize, &str)> {
+    let args = compact_ad_call_args(value, "offset")?;
+    if args.len() != 2 {
+        return None;
+    }
+    let source = compact_scratch_ad_value_index(args[0])?;
+    Some((source, args[1]))
+}
+
 fn compact_sqrt_square_offset_arg(value: &str) -> Option<(usize, &str)> {
     let sqrt_args = compact_ad_call_args(value, "sqrt")?;
     if sqrt_args.len() != 1 {
@@ -22960,6 +23078,27 @@ fn compact_sqrt_square_offset_arg(value: &str) -> Option<(usize, &str)> {
     }
     let source = compact_square_scratch_arg(offset_args[0])?;
     Some((source, offset_args[1]))
+}
+
+fn compact_sqrt_offset_square_offset_arg(value: &str) -> Option<(usize, &str, &str)> {
+    let sqrt_args = compact_ad_call_args(value, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+    let outer_offset_args = compact_ad_call_args(sqrt_args[0], "offset")?;
+    if outer_offset_args.len() != 2 {
+        return None;
+    }
+    let product_args = compact_ad_call_args(outer_offset_args[0], "mul_offset_lhs")?;
+    if product_args.len() != 3 {
+        return None;
+    }
+    let source = compact_scratch_ad_value_index(product_args[0])?;
+    let (right_source, right_offset) = compact_offset_scratch_arg(product_args[2])?;
+    if source != right_source || product_args[1].trim() != right_offset.trim() {
+        return None;
+    }
+    Some((source, product_args[1], outer_offset_args[1]))
 }
 
 fn compact_sqrt_square_sum_arg(value: &str) -> Option<(usize, usize)> {
