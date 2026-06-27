@@ -851,6 +851,23 @@ fn opt_lowering_constant_folds_real_arithmetic() {
 }
 
 #[test]
+fn opt_lowering_eliminates_dead_folded_constant_operands() {
+    let (_, _, _, opt) = lower_fixture_parts(constant_arithmetic_source(), "const_arith");
+
+    assert!(
+        opt.values.iter().all(|value| {
+            !matches!(
+                value.kind,
+                OptValueKind::RealConstant(value) if value == 2.0 || value == 3.0
+            )
+        }),
+        "folded constant operands should not remain live in scalar OptIR: {:?}",
+        opt.values
+    );
+    assert!(opt.validate().is_ok());
+}
+
+#[test]
 fn opt_lowering_constant_folds_unary_negation() {
     let (_, _, _, opt) = lower_fixture_parts(negative_constant_gain_source(), "neg_const_gain");
 

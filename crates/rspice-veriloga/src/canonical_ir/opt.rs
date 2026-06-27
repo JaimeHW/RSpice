@@ -157,13 +157,13 @@ impl OptModel {
         mir.validate()?;
 
         let mut builder = ScalarGraphBuilder::new(mir);
-        let equation_values: Vec<_> = mir
+        let mut equation_values: Vec<_> = mir
             .equations
             .iter()
             .map(|equation| builder.lower_expression(equation.expression.id))
             .collect();
         builder.add_sparse_derivatives();
-        let values = builder.finish();
+        let values = builder.finish(&mut equation_values);
 
         let mut schedules = Vec::new();
         if !mir.parameters.is_empty() {
@@ -307,8 +307,101 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
     }
 
-    fn finish(self) -> Vec<OptValue> {
+    fn finish(mut self, equation_values: &mut [Option<ValueId>]) -> Vec<OptValue> {
+        self.eliminate_dead_values(equation_values);
         self.values
+    }
+
+    fn eliminate_dead_values(&mut self, equation_values: &mut [Option<ValueId>]) {
+        if self.values.is_empty() {
+            return;
+        }
+
+        let mut observable_roots = HashSet::new();
+        let mut live = vec![false; self.values.len()];
+        for root in equation_values.iter().flatten().copied() {
+            observable_roots.insert(root);
+            self.mark_live_value(root, &mut live);
+            for derivative in self.values[usize::from(root)].derivatives.clone() {
+                self.mark_live_value(derivative.value, &mut live);
+            }
+        }
+
+        if live.iter().all(|is_live| *is_live) {
+            return;
+        }
+
+        let mut remap = vec![None; self.values.len()];
+        let mut compacted = Vec::with_capacity(live.iter().filter(|is_live| **is_live).count());
+        for (old_index, value) in self.values.iter().enumerate() {
+            if live[old_index] {
+                let new_id = ValueId::from(compacted.len());
+                remap[old_index] = Some(new_id);
+                let mut value = value.clone();
+                value.id = new_id;
+                compacted.push(value);
+            }
+        }
+
+        let observable_new_roots: HashSet<_> = observable_roots
+            .iter()
+            .map(|root| remap_value_id(*root, &remap))
+            .collect();
+
+        for value in &mut compacted {
+            value.kind = remap_value_kind(&value.kind, &remap);
+            if observable_new_roots.contains(&value.id) {
+                value.derivatives = value
+                    .derivatives
+                    .iter()
+                    .map(|derivative| OptDerivative {
+                        lane: derivative.lane,
+                        value: remap_value_id(derivative.value, &remap),
+                    })
+                    .collect();
+            } else {
+                value.derivatives.clear();
+            }
+        }
+
+        for root in equation_values.iter_mut().flatten() {
+            *root = remap_value_id(*root, &remap);
+        }
+
+        self.values = compacted;
+    }
+
+    fn mark_live_value(&self, value: ValueId, live: &mut [bool]) {
+        let index = usize::from(value);
+        if live.get(index).copied().unwrap_or(false) {
+            return;
+        }
+        let Some(slot) = live.get_mut(index) else {
+            return;
+        };
+        *slot = true;
+        match self.values[index].kind {
+            OptValueKind::RealConstant(_)
+            | OptValueKind::BooleanConstant(_)
+            | OptValueKind::Parameter { .. }
+            | OptValueKind::NodePotential { .. }
+            | OptValueKind::BranchFlow { .. }
+            | OptValueKind::EquationValue { .. } => {}
+            OptValueKind::Unary { input, .. } => self.mark_live_value(input, live),
+            OptValueKind::Binary { left, right, .. } => {
+                self.mark_live_value(left, live);
+                self.mark_live_value(right, live);
+            }
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                self.mark_live_value(condition, live);
+                self.mark_live_value(then_value, live);
+                self.mark_live_value(else_value, live);
+            }
+        }
     }
 
     fn lower_expression(&mut self, expr: ExprId) -> Option<ValueId> {
@@ -949,6 +1042,46 @@ fn unary_op(op: &str) -> Option<OptUnaryOp> {
         "Neg" => Some(OptUnaryOp::Neg),
         "Not" => Some(OptUnaryOp::Not),
         _ => None,
+    }
+}
+
+fn remap_value_id(value: ValueId, remap: &[Option<ValueId>]) -> ValueId {
+    remap
+        .get(usize::from(value))
+        .and_then(|value| *value)
+        .expect("live OptIR value must have a compacted id")
+}
+
+fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueKind {
+    match kind {
+        OptValueKind::RealConstant(value) => OptValueKind::RealConstant(*value),
+        OptValueKind::BooleanConstant(value) => OptValueKind::BooleanConstant(*value),
+        OptValueKind::Parameter { parameter } => OptValueKind::Parameter {
+            parameter: *parameter,
+        },
+        OptValueKind::NodePotential { node } => OptValueKind::NodePotential { node: *node },
+        OptValueKind::BranchFlow { branch } => OptValueKind::BranchFlow { branch: *branch },
+        OptValueKind::Unary { op, input } => OptValueKind::Unary {
+            op: *op,
+            input: remap_value_id(*input, remap),
+        },
+        OptValueKind::Binary { op, left, right } => OptValueKind::Binary {
+            op: *op,
+            left: remap_value_id(*left, remap),
+            right: remap_value_id(*right, remap),
+        },
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => OptValueKind::Select {
+            condition: remap_value_id(*condition, remap),
+            then_value: remap_value_id(*then_value, remap),
+            else_value: remap_value_id(*else_value, remap),
+        },
+        OptValueKind::EquationValue { equation } => OptValueKind::EquationValue {
+            equation: *equation,
+        },
     }
 }
 
