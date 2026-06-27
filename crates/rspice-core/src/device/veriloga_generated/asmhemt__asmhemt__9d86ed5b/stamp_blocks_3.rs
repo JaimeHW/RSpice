@@ -2231,7 +2231,7 @@ impl Instance {
     ) {
         if s.b[558] {
             s.store_scalar(169, (p.p213).min((p.p211 / (2.0 * p.p214))));
-            s.store_sub_from_scalar_ad(167, ((p.p4 * p.p5) * p.p211), A::mul_scaled_lhs(s.ad_value(169), (p.p4 * p.p5), s.ad_value(168)));
+            s.store_sub_from_scalar_scaled_mul(167, ((p.p4 * p.p5) * p.p211), 169, 168, (p.p4 * p.p5));
             s.store_mul_voltage_ad(163, A::max_with_scalar(s.ad_value(167), 0.0), ctx, nodes, Some(10), Some(0));
         }
 
@@ -2239,7 +2239,7 @@ impl Instance {
             s.store_scaled_voltage(162, ctx, nodes, Some(1), Some(2), ((p.p4 * p.p5) * p.p210));
             s.store_div_scaled_inputs(168, A::voltage(ctx, nodes, Some(0), Some(2)), p.p214, A::sqrt(A::offset(A::square(A::voltage(ctx, nodes, Some(0), Some(2))), (p.p214 * p.p214))), 1.0);
             s.store_scalar(169, (p.p213).min((p.p211 / (2.0 * p.p214))));
-            s.store_sub_from_scalar_ad(167, ((p.p4 * p.p5) * p.p211), A::mul_scaled_lhs(s.ad_value(169), (p.p4 * p.p5), s.ad_value(168)));
+            s.store_sub_from_scalar_scaled_mul(167, ((p.p4 * p.p5) * p.p211), 169, 168, (p.p4 * p.p5));
             s.store_mul_voltage_ad(163, A::max_with_scalar(s.ad_value(167), 0.0), ctx, nodes, Some(1), Some(0));
         }
 

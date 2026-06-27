@@ -2841,7 +2841,7 @@ impl Instance {
         }
 
         if (s.b[1508] && (!((s.b[1505] || s.b[1506]) || s.b[1507]))) {
-            s.store_sub_from_scalar_ad(1491, 1.0, A::mul(s.ad_value(77), s.ad_value(76)));
+            s.store_sub_from_scalar_scaled_mul(1491, 1.0, 77, 76, 1.0);
             s.store_sub_from_scalar(843, 1.0, 1491);
             s.store_offset(844, 1491, 1.0);
             s.store_add_ad_rhs(845, 844, A::div_scaled_product_offset_denominator(s.ad_value(74), s.ad_value(49), 2.0, s.ad_value(72), 1e-10, 1.0));

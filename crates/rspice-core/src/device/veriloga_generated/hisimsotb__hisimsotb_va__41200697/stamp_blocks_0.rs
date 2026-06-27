@@ -1771,7 +1771,7 @@ impl Instance {
             s.store_div_from_scalar(278, 1.0, 270);
             s.store_scalar(280, (1.0 / s.v[294]));
             s.store_div_from_scalar_add_ad(281, 1.0, A::offset(s.ad_value(278), s.v[536]), s.ad_value(280));
-            s.store_sub_from_scalar_ad(282, 1.0, A::mul(s.ad_value(281), s.ad_value(278)));
+            s.store_sub_from_scalar_scaled_mul(282, 1.0, 281, 278, 1.0);
             s.store_mul_ad_product_rhs(283, 278, s.ad_value(281), A::sub(A::mul_scaled_rhs(A::offset(s.ad_value(280), (0.5 * s.v[536])), s.ad_value(296), -1.0), s.ad_value(440)));
             s.store_div(327, 283, 282);
         }

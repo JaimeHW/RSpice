@@ -1186,7 +1186,7 @@ impl Instance {
 
         s.v[460] = 1.0;
 
-        s.store_sub_from_scalar_ad(461, ((s.v[451] * s.v[460]) * s.v[460]), A::mul(s.ad_value(421), A::limited_exp_scaled_input(s.ad_value(50), 2.0)));
+        s.store_sub_from_scalar_scaled_mul_ad_rhs(461, ((s.v[451] * s.v[460]) * s.v[460]), 421, A::limited_exp_scaled_input(s.ad_value(50), 2.0), 1.0);
 
         s.store_sqrt(462, 461);
 
@@ -3932,7 +3932,7 @@ impl Instance {
 
         s.v[460] = 1.0;
 
-        s.store_sub_from_scalar_ad(461, ((s.v[451] * s.v[460]) * s.v[460]), A::mul(s.ad_value(421), A::limited_exp_scaled_input(s.ad_value(50), 2.0)));
+        s.store_sub_from_scalar_scaled_mul_ad_rhs(461, ((s.v[451] * s.v[460]) * s.v[460]), 421, A::limited_exp_scaled_input(s.ad_value(50), 2.0), 1.0);
 
         s.store_sqrt(462, 461);
 

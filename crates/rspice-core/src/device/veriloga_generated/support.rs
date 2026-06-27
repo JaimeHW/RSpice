@@ -4670,6 +4670,33 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_components(&mut self, index: usize, scalar: f64, left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], scale: f64) {
+        self.v[index] = scalar - left_value * right_value * scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(left_dn[axis] * right_value + left_value * right_dn[axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(left_db[axis] * right_value + left_value * right_db[axis]) * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul(&mut self, index: usize, scalar: f64, left: usize, right: usize, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, self.v[left], self.dn[left], self.db[left], self.v[right], self.dn[right], self.db[right], scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_ad_lhs(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, left.value, left.dn, left.db, self.v[right], self.dn[right], self.db[right], scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_ad_rhs(&mut self, index: usize, scalar: f64, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, self.v[left], self.dn[left], self.db[left], right.value, right.dn, right.db, scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_ad(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, left.value, left.dn, left.db, right.value, right.dn, right.db, scale);
+    }
+
+    #[inline]
     pub(crate) fn store_div_from_scalar(&mut self, index: usize, scalar: f64, source: usize) {
         let reciprocal = 1.0 / self.v[source];
         let quotient = scalar * reciprocal;
@@ -15101,6 +15128,33 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_sub_from_scalar_scaled_input(&mut self, index: usize, scalar: f64, source: usize, scale: f64) {
         self.store_unary_scaled(index, source, scalar - self.v[source] * scale, -scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_components(&mut self, index: usize, scalar: f64, left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], scale: f64) {
+        self.v[index] = scalar - left_value * right_value * scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(left_dn[axis] * right_value + left_value * right_dn[axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(left_db[axis] * right_value + left_value * right_db[axis]) * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul(&mut self, index: usize, scalar: f64, left: usize, right: usize, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, self.v[left], self.dn[left], self.db[left], self.v[right], self.dn[right], self.db[right], scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_ad_lhs(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, left.value, left.dn, left.db, self.v[right], self.dn[right], self.db[right], scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_ad_rhs(&mut self, index: usize, scalar: f64, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, self.v[left], self.dn[left], self.db[left], right.value, right.dn, right.db, scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_scaled_mul_ad(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
+        self.store_sub_from_scalar_scaled_mul_components(index, scalar, left.value, left.dn, left.db, right.value, right.dn, right.db, scale);
     }
 
     #[inline]
