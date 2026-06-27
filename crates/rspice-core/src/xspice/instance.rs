@@ -6,13 +6,57 @@
 use super::context::PendingDigitalEvent;
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EventQueue,
-    PortSpec, PortType,
+    ParamSpec, ParamType, PortSpec, PortType,
 };
 use crate::Value;
 use std::any::Any;
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+
+fn canonical_param_key(name: &str) -> String {
+    name.to_ascii_lowercase()
+}
+
+fn validate_numeric_param(spec: &ParamSpec, value: Value) -> CmResult<()> {
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("value must be finite, got {value}"),
+        });
+    }
+
+    if matches!(
+        spec.param_type,
+        ParamType::Integer | ParamType::IntegerVector
+    ) && (value.round() - value).abs() > 1.0e-12
+    {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("expected integer value, got {value}"),
+        });
+    }
+
+    if let Some(min) = spec.min
+        && value < min
+    {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("value {value} is below minimum {min}"),
+        });
+    }
+
+    if let Some(max) = spec.max
+        && value > max
+    {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("value {value} is above maximum {max}"),
+        });
+    }
+
+    Ok(())
+}
 
 //=============================================================================
 // Port Connection
@@ -140,8 +184,17 @@ impl XspiceInstance {
             }
         }
 
+        let param_specs: HashMap<String, &ParamSpec> = model
+            .parameters()
+            .iter()
+            .map(|spec| (canonical_param_key(&spec.name), spec))
+            .collect();
+
         // Override with instance parameters
         for (name, value) in params {
+            if let Some(spec) = param_specs.get(&canonical_param_key(name)) {
+                validate_numeric_param(spec, *value)?;
+            }
             context.set_param(name, *value);
         }
         for (name, value) in string_params {
@@ -798,6 +851,63 @@ mod tests {
             &[],
         )
         .expect("panic-model instance should construct")
+    }
+
+    fn model_with_params(params: Vec<ParamSpec>) -> PanicModel {
+        let mut model = PanicModel::new();
+        model.params = params;
+        model
+    }
+
+    #[test]
+    fn instance_rejects_out_of_range_known_numeric_parameter() {
+        let model = model_with_params(vec![ParamSpec::integer("ic", 2).with_range(0.0, 2.0)]);
+        let err = XspiceInstance::new(
+            "Aparam",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[("ic".to_string(), 3.0)],
+            &[],
+        )
+        .expect_err("known integer parameter outside its range must be rejected");
+
+        assert!(matches!(
+            err,
+            CmError::InvalidParameter { ref name, .. } if name == "ic"
+        ));
+    }
+
+    #[test]
+    fn instance_rejects_fractional_known_integer_parameter() {
+        let model = model_with_params(vec![ParamSpec::integer("select_value", 1)]);
+        let err = XspiceInstance::new(
+            "Aparam",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[("select_value".to_string(), 1.5)],
+            &[],
+        )
+        .expect_err("known integer parameter must not accept fractional values");
+
+        assert!(matches!(
+            err,
+            CmError::InvalidParameter { ref name, .. } if name == "select_value"
+        ));
+    }
+
+    #[test]
+    fn instance_preserves_unknown_numeric_parameters_for_compatibility() {
+        let model = PanicModel::new();
+        let instance = XspiceInstance::new(
+            "Aparam",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[("vendor_extra".to_string(), -1.25)],
+            &[],
+        )
+        .expect("unknown compatibility parameters should still be stored");
+
+        assert_eq!(instance.param("vendor_extra"), -1.25);
     }
 
     fn assert_evaluation_error(result: CmResult<()>, expected: &str) {
