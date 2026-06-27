@@ -3095,7 +3095,7 @@ impl Instance {
                 s.store_scalar(784, 100.0);
                 s.store_div(785, 783, 784);
                 s.store_add_scaled_inputs3(786, s.ad_value(53), 1.0, s.ad_value(73), 1.0, A::add_scaled_product(s.ad_value(339), 1.0, s.ad_value(392), s.ad_value(785), 1.0), -1.0);
-                s.store_sub_from_scalar_ad(787, 1.0, A::div(s.ad_value(786), s.ad_value(391)));
+                s.store_sub_from_scalar_div_indices(787, 1.0, 786, 391);
             }
             let (assign9680_body5_e10257,) = {
     if ((s.b[775] && s.b[776]) && (!s.b[799])) {

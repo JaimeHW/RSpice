@@ -2352,6 +2352,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sub_from_scalar_div_components(&mut self, index: usize, scalar: f64, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT]) {
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale); }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_ad(&mut self, index: usize, scalar: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_sub_from_scalar_div_components(index, scalar, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db);
+    }
+
+    #[inline]
     pub(crate) fn store_sub_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
         let right_value = self.v[right];
         let right_dn = self.dn[right];
@@ -9101,6 +9116,39 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_dn = self.dn[denominator];
         let denominator_db = self.db[denominator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_mixed_ai(&mut self, index: usize, scalar: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize) {
+        let reciprocal = 1.0 / self.v[denominator];
+        let quotient = numerator.value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(numerator.dn[axis] * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(numerator.db[axis] * reciprocal + self.db[denominator][axis] * denominator_derivative_scale); }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_mixed_ia(&mut self, index: usize, scalar: f64, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let reciprocal = 1.0 / denominator.value;
+        let quotient = self.v[numerator] * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(self.dn[numerator][axis] * reciprocal + denominator.dn[axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(self.db[numerator][axis] * reciprocal + denominator.db[axis] * denominator_derivative_scale); }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_indices(&mut self, index: usize, scalar: f64, numerator: usize, denominator: usize) {
+        let reciprocal = 1.0 / self.v[denominator];
+        let quotient = self.v[numerator] * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(self.dn[numerator][axis] * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(self.db[numerator][axis] * reciprocal + self.db[denominator][axis] * denominator_derivative_scale); }
     }
 
 
@@ -12345,6 +12393,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sub_from_scalar_div_components(&mut self, index: usize, scalar: f64, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT]) {
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale); }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_ad(&mut self, index: usize, scalar: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_sub_from_scalar_div_components(index, scalar, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db);
+    }
+
+    #[inline]
     pub(crate) fn store_sub_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
         let right_value = self.v[right];
         let right_dn = self.dn[right];
@@ -19094,6 +19157,39 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_dn = self.dn[denominator];
         let denominator_db = self.db[denominator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_mixed_ai(&mut self, index: usize, scalar: f64, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize) {
+        let reciprocal = 1.0 / self.v[denominator];
+        let quotient = numerator.value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(numerator.dn[axis] * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(numerator.db[axis] * reciprocal + self.db[denominator][axis] * denominator_derivative_scale); }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_mixed_ia(&mut self, index: usize, scalar: f64, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let reciprocal = 1.0 / denominator.value;
+        let quotient = self.v[numerator] * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(self.dn[numerator][axis] * reciprocal + denominator.dn[axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(self.db[numerator][axis] * reciprocal + denominator.db[axis] * denominator_derivative_scale); }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_from_scalar_div_indices(&mut self, index: usize, scalar: f64, numerator: usize, denominator: usize) {
+        let reciprocal = 1.0 / self.v[denominator];
+        let quotient = self.v[numerator] * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = scalar - quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = -(self.dn[numerator][axis] * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = -(self.db[numerator][axis] * reciprocal + self.db[denominator][axis] * denominator_derivative_scale); }
     }
 
 

@@ -2943,7 +2943,7 @@ impl Instance {
                 s.store_scalar(813, 100.0);
                 s.store_div(814, 812, 813);
                 s.store_add_scaled_inputs3(815, s.ad_value(159), 1.0, s.ad_value(175), 1.0, A::add_scaled_product(s.ad_value(395), 1.0, s.ad_value(449), s.ad_value(814), 1.0), -1.0);
-                s.store_sub_from_scalar_ad(816, 1.0, A::div(s.ad_value(815), s.ad_value(448)));
+                s.store_sub_from_scalar_div_indices(816, 1.0, 815, 448);
             }
             let (assign10120_body5_e9186,) = {
     if (((s.b[737] && s.b[804]) && s.b[805]) && (!s.b[829])) {
@@ -5274,7 +5274,7 @@ impl Instance {
             s.store_offset_div_scaled_inputs(412, s.ad_value(414), (-2.0), A::mul(A::mul3(s.ad_value(225), s.ad_value(323), s.ad_value(411)), s.ad_value(411)), 1.0, 1.0);
             s.store_mul_ad_product_lhs(328, A::square(s.ad_value(411)), s.ad_value(411), 411);
             s.store_mul(415, 412, 411);
-            s.store_sub_from_scalar_ad(413, 1.0, A::div(s.ad_value(415), s.ad_value(192)));
+            s.store_sub_from_scalar_div_indices(413, 1.0, 415, 192);
         }
 
         s.b[1055] = ((s.v[413] < 1e-5) && (1e-5 >= 0.0));

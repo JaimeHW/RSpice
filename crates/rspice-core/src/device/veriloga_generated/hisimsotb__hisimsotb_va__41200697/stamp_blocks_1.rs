@@ -4690,7 +4690,7 @@ impl Instance {
                 s.store_scalar(784, 100.0);
                 s.store_div(785, 783, 784);
                 s.store_add_scaled_inputs3(786, s.ad_value(53), 1.0, s.ad_value(73), 1.0, A::add_scaled_product(s.ad_value(339), 1.0, s.ad_value(392), s.ad_value(785), 1.0), -1.0);
-                s.store_sub_from_scalar_ad(787, 1.0, A::div(s.ad_value(786), s.ad_value(391)));
+                s.store_sub_from_scalar_div_indices(787, 1.0, 786, 391);
                 s.store_add_ad_rhs(790, 782, A::div(s.ad_value(786), s.ad_value(796)));
                 s.store_square(788, 790);
                 s.store_sqrt_square_offset(639, 787, ((4.0 * 0.001) * 0.001));

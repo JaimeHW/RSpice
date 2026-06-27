@@ -1013,13 +1013,13 @@ impl Instance {
         }
 
         if (!s.b[1454]) {
-            s.store_sub_from_scalar_ad(811, 1.0, A::div({
+            s.store_sub_from_scalar_div_mixed_ai(811, 1.0, {
                 if (s.v[1087] > s.v[994]) {
                     s.ad_value(994)
                 } else {
                     s.ad_value(1087)
                 }
-            }, s.ad_value(815)));
+            }, 815);
         }
 
         s.b[1455] = (s.v[816] == 0.5);
@@ -1066,13 +1066,13 @@ impl Instance {
         }
 
         if (!s.b[1454]) {
-            s.store_sub_from_scalar_ad(811, 1.0, A::div({
+            s.store_sub_from_scalar_div_mixed_ai(811, 1.0, {
                 if (s.v[1088] > s.v[994]) {
                     s.ad_value(994)
                 } else {
                     s.ad_value(1088)
                 }
-            }, s.ad_value(815)));
+            }, 815);
         }
 
         s.b[1457] = (s.v[816] == 0.5);

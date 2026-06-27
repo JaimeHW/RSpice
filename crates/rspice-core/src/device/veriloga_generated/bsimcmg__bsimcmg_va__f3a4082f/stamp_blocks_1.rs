@@ -3402,7 +3402,7 @@ impl Instance {
         }
 
         if ((((s.b[1523] && s.b[1550]) && s.b[1551]) && s.b[1552]) && (!s.b[1553])) {
-            s.store_sub_from_scalar_ad(1547, 1.0, A::div(s.ad_value(557), s.ad_value(269)));
+            s.store_sub_from_scalar_div_indices(1547, 1.0, 557, 269);
         }
 
         s.b[1556] = (p.p1596 != 1.0);
@@ -3609,7 +3609,7 @@ impl Instance {
         }
 
         if ((((s.b[1523] && s.b[1572]) && s.b[1573]) && s.b[1574]) && (!s.b[1575])) {
-            s.store_sub_from_scalar_ad(1569, 1.0, A::div(s.ad_value(559), s.ad_value(270)));
+            s.store_sub_from_scalar_div_indices(1569, 1.0, 559, 270);
         }
 
         s.b[1578] = (p.p1598 != 1.0);
@@ -3810,7 +3810,7 @@ impl Instance {
         }
 
         if ((((s.b[1523] && s.b[1594]) && s.b[1595]) && s.b[1596]) && (!s.b[1597])) {
-            s.store_sub_from_scalar_ad(1591, 1.0, A::div(s.ad_value(561), s.ad_value(271)));
+            s.store_sub_from_scalar_div_indices(1591, 1.0, 561, 271);
         }
 
         s.b[1600] = (p.p1600 != 1.0);
@@ -4015,7 +4015,7 @@ impl Instance {
         }
 
         if ((((s.b[1523] && s.b[1616]) && s.b[1617]) && s.b[1618]) && (!s.b[1619])) {
-            s.store_sub_from_scalar_ad(1613, 1.0, A::div(s.ad_value(563), s.ad_value(272)));
+            s.store_sub_from_scalar_div_indices(1613, 1.0, 563, 272);
         }
 
         s.b[1622] = (p.p1597 != 1.0);
@@ -4222,7 +4222,7 @@ impl Instance {
         }
 
         if ((((s.b[1523] && s.b[1638]) && s.b[1639]) && s.b[1640]) && (!s.b[1641])) {
-            s.store_sub_from_scalar_ad(1635, 1.0, A::div(s.ad_value(565), s.ad_value(273)));
+            s.store_sub_from_scalar_div_indices(1635, 1.0, 565, 273);
         }
 
         s.b[1644] = (p.p1599 != 1.0);
@@ -4423,7 +4423,7 @@ impl Instance {
         }
 
         if ((((s.b[1523] && s.b[1660]) && s.b[1661]) && s.b[1662]) && (!s.b[1663])) {
-            s.store_sub_from_scalar_ad(1657, 1.0, A::div(s.ad_value(567), s.ad_value(274)));
+            s.store_sub_from_scalar_div_indices(1657, 1.0, 567, 274);
         }
 
         s.b[1666] = (p.p1601 != 1.0);

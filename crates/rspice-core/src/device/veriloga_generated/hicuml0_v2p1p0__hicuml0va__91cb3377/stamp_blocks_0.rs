@@ -1026,7 +1026,7 @@ impl Instance {
 
         s.store_mul(138, 117, 126);
 
-        s.store_sub_from_scalar_ad(147, 1.0, A::div(s.ad_value(142), s.ad_value(126)));
+        s.store_sub_from_scalar_div_indices(147, 1.0, 142, 126);
 
         s.store_sqrt_square_offset(144, 147, p.p60);
 
@@ -2262,7 +2262,7 @@ impl Instance {
 
         s.store_mul(138, 117, 126);
 
-        s.store_sub_from_scalar_ad(147, 1.0, A::div(s.ad_value(142), s.ad_value(126)));
+        s.store_sub_from_scalar_div_indices(147, 1.0, 142, 126);
 
         s.store_sqrt_square_offset(144, 147, p.p60);
 

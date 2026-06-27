@@ -2988,13 +2988,13 @@ impl Instance {
         }
 
         if (!s.b[1785]) {
-            s.store_sub_from_scalar_ad(1147, 1.0, A::div({
+            s.store_sub_from_scalar_div_mixed_ai(1147, 1.0, {
                 if (s.v[1421] > s.v[1329]) {
                     s.ad_value(1329)
                 } else {
                     s.ad_value(1421)
                 }
-            }, s.ad_value(1151)));
+            }, 1151);
         }
 
         s.b[1786] = (p.p173 == 0.5);
@@ -3035,13 +3035,13 @@ impl Instance {
         }
 
         if (!s.b[1785]) {
-            s.store_sub_from_scalar_ad(1147, 1.0, A::div({
+            s.store_sub_from_scalar_div_mixed_ai(1147, 1.0, {
                 if (s.v[1422] > s.v[1329]) {
                     s.ad_value(1329)
                 } else {
                     s.ad_value(1422)
                 }
-            }, s.ad_value(1151)));
+            }, 1151);
         }
 
         s.b[1788] = (p.p173 == 0.5);
