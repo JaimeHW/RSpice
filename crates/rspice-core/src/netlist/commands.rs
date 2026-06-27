@@ -124,6 +124,8 @@ pub fn parse_command(
                 params: model_params,
                 expr_params: Vec::new(),
                 string_params: Vec::new(),
+                real_vector_params: Vec::new(),
+                integer_vector_params: Vec::new(),
             });
         }
         ".PARAM" => {

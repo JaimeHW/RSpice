@@ -58,6 +58,8 @@ pub(super) fn parse_model_definition(
             params: Vec::new(),
             expr_params: Vec::new(),
             string_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            integer_vector_params: Vec::new(),
         });
     }
 
@@ -70,6 +72,8 @@ pub(super) fn parse_model_definition(
             params: model_params.numeric,
             expr_params: model_params.expr,
             string_params: model_params.string,
+            real_vector_params: model_params.real_vector,
+            integer_vector_params: model_params.integer_vector,
         });
     };
 
@@ -106,19 +110,45 @@ pub(super) fn parse_model_definition(
     let mut numeric = base.params.clone();
     let mut expr = base.expr_params.clone();
     let mut string = base.string_params.clone();
+    let mut real_vector = base.real_vector_params.clone();
+    let mut integer_vector = base.integer_vector_params.clone();
     for (key, value) in model_params.numeric {
         numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         numeric.push((key, value));
     }
     for (key, value) in model_params.expr {
         numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         expr.push((key, value));
     }
     for (key, value) in model_params.string {
+        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
         string.push((key, value));
+    }
+    for (key, value) in model_params.real_vector {
+        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        real_vector.push((key, value));
+    }
+    for (key, value) in model_params.integer_vector {
+        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
+        integer_vector.push((key, value));
     }
 
     Ok(ModelDef {
@@ -127,6 +157,8 @@ pub(super) fn parse_model_definition(
         params: numeric,
         expr_params: expr,
         string_params: string,
+        real_vector_params: real_vector,
+        integer_vector_params: integer_vector,
     })
 }
 

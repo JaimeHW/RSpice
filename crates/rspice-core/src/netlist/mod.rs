@@ -672,6 +672,135 @@ mod tests {
     }
 
     #[test]
+    fn model_vector_params_parse_decimal_vectors() {
+        let netlist = Netlist::parse(
+            "xspice vector model params\n\
+             .model lut pwl (x_array=[-1 0 0.5 2] y_array=[0 -2 4 8])\n\
+             .end\n",
+        )
+        .expect("model vector parameters parse");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("lut"))
+            .expect("model exists");
+        let x_array = model
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("x_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("x_array exists");
+        let y_array = model
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("y_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("y_array exists");
+
+        assert_eq!(x_array, &[-1.0, 0.0, 0.5, 2.0]);
+        assert_eq!(y_array, &[0.0, -2.0, 4.0, 8.0]);
+    }
+
+    #[test]
+    fn model_vector_params_store_integer_literals_as_numeric_vectors() {
+        let netlist = Netlist::parse(
+            "xspice integer-looking vector model params\n\
+             .model lut d_lut (table_values=[0 1 1 0])\n\
+             .end\n",
+        )
+        .expect("integer-looking vector parameters parse as numeric vectors");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("lut"))
+            .expect("model exists");
+        let table_values = model
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("table_values"))
+            .map(|(_, values)| values.as_slice())
+            .expect("table_values exists");
+
+        assert_eq!(table_values, &[0.0, 1.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn model_vector_params_accept_commas_signed_values_and_suffixes() {
+        let netlist = Netlist::parse(
+            "xspice vector model params with punctuation\n\
+             .param scale=2\n\
+             .model lut pwl (points=[-.14, 1u, -2, scale])\n\
+             .end\n",
+        )
+        .expect("punctuated vector parameters parse");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("lut"))
+            .expect("model exists");
+        let points = model
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("points"))
+            .map(|(_, values)| values.as_slice())
+            .expect("points exists");
+
+        assert_eq!(points, &[-0.14, 1e-6, -2.0, 2.0]);
+    }
+
+    #[test]
+    fn model_vector_params_reject_missing_closing_bracket() {
+        let err = Netlist::parse(
+            "unterminated xspice vector model param\n\
+             .model lut pwl (points=[1 2 3)\n\
+             .end\n",
+        )
+        .expect_err("unterminated vector must be rejected");
+
+        let message = err.to_string();
+        let lowered = message.to_ascii_lowercase();
+        assert!(
+            lowered.contains("points") && message.contains("]'"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn ako_model_vector_params_inherit_and_override_by_name() {
+        let netlist = Netlist::parse(
+            "ako vector inheritance\n\
+             .model base pwl (x_array=[0 1 2] y_array=[0 10 20])\n\
+             .model child ako:base pwl (y_array=[0 5 15])\n\
+             .end\n",
+        )
+        .expect("AKO vector inheritance parses");
+
+        let child = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("child"))
+            .expect("child model exists");
+        let x_array = child
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("x_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("x_array inherited");
+        let y_array = child
+            .real_vector_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("y_array"))
+            .map(|(_, values)| values.as_slice())
+            .expect("y_array overridden");
+
+        assert_eq!(x_array, &[0.0, 1.0, 2.0]);
+        assert_eq!(y_array, &[0.0, 5.0, 15.0]);
+    }
+
+    #[test]
     fn mosfet_off_flag_stays_instance_parameter() {
         let netlist = Netlist::parse(
             "mos off\n\
@@ -1628,6 +1757,33 @@ mod tests {
                 && *ac_magnitude == 2.0
                 && matches!(transient.as_ref(), SourceSpec::Pulse { .. })
         ));
+    }
+
+    #[test]
+    fn bare_source_dc_levels_accept_spice_unit_suffixes() {
+        let netlist = Netlist::parse(
+            "source unit suffixes\n\
+             V1 1 0 5V\n\
+             I1 0 1 10U\n\
+             V2 2 0 2K\n\
+             R1 1 0 1k\n\
+             R2 2 0 1k\n\
+             .end\n",
+        )
+        .expect("bare source DC levels with SPICE unit suffixes should parse");
+
+        let sources = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => Some(spec),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(matches!(sources[0], SourceSpec::Dc(value) if (*value - 5.0).abs() < 1e-12));
+        assert!(matches!(sources[1], SourceSpec::Dc(value) if (*value - 10e-6).abs() < 1e-18));
+        assert!(matches!(sources[2], SourceSpec::Dc(value) if (*value - 2000.0).abs() < 1e-9));
     }
 
     #[test]

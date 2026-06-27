@@ -116,6 +116,8 @@ pub(super) struct ParsedModelParams {
     pub(super) numeric: Vec<(String, Value)>,
     pub(super) expr: Vec<(String, String)>,
     pub(super) string: Vec<(String, String)>,
+    pub(super) real_vector: Vec<(String, Vec<Value>)>,
+    pub(super) integer_vector: Vec<(String, Vec<i64>)>,
 }
 
 pub(super) fn parse_model_params(
@@ -126,6 +128,8 @@ pub(super) fn parse_model_params(
     let mut numeric_params = Vec::new();
     let mut expr_params = Vec::new();
     let mut string_params = Vec::new();
+    let mut real_vector_params = Vec::new();
+    let integer_vector_params = Vec::new();
 
     let opened_paren = stream.consume(&TokenKind::LParen);
 
@@ -139,6 +143,8 @@ pub(super) fn parse_model_params(
                     numeric: numeric_params,
                     expr: expr_params,
                     string: string_params,
+                    real_vector: real_vector_params,
+                    integer_vector: integer_vector_params,
                 });
             }
             TokenKind::RParen => {
@@ -183,6 +189,10 @@ pub(super) fn parse_model_params(
                         } else {
                             expr_params.push((name, expr));
                         }
+                    }
+                    TokenKind::LBracket => {
+                        let values = parse_model_real_vector(stream, line_num, &name, params)?;
+                        real_vector_params.push((name, values));
                     }
                     _ => {
                         if stream.consume(&TokenKind::LParen) {
@@ -229,7 +239,69 @@ pub(super) fn parse_model_params(
         numeric: numeric_params,
         expr: expr_params,
         string: string_params,
+        real_vector: real_vector_params,
+        integer_vector: integer_vector_params,
     })
+}
+
+fn parse_model_real_vector(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+    params: &ParamContext,
+) -> Result<Vec<Value>, ParseError> {
+    if !stream.consume(&TokenKind::LBracket) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected '[' for model parameter vector '{}'", name),
+        });
+    }
+
+    let mut values = Vec::new();
+    loop {
+        skip_commas(stream);
+
+        match &stream.peek().kind {
+            TokenKind::RBracket => {
+                stream.advance();
+                if values.is_empty() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Model parameter vector '{}' cannot be empty", name),
+                    });
+                }
+                return Ok(values);
+            }
+            TokenKind::RParen | TokenKind::Newline | TokenKind::Eof => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Model parameter vector '{}' is missing ']'", name),
+                });
+            }
+            _ => {}
+        }
+
+        let Some(value) = try_signed_model_value(stream, params) else {
+            return Err(ParseError::Syntax {
+                line: stream.line(),
+                message: format!(
+                    "Expected numeric value in model parameter vector '{}', found {}",
+                    name,
+                    stream.peek().kind
+                ),
+            });
+        };
+
+        if !value.is_finite() {
+            return Err(ParseError::InvalidValue(format!(
+                "line {}: model parameter vector '{}' contains non-finite value {}",
+                stream.line(),
+                name,
+                value
+            )));
+        }
+        values.push(value);
+    }
 }
 
 fn try_dotted_model_version(stream: &mut TokenStream) -> Option<String> {
