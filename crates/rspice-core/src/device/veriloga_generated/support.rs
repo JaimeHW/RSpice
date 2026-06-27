@@ -2091,6 +2091,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs(&mut self, index: usize, scalar: f64, inner_scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, rhs_input_scale: f64, rhs_inner_offset: f64, rhs_output_scale: f64, rhs_offset: f64, outer_offset: f64) {
+        let value_raw = value.value;
+        let left_value = inner_scalar - value_raw;
+        let rhs_affine_value = left_value * rhs_input_scale + rhs_inner_offset;
+        let right_raw = left_value * rhs_affine_value * rhs_output_scale + rhs_offset;
+        let denominator = left_value * right_raw + outer_offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        let rhs_derivative_scale = -((2.0 * rhs_input_scale * left_value + rhs_inner_offset) * rhs_output_scale);
+        let denominator_derivative_scale = (-right_raw + left_value * rhs_derivative_scale) * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_components(&mut self, index: usize, scalar: f64, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_offset: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], output_offset: f64) {
         let offset_left = left_raw + left_offset;
         let denominator = offset_left * right_raw + output_offset;
@@ -14333,6 +14350,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = quotient;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = value_dn[axis] * denominator_derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = value_db[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs(&mut self, index: usize, scalar: f64, inner_scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, rhs_input_scale: f64, rhs_inner_offset: f64, rhs_output_scale: f64, rhs_offset: f64, outer_offset: f64) {
+        let value_raw = value.value;
+        let left_value = inner_scalar - value_raw;
+        let rhs_affine_value = left_value * rhs_input_scale + rhs_inner_offset;
+        let right_raw = left_value * rhs_affine_value * rhs_output_scale + rhs_offset;
+        let denominator = left_value * right_raw + outer_offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        let rhs_derivative_scale = -((2.0 * rhs_input_scale * left_value + rhs_inner_offset) * rhs_output_scale);
+        let denominator_derivative_scale = (-right_raw + left_value * rhs_derivative_scale) * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * denominator_derivative_scale; }
     }
 
     #[inline]
