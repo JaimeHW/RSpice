@@ -4132,36 +4132,52 @@ fn rust_backend_directly_stores_affine_sum_expression_helpers() {
 
     assert!(
         support.contains(
-            "fn store_add_scaled_inputs3(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64)"
+            "fn store_add_scaled_inputs3_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64)"
         ),
         "{support}"
     );
     assert!(
         support.contains(
-            "fn store_add_scaled_inputs3_offset(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, offset: f64)"
+            "fn store_add_scaled_inputs3_offset_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, offset: f64)"
         ),
         "{support}"
     );
     assert!(
         support.contains(
-            "fn store_add_scaled_inputs4(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64)"
+            "fn store_add_scaled_inputs4_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64)"
         ),
         "{support}"
     );
     assert!(
         support.contains(
-            "fn store_add_scaled_inputs4_offset(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, fourth: AdValue<NODE_COUNT, BRANCH_COUNT>, fourth_scale: f64, offset: f64)"
+            "fn store_add_scaled_inputs4_offset_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, offset: f64)"
         ),
         "{support}"
     );
-    assert!(stamp.contains("s.store_add_scaled_inputs3("), "{stamp}");
     assert!(
-        stamp.contains("s.store_add_scaled_inputs3_offset("),
+        stamp.contains("s.store_add_scaled_inputs3_indices("),
         "{stamp}"
     );
-    assert!(stamp.contains("s.store_add_scaled_inputs4("), "{stamp}");
     assert!(
-        stamp.contains("s.store_add_scaled_inputs4_offset("),
+        stamp.contains("s.store_add_scaled_inputs3_offset_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs4_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_inputs4_offset_indices("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_add_scaled_inputs3("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_add_scaled_inputs3_offset("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_add_scaled_inputs4("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_add_scaled_inputs4_offset("),
         "{stamp}"
     );
     assert!(
@@ -5478,13 +5494,17 @@ fn rust_backend_fuses_expression_scaled_add_sub_chains() {
     assert!(
         stamp.contains("A::scale_offset(")
             || stamp.contains("A::add_scaled_inputs3_offset(")
-            || stamp.contains("s.store_add_scaled_inputs3_offset("),
+            || stamp.contains("s.store_add_scaled_inputs3_offset(")
+            || stamp.contains("s.store_add_scaled_inputs3_offset_indices(")
+            || stamp.contains("s.store_add_scaled_inputs3_offset_mixed_"),
         "{stamp}"
     );
     assert!(
         stamp.contains("A::scaled_offset(")
             || stamp.contains("A::add_scaled_inputs3_offset(")
-            || stamp.contains("s.store_add_scaled_inputs3_offset("),
+            || stamp.contains("s.store_add_scaled_inputs3_offset(")
+            || stamp.contains("s.store_add_scaled_inputs3_offset_indices(")
+            || stamp.contains("s.store_add_scaled_inputs3_offset_mixed_"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::scale(A::add("), "{stamp}");
@@ -6999,15 +7019,25 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{support}"
     );
     assert!(
+        support.contains(
+            "pub(crate) fn store_add_scaled_inputs4_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64)"
+        ),
+        "{support}"
+    );
+    assert!(
         stamp.contains("s.store_mul_ad(2, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_add_scaled_inputs4(3, s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), 1.0, s.ad_value(1), (-1.0));"),
+        stamp.contains("s.store_add_scaled_inputs4_indices(3, 0, 1.0, 1, 1.0, 0, 1.0, 1, (-1.0));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_add_scaled_inputs4(4, s.ad_value(0), 1.0, s.ad_value(1), 1.0, s.ad_value(0), -1.0, s.ad_value(1), 1.0);"),
+        stamp.contains("s.store_add_scaled_inputs4_indices(4, 0, 1.0, 1, 1.0, 0, -1.0, 1, 1.0);"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_inputs4(3, s.ad_value"),
         "{stamp}"
     );
     assert!(
