@@ -1249,14 +1249,14 @@ impl Instance {
 
         s.store_div_scaled_value_offset_denominator(163, s.ad_value(162), 1.0, A::sqrt(A::offset(s.ad_value(162), 1.0)), 1.0, 1.0);
 
-        s.store_div_scaled_product_offset_denominator(160, s.ad_value(43), A::offset(s.ad_value(254), (-1.0)), 2.0, A::sqrt(A::offset(A::mul(A::div_scaled_inputs(s.ad_value(43), 4.0, s.ad_value(37), 1.0), s.ad_value(254)), 1.0)), 1.0, 1.0);
+        s.store_div_scaled_product_offset_denominator(160, s.ad_value(43), A::offset(s.ad_value(254), (-1.0)), 2.0, A::sqrt_product_offset(A::div_scaled_inputs(s.ad_value(43), 4.0, s.ad_value(37), 1.0), s.ad_value(254), 1.0), 1.0, 1.0);
 
         s.b[523] = ((p.p5 > 0.0) && (p.p32 > 0.0));
         s.v[523] = if s.b[523] { 1.0 } else { 0.0 };
 
         if s.b[523] {
             s.store_scale(160, 160, s.v[153]);
-            s.store_div_scaled_product_offset_denominator(167, s.ad_value(43), A::offset(s.ad_value(255), (-1.0)), (p.p32 * 2.0), A::sqrt(A::offset(A::mul(A::div_scaled_inputs(s.ad_value(43), 4.0, s.ad_value(37), 1.0), s.ad_value(255)), 1.0)), 1.0, 1.0);
+            s.store_div_scaled_product_offset_denominator(167, s.ad_value(43), A::offset(s.ad_value(255), (-1.0)), (p.p32 * 2.0), A::sqrt_product_offset(A::div_scaled_inputs(s.ad_value(43), 4.0, s.ad_value(37), 1.0), s.ad_value(255), 1.0), 1.0, 1.0);
             s.store_scalar(168, 0.0);
         }
 
@@ -2898,7 +2898,7 @@ impl Instance {
         s.v[523] = if s.b[523] { 1.0 } else { 0.0 };
 
         if s.b[523] {
-            s.store_div_scaled_product_offset_denominator(167, s.ad_value(43), A::offset(s.ad_value(255), (-1.0)), (p.p32 * 2.0), A::sqrt(A::offset(A::mul(A::div_scaled_inputs(s.ad_value(43), 4.0, s.ad_value(37), 1.0), s.ad_value(255)), 1.0)), 1.0, 1.0);
+            s.store_div_scaled_product_offset_denominator(167, s.ad_value(43), A::offset(s.ad_value(255), (-1.0)), (p.p32 * 2.0), A::sqrt_product_offset(A::div_scaled_inputs(s.ad_value(43), 4.0, s.ad_value(37), 1.0), s.ad_value(255), 1.0), 1.0, 1.0);
             s.store_scalar(168, 0.0);
         }
 

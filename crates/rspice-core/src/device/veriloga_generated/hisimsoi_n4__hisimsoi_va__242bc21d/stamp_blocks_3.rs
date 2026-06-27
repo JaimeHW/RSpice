@@ -2349,7 +2349,7 @@ impl Instance {
         }
 
         if ((s.b[1220] && (!s.b[1281])) && (!s.b[1282])) {
-            s.store_mul_ad_affine_product_rhs(437, 1245, s.ad_value(1246), A::sqrt(A::offset(A::mul_scaled_lhs(s.ad_value(1246), 0.3333333333333333, A::scale_offset(s.ad_value(1246), 0.25, 1.0)), 1.0)), (-0.7071067811865475), 0.0);
+            s.store_mul_ad_affine_product_rhs(437, 1245, s.ad_value(1246), A::sqrt_scaled_lhs_product_offset(s.ad_value(1246), 0.3333333333333333, A::scale_offset(s.ad_value(1246), 0.25, 1.0), 1.0), (-0.7071067811865475), 0.0);
         }
 
         if s.b[1220] {
