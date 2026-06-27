@@ -3777,6 +3777,28 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_negated_binary_inputs_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_neg_add"), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(100, AdValue::neg(AdValue::add(scratch.ad_value(2), scratch.ad_value(3))));
+    scratch.store_ad_value(101, AdValue::neg(AdValue::sub(scratch.ad_value(4), scratch.ad_value(5))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(compact.contains("s.store_neg_add(100, 2, 3);"), "{compact}");
+        assert!(compact.contains("s.store_sub(101, 5, 4);"), "{compact}");
+        assert!(!compact.contains("s.store_neg_ad("), "{compact}");
+        assert!(!compact.contains("A::add(s.ad_value("), "{compact}");
+        assert!(!compact.contains("A::sub(s.ad_value("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sqrt_shifted_square_offset_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -14233,6 +14255,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_neg_add(&mut self, index: usize, left: usize, right: usize) {",
+        "        let value = -(self.values[left] + self.values[right]);",
+        "        self.store_unary_add_scaled(index, left, right, value, -1.0);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_powf_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: f64) {",
         "        let base = self.values[source] * input_scale;",
         "        let value = base.powf(exponent);",
@@ -21517,6 +21545,10 @@ fn compact_sub_div_same_denominator_store_helper_call(
 }
 
 fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    if let Some(line) = compact_negated_binary_input_store_helper_line(target_index, value) {
+        return Some(line);
+    }
+
     if let Some(args) = compact_ad_call_args(value, "pow") {
         if args.len() != 2 {
             return None;
@@ -21676,6 +21708,30 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         return Some(format!(
             "scratch.store_powf_ad({target_index}, {}, {});",
             args[0], args[1]
+        ));
+    }
+
+    None
+}
+
+fn compact_negated_binary_input_store_helper_line(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "neg")?;
+    if args.len() != 1 {
+        return None;
+    }
+
+    if let Some((left, right)) = compact_binary_scratch_ad_indices(args[0], "add") {
+        return Some(format!(
+            "scratch.store_neg_add({target_index}, {left}, {right});"
+        ));
+    }
+
+    if let Some((left, right)) = compact_binary_scratch_ad_indices(args[0], "sub") {
+        return Some(format!(
+            "scratch.store_sub({target_index}, {right}, {left});"
         ));
     }
 
