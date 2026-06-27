@@ -2240,6 +2240,40 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_sqrt_add_sub_scaled_square_input_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sqrt_add_scaled_square_input"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(17, AdValue::sqrt(AdValue::add_scaled_inputs(AdValue::square(scratch.ad_value(2)), params.square_scale, scratch.ad_value(3), params.input_scale)));
+    scratch.store_ad_value(18, AdValue::sqrt(AdValue::sub_scaled_inputs(AdValue::square(scratch.ad_value(4)), params.square_scale, scratch.ad_value(5), params.input_scale)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_sqrt_add_scaled_square_input(17, 2, p.square_scale, 3, p.input_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_sqrt_add_scaled_square_input(18, 4, p.square_scale, 5, (-p.input_scale));"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_sqrt_ad("), "{compact}");
+        assert!(!compact.contains("A::square("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_div_scaled_product_sqrt_square_sum_denominator_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -9707,6 +9741,22 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_scale + add_node_derivatives[axis] * add_scale; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_scale + add_branch_derivatives[axis] * add_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_sqrt_add_scaled_square_input(&mut self, index: usize, square_source: usize, square_scale: f64, input: usize, input_scale: f64) {",
+    "        let square_value = self.values[square_source];",
+    "        let input_value = self.values[input];",
+    "        let value = (square_value * square_value * square_scale + input_value * input_scale).sqrt();",
+    "        let square_derivative_scale = square_value * square_scale / value;",
+    "        let input_derivative_scale = input_scale / (2.0 * value);",
+    "        let square_node_derivatives = self.node_derivatives[square_source];",
+    "        let input_node_derivatives = self.node_derivatives[input];",
+    "        let square_branch_derivatives = self.branch_derivatives[square_source];",
+    "        let input_branch_derivatives = self.branch_derivatives[input];",
+    "        self.values[index] = value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_derivative_scale + input_node_derivatives[axis] * input_derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_derivative_scale + input_branch_derivatives[axis] * input_derivative_scale; }",
     "    }",
     "",
     "    #[inline]",
@@ -20247,7 +20297,64 @@ fn compact_sqrt_square_and_affine_store_helper_call(
         }
     }
 
+    if let Some(add_scaled_args) = compact_ad_call_args(inner, "add_scaled_inputs") {
+        return compact_sqrt_add_sub_scaled_square_input_store_helper_line(
+            target_index,
+            &add_scaled_args,
+            false,
+        );
+    }
+
+    if let Some(sub_scaled_args) = compact_ad_call_args(inner, "sub_scaled_inputs") {
+        return compact_sqrt_add_sub_scaled_square_input_store_helper_line(
+            target_index,
+            &sub_scaled_args,
+            true,
+        );
+    }
+
     None
+}
+
+fn compact_sqrt_add_sub_scaled_square_input_store_helper_line(
+    target_index: usize,
+    args: &[&str],
+    subtract_rhs: bool,
+) -> Option<String> {
+    if args.len() != 4 {
+        return None;
+    }
+
+    let left_square = compact_square_scratch_arg(args[0]);
+    let right_square = compact_square_scratch_arg(args[2]);
+
+    match (left_square, right_square) {
+        (Some(square_source), None) => {
+            let input = compact_scratch_ad_value_index(args[2])?;
+            let input_scale = if subtract_rhs {
+                compact_scalar_negate(args[3])
+            } else {
+                args[3].to_string()
+            };
+            Some(format!(
+                "scratch.store_sqrt_add_scaled_square_input({target_index}, {square_source}, {}, {input}, {input_scale});",
+                args[1]
+            ))
+        }
+        (None, Some(square_source)) => {
+            let input = compact_scratch_ad_value_index(args[0])?;
+            let square_scale = if subtract_rhs {
+                compact_scalar_negate(args[3])
+            } else {
+                args[3].to_string()
+            };
+            Some(format!(
+                "scratch.store_sqrt_add_scaled_square_input({target_index}, {square_source}, {square_scale}, {input}, {});",
+                args[1]
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn compact_square_scratch_arg(value: &str) -> Option<usize> {
