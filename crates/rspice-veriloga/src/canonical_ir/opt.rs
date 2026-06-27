@@ -344,6 +344,10 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn push_value(&mut self, value_type: OptValueType, kind: OptValueKind) -> ValueId {
+        if let Some(value) = self.simplified_existing_value(&kind) {
+            return value;
+        }
+
         let key = OptValueKey::from_kind(&kind);
         if let Some(value) = self.value_keys.get(&key) {
             return *value;
@@ -358,6 +362,38 @@ impl<'a> ScalarGraphBuilder<'a> {
         });
         self.value_keys.insert(key, id);
         id
+    }
+
+    fn simplified_existing_value(&self, kind: &OptValueKind) -> Option<ValueId> {
+        match kind {
+            OptValueKind::Unary {
+                op: OptUnaryOp::Pos,
+                input,
+            } => Some(*input),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Mul,
+                left,
+                right,
+            } if self.is_real_constant(*left, 1.0) => Some(*right),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Mul,
+                left,
+                right,
+            } if self.is_real_constant(*right, 1.0) => Some(*left),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Div,
+                left,
+                right,
+            } if self.is_real_constant(*right, 1.0) => Some(*left),
+            _ => None,
+        }
+    }
+
+    fn is_real_constant(&self, value: ValueId, expected: f64) -> bool {
+        matches!(
+            self.values.get(usize::from(value)).map(|value| &value.kind),
+            Some(OptValueKind::RealConstant(actual)) if actual.to_bits() == expected.to_bits()
+        )
     }
 
     fn add_sparse_derivatives(&mut self) {

@@ -216,6 +216,16 @@ endmodule
 "#
 }
 
+fn multiply_by_one_source() -> &'static str {
+    r#"
+module mul_one(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) * 1.0;
+endmodule
+"#
+}
+
 fn named_branch_potential_source() -> &'static str {
     r#"
 module branch_potential(p, n);
@@ -758,6 +768,36 @@ fn opt_lowering_reuses_common_scalar_values_across_equations() {
         .count();
 
     assert_eq!(mid_potential_count, 1);
+}
+
+#[test]
+fn opt_lowering_strength_reduces_multiply_by_one() {
+    let (_, _, _, opt) = lower_fixture_parts(multiply_by_one_source(), "mul_one");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+
+    assert_eq!(
+        newton.ops.first(),
+        Some(&OptOp::ComputeValue {
+            value: ValueId::new(2)
+        })
+    );
+    assert!(
+        opt.values.iter().all(|value| {
+            !matches!(
+                value.kind,
+                OptValueKind::Binary {
+                    op: OptBinaryOp::Mul,
+                    ..
+                }
+            )
+        }),
+        "multiply by one should not remain in scalar OptIR: {:?}",
+        opt.values
+    );
 }
 
 #[test]
