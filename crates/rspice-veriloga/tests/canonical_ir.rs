@@ -13,8 +13,9 @@ use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DerivativeLane, DerivativeLaneKind,
     DiagnosticSeverity, HirAnalogOperator, HirContributionKind, HirExprKind, HirLaplaceKind,
     HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic, MirAnalysisDomain,
-    MirEquationKind, MirModel, MirStateSlot, OptBinaryOp, OptDerivative, OptModel, OptOp,
-    OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType, SourceSpanRef, StableDigest,
+    MirEquationKind, MirModel, MirStateSlot, OptBinaryOp, OptDerivative, OptEvalInputs, OptModel,
+    OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType, SourceSpanRef,
+    StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -879,6 +880,265 @@ fn opt_validation_rejects_schedule_value_out_of_range() {
     );
 
     assert_opt_validation_message(&opt, "ComputeValue ValueId(42) is out of range");
+}
+
+#[test]
+fn opt_reference_evaluator_evaluates_scalar_value_graph() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(1),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(2),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Sub,
+                left: ValueId::new(0),
+                right: ValueId::new(1),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(3),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Parameter {
+                parameter: ParamId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(4),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Div,
+                left: ValueId::new(2),
+                right: ValueId::new(3),
+            },
+            derivatives: Vec::new(),
+        },
+    ];
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![1000.0],
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate OptIR");
+
+    assert_eq!(snapshot.real(ValueId::new(4)).expect("real value"), 0.003);
+}
+
+#[test]
+fn opt_reference_evaluator_exposes_sparse_derivative_values() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(1.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: vec![OptDerivative {
+                lane: DerivativeLane::node(NodeId::new(0)),
+                value: ValueId::new(0),
+            }],
+        },
+    ];
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![1000.0],
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate OptIR");
+
+    assert_eq!(
+        snapshot.derivative(ValueId::new(1), DerivativeLane::node(NodeId::new(0))),
+        Some(1.0)
+    );
+    assert_eq!(
+        snapshot.derivative(ValueId::new(1), DerivativeLane::node(NodeId::new(1))),
+        None
+    );
+}
+
+#[test]
+fn opt_reference_evaluator_evaluates_diode_like_expression() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.parameter_count = 2;
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Parameter {
+                parameter: ParamId::new(1),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(2),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Div,
+                left: ValueId::new(0),
+                right: ValueId::new(1),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(3),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Unary {
+                op: OptUnaryOp::Exp,
+                input: ValueId::new(2),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(4),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(1.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(5),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Sub,
+                left: ValueId::new(3),
+                right: ValueId::new(4),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(6),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Parameter {
+                parameter: ParamId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(7),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Mul,
+                left: ValueId::new(6),
+                right: ValueId::new(5),
+            },
+            derivatives: Vec::new(),
+        },
+    ];
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![1.0e-12, 0.026],
+            node_potentials: vec![0.026, 0.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate OptIR");
+
+    let expected = 1.0e-12 * (std::f64::consts::E - 1.0);
+    let actual = snapshot.real(ValueId::new(7)).expect("diode current");
+    assert!((actual - expected).abs() < 1.0e-24);
+}
+
+#[test]
+fn opt_reference_evaluator_evaluates_conditional_select() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(0.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(2),
+            value_type: OptValueType::Boolean,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Gt,
+                left: ValueId::new(0),
+                right: ValueId::new(1),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(3),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(10.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(4),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(-10.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(5),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Select {
+                condition: ValueId::new(2),
+                then_value: ValueId::new(3),
+                else_value: ValueId::new(4),
+            },
+            derivatives: Vec::new(),
+        },
+    ];
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![1000.0],
+            node_potentials: vec![5.0, 0.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate OptIR");
+
+    assert_eq!(snapshot.boolean(ValueId::new(2)), Some(true));
+    assert_eq!(snapshot.real(ValueId::new(5)), Some(10.0));
 }
 
 #[test]

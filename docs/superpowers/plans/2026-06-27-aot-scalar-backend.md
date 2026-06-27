@@ -35,12 +35,12 @@
 
 ## Phase 2: Scalar Reference Evaluator
 
-- [ ] Add a reference evaluator module under `crates/rspice-veriloga/src/canonical_ir/opt_eval.rs` or equivalent.
+- [x] Add a reference evaluator module under `crates/rspice-veriloga/src/canonical_ir/opt_eval.rs` or equivalent.
   - Evaluate scalar values from constants, parameters, branch potentials, unary ops, binary ops, comparisons, and selects.
   - Evaluate derivative lanes from explicit derivative graph operations.
   - Keep evaluator straightforward and unoptimized; it is a correctness oracle, not the production runtime.
 
-- [ ] Add tests comparing evaluator output against direct arithmetic for simple Verilog-A expression fixtures.
+- [x] Add tests comparing evaluator output against direct arithmetic for simple Verilog-A expression fixtures.
   - Resistor current: `V(p,n) / r`.
   - Diode-like expression: `is * (limexp(vd / vt) - 1)`.
   - Conditional expression with branch split.

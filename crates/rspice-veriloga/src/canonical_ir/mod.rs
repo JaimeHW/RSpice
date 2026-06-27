@@ -11,6 +11,7 @@ pub mod ids;
 pub mod metadata;
 pub mod mir;
 pub mod opt;
+pub mod opt_eval;
 
 pub use artifact::CanonicalIrArtifact;
 pub use diagnostic::{
@@ -35,4 +36,8 @@ pub use mir::{
 pub use opt::{
     DerivativeLane, DerivativeLaneKind, InvalidationClass, OptBinaryOp, OptDerivative, OptModel,
     OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType,
+};
+pub use opt_eval::{
+    OptEvalError, OptEvalInputs, OptEvalSnapshot, OptEvalValue, OptEvaluatedDerivative,
+    evaluate_opt_model,
 };
