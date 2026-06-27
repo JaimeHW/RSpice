@@ -251,6 +251,10 @@ pub struct ParamSpec {
     pub default: Value,
     /// Default string value for string-typed parameters
     pub string_default: Option<String>,
+    /// Default real-vector value for vector-typed parameters
+    pub real_vector_default: Option<Vec<Value>>,
+    /// Default integer-vector value for vector-typed parameters
+    pub integer_vector_default: Option<Vec<i64>>,
     /// Minimum value (for numeric types)
     pub min: Option<Value>,
     /// Maximum value (for numeric types)
@@ -269,6 +273,8 @@ impl ParamSpec {
             param_type: ParamType::Real,
             default,
             string_default: None,
+            real_vector_default: None,
+            integer_vector_default: None,
             min: None,
             max: None,
             required: false,
@@ -283,6 +289,8 @@ impl ParamSpec {
             param_type: ParamType::Integer,
             default: default as f64,
             string_default: None,
+            real_vector_default: None,
+            integer_vector_default: None,
             min: None,
             max: None,
             required: false,
@@ -297,6 +305,8 @@ impl ParamSpec {
             param_type: ParamType::Boolean,
             default: if default { 1.0 } else { 0.0 },
             string_default: None,
+            real_vector_default: None,
+            integer_vector_default: None,
             min: None,
             max: None,
             required: false,
@@ -311,6 +321,40 @@ impl ParamSpec {
             param_type: ParamType::String,
             default: 0.0,
             string_default: Some(default.into()),
+            real_vector_default: None,
+            integer_vector_default: None,
+            min: None,
+            max: None,
+            required: false,
+            description: String::new(),
+        }
+    }
+
+    /// Create a real-vector parameter with default
+    pub fn real_vector(name: impl Into<String>, default: Vec<Value>) -> Self {
+        Self {
+            name: name.into(),
+            param_type: ParamType::RealVector,
+            default: 0.0,
+            string_default: None,
+            real_vector_default: Some(default),
+            integer_vector_default: None,
+            min: None,
+            max: None,
+            required: false,
+            description: String::new(),
+        }
+    }
+
+    /// Create an integer-vector parameter with default
+    pub fn integer_vector(name: impl Into<String>, default: Vec<i64>) -> Self {
+        Self {
+            name: name.into(),
+            param_type: ParamType::IntegerVector,
+            default: 0.0,
+            string_default: None,
+            real_vector_default: None,
+            integer_vector_default: Some(default),
             min: None,
             max: None,
             required: false,

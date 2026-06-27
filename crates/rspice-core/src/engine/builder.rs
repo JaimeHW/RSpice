@@ -2301,6 +2301,8 @@ impl Engine {
                         connections,
                         &resolved_model.numeric_params,
                         &resolved_model.string_params,
+                        &resolved_model.real_vector_params,
+                        &resolved_model.integer_vector_params,
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(

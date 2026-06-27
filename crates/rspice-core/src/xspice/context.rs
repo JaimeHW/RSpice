@@ -260,6 +260,10 @@ pub struct CmContext {
     params: HashMap<String, Value>,
     /// String parameters (paths, etc.)
     string_params: HashMap<String, String>,
+    /// Real-vector parameters by name
+    real_vector_params: HashMap<String, Vec<Value>>,
+    /// Integer-vector parameters by name
+    integer_vector_params: HashMap<String, Vec<i64>>,
 
     //-------------------------------------------------------------------------
     // Internal State
@@ -315,6 +319,8 @@ impl CmContext {
             port_widths: HashMap::new(),
             params: HashMap::new(),
             string_params: HashMap::new(),
+            real_vector_params: HashMap::new(),
+            integer_vector_params: HashMap::new(),
             state: Vec::new(),
             state_prev: Vec::new(),
             int_state: Vec::new(),
@@ -568,6 +574,20 @@ impl CmContext {
             .map(|s| s.as_str())
     }
 
+    /// Get real-vector parameter
+    pub fn real_vector_param(&self, name: &str) -> Option<&[Value]> {
+        self.real_vector_params
+            .get(&Self::canonical_param_key(name))
+            .map(|values| values.as_slice())
+    }
+
+    /// Get integer-vector parameter
+    pub fn integer_vector_param(&self, name: &str) -> Option<&[i64]> {
+        self.integer_vector_params
+            .get(&Self::canonical_param_key(name))
+            .map(|values| values.as_slice())
+    }
+
     /// Set parameter value
     pub fn set_param(&mut self, name: &str, value: Value) {
         self.params.insert(Self::canonical_param_key(name), value);
@@ -577,6 +597,18 @@ impl CmContext {
     pub fn set_string_param(&mut self, name: &str, value: &str) {
         self.string_params
             .insert(Self::canonical_param_key(name), value.to_string());
+    }
+
+    /// Set real-vector parameter
+    pub fn set_real_vector_param(&mut self, name: &str, value: Vec<Value>) {
+        self.real_vector_params
+            .insert(Self::canonical_param_key(name), value);
+    }
+
+    /// Set integer-vector parameter
+    pub fn set_integer_vector_param(&mut self, name: &str, value: Vec<i64>) {
+        self.integer_vector_params
+            .insert(Self::canonical_param_key(name), value);
     }
 
     //-------------------------------------------------------------------------

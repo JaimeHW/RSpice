@@ -58,6 +58,16 @@ fn validate_numeric_param(spec: &ParamSpec, value: Value) -> CmResult<()> {
     Ok(())
 }
 
+fn invalid_vector_param_type(spec: &ParamSpec, actual: &str) -> CmError {
+    CmError::InvalidParameter {
+        name: spec.name.clone(),
+        message: format!(
+            "expected {:?} parameter, got {} parameter",
+            spec.param_type, actual
+        ),
+    }
+}
+
 //=============================================================================
 // Port Connection
 //=============================================================================
@@ -150,6 +160,8 @@ impl XspiceInstance {
         connections: Vec<PortConnection>,
         params: &[(String, Value)],
         string_params: &[(String, String)],
+        real_vector_params: &[(String, Vec<Value>)],
+        integer_vector_params: &[(String, Vec<i64>)],
     ) -> CmResult<Self> {
         let name = name.into();
         let ports = model.ports().to_vec();
@@ -180,6 +192,16 @@ impl XspiceInstance {
                         context.set_string_param(&param_spec.name, default);
                     }
                 }
+                super::ParamType::RealVector => {
+                    if let Some(default) = &param_spec.real_vector_default {
+                        context.set_real_vector_param(&param_spec.name, default.clone());
+                    }
+                }
+                super::ParamType::IntegerVector => {
+                    if let Some(default) = &param_spec.integer_vector_default {
+                        context.set_integer_vector_param(&param_spec.name, default.clone());
+                    }
+                }
                 _ => context.set_param(&param_spec.name, param_spec.default),
             }
         }
@@ -199,6 +221,50 @@ impl XspiceInstance {
         }
         for (name, value) in string_params {
             context.set_string_param(name, value);
+        }
+        for (name, values) in real_vector_params {
+            if let Some(spec) = param_specs.get(&canonical_param_key(name)) {
+                match spec.param_type {
+                    ParamType::RealVector => {
+                        for value in values {
+                            validate_numeric_param(spec, *value)?;
+                        }
+                    }
+                    ParamType::IntegerVector => {
+                        let mut integer_values = Vec::with_capacity(values.len());
+                        for value in values {
+                            validate_numeric_param(spec, *value)?;
+                            integer_values.push(value.round() as i64);
+                        }
+                        context.set_integer_vector_param(name, integer_values);
+                        continue;
+                    }
+                    _ => return Err(invalid_vector_param_type(spec, "real-vector")),
+                }
+            }
+            context.set_real_vector_param(name, values.clone());
+        }
+        for (name, values) in integer_vector_params {
+            if let Some(spec) = param_specs.get(&canonical_param_key(name)) {
+                match spec.param_type {
+                    ParamType::IntegerVector => {
+                        for value in values {
+                            validate_numeric_param(spec, *value as Value)?;
+                        }
+                    }
+                    ParamType::RealVector => {
+                        let real_values: Vec<Value> =
+                            values.iter().map(|value| *value as Value).collect();
+                        for value in &real_values {
+                            validate_numeric_param(spec, *value)?;
+                        }
+                        context.set_real_vector_param(name, real_values);
+                        continue;
+                    }
+                    _ => return Err(invalid_vector_param_type(spec, "integer-vector")),
+                }
+            }
+            context.set_integer_vector_param(name, values.clone());
         }
 
         for (port, connection) in ports.iter().zip(connections.iter()) {
@@ -263,6 +329,16 @@ impl XspiceInstance {
     /// Get string parameter value
     pub fn string_param(&self, name: &str) -> Option<&str> {
         self.context.string_param(name)
+    }
+
+    /// Get real-vector parameter value
+    pub fn real_vector_param(&self, name: &str) -> Option<&[Value]> {
+        self.context.real_vector_param(name)
+    }
+
+    /// Get integer-vector parameter value
+    pub fn integer_vector_param(&self, name: &str) -> Option<&[i64]> {
+        self.context.integer_vector_param(name)
     }
 
     /// Set parameter value
@@ -849,6 +925,8 @@ mod tests {
             vec![PortConnection::Analog(1)],
             &[],
             &[],
+            &[],
+            &[],
         )
         .expect("panic-model instance should construct")
     }
@@ -868,6 +946,8 @@ mod tests {
             vec![PortConnection::Analog(1)],
             &[("ic".to_string(), 3.0)],
             &[],
+            &[],
+            &[],
         )
         .expect_err("known integer parameter outside its range must be rejected");
 
@@ -885,6 +965,8 @@ mod tests {
             Arc::new(model),
             vec![PortConnection::Analog(1)],
             &[("select_value".to_string(), 1.5)],
+            &[],
+            &[],
             &[],
         )
         .expect_err("known integer parameter must not accept fractional values");
@@ -904,10 +986,69 @@ mod tests {
             vec![PortConnection::Analog(1)],
             &[("vendor_extra".to_string(), -1.25)],
             &[],
+            &[],
+            &[],
         )
         .expect("unknown compatibility parameters should still be stored");
 
         assert_eq!(instance.param("vendor_extra"), -1.25);
+    }
+
+    #[test]
+    fn instance_uses_real_vector_parameter_default() {
+        let model = model_with_params(vec![ParamSpec::real_vector("points", vec![1.0, 2.5])]);
+        let instance = XspiceInstance::new(
+            "Avec",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("real-vector default should construct");
+
+        assert_eq!(instance.real_vector_param("POINTS").unwrap(), &[1.0, 2.5]);
+    }
+
+    #[test]
+    fn instance_applies_real_vector_parameter_override() {
+        let model = model_with_params(vec![ParamSpec::real_vector("points", vec![1.0, 2.0])]);
+        let instance = XspiceInstance::new(
+            "Avec",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+            &[("points".to_string(), vec![3.0, 4.0, 5.0])],
+            &[],
+        )
+        .expect("real-vector override should construct");
+
+        assert_eq!(
+            instance.real_vector_param("points").unwrap(),
+            &[3.0, 4.0, 5.0]
+        );
+    }
+
+    #[test]
+    fn instance_applies_integer_vector_parameter_override() {
+        let model = model_with_params(vec![ParamSpec::integer_vector("bits", vec![1, 0])]);
+        let instance = XspiceInstance::new(
+            "Avec",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+            &[],
+            &[("bits".to_string(), vec![1, 1, 0, 1])],
+        )
+        .expect("integer-vector override should construct");
+
+        assert_eq!(
+            instance.integer_vector_param("bits").unwrap(),
+            &[1, 1, 0, 1]
+        );
     }
 
     fn assert_evaluation_error(result: CmResult<()>, expected: &str) {
@@ -970,6 +1111,8 @@ mod tests {
             "Amutable",
             Arc::new(model),
             vec![PortConnection::Analog(1)],
+            &[],
+            &[],
             &[],
             &[],
         )

@@ -626,6 +626,8 @@ mod tests {
             vec![connection],
             &[],
             &[],
+            &[],
+            &[],
         )
         .expect("output instance should construct")
     }
@@ -635,6 +637,8 @@ mod tests {
             "Afail",
             Arc::new(FailingModel::new()),
             vec![PortConnection::Analog(1)],
+            &[],
+            &[],
             &[],
             &[],
         )
