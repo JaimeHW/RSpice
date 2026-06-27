@@ -1475,6 +1475,72 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = left.value;
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let scaled_affine_value = affine_value * poly_output_scale;
+        let right_derivative_scale = scaled_affine_value + scaled_offset_left_value * poly_input_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = self.v[left];
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let scaled_affine_value = affine_value * poly_output_scale;
+        let right_derivative_scale = scaled_affine_value + scaled_offset_left_value * poly_input_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_mul_scaled_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = left.value;
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let right_derivative_scale = (affine_value + offset_left_value * poly_input_scale) * poly_output_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_mul_scaled_ad_rhs(&mut self, index: usize, left: usize, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = self.v[left];
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let right_derivative_scale = (affine_value + offset_left_value * poly_input_scale) * poly_output_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_add_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
         self.v[index] = (left.value + right.value) * scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = (left.dn[axis] + right.dn[axis]) * scale; }
@@ -13734,6 +13800,72 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_scaled_offset_mul_offset_lhs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64, output_scale: f64) {
         self.store_scaled_offset_mul_offset_lhs_components(index, left.value, left.dn, left.db, left_offset, right.value, right.dn, right.db, output_offset, output_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = left.value;
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let scaled_affine_value = affine_value * poly_output_scale;
+        let right_derivative_scale = scaled_affine_value + scaled_offset_left_value * poly_input_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = self.v[left];
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let scaled_affine_value = affine_value * poly_output_scale;
+        let right_derivative_scale = scaled_affine_value + scaled_offset_left_value * poly_input_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_mul_scaled_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = left.value;
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let right_derivative_scale = (affine_value + offset_left_value * poly_input_scale) * poly_output_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_softlimit_poly_offset_lhs_mul_scaled_ad_rhs(&mut self, index: usize, left: usize, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64, output_scale: f64) {
+        let left_raw = self.v[left];
+        let offset_left_value = left_raw + left_offset;
+        let affine_value = left_raw * poly_input_scale + poly_inner_offset;
+        let scaled_offset_left_value = offset_left_value * poly_output_scale;
+        let right_raw = scaled_offset_left_value * affine_value + right_offset;
+        let product_value = offset_left_value * right_raw;
+        let right_derivative_scale = (affine_value + offset_left_value * poly_input_scale) * poly_output_scale;
+        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * output_scale;
+        self.v[index] = (product_value + output_offset) * output_scale;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * derivative_scale; }
     }
 
     #[inline]
