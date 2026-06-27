@@ -953,7 +953,7 @@ impl Instance {
 
         if s.b[1127] {
             s.store_offset_scaled_ad(376, A::limited_exp_scaled_input(A::div_scaled_inputs(s.ad_value(894), 2.0, s.ad_value(895), 1.0), (-1.0 / (p.p399))), p.p398, 1.0);
-            s.store_mul_ad_lhs(373, A::div_scaled_inputs(s.ad_value(894), 2.0, s.ad_value(895), 1.0), 376);
+            s.store_mul_div_scaled_inputs_rhs(373, 376, s.ad_value(894), 2.0, s.ad_value(895), 1.0);
         }
 
         s.b[1130] = (s.v[576] <= 0.0);

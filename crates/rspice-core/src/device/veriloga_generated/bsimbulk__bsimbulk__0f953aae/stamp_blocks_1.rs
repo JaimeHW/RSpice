@@ -1062,7 +1062,7 @@ impl Instance {
         }
 
         if s.b[1541] {
-            s.store_offset_ad(718, A::div_scaled_inputs(s.ad_value(713), 1.0, A::sqrt(s.ad_value(716)), 2.0), 1.0);
+            s.store_offset_div_scaled_inputs(718, s.ad_value(713), 1.0, A::sqrt(s.ad_value(716)), 2.0, 1.0);
             s.copy_ad(719, 157);
             s.store_scale(726, 719, (s.v[46] * s.v[29]));
             s.store_scale(725, 157, (s.v[46] * s.v[29]));

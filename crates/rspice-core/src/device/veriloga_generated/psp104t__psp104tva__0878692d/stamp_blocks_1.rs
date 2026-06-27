@@ -5236,7 +5236,7 @@ impl Instance {
             s.store_mul(2022, 2010, 362);
             s.store_mul(2023, 2019, 362);
             s.store_mul(2024, 2017, 362);
-            s.store_offset_ad(1930, A::div_scaled_inputs(s.ad_value(2012), 0.5, A::sqrt(s.ad_value(2022)), 1.0), 1.0);
+            s.store_offset_div_scaled_inputs(1930, s.ad_value(2012), 0.5, A::sqrt(s.ad_value(2022)), 1.0, 1.0);
             s.store_add_scaled_product_right_ad(1931, 2022, 1.0, 2012, A::sqrt(s.ad_value(2022)), 1.0);
             s.store_add_scaled_inputs_product_mixed_aiai(2025, A::div_scaled_inputs2(s.ad_value(2024), 1.0, s.ad_value(1931), (-1.0), s.ad_value(1930), 1.0), 1.0, 2022, 0.5, A::offset(s.ad_value(189), 1.0), 2023, (-1.0));
             s.store_offset_scaled(2026, 2022, 0.5, 2.0);
@@ -5328,7 +5328,7 @@ impl Instance {
         }
 
         if (!s.b[2172]) {
-            s.store_offset_ad(2046, A::div_scaled_inputs(s.ad_value(2020), 0.5, A::sqrt(s.ad_value(2045)), 1.0), 1.0);
+            s.store_offset_div_scaled_inputs(2046, s.ad_value(2020), 0.5, A::sqrt(s.ad_value(2045)), 1.0, 1.0);
         }
 
         s.store_add_scaled_value_products(2047, s.ad_value(2045), 1.0, s.ad_value(2020), A::sqrt(s.ad_value(2045)), 1.0, s.ad_value(2046), A::ln(A::offset(s.ad_value(2046), (-1.0))), (-1.0));

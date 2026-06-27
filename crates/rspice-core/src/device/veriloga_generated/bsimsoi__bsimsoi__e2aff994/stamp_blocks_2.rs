@@ -2386,7 +2386,7 @@ impl Instance {
 
         if ((!s.b[1620]) && s.b[1950]) {
             s.store_scaled_add_ad(984, A::offset(s.ad_value(983), 1.0), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(983), (-1.0), A::offset(s.ad_value(983), (-1.0))), ((0.25 * 2.0) * 2.0))), 0.5);
-            s.store_offset_ad(986, A::div_scaled_inputs(s.ad_value(981), 1.0, A::sqrt(s.ad_value(984)), 2.0), 1.0);
+            s.store_offset_div_scaled_inputs(986, s.ad_value(981), 1.0, A::sqrt(s.ad_value(984)), 2.0, 1.0);
             s.copy_ad(987, 337);
             s.store_scale(994, 987, (s.v[199] * s.v[183]));
             s.store_scale(993, 337, (s.v[199] * s.v[183]));
