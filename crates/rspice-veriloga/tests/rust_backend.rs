@@ -4450,8 +4450,14 @@ fn rust_backend_directly_stores_affine_division_expression_helpers() {
         stamp.contains("s.store_div_scaled_inputs2_indices("),
         "{stamp}"
     );
-    assert!(stamp.contains("s.store_div_scaled_inputs3("), "{stamp}");
-    assert!(stamp.contains("s.store_div_scaled_inputs4("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_div_scaled_inputs3_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_div_scaled_inputs4_indices("),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("s.store_ad_value("),
         "direct affine-division root assignments should not materialize returned AD temporaries:\n{stamp}"

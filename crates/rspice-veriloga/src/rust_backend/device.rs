@@ -2418,6 +2418,56 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_wide_div_scaled_inputs_rvalue_stores_as_index_or_mixed_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_div_scaled_inputs3_indices",
+            "fn store_div_scaled_inputs3_mixed_iiai",
+            "fn store_div_scaled_inputs3_mixed_iaaa",
+            "fn store_div_scaled_inputs4_indices",
+            "fn store_div_scaled_inputs4_mixed_iiiia",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(190, AdValue::div_scaled_inputs3(scratch.ad_value(2), params.first_scale, scratch.ad_value(3), params.second_scale, scratch.ad_value(4), params.third_scale, scratch.ad_value(5), params.denominator_scale));
+    scratch.store_ad_value(191, AdValue::div_scaled_inputs3(scratch.ad_value(6), params.first_scale, scratch.ad_value(7), params.second_scale, AdValue::ln(scratch.ad_value(8)), params.third_scale, scratch.ad_value(9), params.denominator_scale));
+    scratch.store_ad_value(192, AdValue::div_scaled_inputs3(scratch.ad_value(10), params.first_scale, AdValue::sqrt(scratch.ad_value(11)), params.second_scale, AdValue::ln(scratch.ad_value(12)), params.third_scale, AdValue::exp(scratch.ad_value(13)), params.denominator_scale));
+    scratch.store_ad_value(193, AdValue::div_scaled_inputs4(scratch.ad_value(14), params.first_scale, scratch.ad_value(15), params.second_scale, scratch.ad_value(16), params.third_scale, scratch.ad_value(17), params.fourth_scale, scratch.ad_value(18), params.denominator_scale));
+    scratch.store_ad_value(194, AdValue::div_scaled_inputs4(scratch.ad_value(19), params.first_scale, scratch.ad_value(20), params.second_scale, scratch.ad_value(21), params.third_scale, scratch.ad_value(22), params.fourth_scale, AdValue::sqrt(scratch.ad_value(23)), params.denominator_scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_div_scaled_inputs3_indices(190, 2, p.first_scale, 3, p.second_scale, 4, p.third_scale, 5, p.denominator_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_div_scaled_inputs3_mixed_iiai(191, 6, p.first_scale, 7, p.second_scale, A::ln(s.ad_value(8)), p.third_scale, 9, p.denominator_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_div_scaled_inputs3_mixed_iaaa(192, 10, p.first_scale, A::sqrt(s.ad_value(11)), p.second_scale, A::ln(s.ad_value(12)), p.third_scale, A::exp(s.ad_value(13)), p.denominator_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_div_scaled_inputs4_indices(193, 14, p.first_scale, 15, p.second_scale, 16, p.third_scale, 17, p.fourth_scale, 18, p.denominator_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_div_scaled_inputs4_mixed_iiiia(194, 19, p.first_scale, 20, p.second_scale, 21, p.third_scale, 22, p.fourth_scale, A::sqrt(s.ad_value(23)), p.denominator_scale);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_div_scaled_inputs3("), "{compact}");
+        assert!(!compact.contains("s.store_div_scaled_inputs4("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_offset_div_scaled_inputs_rvalue_stores_as_index_or_mixed_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
@@ -7525,34 +7575,44 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_div_scaled_inputs3(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64, denominator: AdValue, denominator_scale: f64) {",
-        "        let first_value = first.value * first_scale;",
-        "        let second_value = second.value * second_scale;",
-        "        let third_value = third.value * third_scale;",
+        "    fn store_div_scaled_inputs3_components(&mut self, index: usize, first_raw: f64, first_node_derivatives: [f64; Instance::NODE_COUNT], first_branch_derivatives: [f64; Instance::BRANCH_COUNT], first_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, third_raw: f64, third_node_derivatives: [f64; Instance::NODE_COUNT], third_branch_derivatives: [f64; Instance::BRANCH_COUNT], third_scale: f64, denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_scale: f64) {",
+        "        let first_value = first_raw * first_scale;",
+        "        let second_value = second_raw * second_scale;",
+        "        let third_value = third_raw * third_scale;",
         "        let numerator_value = (first_value + second_value) + third_value;",
-        "        let denominator_value = denominator.value * denominator_scale;",
+        "        let denominator_value = denominator_raw * denominator_scale;",
         "        let reciprocal = 1.0 / denominator_value;",
         "        let quotient = numerator_value * reciprocal;",
         "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
         "        self.values[index] = quotient;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale) * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale) * reciprocal + denominator.branch_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((first_node_derivatives[axis] * first_scale + second_node_derivatives[axis] * second_scale) + third_node_derivatives[axis] * third_scale) * reciprocal + denominator_node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((first_branch_derivatives[axis] * first_scale + second_branch_derivatives[axis] * second_scale) + third_branch_derivatives[axis] * third_scale) * reciprocal + denominator_branch_derivatives[axis] * denominator_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_scaled_inputs3(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64, denominator: AdValue, denominator_scale: f64) {",
+        "        self.store_div_scaled_inputs3_components(index, first.value, first.node_derivatives, first.branch_derivatives, first_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, third.value, third.node_derivatives, third.branch_derivatives, third_scale, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, denominator_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_scaled_inputs4_components(&mut self, index: usize, first_raw: f64, first_node_derivatives: [f64; Instance::NODE_COUNT], first_branch_derivatives: [f64; Instance::BRANCH_COUNT], first_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, third_raw: f64, third_node_derivatives: [f64; Instance::NODE_COUNT], third_branch_derivatives: [f64; Instance::BRANCH_COUNT], third_scale: f64, fourth_raw: f64, fourth_node_derivatives: [f64; Instance::NODE_COUNT], fourth_branch_derivatives: [f64; Instance::BRANCH_COUNT], fourth_scale: f64, denominator_raw: f64, denominator_node_derivatives: [f64; Instance::NODE_COUNT], denominator_branch_derivatives: [f64; Instance::BRANCH_COUNT], denominator_scale: f64) {",
+        "        let first_value = first_raw * first_scale;",
+        "        let second_value = second_raw * second_scale;",
+        "        let third_value = third_raw * third_scale;",
+        "        let fourth_value = fourth_raw * fourth_scale;",
+        "        let numerator_value = ((first_value + second_value) + third_value) + fourth_value;",
+        "        let denominator_value = denominator_raw * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let quotient = numerator_value * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (((first_node_derivatives[axis] * first_scale + second_node_derivatives[axis] * second_scale) + third_node_derivatives[axis] * third_scale) + fourth_node_derivatives[axis] * fourth_scale) * reciprocal + denominator_node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (((first_branch_derivatives[axis] * first_scale + second_branch_derivatives[axis] * second_scale) + third_branch_derivatives[axis] * third_scale) + fourth_branch_derivatives[axis] * fourth_scale) * reciprocal + denominator_branch_derivatives[axis] * denominator_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_div_scaled_inputs4(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64, fourth: AdValue, fourth_scale: f64, denominator: AdValue, denominator_scale: f64) {",
-        "        let first_value = first.value * first_scale;",
-        "        let second_value = second.value * second_scale;",
-        "        let third_value = third.value * third_scale;",
-        "        let fourth_value = fourth.value * fourth_scale;",
-        "        let numerator_value = ((first_value + second_value) + third_value) + fourth_value;",
-        "        let denominator_value = denominator.value * denominator_scale;",
-        "        let reciprocal = 1.0 / denominator_value;",
-        "        let quotient = numerator_value * reciprocal;",
-        "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
-        "        self.values[index] = quotient;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (((first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale) + fourth.node_derivatives[axis] * fourth_scale) * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (((first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale) + fourth.branch_derivatives[axis] * fourth_scale) * reciprocal + denominator.branch_derivatives[axis] * denominator_derivative_scale; }",
+        "        self.store_div_scaled_inputs4_components(index, first.value, first.node_derivatives, first.branch_derivatives, first_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, third.value, third.node_derivatives, third.branch_derivatives, third_scale, fourth.value, fourth.node_derivatives, fourth.branch_derivatives, fourth_scale, denominator.value, denominator.node_derivatives, denominator.branch_derivatives, denominator_scale);",
         "    }",
         "",
         "    #[inline]",
@@ -12815,6 +12875,10 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_index_or_mixed_add_scaled_inputs4_offset_helper(
             &mask,
         ));
+        out.push_str(&generate_index_or_mixed_div_scaled_inputs3_helper(&mask));
+    }
+    for mask in index_or_mixed_masks(5) {
+        out.push_str(&generate_index_or_mixed_div_scaled_inputs4_helper(&mask));
     }
     for mask in index_or_mixed_masks(6) {
         out.push_str(&generate_index_or_mixed_add_scaled_inputs_products_helper(
@@ -13087,6 +13151,54 @@ fn generate_index_or_mixed_offset_div_scaled_inputs2_helper(mask: &str) -> Strin
         first_ty = mixed_helper_type(mask, 0),
         second_ty = mixed_helper_type(mask, 1),
         denominator_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_index_or_mixed_div_scaled_inputs3_helper(mask: &str) -> String {
+    let operands = ["first", "second", "third", "denominator"];
+    let helper = index_or_mixed_helper_name("store_div_scaled_inputs3", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let first = mixed_helper_component_args(mask, 0, "first");
+    let second = mixed_helper_component_args(mask, 1, "second");
+    let third = mixed_helper_component_args(mask, 2, "third");
+    let denominator = mixed_helper_component_args(mask, 3, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, third: {third_ty}, third_scale: f64, denominator: {denominator_ty}, denominator_scale: f64) {{
+{locals}        self.store_div_scaled_inputs3_components(index, {first}, first_scale, {second}, second_scale, {third}, third_scale, {denominator}, denominator_scale);
+    }}
+"#,
+        first_ty = mixed_helper_type(mask, 0),
+        second_ty = mixed_helper_type(mask, 1),
+        third_ty = mixed_helper_type(mask, 2),
+        denominator_ty = mixed_helper_type(mask, 3),
+    )
+}
+
+fn generate_index_or_mixed_div_scaled_inputs4_helper(mask: &str) -> String {
+    let operands = ["first", "second", "third", "fourth", "denominator"];
+    let helper = index_or_mixed_helper_name("store_div_scaled_inputs4", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let first = mixed_helper_component_args(mask, 0, "first");
+    let second = mixed_helper_component_args(mask, 1, "second");
+    let third = mixed_helper_component_args(mask, 2, "third");
+    let fourth = mixed_helper_component_args(mask, 3, "fourth");
+    let denominator = mixed_helper_component_args(mask, 4, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, third: {third_ty}, third_scale: f64, fourth: {fourth_ty}, fourth_scale: f64, denominator: {denominator_ty}, denominator_scale: f64) {{
+{locals}        self.store_div_scaled_inputs4_components(index, {first}, first_scale, {second}, second_scale, {third}, third_scale, {fourth}, fourth_scale, {denominator}, denominator_scale);
+    }}
+"#,
+        first_ty = mixed_helper_type(mask, 0),
+        second_ty = mixed_helper_type(mask, 1),
+        third_ty = mixed_helper_type(mask, 2),
+        fourth_ty = mixed_helper_type(mask, 3),
+        denominator_ty = mixed_helper_type(mask, 4),
     )
 }
 
@@ -18832,6 +18944,15 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_inputs3")
         && args.len() == 8
     {
+        if let Some(line) = compact_index_or_mixed_scaled_inputs_helper_line(
+            target_index,
+            "store_div_scaled_inputs3",
+            &[args[0], args[2], args[4], args[6]],
+            &[args[1], args[3], args[5], args[7]],
+            &[],
+        ) {
+            return Some(line);
+        }
         return Some(format!(
             "scratch.store_div_scaled_inputs3({target_index}, {}, {}, {}, {}, {}, {}, {}, {});",
             args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
@@ -18841,6 +18962,15 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_inputs4")
         && args.len() == 10
     {
+        if let Some(line) = compact_index_or_mixed_scaled_inputs_helper_line(
+            target_index,
+            "store_div_scaled_inputs4",
+            &[args[0], args[2], args[4], args[6], args[8]],
+            &[args[1], args[3], args[5], args[7], args[9]],
+            &[],
+        ) {
+            return Some(line);
+        }
         return Some(format!(
             "scratch.store_div_scaled_inputs4({target_index}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});",
             args[0],
