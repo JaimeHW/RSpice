@@ -3413,6 +3413,10 @@ fn stamp() {
             "fn store_div_from_scalar_offset_mul_offset_lhs_mixed_ai",
             "fn store_div_from_scalar_offset_mul_offset_lhs_mixed_ia",
             "fn store_div_from_scalar_offset_mul_offset_lhs_ad",
+            "fn store_div_from_scalar_softlimit_poly_offset_lhs_ad",
+            "fn store_div_from_scalar_softlimit_poly_offset_lhs_mixed_ia",
+            "fn store_div_from_scalar_softlimit_poly_offset_lhs_mul_scaled_ad",
+            "fn store_div_from_scalar_softlimit_poly_offset_lhs_mul_scaled_mixed_ia",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
@@ -3423,6 +3427,39 @@ fn stamp() {
     scratch.store_ad_value(61, AdValue::div_from_scalar(2.0, AdValue::offset(AdValue::mul_offset_lhs(AdValue::ln(scratch.ad_value(4)), params.left_offset, scratch.ad_value(5)), params.output_offset)));
     scratch.store_ad_value(62, AdValue::div_from_scalar(2.0, AdValue::offset(AdValue::mul_offset_lhs(scratch.ad_value(6), params.left_offset, AdValue::exp(scratch.ad_value(7))), params.output_offset)));
     scratch.store_ad_value(63, AdValue::div_from_scalar(2.0, AdValue::offset(AdValue::mul_offset_lhs(AdValue::neg(scratch.ad_value(8)), params.left_offset, AdValue::sqrt(scratch.ad_value(9))), params.output_offset)));
+    scratch.store_ad_value(64, AdValue::div_from_scalar(params.scalar, AdValue::offset(AdValue::mul_offset_lhs(
+        AdValue::sub(scratch.ad_value(10), scratch.ad_value(11)),
+        params.left_offset,
+        AdValue::offset(
+            AdValue::mul_offset_lhs_scaled_output(
+                AdValue::sub(scratch.ad_value(10), scratch.ad_value(11)),
+                params.left_offset,
+                AdValue::scale_offset(
+                    AdValue::sub(scratch.ad_value(10), scratch.ad_value(11)),
+                    params.poly_input_scale,
+                    params.poly_inner_offset
+                ),
+                params.poly_output_scale
+            ),
+            params.right_offset
+        )
+    ), params.output_offset)));
+    scratch.store_ad_value(65, AdValue::div_from_scalar(params.scalar, AdValue::offset(AdValue::mul_offset_lhs(
+        scratch.ad_value(12),
+        params.left_offset,
+        AdValue::offset(
+            AdValue::mul_scaled_lhs(
+                AdValue::offset(scratch.ad_value(12), params.left_offset),
+                params.poly_output_scale,
+                AdValue::scale_offset(
+                    scratch.ad_value(12),
+                    params.poly_input_scale,
+                    params.poly_inner_offset
+                )
+            ),
+            params.right_offset
+        )
+    ), params.output_offset)));
 }
 "#;
 
@@ -3449,6 +3486,18 @@ fn stamp() {
         assert!(
             compact.contains(
                 "s.store_div_from_scalar_offset_mul_offset_lhs_ad(63, 2.0, A::neg(s.ad_value(8)), p.left_offset, A::sqrt(s.ad_value(9)), p.output_offset);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_softlimit_poly_offset_lhs_ad(64, p.scalar, A::sub(s.ad_value(10), s.ad_value(11)), p.left_offset, p.poly_input_scale, p.poly_inner_offset, p.poly_output_scale, p.right_offset, p.output_offset);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_softlimit_poly_offset_lhs_mul_scaled_mixed_ia(65, p.scalar, 12, p.left_offset, p.poly_input_scale, p.poly_inner_offset, p.poly_output_scale, p.right_offset, p.output_offset);"
             ),
             "{compact}"
         );
@@ -10064,7 +10113,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-    "    fn store_div_from_scalar_offset_mul_offset_lhs_components(&mut self, index: usize, scalar: f64, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_offset: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], output_offset: f64) {",
+        "    fn store_div_from_scalar_offset_mul_offset_lhs_components(&mut self, index: usize, scalar: f64, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_offset: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], output_offset: f64) {",
         "        let offset_left = left_raw + left_offset;",
         "        let denominator = offset_left * right_raw + output_offset;",
         "        let reciprocal = 1.0 / denominator;",
@@ -10078,6 +10127,84 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_div_from_scalar_offset_mul_offset_lhs_ad(&mut self, index: usize, scalar: f64, left: AdValue, left_offset: f64, right: AdValue, output_offset: f64) {",
         "        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left.value, left.node_derivatives, left.branch_derivatives, left_offset, right.value, right.node_derivatives, right.branch_derivatives, output_offset);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar_softlimit_poly_offset_lhs_ad(&mut self, index: usize, scalar: f64, left: AdValue, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64) {",
+        "        let left_raw = left.value;",
+        "        let offset_left_value = left_raw + left_offset;",
+        "        let affine_value = left_raw * poly_input_scale + poly_inner_offset;",
+        "        let scaled_offset_left_value = offset_left_value * poly_output_scale;",
+        "        let right_raw = scaled_offset_left_value * affine_value + right_offset;",
+        "        let denominator = offset_left_value * right_raw + output_offset;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_scale = -quotient * reciprocal;",
+        "        let scaled_affine_value = affine_value * poly_output_scale;",
+        "        let right_derivative_scale = scaled_affine_value + scaled_offset_left_value * poly_input_scale;",
+        "        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar_softlimit_poly_offset_lhs_mixed_ia(&mut self, index: usize, scalar: f64, left: usize, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64) {",
+        "        let left_raw = self.values[left];",
+        "        let offset_left_value = left_raw + left_offset;",
+        "        let affine_value = left_raw * poly_input_scale + poly_inner_offset;",
+        "        let scaled_offset_left_value = offset_left_value * poly_output_scale;",
+        "        let right_raw = scaled_offset_left_value * affine_value + right_offset;",
+        "        let denominator = offset_left_value * right_raw + output_offset;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_scale = -quotient * reciprocal;",
+        "        let scaled_affine_value = affine_value * poly_output_scale;",
+        "        let right_derivative_scale = scaled_affine_value + scaled_offset_left_value * poly_input_scale;",
+        "        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar_softlimit_poly_offset_lhs_mul_scaled_ad(&mut self, index: usize, scalar: f64, left: AdValue, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64) {",
+        "        let left_raw = left.value;",
+        "        let offset_left_value = left_raw + left_offset;",
+        "        let affine_value = left_raw * poly_input_scale + poly_inner_offset;",
+        "        let scaled_offset_left_value = offset_left_value * poly_output_scale;",
+        "        let right_raw = scaled_offset_left_value * affine_value + right_offset;",
+        "        let denominator = offset_left_value * right_raw + output_offset;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_scale = -quotient * reciprocal;",
+        "        let right_derivative_scale = (affine_value + offset_left_value * poly_input_scale) * poly_output_scale;",
+        "        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar_softlimit_poly_offset_lhs_mul_scaled_mixed_ia(&mut self, index: usize, scalar: f64, left: usize, left_offset: f64, poly_input_scale: f64, poly_inner_offset: f64, poly_output_scale: f64, right_offset: f64, output_offset: f64) {",
+        "        let left_raw = self.values[left];",
+        "        let offset_left_value = left_raw + left_offset;",
+        "        let affine_value = left_raw * poly_input_scale + poly_inner_offset;",
+        "        let scaled_offset_left_value = offset_left_value * poly_output_scale;",
+        "        let right_raw = scaled_offset_left_value * affine_value + right_offset;",
+        "        let denominator = offset_left_value * right_raw + output_offset;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_scale = -quotient * reciprocal;",
+        "        let right_derivative_scale = (affine_value + offset_left_value * poly_input_scale) * poly_output_scale;",
+        "        let derivative_scale = (right_raw + offset_left_value * right_derivative_scale) * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -25030,6 +25157,26 @@ fn compact_div_from_scalar_offset_mul_offset_lhs_store_helper_line(
 
     let left_index = compact_scratch_ad_value_index(args[0]);
     let right_index = compact_scratch_ad_value_index(args[2]);
+
+    if right_index.is_none()
+        && let Some((helper, poly_input_scale, poly_inner_offset, poly_output_scale, right_offset)) =
+            compact_scaled_softlimit_poly_offset_lhs_args(args[0], args[1], args[2])
+        && let Some(helper) = compact_div_from_scalar_softlimit_poly_offset_lhs_helper_name(helper)
+    {
+        if let Some(left) = left_index {
+            return Some(format!(
+                "scratch.{helper}_mixed_ia({target_index}, {scalar}, {left}, {}, {poly_input_scale}, {poly_inner_offset}, {poly_output_scale}, {right_offset}, {output_offset});",
+                args[1],
+            ));
+        }
+
+        let left = compact_scratch_or_non_atomic_ad_arg(args[0])?;
+        return Some(format!(
+            "scratch.{helper}_ad({target_index}, {scalar}, {left}, {}, {poly_input_scale}, {poly_inner_offset}, {poly_output_scale}, {right_offset}, {output_offset});",
+            args[1],
+        ));
+    }
+
     let left = compact_mixed_index_or_ad_arg(left_index, args[0])?;
     let right = compact_mixed_index_or_ad_arg(right_index, args[2])?;
 
@@ -25047,6 +25194,20 @@ fn compact_div_from_scalar_offset_mul_offset_lhs_store_helper_line(
         "scratch.store_div_from_scalar_offset_mul_offset_lhs_ad({target_index}, {scalar}, {left}, {}, {right}, {output_offset});",
         args[1],
     ))
+}
+
+fn compact_div_from_scalar_softlimit_poly_offset_lhs_helper_name(
+    scaled_helper: &str,
+) -> Option<&'static str> {
+    match scaled_helper {
+        "store_scaled_softlimit_poly_offset_lhs" => {
+            Some("store_div_from_scalar_softlimit_poly_offset_lhs")
+        }
+        "store_scaled_softlimit_poly_offset_lhs_mul_scaled" => {
+            Some("store_div_from_scalar_softlimit_poly_offset_lhs_mul_scaled")
+        }
+        _ => None,
+    }
 }
 
 fn compact_mixed_index_or_ad_arg(index: Option<usize>, expression: &str) -> Option<String> {
