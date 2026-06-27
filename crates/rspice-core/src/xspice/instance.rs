@@ -10,7 +10,7 @@ use super::{
 };
 use crate::Value;
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
@@ -214,6 +214,25 @@ impl XspiceInstance {
             .iter()
             .map(|spec| (canonical_param_key(&spec.name), spec))
             .collect();
+        let provided_param_keys: HashSet<String> = params
+            .iter()
+            .map(|(name, _)| canonical_param_key(name))
+            .chain(
+                string_params
+                    .iter()
+                    .map(|(name, _)| canonical_param_key(name)),
+            )
+            .chain(
+                real_vector_params
+                    .iter()
+                    .map(|(name, _)| canonical_param_key(name)),
+            )
+            .chain(
+                integer_vector_params
+                    .iter()
+                    .map(|(name, _)| canonical_param_key(name)),
+            )
+            .collect();
 
         // Override with instance parameters
         for (name, value) in params {
@@ -288,6 +307,11 @@ impl XspiceInstance {
                 }
             }
             context.set_integer_vector_param(name, values.clone());
+        }
+        for spec in model.parameters() {
+            if spec.required && !provided_param_keys.contains(&canonical_param_key(&spec.name)) {
+                return Err(CmError::MissingParameter(spec.name.clone()));
+            }
         }
 
         for (port, connection) in ports.iter().zip(connections.iter()) {
@@ -516,6 +540,16 @@ impl XspiceInstance {
     /// Get output value for stamping
     pub fn output(&self, port_name: &str) -> Value {
         self.context.output(port_name)
+    }
+
+    /// Get the last analog input value supplied to a port.
+    pub fn analog_input_value(&self, port_name: &str) -> Value {
+        self.context.input(port_name)
+    }
+
+    /// Get model-provided control partials for a voltage output port.
+    pub fn output_input_partials(&self, output_port: &str) -> Vec<(String, Value)> {
+        self.model.output_input_partials(&self.context, output_port)
     }
 
     /// Stamp the instance into the circuit matrix

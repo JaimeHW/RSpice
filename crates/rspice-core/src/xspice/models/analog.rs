@@ -98,6 +98,14 @@ impl CodeModel for Gain {
     fn ac_gain(&self, ctx: &CmContext) -> Vec<Value> {
         vec![ctx.param("gain")]
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.param("gain"))]
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 //=============================================================================
@@ -229,6 +237,18 @@ impl CodeModel for Multiplier {
         ctx.set_output("out", v_out);
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            let out_gain = ctx.param("out_gain");
+            vec![
+                ("in0".to_string(), ctx.input("in1") * out_gain),
+                ("in1".to_string(), ctx.input("in0") * out_gain),
+            ]
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 //=============================================================================
@@ -306,6 +326,38 @@ impl CodeModel for Divider {
         let v_out = (num / safe_den) * out_gain + out_offset;
         ctx.set_output("out", v_out);
         Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if !output_port.eq_ignore_ascii_case("out") {
+            return Vec::new();
+        }
+
+        let out_gain = ctx.param("out_gain");
+        let den_limit = ctx.param("den_lower_limit");
+        let num = ctx.input("num");
+        let den = ctx.input("den");
+        let den_limited = den.abs() < den_limit;
+        let safe_den = if den_limited {
+            den_limit.copysign(den)
+        } else {
+            den
+        };
+        if safe_den == 0.0 || !safe_den.is_finite() {
+            return Vec::new();
+        }
+
+        vec![
+            ("num".to_string(), out_gain / safe_den),
+            (
+                "den".to_string(),
+                if den_limited {
+                    0.0
+                } else {
+                    -out_gain * num / (safe_den * safe_den)
+                },
+            ),
+        ]
     }
 }
 
@@ -399,6 +451,14 @@ impl CodeModel for Limiter {
         ctx.set_output_with_partial("out", v_out, partial);
         Ok(())
     }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.partial("out"))]
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 //=============================================================================
@@ -475,6 +535,14 @@ impl CodeModel for ControlledLimiter {
 
         ctx.set_output_with_partial("out", out, pout_pin);
         Ok(())
+    }
+
+    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
+        if output_port.eq_ignore_ascii_case("out") {
+            vec![("in".to_string(), ctx.partial("out"))]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -825,6 +893,14 @@ macro_rules! analog_model_alias {
 
             fn ac_gain(&self, ctx: &CmContext) -> Vec<Value> {
                 $target.ac_gain(ctx)
+            }
+
+            fn output_input_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+            ) -> Vec<(String, Value)> {
+                $target.output_input_partials(ctx, output_port)
             }
         }
     };

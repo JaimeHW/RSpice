@@ -342,6 +342,31 @@ impl CircuitData {
             }
         }
 
+        #[inline]
+        fn stamp_voltage_control_partial(
+            matrix: &mut StaticMatrix,
+            branch_row: usize,
+            connection: &crate::xspice::PortConnection,
+            partial: Value,
+        ) {
+            match connection {
+                crate::xspice::PortConnection::Analog(node) => {
+                    if *node > 0 {
+                        add_matrix_if_present(matrix, branch_row, *node - 1, -partial);
+                    }
+                }
+                crate::xspice::PortConnection::Differential(pos, neg) => {
+                    if *pos > 0 {
+                        add_matrix_if_present(matrix, branch_row, *pos - 1, -partial);
+                    }
+                    if *neg > 0 {
+                        add_matrix_if_present(matrix, branch_row, *neg - 1, partial);
+                    }
+                }
+                _ => {}
+            }
+        }
+
         for instance in &mut self.xspice_instances {
             let ports = instance.ports();
             // Get contributions from each output port
@@ -364,6 +389,26 @@ impl CircuitData {
                                     );
                                     continue;
                                 }
+                                let mut branch_rhs = current;
+                                for (control_port, partial) in
+                                    instance.output_input_partials(&port.name)
+                                {
+                                    if !partial.is_finite() {
+                                        continue;
+                                    }
+                                    branch_rhs -=
+                                        partial * instance.analog_input_value(&control_port);
+                                    if let Some(control_connection) =
+                                        instance.connection(&control_port)
+                                    {
+                                        stamp_voltage_control_partial(
+                                            matrix,
+                                            br,
+                                            control_connection,
+                                            partial,
+                                        );
+                                    }
+                                }
                                 match connection {
                                     crate::xspice::PortConnection::Analog(node) => {
                                         if *node > 0 {
@@ -371,7 +416,7 @@ impl CircuitData {
                                             add_matrix_if_present(matrix, br, node_row, 1.0);
                                             add_matrix_if_present(matrix, node_row, br, 1.0);
                                         }
-                                        add_rhs_if_present(rhs, br, current);
+                                        add_rhs_if_present(rhs, br, branch_rhs);
                                     }
                                     crate::xspice::PortConnection::Differential(pos, neg) => {
                                         if *pos > 0 {
@@ -384,7 +429,7 @@ impl CircuitData {
                                             add_matrix_if_present(matrix, br, neg_row, -1.0);
                                             add_matrix_if_present(matrix, neg_row, br, -1.0);
                                         }
-                                        add_rhs_if_present(rhs, br, current);
+                                        add_rhs_if_present(rhs, br, branch_rhs);
                                     }
                                     _ => {
                                         stamp_nodal_current_output(
@@ -575,6 +620,59 @@ mod tests {
         }
     }
 
+    struct ControlledVoltageModel {
+        ports: Vec<PortSpec>,
+        params: Vec<ParamSpec>,
+    }
+
+    impl ControlledVoltageModel {
+        fn new() -> Self {
+            Self {
+                ports: vec![
+                    PortSpec::input("in", PortType::Voltage),
+                    PortSpec::output("out", PortType::Voltage),
+                ],
+                params: Vec::new(),
+            }
+        }
+    }
+
+    impl CodeModel for ControlledVoltageModel {
+        fn name(&self) -> &str {
+            "controlled_voltage_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            &self.ports
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &self.params
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            let input = ctx.input("in");
+            ctx.set_output_with_partial("out", 2.0 * input + 1.0, 2.0);
+            Ok(())
+        }
+
+        fn output_input_partials(
+            &self,
+            ctx: &CmContext,
+            output_port: &str,
+        ) -> Vec<(String, Value)> {
+            if output_port.eq_ignore_ascii_case("out") {
+                vec![("in".to_string(), ctx.partial("out"))]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
     struct FailingModel {
         ports: Vec<PortSpec>,
         params: Vec<ParamSpec>,
@@ -704,5 +802,55 @@ mod tests {
 
         result.expect("out-of-range XSPICE branch row must not panic");
         assert_eq!(rhs, vec![0.0]);
+    }
+
+    #[test]
+    fn stamp_xspice_voltage_output_linearizes_control_input_into_branch_equation() {
+        let mut instance = XspiceInstance::new(
+            "Actrl",
+            Arc::new(ControlledVoltageModel::new()),
+            vec![PortConnection::Analog(1), PortConnection::Analog(2)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("controlled voltage instance should construct");
+
+        let mut circuit = CircuitData::new();
+        let in_node = circuit.get_or_create_node("in");
+        let out_node = circuit.get_or_create_node("out");
+        let branch = circuit.allocate_branch_named("Actrl#out");
+        instance
+            .set_output_branch(1, branch)
+            .expect("test instance should accept branch assignment");
+        circuit.xspice_instances.push(instance);
+
+        circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[0.0, 0.0], AnalysisType::DcOp);
+        let in_row = in_node - 1;
+        let out_row = out_node - 1;
+        let branch_row = circuit.get_branch_matrix_index(branch) - 1;
+        let mut matrix = StaticMatrix::from_triplets(
+            circuit.matrix_size(),
+            circuit.matrix_size(),
+            &[
+                (in_row, in_row, 0.0),
+                (out_row, branch_row, 0.0),
+                (branch_row, in_row, 0.0),
+                (branch_row, out_row, 0.0),
+            ],
+        )
+        .expect("test matrix should construct");
+        let mut rhs = vec![0.0; circuit.matrix_size()];
+        matrix.add(in_row, in_row, 1.0);
+        rhs[in_row] = 3.0;
+        circuit.stamp_xspice(&mut matrix, &mut rhs);
+
+        let solution = matrix.solve(&rhs).expect("linearized matrix solves");
+        assert!(
+            (solution[out_row] - 7.0).abs() < 1.0e-12,
+            "controlled voltage output should solve from linearized input partial, got {:?}",
+            solution
+        );
     }
 }

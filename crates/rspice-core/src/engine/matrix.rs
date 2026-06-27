@@ -730,6 +730,43 @@ impl Engine {
                             }
                             _ => {}
                         }
+                        for (control_idx, control_port) in ports.iter().enumerate() {
+                            if !matches!(
+                                control_port.direction,
+                                crate::xspice::PortDirection::In
+                                    | crate::xspice::PortDirection::InOut
+                            ) || !control_port.default_type.is_analog()
+                            {
+                                continue;
+                            }
+                            let Some(control_connection) = instance.connections().get(control_idx)
+                            else {
+                                continue;
+                            };
+                            match control_connection {
+                                crate::xspice::PortConnection::Analog(node) => {
+                                    if *node > 0 {
+                                        triplets.push((br_idx, *node - 1, 0.0));
+                                    }
+                                }
+                                crate::xspice::PortConnection::Differential(pos, neg) => {
+                                    if *pos > 0 {
+                                        triplets.push((br_idx, *pos - 1, 0.0));
+                                    }
+                                    if *neg > 0 {
+                                        triplets.push((br_idx, *neg - 1, 0.0));
+                                    }
+                                }
+                                crate::xspice::PortConnection::AnalogVector(nodes) => {
+                                    for &node in nodes {
+                                        if node > 0 {
+                                            triplets.push((br_idx, node - 1, 0.0));
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                     crate::xspice::PortType::Current => match connection {
                         crate::xspice::PortConnection::Analog(node) => {

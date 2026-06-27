@@ -455,6 +455,19 @@ pub trait CodeModel: Send + Sync {
                 .count()
         ]
     }
+
+    /// Linearized control partials for a voltage output branch equation.
+    ///
+    /// Each tuple is `(input_port_name, d(output)/d(input_port))`. The circuit
+    /// stamper uses these to form `v(out) - f(inputs) = 0` instead of treating
+    /// controlled voltage outputs as iteration-only independent sources.
+    fn output_input_partials(
+        &self,
+        _ctx: &super::CmContext,
+        _output_port: &str,
+    ) -> Vec<(String, Value)> {
+        Vec::new()
+    }
 }
 
 //=============================================================================
