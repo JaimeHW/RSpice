@@ -51,7 +51,7 @@
   - Numbers, real parameters, identifiers, branch potentials, unary `+`/`-`, binary `+`, `-`, `*`, `/`, comparisons, ternary conditional, selected math calls.
   - Emit unsupported constructs as explicit fallback markers.
 
-- [ ] Add AD lowering for supported operations.
+- [x] Add AD lowering for supported operations.
   - Direct sparse derivative formulas.
   - Lane pruning for independent operands.
   - Reuse primal subexpressions for derivative formulas where profitable.

@@ -654,7 +654,7 @@ fn opt_lowering_builds_scalar_graph_for_tiny_resistor_expression() {
     let mir = lower_tiny_resistor_mir();
     let opt = OptModel::from_mir(&mir).expect("lower OptIR");
 
-    assert_eq!(opt.values.len(), 5);
+    assert!(opt.values.len() >= 5);
     assert_eq!(
         opt.values[0].kind,
         OptValueKind::NodePotential {
@@ -715,6 +715,30 @@ fn opt_lowering_builds_scalar_graph_for_tiny_resistor_expression() {
         })
         .expect("evaluate lowered graph");
     assert_eq!(snapshot.real(ValueId::new(4)), Some(0.003));
+}
+
+#[test]
+fn opt_lowering_adds_sparse_derivatives_for_tiny_resistor_expression() {
+    let mir = lower_tiny_resistor_mir();
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+
+    let root = ValueId::new(4);
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![1000.0],
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate lowered graph");
+
+    assert_eq!(
+        snapshot.derivative(root, DerivativeLane::node(NodeId::new(0))),
+        Some(0.001)
+    );
+    assert_eq!(
+        snapshot.derivative(root, DerivativeLane::node(NodeId::new(1))),
+        Some(-0.001)
+    );
 }
 
 #[test]
@@ -817,7 +841,7 @@ fn opt_validation_accepts_scalar_value_graph() {
 fn opt_validation_rejects_scalar_operand_out_of_range() {
     let mir = lower_tiny_resistor_mir();
     let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values.push(OptValue {
+    opt.values = vec![OptValue {
         id: ValueId::new(0),
         value_type: OptValueType::Real,
         kind: OptValueKind::Unary {
@@ -825,7 +849,18 @@ fn opt_validation_rejects_scalar_operand_out_of_range() {
             input: ValueId::new(9),
         },
         derivatives: Vec::new(),
-    });
+    }];
+    set_newton_ops(
+        &mut opt,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(0),
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0),
+            },
+        ],
+    );
 
     assert_opt_validation_message(&opt, "operand ValueId(9) is out of range");
 }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::{
     BranchId, BranchUnknownId, CompilerPhase, EquationId, ExprId, HirAnalogOperator, HirExprKind,
@@ -162,6 +162,7 @@ impl OptModel {
             .iter()
             .map(|equation| builder.lower_expression(equation.expression.id))
             .collect();
+        builder.add_sparse_derivatives();
         let values = builder.finish();
 
         let mut schedules = Vec::new();
@@ -294,6 +295,277 @@ impl<'a> ScalarGraphBuilder<'a> {
             derivatives: Vec::new(),
         });
         id
+    }
+
+    fn add_sparse_derivatives(&mut self) {
+        let primal_count = self.values.len();
+        for index in 0..primal_count {
+            let value = ValueId::from(index);
+            let derivatives = self.lower_value_derivatives(value);
+            self.values[index].derivatives = derivatives
+                .into_iter()
+                .map(|(lane, value)| OptDerivative { lane, value })
+                .collect();
+        }
+    }
+
+    fn lower_value_derivatives(&mut self, value: ValueId) -> BTreeMap<DerivativeLane, ValueId> {
+        match self.values[usize::from(value)].kind.clone() {
+            OptValueKind::RealConstant(_)
+            | OptValueKind::BooleanConstant(_)
+            | OptValueKind::Parameter { .. }
+            | OptValueKind::EquationValue { .. } => BTreeMap::new(),
+            OptValueKind::NodePotential { node } => {
+                let derivative =
+                    self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+                BTreeMap::from([(DerivativeLane::node(node), derivative)])
+            }
+            OptValueKind::BranchFlow { .. } => BTreeMap::new(),
+            OptValueKind::Unary { op, input } => self.lower_unary_derivatives(value, op, input),
+            OptValueKind::Binary { op, left, right } => {
+                self.lower_binary_derivatives(op, left, right)
+            }
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => self.lower_select_derivatives(condition, then_value, else_value),
+        }
+    }
+
+    fn lower_unary_derivatives(
+        &mut self,
+        value: ValueId,
+        op: OptUnaryOp,
+        input: ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        let input_derivatives = self.derivative_map(input);
+        let mut derivatives = BTreeMap::new();
+
+        for (lane, input_derivative) in input_derivatives {
+            let derivative = match op {
+                OptUnaryOp::Pos => input_derivative,
+                OptUnaryOp::Neg => self.push_value(
+                    OptValueType::Real,
+                    OptValueKind::Unary {
+                        op: OptUnaryOp::Neg,
+                        input: input_derivative,
+                    },
+                ),
+                OptUnaryOp::Exp => {
+                    self.push_binary_value(OptBinaryOp::Mul, value, input_derivative)
+                }
+                OptUnaryOp::Ln => self.push_binary_value(OptBinaryOp::Div, input_derivative, input),
+                OptUnaryOp::Sqrt => {
+                    let two = self.push_value(OptValueType::Real, OptValueKind::RealConstant(2.0));
+                    let denominator = self.push_binary_value(OptBinaryOp::Mul, two, value);
+                    self.push_binary_value(OptBinaryOp::Div, input_derivative, denominator)
+                }
+                OptUnaryOp::Abs | OptUnaryOp::Not => continue,
+            };
+            derivatives.insert(lane, derivative);
+        }
+
+        derivatives
+    }
+
+    fn lower_binary_derivatives(
+        &mut self,
+        op: OptBinaryOp,
+        left: ValueId,
+        right: ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        match op {
+            OptBinaryOp::Add => self.combine_binary_derivatives(
+                left,
+                right,
+                |builder, left, right| builder.push_binary_value(OptBinaryOp::Add, left, right),
+                |_, value| value,
+                |_, value| value,
+            ),
+            OptBinaryOp::Sub => self.combine_binary_derivatives(
+                left,
+                right,
+                |builder, left, right| builder.push_binary_value(OptBinaryOp::Sub, left, right),
+                |_, value| value,
+                |builder, value| {
+                    builder.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Neg,
+                            input: value,
+                        },
+                    )
+                },
+            ),
+            OptBinaryOp::Mul => self.product_derivatives(left, right),
+            OptBinaryOp::Div => self.quotient_derivatives(left, right),
+            OptBinaryOp::Pow
+            | OptBinaryOp::Eq
+            | OptBinaryOp::Ne
+            | OptBinaryOp::Lt
+            | OptBinaryOp::Le
+            | OptBinaryOp::Gt
+            | OptBinaryOp::Ge
+            | OptBinaryOp::And
+            | OptBinaryOp::Or => BTreeMap::new(),
+        }
+    }
+
+    fn combine_binary_derivatives(
+        &mut self,
+        left: ValueId,
+        right: ValueId,
+        both: impl Fn(&mut Self, ValueId, ValueId) -> ValueId,
+        only_left: impl Fn(&mut Self, ValueId) -> ValueId,
+        only_right: impl Fn(&mut Self, ValueId) -> ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        let left_derivatives = self.derivative_map(left);
+        let right_derivatives = self.derivative_map(right);
+        let mut lanes: HashSet<_> = left_derivatives.keys().copied().collect();
+        lanes.extend(right_derivatives.keys().copied());
+
+        let mut derivatives = BTreeMap::new();
+        for lane in lanes {
+            let derivative = match (
+                left_derivatives.get(&lane).copied(),
+                right_derivatives.get(&lane).copied(),
+            ) {
+                (Some(left), Some(right)) => both(self, left, right),
+                (Some(left), None) => only_left(self, left),
+                (None, Some(right)) => only_right(self, right),
+                (None, None) => continue,
+            };
+            derivatives.insert(lane, derivative);
+        }
+
+        derivatives
+    }
+
+    fn product_derivatives(
+        &mut self,
+        left: ValueId,
+        right: ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        let left_derivatives = self.derivative_map(left);
+        let right_derivatives = self.derivative_map(right);
+        let mut lanes: HashSet<_> = left_derivatives.keys().copied().collect();
+        lanes.extend(right_derivatives.keys().copied());
+
+        let mut derivatives = BTreeMap::new();
+        for lane in lanes {
+            let left_term = left_derivatives
+                .get(&lane)
+                .copied()
+                .map(|derivative| self.push_binary_value(OptBinaryOp::Mul, derivative, right));
+            let right_term = right_derivatives
+                .get(&lane)
+                .copied()
+                .map(|derivative| self.push_binary_value(OptBinaryOp::Mul, left, derivative));
+
+            let derivative = match (left_term, right_term) {
+                (Some(left_term), Some(right_term)) => {
+                    self.push_binary_value(OptBinaryOp::Add, left_term, right_term)
+                }
+                (Some(term), None) | (None, Some(term)) => term,
+                (None, None) => continue,
+            };
+            derivatives.insert(lane, derivative);
+        }
+
+        derivatives
+    }
+
+    fn quotient_derivatives(
+        &mut self,
+        left: ValueId,
+        right: ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        let left_derivatives = self.derivative_map(left);
+        let right_derivatives = self.derivative_map(right);
+        let mut lanes: HashSet<_> = left_derivatives.keys().copied().collect();
+        lanes.extend(right_derivatives.keys().copied());
+
+        let mut derivatives = BTreeMap::new();
+        for lane in lanes {
+            let numerator = match (
+                left_derivatives.get(&lane).copied(),
+                right_derivatives.get(&lane).copied(),
+            ) {
+                (Some(left_derivative), Some(right_derivative)) => {
+                    let left_term =
+                        self.push_binary_value(OptBinaryOp::Mul, left_derivative, right);
+                    let right_term =
+                        self.push_binary_value(OptBinaryOp::Mul, left, right_derivative);
+                    self.push_binary_value(OptBinaryOp::Sub, left_term, right_term)
+                }
+                (Some(left_derivative), None) => {
+                    self.push_binary_value(OptBinaryOp::Mul, left_derivative, right)
+                }
+                (None, Some(right_derivative)) => {
+                    let right_term =
+                        self.push_binary_value(OptBinaryOp::Mul, left, right_derivative);
+                    self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Neg,
+                            input: right_term,
+                        },
+                    )
+                }
+                (None, None) => continue,
+            };
+            let denominator = self.push_binary_value(OptBinaryOp::Mul, right, right);
+            let derivative = self.push_binary_value(OptBinaryOp::Div, numerator, denominator);
+            derivatives.insert(lane, derivative);
+        }
+
+        derivatives
+    }
+
+    fn lower_select_derivatives(
+        &mut self,
+        condition: ValueId,
+        then_value: ValueId,
+        else_value: ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        let then_derivatives = self.derivative_map(then_value);
+        let else_derivatives = self.derivative_map(else_value);
+        let mut lanes: HashSet<_> = then_derivatives.keys().copied().collect();
+        lanes.extend(else_derivatives.keys().copied());
+
+        let mut derivatives = BTreeMap::new();
+        for lane in lanes {
+            let then_derivative = then_derivatives.get(&lane).copied().unwrap_or_else(|| {
+                self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0))
+            });
+            let else_derivative = else_derivatives.get(&lane).copied().unwrap_or_else(|| {
+                self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0))
+            });
+            let derivative = self.push_value(
+                OptValueType::Real,
+                OptValueKind::Select {
+                    condition,
+                    then_value: then_derivative,
+                    else_value: else_derivative,
+                },
+            );
+            derivatives.insert(lane, derivative);
+        }
+
+        derivatives
+    }
+
+    fn derivative_map(&self, value: ValueId) -> BTreeMap<DerivativeLane, ValueId> {
+        self.values[usize::from(value)]
+            .derivatives
+            .iter()
+            .map(|derivative| (derivative.lane, derivative.value))
+            .collect()
+    }
+
+    fn push_binary_value(&mut self, op: OptBinaryOp, left: ValueId, right: ValueId) -> ValueId {
+        self.push_value(OptValueType::Real, OptValueKind::Binary { op, left, right })
     }
 
     fn lower_identifier(&mut self, name: &SmolStr) -> Option<ValueId> {
