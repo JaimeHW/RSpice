@@ -200,6 +200,7 @@ fn artifact_diagnostics(
             opt.equation_count, mir_equation_count
         )));
     }
+    validate_mir_opt_topology_counts(&mut diagnostics, mir, opt);
 
     validate_hir_mir_nodes(&mut diagnostics, hir, mir);
     validate_hir_mir_ground_nodes(&mut diagnostics, hir, mir);
@@ -209,9 +210,47 @@ fn artifact_diagnostics(
     validate_hir_mir_expressions(&mut diagnostics, hir, mir);
     validate_hir_mir_contributions(&mut diagnostics, hir, mir);
     validate_mir_opt_newton_schedule(&mut diagnostics, mir, opt);
-    validate_mir_opt_canonical_lineage(&mut diagnostics, mir, opt);
 
     diagnostics
+}
+
+fn validate_mir_opt_topology_counts(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    mir: &MirModel,
+    opt: &OptModel,
+) {
+    let mir_node_count = u32::try_from(mir.nodes.len()).expect("MIR node count exceeds u32::MAX");
+    let mir_parameter_count =
+        u32::try_from(mir.parameters.len()).expect("MIR parameter count exceeds u32::MAX");
+    let mir_branch_count =
+        u32::try_from(mir.branches.len()).expect("MIR branch count exceeds u32::MAX");
+    let mir_branch_unknown_count = u32::try_from(mir.branch_unknowns.len())
+        .expect("MIR branch unknown count exceeds u32::MAX");
+
+    if opt.node_count != mir_node_count {
+        diagnostics.push(artifact_error(format!(
+            "OptIR node count {} must match MIR node count {}",
+            opt.node_count, mir_node_count
+        )));
+    }
+    if opt.parameter_count != mir_parameter_count {
+        diagnostics.push(artifact_error(format!(
+            "OptIR parameter count {} must match MIR parameter count {}",
+            opt.parameter_count, mir_parameter_count
+        )));
+    }
+    if opt.branch_count != mir_branch_count {
+        diagnostics.push(artifact_error(format!(
+            "OptIR branch count {} must match MIR branch count {}",
+            opt.branch_count, mir_branch_count
+        )));
+    }
+    if opt.branch_unknown_count != mir_branch_unknown_count {
+        diagnostics.push(artifact_error(format!(
+            "OptIR branch unknown count {} must match MIR branch unknown count {}",
+            opt.branch_unknown_count, mir_branch_unknown_count
+        )));
+    }
 }
 
 fn validate_hir_mir_nodes(diagnostics: &mut Vec<IrDiagnostic>, hir: &HirModel, mir: &MirModel) {
@@ -462,71 +501,37 @@ fn validate_mir_opt_newton_schedule(
         )));
     }
 
-    if schedule.ops.len() != mir.equations.len() {
+    let equation_ops: Vec<_> = schedule
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            OptOp::EvaluateEquation { equation } => Some(*equation),
+            OptOp::ComputeValue { .. } => None,
+        })
+        .collect();
+
+    if equation_ops.len() != mir.equations.len() {
         diagnostics.push(artifact_error(format!(
             "OptIR NewtonIteration op count {} must match MIR equation count {}",
-            schedule.ops.len(),
+            equation_ops.len(),
             mir.equations.len()
         )));
     }
 
     for (index, equation) in mir.equations.iter().enumerate() {
-        let expected = OptOp::EvaluateEquation {
-            equation: equation.id,
-        };
-        match schedule.ops.get(index) {
-            Some(op) if *op == expected => {}
-            Some(op) => diagnostics.push(artifact_error(format!(
+        match equation_ops.get(index) {
+            Some(found) if *found == equation.id => {}
+            Some(found) => diagnostics.push(artifact_error(format!(
                 "OptIR NewtonIteration op {} must evaluate MIR equation {}, found {}",
                 index,
                 equation.id,
-                opt_op_label(op)
+                opt_op_label(&OptOp::EvaluateEquation { equation: *found })
             ))),
             None => diagnostics.push(artifact_error(format!(
                 "OptIR NewtonIteration missing op {} for MIR equation {}",
                 index, equation.id
             ))),
         }
-    }
-}
-
-fn validate_mir_opt_canonical_lineage(
-    diagnostics: &mut Vec<IrDiagnostic>,
-    mir: &MirModel,
-    opt: &OptModel,
-) {
-    let Ok(expected) = OptModel::from_mir(mir) else {
-        return;
-    };
-
-    if opt.module_name != expected.module_name {
-        diagnostics.push(artifact_error(format!(
-            "OptIR lineage module_name '{}' must match canonical '{}'",
-            opt.module_name, expected.module_name
-        )));
-    }
-
-    if opt.equation_count != expected.equation_count {
-        diagnostics.push(artifact_error(format!(
-            "OptIR lineage equation_count {} must match canonical {}",
-            opt.equation_count, expected.equation_count
-        )));
-    }
-
-    if opt.values != expected.values {
-        diagnostics.push(artifact_error(format!(
-            "OptIR lineage values must match canonical MIR lowering: expected {}, found {}",
-            expected.values.len(),
-            opt.values.len()
-        )));
-    }
-
-    if opt.schedules != expected.schedules {
-        diagnostics.push(artifact_error(format!(
-            "OptIR lineage schedules must match canonical MIR lowering: expected {}, found {}",
-            expected.schedules.len(),
-            opt.schedules.len()
-        )));
     }
 }
 
@@ -1390,6 +1395,9 @@ fn invalidation_label(invalidation: InvalidationClass) -> &'static str {
 
 fn opt_op_label(op: &OptOp) -> String {
     match op {
+        OptOp::ComputeValue { value } => {
+            format!("compute_value:{}", value.index())
+        }
         OptOp::EvaluateEquation { equation } => {
             format!("evaluate_equation:{}", equation.index())
         }

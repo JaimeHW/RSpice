@@ -32,4 +32,7 @@ pub use mir::{
     MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind,
     MirModel, MirNode, MirParameterSlot, MirStateSlot,
 };
-pub use opt::{InvalidationClass, OptModel, OptOp, OptSchedule, OptValue, OptValueType};
+pub use opt::{
+    DerivativeLane, DerivativeLaneKind, InvalidationClass, OptBinaryOp, OptDerivative, OptModel,
+    OptOp, OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType,
+};

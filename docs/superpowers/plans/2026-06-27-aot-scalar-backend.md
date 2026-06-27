@@ -12,12 +12,12 @@
 
 ## Phase 1: Scalar OptIR Foundation
 
-- [ ] Add scalar graph types to `crates/rspice-veriloga/src/canonical_ir/opt.rs`.
+- [x] Add scalar graph types to `crates/rspice-veriloga/src/canonical_ir/opt.rs`.
   - Types: `OptValueKind`, `OptUnaryOp`, `OptBinaryOp`, `DerivativeLane`, `DerivativeLaneKind`, `OptDerivative`, `OptScheduleOp`.
   - Keep existing `OptOp::EvaluateEquation` compatibility until the Rust backend migrates.
   - Preserve serde compatibility for newly generated artifacts.
 
-- [ ] Add OptIR verifier checks.
+- [x] Add OptIR verifier checks.
   - Dense `ValueId` ordering.
   - Valid operand ids.
   - Topological operand order.
@@ -25,7 +25,7 @@
   - Sorted and unique derivative lanes per value.
   - Schedule operations reference valid values and equations.
 
-- [ ] Add canonical IR tests in `crates/rspice-veriloga/tests/canonical_ir.rs`.
+- [x] Add canonical IR tests in `crates/rspice-veriloga/tests/canonical_ir.rs`.
   - Accepts a simple scalar graph.
   - Rejects non-dense scalar ids.
   - Rejects out-of-range operands.

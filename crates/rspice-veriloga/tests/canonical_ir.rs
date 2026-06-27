@@ -10,10 +10,11 @@ use rspice_veriloga::canonical_ir::{
     PortId, ScheduleId, SourceId, StateId, ValueId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
-    CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DiagnosticSeverity, HirAnalogOperator,
-    HirContributionKind, HirExprKind, HirLaplaceKind, HirLoop, HirModel, HirStatement,
-    InvalidationClass, IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot,
-    OptModel, OptOp, OptSchedule, OptValue, OptValueType, SourceSpanRef, StableDigest,
+    CanonicalIrArtifact, CanonicalMetadata, CompilerPhase, DerivativeLane, DerivativeLaneKind,
+    DiagnosticSeverity, HirAnalogOperator, HirContributionKind, HirExprKind, HirLaplaceKind,
+    HirLoop, HirModel, HirStatement, InvalidationClass, IrDiagnostic, MirAnalysisDomain,
+    MirEquationKind, MirModel, MirStateSlot, OptBinaryOp, OptDerivative, OptModel, OptOp,
+    OptSchedule, OptUnaryOp, OptValue, OptValueKind, OptValueType, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
@@ -665,9 +666,219 @@ fn opt_validation_rejects_non_dense_value_id() {
     opt.values.push(OptValue {
         id: ValueId::new(1),
         value_type: OptValueType::Real,
+        kind: OptValueKind::RealConstant(1.0),
+        derivatives: Vec::new(),
     });
 
     assert_opt_validation_message(&opt, "OptIR value IDs must be dense");
+}
+
+#[test]
+fn opt_validation_accepts_scalar_value_graph() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: vec![OptDerivative {
+                lane: DerivativeLane::node(NodeId::new(0)),
+                value: ValueId::new(2),
+            }],
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Parameter {
+                parameter: ParamId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(2),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(1.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(3),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Div,
+                left: ValueId::new(0),
+                right: ValueId::new(1),
+            },
+            derivatives: vec![OptDerivative {
+                lane: DerivativeLane {
+                    kind: DerivativeLaneKind::Node,
+                    index: 0,
+                },
+                value: ValueId::new(2),
+            }],
+        },
+    ];
+
+    opt.schedules[1].ops.insert(
+        0,
+        OptOp::ComputeValue {
+            value: ValueId::new(3),
+        },
+    );
+
+    assert!(opt.validate().is_ok());
+}
+
+#[test]
+fn opt_validation_rejects_scalar_operand_out_of_range() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values.push(OptValue {
+        id: ValueId::new(0),
+        value_type: OptValueType::Real,
+        kind: OptValueKind::Unary {
+            op: OptUnaryOp::Neg,
+            input: ValueId::new(9),
+        },
+        derivatives: Vec::new(),
+    });
+
+    assert_opt_validation_message(&opt, "operand ValueId(9) is out of range");
+}
+
+#[test]
+fn opt_validation_rejects_forward_scalar_operand() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Unary {
+                op: OptUnaryOp::Neg,
+                input: ValueId::new(1),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(1.0),
+            derivatives: Vec::new(),
+        },
+    ];
+
+    assert_opt_validation_message(&opt, "violates scalar value topological order");
+}
+
+#[test]
+fn opt_validation_rejects_duplicate_derivative_lanes() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(1.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: vec![
+                OptDerivative {
+                    lane: DerivativeLane::node(NodeId::new(0)),
+                    value: ValueId::new(0),
+                },
+                OptDerivative {
+                    lane: DerivativeLane::node(NodeId::new(0)),
+                    value: ValueId::new(0),
+                },
+            ],
+        },
+    ];
+
+    assert_opt_validation_message(&opt, "duplicate derivative lane");
+}
+
+#[test]
+fn opt_validation_rejects_out_of_range_derivative_lane() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(1.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: vec![OptDerivative {
+                lane: DerivativeLane::node(NodeId::new(opt.node_count)),
+                value: ValueId::new(0),
+            }],
+        },
+    ];
+
+    assert_opt_validation_message(&opt, "derivative lane");
+    assert_opt_validation_message(&opt, "out of range");
+}
+
+#[test]
+fn opt_validation_rejects_unsorted_derivative_lanes() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::RealConstant(1.0),
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: vec![
+                OptDerivative {
+                    lane: DerivativeLane::node(NodeId::new(1)),
+                    value: ValueId::new(0),
+                },
+                OptDerivative {
+                    lane: DerivativeLane::node(NodeId::new(0)),
+                    value: ValueId::new(0),
+                },
+            ],
+        },
+    ];
+
+    assert_opt_validation_message(&opt, "derivative lanes must be sorted");
+}
+
+#[test]
+fn opt_validation_rejects_schedule_value_out_of_range() {
+    let mir = lower_tiny_resistor_mir();
+    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    opt.schedules[1].ops.insert(
+        0,
+        OptOp::ComputeValue {
+            value: ValueId::new(42),
+        },
+    );
+
+    assert_opt_validation_message(&opt, "ComputeValue ValueId(42) is out of range");
 }
 
 #[test]
@@ -933,39 +1144,78 @@ fn artifact_validation_rejects_newton_schedule_mismatch() {
 }
 
 #[test]
-fn artifact_validation_rejects_missing_canonical_opt_instance_schedule() {
+fn artifact_validation_accepts_opt_without_legacy_instance_schedule() {
     let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
     opt.schedules
         .retain(|schedule| schedule.invalidation != InvalidationClass::InstanceStatic);
     opt.schedules[0].id = ScheduleId::new(0);
     assert!(opt.validate().is_ok());
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect_err("missing canonical OptIR schedule must fail artifact validation");
+    let artifact = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        .expect("OptIR without legacy instance schedule");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic.message.contains("OptIR lineage")
-            && diagnostic.message.contains("schedules")
-    }));
+    assert!(artifact.validate().is_ok());
 }
 
 #[test]
-fn artifact_validation_rejects_unexpected_opt_values() {
+fn artifact_validation_accepts_scalar_opt_values_and_compute_ops() {
     let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
-    opt.values.push(OptValue {
-        id: ValueId::new(0),
-        value_type: OptValueType::Real,
-    });
+    opt.values = vec![
+        OptValue {
+            id: ValueId::new(0),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::NodePotential {
+                node: NodeId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(1),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Parameter {
+                parameter: ParamId::new(0),
+            },
+            derivatives: Vec::new(),
+        },
+        OptValue {
+            id: ValueId::new(2),
+            value_type: OptValueType::Real,
+            kind: OptValueKind::Binary {
+                op: OptBinaryOp::Div,
+                left: ValueId::new(0),
+                right: ValueId::new(1),
+            },
+            derivatives: Vec::new(),
+        },
+    ];
+    opt.schedules[1].ops.insert(
+        0,
+        OptOp::ComputeValue {
+            value: ValueId::new(2),
+        },
+    );
+    assert!(opt.validate().is_ok());
+
+    let artifact =
+        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("scalar OptIR artifact");
+
+    assert!(artifact.validate().is_ok());
+}
+
+#[test]
+fn artifact_validation_rejects_mismatched_opt_topology_counts() {
+    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
+    opt.node_count += 1;
     assert!(opt.validate().is_ok());
 
     let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect_err("unexpected OptIR value must fail artifact validation");
+        .expect_err("OptIR topology count mismatch must fail");
 
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic.message.contains("OptIR lineage")
-            && diagnostic.message.contains("values")
+            && diagnostic
+                .message
+                .contains("OptIR node count 3 must match MIR node count 2")
     }));
 }
 
