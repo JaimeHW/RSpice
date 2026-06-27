@@ -289,11 +289,11 @@ impl Instance {
 
         s.store_scale(75, 10, p.p122);
 
-        s.store_add_ad_lhs(84, A::offset(s.ad_value(74), p.p117), 75);
+        s.store_add_offset_lhs(84, 74, p.p117, 75);
 
-        s.store_add_ad_lhs(83, A::offset(s.ad_value(74), p.p118), 75);
+        s.store_add_offset_lhs(83, 74, p.p118, 75);
 
-        s.store_add_ad_lhs(85, A::offset(s.ad_value(74), p.p119), 75);
+        s.store_add_offset_lhs(85, 74, p.p119, 75);
 
         s.store_scaled_add(86, 84, 83, 0.5);
 
@@ -695,9 +695,9 @@ impl Instance {
             s.store_ln(13, 11);
             s.store_mul_scaled_ln_rhs(74, 10, p.p121, 10);
             s.store_scale(75, 10, p.p122);
-            s.store_add_ad_lhs(84, A::offset(s.ad_value(74), p.p117), 75);
-            s.store_add_ad_lhs(83, A::offset(s.ad_value(74), p.p118), 75);
-            s.store_add_ad_lhs(85, A::offset(s.ad_value(74), p.p119), 75);
+            s.store_add_offset_lhs(84, 74, p.p117, 75);
+            s.store_add_offset_lhs(83, 74, p.p118, 75);
+            s.store_add_offset_lhs(85, 74, p.p119, 75);
             s.store_scaled_add(86, 84, 83, 0.5);
             s.store_scaled_add(87, 84, 85, 0.5);
         }
@@ -3014,11 +3014,11 @@ impl Instance {
 
         s.store_scale(75, 10, p.p122);
 
-        s.store_add_ad_lhs(84, A::offset(s.ad_value(74), p.p117), 75);
+        s.store_add_offset_lhs(84, 74, p.p117, 75);
 
-        s.store_add_ad_lhs(83, A::offset(s.ad_value(74), p.p118), 75);
+        s.store_add_offset_lhs(83, 74, p.p118, 75);
 
-        s.store_add_ad_lhs(85, A::offset(s.ad_value(74), p.p119), 75);
+        s.store_add_offset_lhs(85, 74, p.p119, 75);
 
         s.store_scaled_add(86, 84, 83, 0.5);
 
@@ -3373,9 +3373,9 @@ impl Instance {
             s.store_ln(13, 11);
             s.store_mul_scaled_ln_rhs(74, 10, p.p121, 10);
             s.store_scale(75, 10, p.p122);
-            s.store_add_ad_lhs(84, A::offset(s.ad_value(74), p.p117), 75);
-            s.store_add_ad_lhs(83, A::offset(s.ad_value(74), p.p118), 75);
-            s.store_add_ad_lhs(85, A::offset(s.ad_value(74), p.p119), 75);
+            s.store_add_offset_lhs(84, 74, p.p117, 75);
+            s.store_add_offset_lhs(83, 74, p.p118, 75);
+            s.store_add_offset_lhs(85, 74, p.p119, 75);
             s.store_scaled_add(86, 84, 83, 0.5);
             s.store_scaled_add(87, 84, 85, 0.5);
         }

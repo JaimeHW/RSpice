@@ -5184,7 +5184,7 @@ impl Instance {
                 s.store_div_from_scalar(726, 1.0, 726);
                 s.store_scaled_mul(780, 781, 726, 1e-8);
                 s.store_div_scaled_product_indices(334, 725, 726, 1e-8, 770, 1.0);
-                s.store_add_ad_lhs(1447, A::offset(s.ad_value(965), (-1e-8)), 780);
+                s.store_add_offset_lhs(1447, 965, (-1e-8), 780);
             }
             if (((s.b[1443] && s.b[1444]) && s.b[1559]) && s.b[1560]) {
             }

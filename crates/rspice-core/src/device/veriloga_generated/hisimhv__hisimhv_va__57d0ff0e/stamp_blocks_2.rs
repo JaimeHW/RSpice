@@ -556,7 +556,7 @@ impl Instance {
                 s.store_div_from_scalar(726, 1.0, 726);
                 s.store_scaled_mul(780, 781, 726, 1e-8);
                 s.store_div_scaled_product_indices(337, 725, 726, 1e-8, 770, 1.0);
-                s.store_add_ad_lhs(1830, A::offset(s.ad_value(965), (-1e-8)), 780);
+                s.store_add_offset_lhs(1830, 965, (-1e-8), 780);
             }
             if ((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && s.b[1931]) {
             }
@@ -1823,7 +1823,7 @@ impl Instance {
                 s.store_div_from_scalar(726, 1.0, 726);
                 s.store_scaled_mul(780, 781, 726, 1e-8);
                 s.store_div_scaled_product_indices(337, 725, 726, 1e-8, 770, 1.0);
-                s.store_add_ad_lhs(1831, A::offset(s.ad_value(965), (-1e-8)), 780);
+                s.store_add_offset_lhs(1831, 965, (-1e-8), 780);
             }
             if (((s.b[1443] && (s.b[1445] && (!s.b[1444]))) && (!s.b[1975])) && s.b[1982]) {
             }
@@ -5234,7 +5234,7 @@ impl Instance {
                 s.store_div_from_scalar(726, 1.0, 726);
                 s.store_scaled_mul(780, 781, 726, 1e-12);
                 s.store_div_scaled_product_indices(337, 725, 726, 1e-12, 770, 1.0);
-                s.store_add_ad_lhs(2085, A::offset(s.ad_value(2131), (-1e-12)), 780);
+                s.store_add_offset_lhs(2085, 2131, (-1e-12), 780);
             }
             if ((s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) && s.b[2209]) {
             }
@@ -5369,7 +5369,7 @@ impl Instance {
                 s.store_div_from_scalar(726, 1.0, 726);
                 s.store_scaled_mul(780, 781, 726, p.p406);
                 s.store_div_scaled_product_indices(334, 725, 726, p.p406, 770, 1.0);
-                s.store_add_ad_lhs(2137, A::offset(s.ad_value(2087), (-p.p406)), 780);
+                s.store_add_offset_lhs(2137, 2087, (-p.p406), 780);
             }
             if ((s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) && s.b[2215]) {
             }
@@ -5383,7 +5383,7 @@ impl Instance {
                 s.store_mul(2139, 2139, 334);
                 s.store_mul_sub_rhs(339, 154, 2089, 2092);
                 s.store_exp(340, 339);
-                s.store_sub_ad_lhs(344, A::offset(s.ad_value(340), (-1.0)), 339);
+                s.store_sub_offset_lhs(344, 340, (-1.0), 339);
             }
             s.b[2221] = (s.v[339] >= 1e-7);
             s.v[2221] = if s.b[2221] { 1.0 } else { 0.0 };

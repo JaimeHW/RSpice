@@ -2377,6 +2377,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_offset_lhs_mixed_components(&mut self, index: usize, left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], offset: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.v[index] = left_value + offset + right_value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, self.v[left], self.dn[left], self.db[left], offset, right, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_add_offset_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, left.value, left.dn, left.db, offset, right, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, self.v[left], self.dn[left], self.db[left], offset, right, -1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_offset_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, left.value, left.dn, left.db, offset, right, -1.0);
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_add_ad_rhs(&mut self, index: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
         let left_value = self.v[left];
         let left_dn = self.dn[left];
@@ -12835,6 +12865,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left.value - right_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] - right_dn[axis]; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] - right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_lhs_mixed_components(&mut self, index: usize, left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], offset: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.v[index] = left_value + offset + right_value * right_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, self.v[left], self.dn[left], self.db[left], offset, right, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_add_offset_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, left.value, left.dn, left.db, offset, right, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, self.v[left], self.dn[left], self.db[left], offset, right, -1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_offset_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, right: usize) {
+        self.store_offset_lhs_mixed_components(index, left.value, left.dn, left.db, offset, right, -1.0);
     }
 
     #[inline]

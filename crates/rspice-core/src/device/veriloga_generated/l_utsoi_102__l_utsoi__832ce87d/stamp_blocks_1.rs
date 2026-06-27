@@ -2707,14 +2707,14 @@ impl Instance {
             s.store_exp_neg_input(0, 1459);
             s.store_div_ad_rhs(1493, 1459, A::sub_from_scalar(1.0, s.ad_value(0)));
             s.store_mul(1494, 0, 1493);
-            s.store_add_ad_lhs(1495, A::offset(A::ln(A::div(s.ad_value(1429), A::mul(s.ad_value(1462), s.ad_value(1493)))), (-0.6931471805599)), 1432);
+            s.store_add_offset_ad_lhs(1495, A::ln(A::div(s.ad_value(1429), A::mul(s.ad_value(1462), s.ad_value(1493)))), (-0.6931471805599), 1432);
         }
 
         if ((s.b[1604] && s.b[1680]) && (!s.b[1681])) {
             s.store_exp(0, 1459);
             s.store_div_scaled_value_offset_denominator(1494, s.ad_value(1459), 1.0, s.ad_value(0), (-1.0), 1.0);
             s.store_mul(1493, 0, 1494);
-            s.store_add_ad_lhs(1495, A::offset(A::ln(A::div(s.ad_value(1429), A::mul(s.ad_value(1462), s.ad_value(1494)))), (-0.6931471805599)), 1433);
+            s.store_add_offset_ad_lhs(1495, A::ln(A::div(s.ad_value(1429), A::mul(s.ad_value(1462), s.ad_value(1494)))), (-0.6931471805599), 1433);
         }
 
         if (s.b[1604] && s.b[1680]) {
@@ -2726,7 +2726,7 @@ impl Instance {
         if (s.b[1604] && (!s.b[1680])) {
             s.store_scale(0, 1460, (0.5 * 0.1666666666667));
             s.store_scale(2, 1459, 0.5);
-            s.store_add_ad_lhs(1493, A::offset(s.ad_value(2), 1.0), 0);
+            s.store_add_offset_lhs(1493, 2, 1.0, 0);
             s.store_add_ad_lhs(1494, A::sub_from_scalar(1.0, s.ad_value(2)), 0);
             s.store_scale(3, 2, 0.1666666666667);
             s.store_div_from_scalar_mul_ad(1496, 1.0, s.ad_value(1458), A::add(A::offset(s.ad_value(1431), 0.5), s.ad_value(3)));
@@ -4471,7 +4471,7 @@ impl Instance {
 
         s.store_mul3_affine_lhs(1823, 1820, 225, (2.0 * 1.602176565e-19), 0.0, 1821);
 
-        s.store_add_ad_lhs(1824, A::offset(A::ln(A::div_scaled_product(s.ad_value(241), s.ad_value(241), 1.0, s.ad_value(1823), 1.0)), (-0.6931471805599)), 1818);
+        s.store_add_offset_ad_lhs(1824, A::ln(A::div_scaled_product(s.ad_value(241), s.ad_value(241), 1.0, s.ad_value(1823), 1.0)), (-0.6931471805599), 1818);
 
         s.store_mul_div_scaled_product_rhs(1825, 1821, s.ad_value(29), s.ad_value(14), (0.5 * 1.602176565e-19), A::add(s.ad_value(237), s.ad_value(238)), 1.0);
 
@@ -4528,7 +4528,7 @@ impl Instance {
 
         s.store_add_scaled_offset_product_rhs(0, 252, 1.0, 23, 8, (-s.v[7]), p.p14);
 
-        s.store_sub_ad_lhs(1830, A::offset(A::add_scaled_inputs4(s.ad_value(179), p.p14, s.ad_value(1819), p.p14, s.ad_value(239), p.p14, s.ad_value(0), 1.0), p.p34), 1822);
+        s.store_sub_offset_ad_lhs(1830, A::add_scaled_inputs4(s.ad_value(179), p.p14, s.ad_value(1819), p.p14, s.ad_value(239), p.p14, s.ad_value(0), 1.0), p.p34, 1822);
 
         s.store_add_scaled_inputs4(1831, s.ad_value(180), p.p14, s.ad_value(1819), p.p14, s.ad_value(240), p.p14, s.ad_value(0), 1.0);
 
@@ -4647,7 +4647,7 @@ impl Instance {
             s.store_add_scaled_product_right_ad(1812, 130, 1.0, 222, A::add_scaled_inputs3(A::div_scaled_inputs2(s.ad_value(1811), 1.0, s.ad_value(446), (-1.0), s.ad_value(447), 1.0), 1.0, s.ad_value(449), (-1.0), s.ad_value(446), 1.0), 1.0);
             s.store_mul_offset_rhs(0, 34, 8, (-s.v[7]));
             s.store_add_scaled_offset_product_rhs(0, 252, 1.0, 23, 8, (-s.v[7]), p.p14);
-            s.store_sub_ad_lhs(1830, A::offset(A::add_scaled_inputs4(s.ad_value(181), p.p14, s.ad_value(1819), p.p14, s.ad_value(239), p.p14, s.ad_value(0), 1.0), p.p34), 1822);
+            s.store_sub_offset_ad_lhs(1830, A::add_scaled_inputs4(s.ad_value(181), p.p14, s.ad_value(1819), p.p14, s.ad_value(239), p.p14, s.ad_value(0), 1.0), p.p34, 1822);
             s.store_add_scaled_inputs4(1831, s.ad_value(182), p.p14, s.ad_value(1819), p.p14, s.ad_value(240), p.p14, s.ad_value(0), 1.0);
             s.store_add_scaled_product_left_ad(1835, 1834, (-1.0), A::sub(s.ad_value(1812), s.ad_value(1830)), 1821, 1.0);
             s.store_add_scaled_product_left_ad(1836, 1834, (-1.0), A::sub_scaled_inputs(s.ad_value(333), -1.0, s.ad_value(1831), 1.0), 1821, 1.0);

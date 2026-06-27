@@ -123,7 +123,7 @@ impl Instance {
             s.store_limited_exp_neg_input(4, 3);
             s.store_scale(2, 71, 0.5);
             s.store_sub_ad_lhs(3, A::sqrt(A::add_scaled_inputs3_offset(s.ad_value(14), 1.0, s.ad_value(4), 1.0, A::square(s.ad_value(2)), 1.0, (-1.0))), 2);
-            s.store_sub_ad_lhs(33, A::offset(A::square(s.ad_value(3)), 1.0), 4);
+            s.store_sub_offset_ad_lhs(33, A::square(s.ad_value(3)), 1.0, 4);
         }
 
         s.store_scaled_add_ad(35, A::offset(s.ad_value(33), 1.0), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(33), (-1.0), A::offset(s.ad_value(33), (-1.0))), ((0.25 * 2.0) * 2.0))), 0.5);

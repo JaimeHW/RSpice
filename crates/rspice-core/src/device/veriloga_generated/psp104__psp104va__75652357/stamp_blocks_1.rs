@@ -5617,7 +5617,7 @@ impl Instance {
         }
 
         if (s.b[2171] && (!s.b[2174])) {
-            s.store_add_ad_lhs(2053, A::offset(s.ad_value(2045), (-1.0)), 2051);
+            s.store_add_offset_lhs(2053, 2045, (-1.0), 2051);
             s.store_sqrt(2054, 2053);
             s.store_offset_scaled_ad(2055, A::div(A::mul_sub_from_scalar_rhs(s.ad_value(2006), 1.0, s.ad_value(2051)), s.ad_value(2054)), 0.5, 1.0);
         }
@@ -6065,7 +6065,7 @@ impl Instance {
         }
 
         if ((s.b[2180] && s.b[2192]) && (!s.b[2193])) {
-            s.store_add_ad_lhs(2099, A::offset(s.ad_value(2092), (-1.0)), 2098);
+            s.store_add_offset_lhs(2099, 2092, (-1.0), 2098);
             s.store_sqrt(2100, 2099);
             s.store_mul_add_scaled_inputs3_offset_rhs(2101, 2091, A::div_from_scalar(1.0, s.ad_value(2098)), 1.0, s.ad_value(2092), (-1.0), s.ad_value(2097), -1.0, (-1.0));
         }
@@ -6086,7 +6086,7 @@ impl Instance {
         }
 
         if (s.b[2180] && (!s.b[2192])) {
-            s.store_add_ad_lhs(2099, A::offset(s.ad_value(2092), (-1.0)), 2098);
+            s.store_add_offset_lhs(2099, 2092, (-1.0), 2098);
             s.store_sqrt(2100, 2099);
         }
 
@@ -6137,7 +6137,7 @@ impl Instance {
         }
 
         if (s.b[2180] && (!s.b[2196])) {
-            s.store_add_ad_lhs(2107, A::offset(s.ad_value(2103), (-1.0)), 2104);
+            s.store_add_offset_lhs(2107, 2103, (-1.0), 2104);
             s.store_mul_sqrt_ad_rhs(2108, 2006, A::add(s.ad_value(2106), s.ad_value(2107)));
         }
 
@@ -6157,7 +6157,7 @@ impl Instance {
             s.store_exp(2118, 2117);
             s.store_div(2104, 2104, 2118);
             s.store_mul(2106, 2106, 2118);
-            s.store_add_ad_lhs(2107, A::offset(s.ad_value(2103), (-1.0)), 2104);
+            s.store_add_offset_lhs(2107, 2103, (-1.0), 2104);
             s.store_mul_sqrt_ad_rhs(2108, 2006, A::add(s.ad_value(2106), s.ad_value(2107)));
             s.store_add_ad(2119, A::sub_from_scalar(1.0, s.ad_value(2104)), A::mul3_scaled_output(s.ad_value(2108), s.ad_value(2109), s.ad_value(2023), 2.0));
             s.store_div_scaled_product3_mixed_iiaa(2093, 2093, 2118, A::add(s.ad_value(2112), s.ad_value(2105)), 1.0, A::add_scaled_product(s.ad_value(2119), 1.0, s.ad_value(2118), s.ad_value(2105), 1.0), 1.0);

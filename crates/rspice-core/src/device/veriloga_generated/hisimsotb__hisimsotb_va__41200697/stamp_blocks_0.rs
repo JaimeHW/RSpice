@@ -754,7 +754,7 @@ impl Instance {
             s.store_scalar(374, s.v[447]);
         }
 
-        s.store_add_ad_lhs(374, A::offset(s.ad_value(374), p.p10), 11);
+        s.store_add_offset_lhs(374, 374, p.p10, 11);
 
         s.v[465] = (p.p37 - (s.v[445] * (9.025e-5 + (s.v[445] * 1e-7))));
 
@@ -2352,7 +2352,7 @@ impl Instance {
             s.store_div_from_scalar_offset_input(646, 1.0, 646, 1e-50);
             s.store_scaled_mul(637, 638, 646, 0.15);
             s.store_div_scaled_product_offset_denominator(279, s.ad_value(645), s.ad_value(646), 0.15, s.ad_value(220), 1e-50, 1.0);
-            s.store_add_ad_lhs(321, A::offset(s.ad_value(320), (-0.15)), 637);
+            s.store_add_offset_lhs(321, 320, (-0.15), 637);
         }
 
         if (((!s.b[725]) && s.b[744]) && s.b[745]) {
@@ -2899,7 +2899,7 @@ impl Instance {
             s.store_div_from_scalar_offset_input(646, 1.0, 646, 1e-50);
             s.store_scaled_mul(637, 638, 646, 0.15);
             s.store_div_scaled_product_offset_denominator(278, s.ad_value(645), s.ad_value(646), 0.15, s.ad_value(220), 1e-50, 1.0);
-            s.store_add_ad_lhs(306, A::offset(s.ad_value(305), (-0.15)), 637);
+            s.store_add_offset_lhs(306, 305, (-0.15), 637);
         }
 
         if ((!s.b[725]) && s.b[769]) {
@@ -5219,7 +5219,7 @@ impl Instance {
             s.store_add_scaled_inputs3(111, s.ad_value(109), 1.0, s.ad_value(110), (-0.5), s.ad_value(278), (-0.5));
             s.store_div_from_scalar(279, 1.0, 278);
             s.store_mul_exp_ad_rhs(278, 101, A::mul(s.ad_value(120), s.ad_value(111)));
-            s.store_add_ad_lhs(279, A::offset(A::mul(s.ad_value(120), A::sub(s.ad_value(111), s.ad_value(70))), (-1.0)), 278);
+            s.store_add_offset_ad_lhs(279, A::mul(s.ad_value(120), A::sub(s.ad_value(111), s.ad_value(70))), (-1.0), 278);
             s.store_sqrt_square_offset(639, 279, ((4.0 * 0.01) * 0.01));
             s.store_offset_scaled_div(278, 279, 639, 0.5, 0.5);
             s.store_offset_add_scaled_inputs_indices(279, 279, 0.5, 639, 0.5, (1e-10 * 0.01));

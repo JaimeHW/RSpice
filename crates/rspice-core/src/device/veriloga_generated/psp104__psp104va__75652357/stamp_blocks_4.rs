@@ -227,7 +227,7 @@ impl Instance {
 
         if (((s.b[2555] && (!s.b[2556])) && (!s.b[2616])) && s.b[2633]) {
             s.store_add_scaled_inputs3_offset(1908, s.ad_value(2526), ((-s.v[413]) * p.p30), s.ad_value(2553), (s.v[416] * p.p30), s.ad_value(2554), ((-s.v[416]) * p.p30), (s.v[413] * p.p30));
-            s.store_sub_ad_lhs(2553, A::offset(s.ad_value(826), p.p863), 2553);
+            s.store_sub_offset_lhs(2553, 826, p.p863, 2553);
             s.store_scaled_mul(2511, 651, 651, 4.0);
             s.store_div(2512, 651, 652);
             s.store_add_scaled_product_indices(2513, 2553, 1.0, 651, 2512, 1.0);

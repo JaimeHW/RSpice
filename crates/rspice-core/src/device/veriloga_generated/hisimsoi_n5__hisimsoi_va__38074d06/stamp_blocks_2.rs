@@ -3775,7 +3775,7 @@ impl Instance {
         s.v[849] = if s.b[849] { 1.0 } else { 0.0 };
 
         if (((((s.b[735] && s.b[802]) && s.b[803]) && (!s.b[845])) && (!s.b[846])) && s.b[849]) {
-            s.store_sub_ad_lhs(44, A::offset(s.ad_value(840), 1e-50), 838);
+            s.store_sub_offset_lhs(44, 840, 1e-50, 838);
             s.store_square(49, 44);
             s.store_square(50, 840);
             s.store_scalar(51, 1.0);
@@ -3851,7 +3851,7 @@ impl Instance {
         if (((((s.b[735] && s.b[802]) && s.b[803]) && (!s.b[845])) && (!s.b[846])) && s.b[849]) {
             s.store_div_from_scalar(53, 1.0, 53);
             s.store_mul3_lhs(43, 44, 840, 53);
-            s.store_sub_ad_lhs(838, A::offset(s.ad_value(840), 1e-50), 43);
+            s.store_sub_offset_lhs(838, 840, 1e-50, 43);
         }
 
         if (((((s.b[735] && s.b[802]) && s.b[803]) && (!s.b[845])) && (!s.b[846])) && (!s.b[849])) {

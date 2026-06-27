@@ -244,7 +244,7 @@ impl Instance {
 
         s.store_div_from_scalar(212, 1.0, 423);
 
-        s.store_add_ad_lhs(353, A::offset(s.ad_value(166), 0.4), 672);
+        s.store_add_offset_lhs(353, 166, 0.4, 672);
 
         s.store_div_scaled_value_by_product(169, s.ad_value(893), 2.0, s.ad_value(895), A::offset(s.ad_value(898), 2.0), 1.0);
 

@@ -674,7 +674,7 @@ impl Instance {
 
         s.store_mul(1188, 1224, 1195);
 
-        s.store_add_ad_lhs(1180, A::offset(A::div_from_scalar(2.0, s.ad_value(1209)), (-1.0)), 1188);
+        s.store_add_offset_ad_lhs(1180, A::div_from_scalar(2.0, s.ad_value(1209)), (-1.0), 1188);
 
         s.store_div(1176, 1179, 1180);
 
