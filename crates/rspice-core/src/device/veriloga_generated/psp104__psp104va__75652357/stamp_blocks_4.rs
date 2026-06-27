@@ -13,7 +13,7 @@ impl Instance {
         s.v[2610] = if s.b[2610] { 1.0 } else { 0.0 };
 
         if ((((s.b[2555] && (!s.b[2556])) && (!s.b[2598])) && (!s.b[2608])) && s.b[2610]) {
-            s.store_exp_ad(2526, A::div_scaled_inputs(s.ad_value(436), -1.0, s.ad_value(2551), 1.0));
+            s.store_exp_div_scaled_inputs_indices(2526, 436, -1.0, 2551, 1.0);
         }
 
         s.b[2611] = (((-s.v[436]) / s.v[2551]) < 0.0);
@@ -153,7 +153,7 @@ impl Instance {
         s.v[2628] = if s.b[2628] { 1.0 } else { 0.0 };
 
         if ((((s.b[2555] && (!s.b[2556])) && (!s.b[2616])) && (!s.b[2626])) && s.b[2628]) {
-            s.store_exp_ad(2526, A::div_scaled_inputs(s.ad_value(437), -1.0, s.ad_value(2551), 1.0));
+            s.store_exp_div_scaled_inputs_indices(2526, 437, -1.0, 2551, 1.0);
         }
 
         s.b[2629] = (((-s.v[437]) / s.v[2551]) < 0.0);
@@ -460,7 +460,7 @@ impl Instance {
         s.v[2656] = if s.b[2656] { 1.0 } else { 0.0 };
 
         if ((((s.b[2555] && (!s.b[2556])) && (!s.b[2644])) && (!s.b[2654])) && s.b[2656]) {
-            s.store_exp_ad(2526, A::div_scaled_inputs(s.ad_value(602), -1.0, s.ad_value(2551), 1.0));
+            s.store_exp_div_scaled_inputs_indices(2526, 602, -1.0, 2551, 1.0);
         }
 
         s.b[2657] = (((-s.v[602]) / s.v[2551]) < 0.0);
@@ -600,7 +600,7 @@ impl Instance {
         s.v[2674] = if s.b[2674] { 1.0 } else { 0.0 };
 
         if ((((s.b[2555] && (!s.b[2556])) && (!s.b[2662])) && (!s.b[2672])) && s.b[2674]) {
-            s.store_exp_ad(2526, A::div_scaled_inputs(s.ad_value(603), -1.0, s.ad_value(2551), 1.0));
+            s.store_exp_div_scaled_inputs_indices(2526, 603, -1.0, 2551, 1.0);
         }
 
         s.b[2675] = (((-s.v[603]) / s.v[2551]) < 0.0);
@@ -740,7 +740,7 @@ impl Instance {
         s.v[2692] = if s.b[2692] { 1.0 } else { 0.0 };
 
         if ((((s.b[2555] && (!s.b[2556])) && (!s.b[2680])) && (!s.b[2690])) && s.b[2692]) {
-            s.store_exp_ad(2526, A::div_scaled_inputs(s.ad_value(604), -1.0, s.ad_value(2551), 1.0));
+            s.store_exp_div_scaled_inputs_indices(2526, 604, -1.0, 2551, 1.0);
         }
 
         s.b[2693] = (((-s.v[604]) / s.v[2551]) < 0.0);

@@ -2272,7 +2272,7 @@ impl Instance {
         if (s.b[3311] && s.b[3312]) {
             s.store_div(339, 668, 958);
             s.store_mul(340, 669, 958);
-            s.store_exp_ad(336, A::div_scaled_inputs(s.ad_value(340), -1.0, s.ad_value(283), 1.0));
+            s.store_exp_div_scaled_inputs_indices(336, 340, -1.0, 283, 1.0);
             s.store_mul3_lhs(428, 339, 283, 336);
         }
 

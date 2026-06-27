@@ -4079,7 +4079,7 @@ impl Instance {
         s.v[1242] = if s.b[1242] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1230])) && (!s.b[1240])) && s.b[1242]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(435), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 435, -1.0, 1220, 1.0);
         }
 
         s.b[1243] = (((-s.v[435]) / s.v[1220]) < 0.0);
@@ -4307,7 +4307,7 @@ impl Instance {
         s.v[1259] = if s.b[1259] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1247])) && (!s.b[1257])) && s.b[1259]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(436), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 436, -1.0, 1220, 1.0);
         }
 
         s.b[1260] = (((-s.v[436]) / s.v[1220]) < 0.0);
@@ -4529,7 +4529,7 @@ impl Instance {
         s.v[1276] = if s.b[1276] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1264])) && (!s.b[1274])) && s.b[1276]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(437), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 437, -1.0, 1220, 1.0);
         }
 
         s.b[1277] = (((-s.v[437]) / s.v[1220]) < 0.0);
@@ -4820,7 +4820,7 @@ impl Instance {
         s.v[1298] = if s.b[1298] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1286])) && (!s.b[1296])) && s.b[1298]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(435), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 435, -1.0, 1220, 1.0);
         }
 
         s.b[1299] = (((-s.v[435]) / s.v[1220]) < 0.0);
@@ -5042,7 +5042,7 @@ impl Instance {
         s.v[1315] = if s.b[1315] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1303])) && (!s.b[1313])) && s.b[1315]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(436), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 436, -1.0, 1220, 1.0);
         }
 
         s.b[1316] = (((-s.v[436]) / s.v[1220]) < 0.0);
@@ -5273,7 +5273,7 @@ impl Instance {
         s.v[1332] = if s.b[1332] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1320])) && (!s.b[1330])) && s.b[1332]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(437), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 437, -1.0, 1220, 1.0);
         }
 
         s.b[1333] = (((-s.v[437]) / s.v[1220]) < 0.0);
@@ -5558,7 +5558,7 @@ impl Instance {
         s.v[1354] = if s.b[1354] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1342])) && (!s.b[1352])) && s.b[1354]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(435), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 435, -1.0, 1220, 1.0);
         }
 
         s.b[1355] = (((-s.v[435]) / s.v[1220]) < 0.0);
@@ -5786,7 +5786,7 @@ impl Instance {
         s.v[1371] = if s.b[1371] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1359])) && (!s.b[1369])) && s.b[1371]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(436), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 436, -1.0, 1220, 1.0);
         }
 
         s.b[1372] = (((-s.v[436]) / s.v[1220]) < 0.0);
@@ -6008,7 +6008,7 @@ impl Instance {
         s.v[1388] = if s.b[1388] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1376])) && (!s.b[1386])) && s.b[1388]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(437), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 437, -1.0, 1220, 1.0);
         }
 
         s.b[1389] = (((-s.v[437]) / s.v[1220]) < 0.0);
@@ -6299,7 +6299,7 @@ impl Instance {
         s.v[1410] = if s.b[1410] { 1.0 } else { 0.0 };
 
         if ((((s.b[1159] && s.b[1176]) && (!s.b[1398])) && (!s.b[1408])) && s.b[1410]) {
-            s.store_exp_ad(1195, A::div_scaled_inputs(s.ad_value(435), -1.0, s.ad_value(1220), 1.0));
+            s.store_exp_div_scaled_inputs_indices(1195, 435, -1.0, 1220, 1.0);
         }
 
         s.b[1411] = (((-s.v[435]) / s.v[1220]) < 0.0);

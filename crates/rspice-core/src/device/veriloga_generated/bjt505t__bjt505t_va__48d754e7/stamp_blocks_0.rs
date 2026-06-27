@@ -1813,7 +1813,7 @@ impl Instance {
     ) {
         let nv4 = ctx.node_voltage(nodes[4]);
         if s.b[600] {
-            s.store_exp_ad(302, A::div_scaled_inputs(s.ad_value(252), 1.0, s.ad_value(6), p.p85));
+            s.store_exp_div_scaled_inputs_indices(302, 252, 1.0, 6, p.p85);
         }
 
         if (!s.b[600]) {
@@ -3439,7 +3439,7 @@ impl Instance {
         s.v[600] = if s.b[600] { 1.0 } else { 0.0 };
 
         if s.b[600] {
-            s.store_exp_ad(302, A::div_scaled_inputs(s.ad_value(252), 1.0, s.ad_value(6), p.p85));
+            s.store_exp_div_scaled_inputs_indices(302, 252, 1.0, 6, p.p85);
         }
 
         if (!s.b[600]) {

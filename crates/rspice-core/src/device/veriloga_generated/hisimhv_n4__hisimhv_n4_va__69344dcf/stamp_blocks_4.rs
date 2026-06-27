@@ -1267,7 +1267,7 @@ impl Instance {
         if ((!s.b[2576]) && s.b[2577]) {
             s.store_div(339, 662, 958);
             s.store_mul(340, 663, 958);
-            s.store_exp_ad(336, A::div_scaled_inputs(s.ad_value(340), -1.0, s.ad_value(283), 1.0));
+            s.store_exp_div_scaled_inputs_indices(336, 340, -1.0, 283, 1.0);
             s.store_mul_product3_rhs(280, 336, s.ad_value(339), s.ad_value(283), s.ad_value(134), 1.0);
             s.store_mul3_lhs(288, 339, 283, 336);
         }

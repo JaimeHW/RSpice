@@ -2480,7 +2480,7 @@ impl Instance {
         if (s.b[3309] && s.b[3310]) {
             s.store_div(339, 668, 958);
             s.store_mul(340, 669, 958);
-            s.store_exp_ad(336, A::div_scaled_inputs(s.ad_value(340), -1.0, s.ad_value(283), 1.0));
+            s.store_exp_div_scaled_inputs_indices(336, 340, -1.0, 283, 1.0);
         }
 
         s.b[3319] = (s.v[78] == 0.0);

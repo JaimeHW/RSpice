@@ -543,7 +543,7 @@ impl Instance {
         s.v[467] = if s.b[467] { 1.0 } else { 0.0 };
 
         if s.b[467] {
-            s.store_exp_ad(246, A::div_scaled_inputs(s.ad_value(232), s.v[8], s.ad_value(48), 1.0));
+            s.store_exp_div_scaled_inputs_indices(246, 232, s.v[8], 48, 1.0);
         }
 
         if (!s.b[467]) {
@@ -2110,7 +2110,7 @@ impl Instance {
         s.v[467] = if s.b[467] { 1.0 } else { 0.0 };
 
         if s.b[467] {
-            s.store_exp_ad(246, A::div_scaled_inputs(s.ad_value(232), s.v[8], s.ad_value(48), 1.0));
+            s.store_exp_div_scaled_inputs_indices(246, 232, s.v[8], 48, 1.0);
         }
 
         if (!s.b[467]) {

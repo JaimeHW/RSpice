@@ -451,7 +451,7 @@ impl Instance {
 
         s.store_scale_ad(34, A::powf(s.ad_value(41), p.p112), p.p18);
 
-        s.store_exp_ad(35, A::div_scaled_inputs(s.ad_value(31), -1.0, A::mul(s.ad_value(32), s.ad_value(73)), 1.0));
+        s.store_exp_div_scaled_inputs_mixed_ia(35, 31, -1.0, A::mul(s.ad_value(32), s.ad_value(73)), 1.0);
 
         s.store_offset_scaled(36, 42, ((p.p130) * (p.p70)), p.p70);
 
