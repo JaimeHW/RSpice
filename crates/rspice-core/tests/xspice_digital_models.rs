@@ -63,6 +63,15 @@ fn value_near_time(times: &[f64], values: &[f64], target: f64) -> f64 {
         .expect("nearest sample exists")
 }
 
+fn digital_tokens(result: &TransientResult, node: &str) -> Vec<(f64, String)> {
+    result
+        .digital_trace_named(node)
+        .unwrap_or_else(|| panic!("digital trace {node} missing from {:?}", result.node_names))
+        .iter()
+        .map(|point| (point.time, point.value.to_ngspice_token()))
+        .collect()
+}
+
 fn parse_file(path: &Path) -> Netlist {
     Netlist::parse_file(path).unwrap_or_else(|err| panic!("deck parses: {err}"))
 }
@@ -120,6 +129,42 @@ rload out 0 1k
     assert!(
         low_window_min < 0.1,
         "d_source 2ns event should drive dac low like ngspice, min={low_window_min}"
+    );
+}
+
+#[test]
+fn d_source_records_digital_event_trace() {
+    let result = run_temp_deck(
+        "rspice-d-source-trace",
+        "0 0s\n1n 1s\n2n Uu\n",
+        "\
+* d_source digital trace oracle
+a_src [d] src
+.model src d_source (input_file=\"stim.stim\")
+.end
+",
+        2.5e-9,
+        100.0e-12,
+    );
+
+    let trace = digital_tokens(&result, "d");
+    assert!(
+        trace
+            .iter()
+            .any(|(time, token)| *time == 0.0 && token == "0s"),
+        "missing t=0 0s digital event in {trace:?}"
+    );
+    assert!(
+        trace
+            .iter()
+            .any(|(time, token)| (*time - 1.0e-9).abs() <= 1.0e-18 && token == "1s"),
+        "missing t=1ns 1s digital event in {trace:?}"
+    );
+    assert!(
+        trace
+            .iter()
+            .any(|(time, token)| (*time - 2.0e-9).abs() <= 1.0e-18 && token == "Uu"),
+        "missing t=2ns Uu digital event in {trace:?}"
     );
 }
 
