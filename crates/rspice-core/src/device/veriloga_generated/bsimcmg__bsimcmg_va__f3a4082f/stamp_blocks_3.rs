@@ -869,7 +869,7 @@ impl Instance {
 
         s.store_add_scaled_product_left_ad(209, 209, 1.0, A::mul3_scaled_output(s.ad_value(424), s.ad_value(399), s.ad_value(402), 0.5), 402, 1.0);
 
-        s.store_add_ad_rhs(168, 241, A::div(s.ad_value(242), A::add_scaled_inputs(s.ad_value(399), 1.0, s.ad_value(181), 2.0)));
+        s.store_add_div_rhs_mixed_ia(168, 241, 242, A::add_scaled_inputs(s.ad_value(399), 1.0, s.ad_value(181), 2.0));
 
         s.store_mul3_lhs(169, 168, 402, 402);
 

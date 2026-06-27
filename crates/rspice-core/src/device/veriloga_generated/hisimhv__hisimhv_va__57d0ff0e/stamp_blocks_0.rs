@@ -5525,7 +5525,7 @@ impl Instance {
         if ((s.b[1443] && s.b[1444]) && s.b[1578]) {
             s.copy_ad(1464, 1513);
             s.store_scalar(1483, 0.0);
-            s.store_add_ad_lhs(1480, A::div(A::ln(A::mul3(s.ad_value(1456), s.ad_value(85), s.ad_value(85))), A::add(s.ad_value(154), A::div_from_scalar(2.0, s.ad_value(85)))), 1483);
+            s.store_add_div_lhs(1480, A::ln(A::mul3(s.ad_value(1456), s.ad_value(85), s.ad_value(85))), A::add(s.ad_value(154), A::div_from_scalar(2.0, s.ad_value(85))), 1483);
         }
 
         s.b[1579] = (s.v[1480] < (s.v[1511] + s.v[1553]));

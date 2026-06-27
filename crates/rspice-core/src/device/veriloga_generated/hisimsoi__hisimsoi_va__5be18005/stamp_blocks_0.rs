@@ -5520,7 +5520,7 @@ impl Instance {
             s.store_sub(328, 313, 515);
             s.store_div(329, 328, 254);
             s.store_sqrt_square_offset(330, 329, 1.0);
-            s.store_add_ad_lhs(161, A::div(s.ad_value(328), s.ad_value(330)), 515);
+            s.store_add_div_lhs_indices(161, 328, 330, 515);
         }
 
         s.b[1070] = (s.v[144] >= 1.0);

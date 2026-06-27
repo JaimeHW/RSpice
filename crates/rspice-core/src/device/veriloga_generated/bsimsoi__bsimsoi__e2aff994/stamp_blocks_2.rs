@@ -984,7 +984,7 @@ impl Instance {
         }
 
         if (!s.b[1620]) {
-            s.store_add_ad_rhs(167, 330, A::div(s.ad_value(333), A::add_scaled_product(s.ad_value(243), 1.0, s.ad_value(267), s.ad_value(637), 2.0)));
+            s.store_add_div_rhs_mixed_ia(167, 330, 333, A::add_scaled_product(s.ad_value(243), 1.0, s.ad_value(267), s.ad_value(637), 2.0));
             s.store_sub(416, 400, 320);
             s.store_mul3_lhs(168, 167, 416, 416);
             s.store_offset(169, 168, ((1.0) + ((-0.001))));

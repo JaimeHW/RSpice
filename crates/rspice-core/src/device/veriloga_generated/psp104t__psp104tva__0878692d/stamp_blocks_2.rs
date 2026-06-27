@@ -4188,7 +4188,7 @@ impl Instance {
             s.store_mul_offset_rhs_scaled_ad_rhs(2744, 1853, A::sqrt(A::scale_offset(s.ad_value(2743), 2.0, 1.0)), 1.0, 0.5);
             s.store_div_ad_rhs(2745, 1853, A::mul(s.ad_value(2744), s.ad_value(2738)));
             s.store_mul_ad_product_lhs(2746, A::mul3(s.ad_value(799), s.ad_value(827), s.ad_value(1841)), s.ad_value(2745), 2745);
-            s.store_add_ad_rhs(2741, 2741, A::div(s.ad_value(2746), s.ad_value(1919)));
+            s.store_add_div_rhs_indices(2741, 2741, 2746, 1919);
         }
 
         if (s.b[2762] && s.b[2764]) {

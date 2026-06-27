@@ -429,7 +429,7 @@ impl Instance {
             s.store_scalar(115, 0.0);
         }
 
-        s.store_add_ad_rhs(16, 121, A::div(s.ad_value(118), A::pow_from_scalar(s.v[30], s.ad_value(119))));
+        s.store_add_div_rhs_mixed_ia(16, 121, 118, A::pow_from_scalar(s.v[30], s.ad_value(119)));
 
         s.store_add_scaled_product_right_ad(115, 115, 1.0, 16, A::tanh(A::mul(s.ad_value(120), s.ad_value(76))), (-1.0));
 
@@ -1235,7 +1235,7 @@ impl Instance {
             s.store_offset_product3(245, A::div(s.ad_value(499), A::mul(s.ad_value(162), s.ad_value(159))), s.ad_value(80), s.ad_value(244), ((s.v[46] * s.v[29]) * 1.0 / (s.v[30])), 1.0);
         }
 
-        s.store_add_ad_rhs(12, 150, A::div(s.ad_value(153), A::add_scaled_product(s.ad_value(80), 1.0, s.ad_value(104), s.ad_value(393), 2.0)));
+        s.store_add_div_rhs_mixed_ia(12, 150, 153, A::add_scaled_product(s.ad_value(80), 1.0, s.ad_value(104), s.ad_value(393), 2.0));
 
         s.store_sub(216, 200, 144);
 

@@ -2117,14 +2117,14 @@ impl Instance {
             s.store_add_scaled_product_indices(259, 416, (-1.0), 77, 122, 1.0);
             s.store_add(279, 259, 416);
             s.store_div(280, 279, 176);
-            s.store_sub_ad_lhs(410, A::div(s.ad_value(279), A::sqrt_square_offset(s.ad_value(280), 1.0)), 416);
+            s.store_sub_div_lhs_mixed_ia(410, 279, A::sqrt_square_offset(s.ad_value(280), 1.0), 416);
             s.store_scaled_sub(408, 404, 410, s.v[435]);
             s.copy_ad(407, 408);
         }
 
         if (s.b[978] && (!s.b[980])) {
             s.store_scalar(77, 3.0);
-            s.store_sub_ad_lhs(319, A::div(s.ad_value(77), s.ad_value(120)), 416);
+            s.store_sub_div_lhs_indices(319, 77, 120, 416);
             s.store_offset_div_scaled_inputs2(290, A::offset(A::mul(s.ad_value(120), A::add(s.ad_value(404), s.ad_value(416))), (-1.0)), 4.0, A::exp_scaled_input(s.ad_value(77), -1.0), 4.0, A::mul(s.ad_value(145), s.ad_value(121)), 1.0, 1.0);
         }
 
@@ -2202,7 +2202,7 @@ impl Instance {
             s.store_sub(434, 434, 433);
             s.store_add_scaled_inputs(434, 434, 1.0, 120, 0.1);
             s.store_add_scaled_inputs_product_mixed_aaii(432, A::ln(A::add_scaled_square_product(s.ad_value(434), 1.0, s.ad_value(430), s.ad_value(278), 1.0)), 1.0, A::ln(A::mul(s.ad_value(429), s.ad_value(278))), (-1.0), 120, 416, 1.0);
-            s.store_sub_ad_lhs(320, A::div(s.ad_value(432), s.ad_value(120)), 416);
+            s.store_sub_div_lhs_indices(320, 432, 120, 416);
             s.copy_ad(431, 77);
             s.store_offset_sub(638, 432, 431, (-(0.0008 * 75.0)));
             s.store_scale(639, 432, (4.0 * (0.0008 * 75.0)));
@@ -2223,7 +2223,7 @@ impl Instance {
         }
 
         if (s.b[978] && (!s.b[980])) {
-            s.store_sub_ad_lhs(410, A::div(s.ad_value(77), s.ad_value(120)), 416);
+            s.store_sub_div_lhs_indices(410, 77, 120, 416);
             s.store_add_offset_lhs_ad_rhs(279, 77, (-1.0), A::exp_scaled_input(s.ad_value(77), -1.0));
         }
 
@@ -2452,14 +2452,14 @@ impl Instance {
             s.store_add_scaled_product_indices(259, 416, (-1.0), 77, 122, 1.0);
             s.store_add(279, 259, 416);
             s.store_div(280, 279, 176);
-            s.store_sub_ad_lhs(410, A::div(s.ad_value(279), A::sqrt_square_offset(s.ad_value(280), 1.0)), 416);
+            s.store_sub_div_lhs_mixed_ia(410, 279, A::sqrt_square_offset(s.ad_value(280), 1.0), 416);
             s.store_scaled_sub(408, 404, 410, s.v[435]);
             s.copy_ad(407, 408);
         }
 
         if (s.b[978] && (!s.b[997])) {
             s.store_scalar(77, 3.0);
-            s.store_sub_ad_lhs(319, A::div(s.ad_value(77), s.ad_value(120)), 416);
+            s.store_sub_div_lhs_indices(319, 77, 120, 416);
             s.store_offset_div_scaled_inputs2(290, A::offset(A::mul(s.ad_value(120), A::add(s.ad_value(404), s.ad_value(416))), (-1.0)), 4.0, A::exp_scaled_input(s.ad_value(77), -1.0), 4.0, A::mul(s.ad_value(145), s.ad_value(121)), 1.0, 1.0);
         }
 
@@ -2546,7 +2546,7 @@ impl Instance {
             s.store_sub(434, 434, 433);
             s.store_add_scaled_inputs(434, 434, 1.0, 120, 0.1);
             s.store_add_scaled_inputs_product_mixed_aaii(432, A::ln(A::add_scaled_square_product(s.ad_value(434), 1.0, s.ad_value(430), s.ad_value(278), 1.0)), 1.0, A::ln(A::mul(s.ad_value(429), s.ad_value(278))), (-1.0), 120, 416, 1.0);
-            s.store_sub_ad_lhs(320, A::div(s.ad_value(432), s.ad_value(120)), 416);
+            s.store_sub_div_lhs_indices(320, 432, 120, 416);
             s.copy_ad(431, 77);
             s.store_offset_sub(638, 432, 431, (-(0.0008 * 75.0)));
             s.store_scale(639, 432, (4.0 * (0.0008 * 75.0)));
@@ -2567,7 +2567,7 @@ impl Instance {
         }
 
         if (s.b[978] && (!s.b[997])) {
-            s.store_sub_ad_lhs(410, A::div(s.ad_value(77), s.ad_value(120)), 416);
+            s.store_sub_div_lhs_indices(410, 77, 120, 416);
             s.store_add_offset_lhs_ad_rhs(279, 77, (-1.0), A::exp_scaled_input(s.ad_value(77), -1.0));
         }
 

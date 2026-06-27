@@ -47,7 +47,7 @@ impl Instance {
         }
 
         if (s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) {
-            s.store_add_ad_lhs(989, A::div(s.ad_value(989), s.ad_value(340)), 2164);
+            s.store_add_div_lhs_indices(989, 989, 340, 2164);
             s.store_mul_square_lhs(338, 2164, 2164);
             s.store_offset(334, 338, 0.0001);
             s.store_div(2165, 338, 334);
@@ -105,7 +105,7 @@ impl Instance {
 
         if ((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && (!s.b[2417])) {
             s.store_mul(340, 338, 337);
-            s.store_add_ad_lhs(989, A::div(s.ad_value(989), s.ad_value(340)), 2164);
+            s.store_add_div_lhs_indices(989, 989, 340, 2164);
         }
 
         if (s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) {
@@ -311,7 +311,7 @@ impl Instance {
             s.store_sub(335, 167, 1433);
             s.store_div(336, 335, 271);
             s.store_sqrt_square_offset(337, 336, 1.0);
-            s.store_add_ad_lhs(87, A::div(s.ad_value(335), s.ad_value(337)), 1433);
+            s.store_add_div_lhs_indices(87, 335, 337, 1433);
             s.copy_ad(91, 87);
             s.store_scalar(94, 0.0);
             s.store_sub(336, 85, 87);
@@ -2078,7 +2078,7 @@ impl Instance {
             s.store_sub(335, 167, 2543);
             s.store_div(336, 335, 271);
             s.store_sqrt_square_offset(337, 336, 1.0);
-            s.store_add_ad_lhs(2521, A::div(s.ad_value(335), s.ad_value(337)), 2543);
+            s.store_add_div_lhs_indices(2521, 335, 337, 2543);
         }
 
         if (((((!s.b[1441]) && s.b[2517]) && (!s.b[2536])) && s.b[2542]) && (!s.b[2552])) {
@@ -3535,7 +3535,7 @@ impl Instance {
             s.store_mul(335, 116, 155);
             s.store_div(336, 335, 271);
             s.store_sqrt_square_offset(337, 336, 1.0);
-            s.store_sub_ad_lhs(404, A::div(s.ad_value(335), s.ad_value(337)), 397);
+            s.store_sub_div_lhs_indices(404, 335, 337, 397);
             s.store_sub(336, 402, 404);
             s.store_mul(398, 413, 336);
             s.copy_ad(354, 398);

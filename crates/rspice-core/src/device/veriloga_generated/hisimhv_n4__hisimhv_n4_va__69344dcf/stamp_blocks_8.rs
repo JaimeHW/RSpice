@@ -634,7 +634,7 @@ impl Instance {
         if (((s.b[1439] && s.b[1440]) && (!s.b[1707])) && s.b[1727]) {
             s.copy_ad(1461, 1510);
             s.copy_ad(1480, 790);
-            s.store_add_ad_lhs(1477, A::div(A::ln(A::mul3(s.ad_value(1452), s.ad_value(85), s.ad_value(85))), A::add(s.ad_value(154), A::div_from_scalar(2.0, s.ad_value(85)))), 790);
+            s.store_add_div_lhs(1477, A::ln(A::mul3(s.ad_value(1452), s.ad_value(85), s.ad_value(85))), A::add(s.ad_value(154), A::div_from_scalar(2.0, s.ad_value(85))), 790);
         }
 
         s.b[1728] = (s.v[1477] < (s.v[1508] + s.v[1549]));

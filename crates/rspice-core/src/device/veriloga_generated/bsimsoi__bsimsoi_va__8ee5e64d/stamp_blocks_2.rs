@@ -2307,7 +2307,7 @@ impl Instance {
         s.v[1739] = if s.b[1739] { 1.0 } else { 0.0 };
 
         if (((s.b[1733] && (!s.b[1734])) && (!s.b[1738])) && s.b[1739]) {
-            s.store_add_ad_rhs(1180, 1179, A::div(s.ad_value(1182), s.ad_value(737)));
+            s.store_add_div_rhs_indices(1180, 1179, 1182, 737);
         }
 
         if (((s.b[1733] && (!s.b[1734])) && (!s.b[1738])) && (!s.b[1739])) {
@@ -2329,7 +2329,7 @@ impl Instance {
         s.v[1741] = if s.b[1741] { 1.0 } else { 0.0 };
 
         if (((s.b[1733] && (!s.b[1734])) && s.b[1740]) && s.b[1741]) {
-            s.store_add_ad_rhs(1180, 1179, A::div(s.ad_value(1182), s.ad_value(737)));
+            s.store_add_div_rhs_indices(1180, 1179, 1182, 737);
         }
 
         if (((s.b[1733] && (!s.b[1734])) && s.b[1740]) && (!s.b[1741])) {
@@ -2693,7 +2693,7 @@ impl Instance {
         s.v[1770] = if s.b[1770] { 1.0 } else { 0.0 };
 
         if (((((!s.b[1733]) && s.b[1751]) && (!s.b[1754])) && (!s.b[1769])) && s.b[1770]) {
-            s.store_add_ad_rhs(1180, 1179, A::div(s.ad_value(1182), s.ad_value(737)));
+            s.store_add_div_rhs_indices(1180, 1179, 1182, 737);
         }
 
         if (((((!s.b[1733]) && s.b[1751]) && (!s.b[1754])) && (!s.b[1769])) && (!s.b[1770])) {
@@ -2722,7 +2722,7 @@ impl Instance {
         s.v[1773] = if s.b[1773] { 1.0 } else { 0.0 };
 
         if ((((((!s.b[1733]) && s.b[1751]) && (!s.b[1754])) && s.b[1771]) && (!s.b[1772])) && s.b[1773]) {
-            s.store_add_ad_rhs(1180, 1179, A::div(s.ad_value(1182), s.ad_value(737)));
+            s.store_add_div_rhs_indices(1180, 1179, 1182, 737);
         }
 
         if ((((((!s.b[1733]) && s.b[1751]) && (!s.b[1754])) && s.b[1771]) && (!s.b[1772])) && (!s.b[1773])) {

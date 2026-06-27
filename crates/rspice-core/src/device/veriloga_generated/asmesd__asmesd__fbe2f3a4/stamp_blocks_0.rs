@@ -499,7 +499,7 @@ impl Instance {
 
         s.store_add_ad_lhs(37, A::div_scaled_inputs2(s.ad_value(35), 1.0, s.ad_value(47), (-1.0), s.ad_value(16), 1.0), 36);
 
-        s.store_add_ad_lhs(40, A::div(s.ad_value(38), s.ad_value(17)), 39);
+        s.store_add_div_lhs_indices(40, 38, 17, 39);
 
         s.store_offset_scaled(66, 77, ((p.p81) * (s.v[66])), s.v[66]);
 

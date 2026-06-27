@@ -3651,7 +3651,7 @@ impl Instance {
                 s.store_div(814, 812, 813);
                 s.store_add_scaled_inputs3_mixed_iia(815, 159, 1.0, 175, 1.0, A::add_scaled_product(s.ad_value(395), 1.0, s.ad_value(449), s.ad_value(814), 1.0), -1.0);
                 s.store_sub_from_scalar_div_indices(816, 1.0, 815, 448);
-                s.store_add_ad_rhs(819, 811, A::div(s.ad_value(815), s.ad_value(826)));
+                s.store_add_div_rhs_indices(819, 811, 815, 826);
                 s.store_square(817, 819);
                 s.store_sqrt_square_offset(44, 816, ((4.0 * 0.001) * 0.001));
                 s.store_offset_add_scaled_inputs_indices(816, 816, 0.5, 44, 0.5, (1e-10 * 0.001));

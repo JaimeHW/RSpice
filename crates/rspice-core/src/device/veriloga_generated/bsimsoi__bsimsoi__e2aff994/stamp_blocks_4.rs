@@ -2190,7 +2190,7 @@ impl Instance {
         }
 
         if (s.b[1620] && s.b[1799]) {
-            s.store_add_ad_rhs(171, 290, A::div(s.ad_value(284), A::pow_from_scalar(s.v[184], s.ad_value(286))));
+            s.store_add_div_rhs_mixed_ia(171, 290, 284, A::pow_from_scalar(s.v[184], s.ad_value(286)));
             s.store_add_scaled_product_right_ad(278, 278, 1.0, 171, A::tanh(A::mul(s.ad_value(288), s.ad_value(227))), (-1.0));
             s.store_add_scaled_inputs3_mixed_aii(242, A::offset(A::add(A::add_scaled_inputs4(s.ad_value(291), 1.0, s.ad_value(278), 1.0, s.ad_value(944), 1.0, s.ad_value(293), -1.0), s.ad_value(945)), p.p1151), 1.0, 956, 1.0, 932, 1.0);
             s.store_add_scaled_inputs_product_indices(213, 222, 1.0, 212, (-1.0), 242, 270, (-1.0));

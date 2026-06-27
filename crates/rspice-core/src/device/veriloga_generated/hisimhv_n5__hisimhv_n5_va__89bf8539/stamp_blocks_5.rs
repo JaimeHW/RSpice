@@ -870,7 +870,7 @@ impl Instance {
             s.store_mul(335, 116, 155);
             s.store_div(336, 335, 271);
             s.store_sqrt_square_offset(337, 336, 1.0);
-            s.store_sub_ad_lhs(404, A::div(s.ad_value(335), s.ad_value(337)), 397);
+            s.store_sub_div_lhs_indices(404, 335, 337, 397);
             s.store_sub(336, 402, 404);
             s.store_mul(398, 413, 336);
             s.copy_ad(354, 398);
@@ -2825,7 +2825,7 @@ impl Instance {
             s.store_mul(335, 116, 155);
             s.store_div(336, 335, 271);
             s.store_sqrt_square_offset(337, 336, 1.0);
-            s.store_sub_ad_lhs(404, A::div(s.ad_value(335), s.ad_value(337)), 397);
+            s.store_sub_div_lhs_indices(404, 335, 337, 397);
             s.store_sub(336, 402, 404);
             s.store_mul(398, 413, 336);
             s.copy_ad(354, 398);
@@ -4643,7 +4643,7 @@ impl Instance {
             s.store_mul(335, 116, 155);
             s.store_div(336, 335, 271);
             s.store_sqrt_square_offset(337, 336, 1.0);
-            s.store_sub_ad_lhs(404, A::div(s.ad_value(335), s.ad_value(337)), 397);
+            s.store_sub_div_lhs_indices(404, 335, 337, 397);
             s.store_sub(336, 402, 404);
             s.store_mul(398, 413, 336);
             s.copy_ad(354, 398);

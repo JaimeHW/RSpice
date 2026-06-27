@@ -275,7 +275,7 @@ impl Instance {
             }
             if ((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && (!s.b[2250])) {
                 s.store_mul(337, 336, 337);
-                s.store_add_ad_rhs(2135, 2088, A::div(A::add_scaled_square_product(s.ad_value(2129), 1.0, s.ad_value(2084), A::sub_scaled_inputs(s.ad_value(2084), 1.0, s.ad_value(2129), 2.0), 1.0), s.ad_value(2134)));
+                s.store_add_div_rhs_mixed_ai(2135, 2088, A::add_scaled_square_product(s.ad_value(2129), 1.0, s.ad_value(2084), A::sub_scaled_inputs(s.ad_value(2084), 1.0, s.ad_value(2129), 2.0), 1.0), 2134);
                 s.store_scalar(2136, 1.0);
                 s.store_mul_sub_from_scalar_rhs_ad_lhs(2137, A::add_scaled_product(s.ad_value(337), 1.0, A::div(s.ad_value(2129), s.ad_value(2084)), s.ad_value(337), (-1.0)), 1.0, 2139);
             }
@@ -3769,7 +3769,7 @@ impl Instance {
         }
 
         if (s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) {
-            s.store_add_ad_lhs(989, A::div(s.ad_value(989), s.ad_value(340)), 2164);
+            s.store_add_div_lhs_indices(989, 989, 340, 2164);
             s.store_mul_square_lhs(338, 2164, 2164);
             s.store_offset(334, 338, 0.0001);
             s.store_div(2165, 338, 334);
@@ -3827,7 +3827,7 @@ impl Instance {
 
         if ((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && (!s.b[2417])) {
             s.store_mul(340, 338, 337);
-            s.store_add_ad_lhs(989, A::div(s.ad_value(989), s.ad_value(340)), 2164);
+            s.store_add_div_lhs_indices(989, 989, 340, 2164);
         }
 
         if (s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) {
@@ -4051,7 +4051,7 @@ impl Instance {
             s.store_sub(335, 167, 1433);
             s.store_div(336, 335, 271);
             s.store_sqrt_square_offset(337, 336, 1.0);
-            s.store_add_ad_lhs(87, A::div(s.ad_value(335), s.ad_value(337)), 1433);
+            s.store_add_div_lhs_indices(87, 335, 337, 1433);
             s.copy_ad(91, 87);
             s.store_scalar(94, 0.0);
             s.store_sub(336, 85, 87);

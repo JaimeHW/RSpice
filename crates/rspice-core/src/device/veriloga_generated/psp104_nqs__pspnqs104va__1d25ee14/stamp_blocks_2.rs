@@ -5322,7 +5322,7 @@ impl Instance {
         }
 
         if s.b[2921] {
-            s.store_add_ad_lhs(2027, A::div(s.ad_value(1969), s.ad_value(1937)), 1890);
+            s.store_add_div_lhs_indices(2027, 1969, 1937, 1890);
         }
 
         s.b[2927] = (((s.v[2027]) as f64).abs() <= s.v[1941]);
@@ -5470,7 +5470,7 @@ impl Instance {
 
         if (s.b[2921] && (!s.b[2935])) {
             s.store_div_scaled_product3_mixed_iiai(1991, 1889, 1889, A::sub_from_scalar(1.0, s.ad_value(2027)), 0.5, 1996, 1.0);
-            s.store_add_ad_lhs(1990, A::div(A::add_scaled_square_product(s.ad_value(1991), 1.0, s.ad_value(1889), s.ad_value(1889), (-0.5)), s.ad_value(1996)), 1991);
+            s.store_add_div_lhs_mixed_ai(1990, A::add_scaled_square_product(s.ad_value(1991), 1.0, s.ad_value(1889), s.ad_value(1889), (-0.5)), 1996, 1991);
         }
 
         if s.b[2921] {
@@ -5552,7 +5552,7 @@ impl Instance {
         }
 
         if s.b[2940] {
-            s.store_add_ad_lhs(2027, A::div(s.ad_value(1970), s.ad_value(1937)), 1890);
+            s.store_add_div_lhs_indices(2027, 1970, 1937, 1890);
         }
 
         s.b[2945] = (((s.v[2027]) as f64).abs() <= s.v[1941]);
@@ -5700,7 +5700,7 @@ impl Instance {
 
         if (s.b[2940] && (!s.b[2953])) {
             s.store_div_scaled_product3_mixed_iiai(1991, 1889, 1889, A::sub_from_scalar(1.0, s.ad_value(2027)), 0.5, 1996, 1.0);
-            s.store_add_ad_lhs(1990, A::div(A::add_scaled_square_product(s.ad_value(1991), 1.0, s.ad_value(1889), s.ad_value(1889), (-0.5)), s.ad_value(1996)), 1991);
+            s.store_add_div_lhs_mixed_ai(1990, A::add_scaled_square_product(s.ad_value(1991), 1.0, s.ad_value(1889), s.ad_value(1889), (-0.5)), 1996, 1991);
         }
 
         if s.b[2940] {
@@ -5765,7 +5765,7 @@ impl Instance {
         }
 
         if s.b[2958] {
-            s.store_add_ad_lhs(2027, A::div(s.ad_value(1971), s.ad_value(1937)), 1890);
+            s.store_add_div_lhs_indices(2027, 1971, 1937, 1890);
         }
 
         s.b[2962] = (((s.v[2027]) as f64).abs() <= s.v[1941]);

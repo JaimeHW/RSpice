@@ -2403,6 +2403,60 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_add_div_rhs_components(&mut self, index: usize, left: usize, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT]) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = left_value + quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_div_rhs(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_add_div_rhs_components(index, left, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db);
+    }
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_components(&mut self, index: usize, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = quotient + right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale + right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale + right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        self.store_add_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db, right);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_components(&mut self, index: usize, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = quotient - right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale - right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale - right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        self.store_sub_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db, right);
+    }
+
+    #[inline]
     pub(crate) fn store_sub_from_scalar_div_components(&mut self, index: usize, scalar: f64, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT]) {
         let reciprocal = 1.0 / denominator_raw;
         let quotient = numerator_raw * reciprocal;
@@ -10909,11 +10963,65 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_add_div_rhs_mixed_ai(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_rhs_components(index, left, numerator.value, numerator.dn, numerator.db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_mixed_ai(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize, right: usize) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator_value, denominator_dn, denominator_db, right);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_mixed_ai(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize, right: usize) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_sub_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator_value, denominator_dn, denominator_db, right);
+    }
+
+
+    #[inline]
     pub(crate) fn store_sub_div_rhs_mixed_ia(&mut self, index: usize, left: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let numerator_value = self.v[numerator];
         let numerator_dn = self.dn[numerator];
         let numerator_db = self.db[numerator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_rhs_mixed_ia(&mut self, index: usize, left: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        self.store_add_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_mixed_ia(&mut self, index: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        self.store_add_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db, right);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_mixed_ia(&mut self, index: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        self.store_sub_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db, right);
     }
 
 
@@ -10926,6 +11034,42 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_dn = self.dn[denominator];
         let denominator_db = self.db[denominator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_rhs_indices(&mut self, index: usize, left: usize, numerator: usize, denominator: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_indices(&mut self, index: usize, numerator: usize, denominator: usize, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db, right);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_indices(&mut self, index: usize, numerator: usize, denominator: usize, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_sub_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db, right);
     }
 
 
@@ -14323,6 +14467,60 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_add_div_rhs_components(&mut self, index: usize, left: usize, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT]) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = left_value + quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_div_rhs(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_add_div_rhs_components(index, left, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db);
+    }
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_components(&mut self, index: usize, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = quotient + right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale + right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale + right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        self.store_add_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db, right);
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_components(&mut self, index: usize, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = numerator_raw * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = quotient - right_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * reciprocal + denominator_dn[axis] * denominator_derivative_scale - right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_derivative_scale - right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        self.store_sub_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator.value, denominator.dn, denominator.db, right);
+    }
+
+    #[inline]
     pub(crate) fn store_sub_from_scalar_div_components(&mut self, index: usize, scalar: f64, numerator_raw: f64, numerator_dn: [f64; NODE_COUNT], numerator_db: [f64; BRANCH_COUNT], denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT]) {
         let reciprocal = 1.0 / denominator_raw;
         let quotient = numerator_raw * reciprocal;
@@ -22829,11 +23027,65 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_add_div_rhs_mixed_ai(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_rhs_components(index, left, numerator.value, numerator.dn, numerator.db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_mixed_ai(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize, right: usize) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator_value, denominator_dn, denominator_db, right);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_mixed_ai(&mut self, index: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: usize, right: usize) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_sub_div_lhs_components(index, numerator.value, numerator.dn, numerator.db, denominator_value, denominator_dn, denominator_db, right);
+    }
+
+
+    #[inline]
     pub(crate) fn store_sub_div_rhs_mixed_ia(&mut self, index: usize, left: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let numerator_value = self.v[numerator];
         let numerator_dn = self.dn[numerator];
         let numerator_db = self.db[numerator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_rhs_mixed_ia(&mut self, index: usize, left: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        self.store_add_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_mixed_ia(&mut self, index: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        self.store_add_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db, right);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_mixed_ia(&mut self, index: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        self.store_sub_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator.value, denominator.dn, denominator.db, right);
     }
 
 
@@ -22846,6 +23098,42 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_dn = self.dn[denominator];
         let denominator_db = self.db[denominator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_rhs_indices(&mut self, index: usize, left: usize, numerator: usize, denominator: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_add_div_lhs_indices(&mut self, index: usize, numerator: usize, denominator: usize, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_add_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db, right);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_sub_div_lhs_indices(&mut self, index: usize, numerator: usize, denominator: usize, right: usize) {
+        let numerator_value = self.v[numerator];
+        let numerator_dn = self.dn[numerator];
+        let numerator_db = self.db[numerator];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_sub_div_lhs_components(index, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db, right);
     }
 
 
