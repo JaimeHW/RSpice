@@ -115,7 +115,7 @@ impl Instance {
         s.v[145] = if s.b[145] { 1.0 } else { 0.0 };
 
         if s.b[145] {
-            s.store_div_scaled_inputs2(4, s.ad_value(14), 1.0, s.ad_value(3), (-1.0), s.ad_value(71), 1.0);
+            s.store_div_scaled_inputs2_indices(4, 14, 1.0, 3, (-1.0), 71, 1.0);
             s.store_neg_ad(33, A::ln(A::max_with_scalar(A::add(A::sub_from_scalar(1.0, s.ad_value(3)), A::square(s.ad_value(4))), 1e-38)));
         }
 
@@ -9493,7 +9493,7 @@ impl Instance {
 
         s.v[91] = 0.1;
 
-        s.store_div_scaled_inputs(92, s.ad_value(61), 2.0, s.ad_value(136), p.p0);
+        s.store_div_scaled_inputs_indices(92, 61, 2.0, 136, p.p0);
 
         s.store_square(94, 92);
 
@@ -18976,7 +18976,7 @@ impl Instance {
 
         s.v[3] = (1.0 / s.v[54]);
 
-        s.store_div_scaled_inputs(4, A::mul_scaled_output(s.ad_value(46), s.ad_value(80), 1.0 / (s.v[39])), -1.0, s.ad_value(63), s.v[54]);
+        s.store_div_scaled_inputs_mixed_ai(4, A::mul_scaled_output(s.ad_value(46), s.ad_value(80), 1.0 / (s.v[39])), -1.0, 63, s.v[54]);
 
         s.store_div_from_scalar_sub_from_scalar_ad(5, s.v[3], 1.0, A::exp(s.ad_value(4)));
 
@@ -18984,7 +18984,7 @@ impl Instance {
 
         s.v[3] = (1.0 / s.v[54]);
 
-        s.store_div_scaled_inputs(4, A::mul_scaled_output(s.ad_value(46), s.ad_value(90), 1.0 / (s.v[39])), -1.0, s.ad_value(63), s.v[54]);
+        s.store_div_scaled_inputs_mixed_ai(4, A::mul_scaled_output(s.ad_value(46), s.ad_value(90), 1.0 / (s.v[39])), -1.0, 63, s.v[54]);
 
         s.store_div_from_scalar_sub_from_scalar_ad(5, s.v[3], 1.0, A::exp(s.ad_value(4)));
 
@@ -18992,7 +18992,7 @@ impl Instance {
 
         s.v[3] = (1.0 / s.v[54]);
 
-        s.store_div_scaled_inputs(4, A::mul_scaled_output(s.ad_value(46), s.ad_value(90), 1.0 / (s.v[39])), -1.0, s.ad_value(63), s.v[54]);
+        s.store_div_scaled_inputs_mixed_ai(4, A::mul_scaled_output(s.ad_value(46), s.ad_value(90), 1.0 / (s.v[39])), -1.0, 63, s.v[54]);
 
         s.store_div_from_scalar_sub_from_scalar_ad(5, s.v[3], 1.0, A::exp(s.ad_value(4)));
 

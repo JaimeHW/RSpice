@@ -53,7 +53,7 @@ impl Instance {
         s.v[494] = if s.b[494] { 1.0 } else { 0.0 };
 
         if s.b[494] {
-            s.store_div_scaled_inputs(93, s.ad_value(208), 1.0, s.ad_value(4), p.p100);
+            s.store_div_scaled_inputs_indices(93, 208, 1.0, 4, p.p100);
         }
 
         s.b[495] = (s.v[93] > 80.0);

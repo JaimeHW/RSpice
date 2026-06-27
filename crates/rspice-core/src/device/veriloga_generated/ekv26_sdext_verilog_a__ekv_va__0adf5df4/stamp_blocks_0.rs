@@ -427,7 +427,7 @@ impl Instance {
 
         s.store_mul3_lhs(16, 29, 15, 14);
 
-        s.store_div_scaled_inputs(0, s.ad_value(4), 1.0, s.ad_value(65), 2.0);
+        s.store_div_scaled_inputs_indices(0, 4, 1.0, 65, 2.0);
 
         s.store_div(1, 3, 144);
 
@@ -435,7 +435,7 @@ impl Instance {
 
         s.store_div_scaled_product_indices(163, 0, 74, (-s.v[46]), 76, 1.0);
 
-        s.store_div_scaled_inputs2(2, s.ad_value(5), 1.0, s.ad_value(61), 1.0, s.ad_value(66), 1.0);
+        s.store_div_scaled_inputs2_indices(2, 5, 1.0, 61, 1.0, 66, 1.0);
 
         s.store_mul_neg_lhs(113, 2, 161);
 
@@ -455,7 +455,7 @@ impl Instance {
 
         s.store_scale(0, 27, (2.0 * p.p25));
 
-        s.store_div_scaled_inputs(1, s.ad_value(17), 1.0, s.ad_value(87), 2.0);
+        s.store_div_scaled_inputs_indices(1, 17, 1.0, 87, 2.0);
 
         s.store_mul_add_scaled_product_rhs(125, 0, s.ad_value(122), (-1.0), s.ad_value(116), s.ad_value(1), 1.0);
 
@@ -540,7 +540,7 @@ impl Instance {
         s.v[255] = if s.b[255] { 1.0 } else { 0.0 };
 
         if s.b[255] {
-            s.store_div_scaled_inputs(0, s.ad_value(6), p.p21, A::mul(s.ad_value(157), s.ad_value(175)), 1.0);
+            s.store_div_scaled_inputs_mixed_ia(0, 6, p.p21, A::mul(s.ad_value(157), s.ad_value(175)), 1.0);
             s.store_mul(164, 0, 113);
             s.store_mul(166, 0, 115);
             s.store_sub_scaled_inputs(140, 137, -1.0, 164, 1.0);
@@ -1102,7 +1102,7 @@ impl Instance {
 
         s.store_mul3_lhs(16, 29, 15, 14);
 
-        s.store_div_scaled_inputs(0, s.ad_value(4), 1.0, s.ad_value(65), 2.0);
+        s.store_div_scaled_inputs_indices(0, 4, 1.0, 65, 2.0);
 
         s.store_div(1, 3, 144);
 
@@ -1110,7 +1110,7 @@ impl Instance {
 
         s.store_div_scaled_product_indices(163, 0, 74, (-s.v[46]), 76, 1.0);
 
-        s.store_div_scaled_inputs2(2, s.ad_value(5), 1.0, s.ad_value(61), 1.0, s.ad_value(66), 1.0);
+        s.store_div_scaled_inputs2_indices(2, 5, 1.0, 61, 1.0, 66, 1.0);
 
         s.store_mul_neg_lhs(113, 2, 161);
 
@@ -1130,7 +1130,7 @@ impl Instance {
 
         s.store_scale(0, 27, (2.0 * p.p25));
 
-        s.store_div_scaled_inputs(1, s.ad_value(17), 1.0, s.ad_value(87), 2.0);
+        s.store_div_scaled_inputs_indices(1, 17, 1.0, 87, 2.0);
 
         s.store_mul_add_scaled_product_rhs(125, 0, s.ad_value(122), (-1.0), s.ad_value(116), s.ad_value(1), 1.0);
 
@@ -1210,7 +1210,7 @@ impl Instance {
         s.v[255] = if s.b[255] { 1.0 } else { 0.0 };
 
         if s.b[255] {
-            s.store_div_scaled_inputs(0, s.ad_value(6), p.p21, A::mul(s.ad_value(157), s.ad_value(175)), 1.0);
+            s.store_div_scaled_inputs_mixed_ia(0, 6, p.p21, A::mul(s.ad_value(157), s.ad_value(175)), 1.0);
             s.store_mul(164, 0, 113);
             s.store_mul(166, 0, 115);
             s.store_sub_scaled_inputs(140, 137, -1.0, 164, 1.0);
