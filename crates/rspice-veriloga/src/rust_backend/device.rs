@@ -2462,8 +2462,14 @@ fn stamp() {
             compact.contains("s.store_div_scaled_inputs4_mixed_iiiia(194, 19, p.first_scale, 20, p.second_scale, 21, p.third_scale, 22, p.fourth_scale, A::sqrt(s.ad_value(23)), p.denominator_scale);"),
             "{compact}"
         );
-        assert!(!compact.contains("s.store_div_scaled_inputs3("), "{compact}");
-        assert!(!compact.contains("s.store_div_scaled_inputs4("), "{compact}");
+        assert!(
+            !compact.contains("s.store_div_scaled_inputs3("),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_div_scaled_inputs4("),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -2926,6 +2932,8 @@ fn stamp() {
     scratch.store_ad_value(14, AdValue::scale(AdValue::sub(scratch.ad_value(4), AdValue::sqrt(AdValue::offset(AdValue::square(scratch.ad_value(5)), params.offset))), params.scale));
     scratch.store_scaled_add_ad_rhs(15, 6, AdValue::sqrt(AdValue::offset(AdValue::square(scratch.ad_value(7)), params.offset)), params.scale);
     scratch.store_scaled_sub_ad_rhs(16, 8, AdValue::sqrt(AdValue::offset(AdValue::square(scratch.ad_value(9)), params.offset)), params.scale);
+    scratch.store_scaled_add_ad_rhs(17, 10, AdValue::sqrt(AdValue::offset(AdValue::mul(scratch.ad_value(11), scratch.ad_value(11)), params.offset)), params.scale);
+    scratch.store_scaled_sub_ad_rhs(18, 12, AdValue::sqrt(AdValue::offset(AdValue::mul_scaled_output(scratch.ad_value(13), scratch.ad_value(13), 1.0), params.offset)), params.scale);
 }
 "#;
 
@@ -2956,9 +2964,56 @@ fn stamp() {
             "{compact}"
         );
         assert!(
+            compact.contains(
+                "s.store_scaled_add_sqrt_square_offset_rhs(17, 10, 11, p.offset, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_scaled_sub_sqrt_square_offset_rhs(18, 12, 13, p.offset, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
             !compact.contains("A::sqrt(A::offset(A::square(s.ad_value("),
             "{compact}"
         );
+        assert!(
+            !compact.contains("A::sqrt(A::offset(A::mul(s.ad_value("),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("A::sqrt(A::offset(A::mul_scaled_output(s.ad_value("),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_sqrt_shifted_square_offset_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sqrt_offset_square_offset"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(19, AdValue::sqrt(AdValue::offset(AdValue::mul_offset_lhs(scratch.ad_value(14), params.square_offset, AdValue::offset(scratch.ad_value(14), params.square_offset)), params.sqrt_offset)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_sqrt_offset_square_offset(19, 14, p.square_offset, p.sqrt_offset);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::mul_offset_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_sqrt_offset_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -11747,6 +11802,13 @@ fn generate_scratch_operation_helpers() -> String {
     "        let source_value = self.values[source];",
     "        let value = (source_value * source_value + offset).sqrt();",
     "        self.store_unary_scaled(index, source, value, source_value / value);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_sqrt_offset_square_offset(&mut self, index: usize, source: usize, square_offset: f64, sqrt_offset: f64) {",
+    "        let square_value = self.values[source] + square_offset;",
+    "        let value = (square_value * square_value + sqrt_offset).sqrt();",
+    "        self.store_unary_scaled(index, source, value, square_value / value);",
     "    }",
     "",
     "    #[inline]",
@@ -23501,6 +23563,12 @@ fn compact_sqrt_square_and_affine_store_helper_call(
                 offset_args[1]
             ));
         }
+        if let Some((source, square_offset)) = compact_offset_square_scratch_arg(offset_args[0]) {
+            return Some(format!(
+                "scratch.store_sqrt_offset_square_offset({target_index}, {source}, {square_offset}, {});",
+                offset_args[1]
+            ));
+        }
     }
 
     if let Some(add_args) = compact_ad_call_args(inner, "add") {
@@ -23589,11 +23657,37 @@ fn compact_sqrt_add_sub_scaled_square_input_store_helper_line(
 }
 
 fn compact_square_scratch_arg(value: &str) -> Option<usize> {
-    let args = compact_ad_call_args(value, "square")?;
-    if args.len() != 1 {
+    if let Some(args) = compact_ad_call_args(value, "square") {
+        if args.len() != 1 {
+            return None;
+        }
+        return compact_scratch_ad_value_index(args[0]);
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul") {
+        if args.len() != 2 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0])?;
+        let right = compact_scratch_ad_value_index(args[1])?;
+        if left == right {
+            return Some(left);
+        }
         return None;
     }
-    compact_scratch_ad_value_index(args[0])
+
+    if let Some(args) = compact_ad_call_args(value, "mul_scaled_output") {
+        if args.len() != 3 || !compact_scalar_same(args[2], "1.0") {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0])?;
+        let right = compact_scratch_ad_value_index(args[1])?;
+        if left == right {
+            return Some(left);
+        }
+    }
+
+    None
 }
 
 fn compact_offset_scratch_arg(value: &str) -> Option<(usize, &str)> {
@@ -23627,7 +23721,33 @@ fn compact_sqrt_offset_square_offset_arg(value: &str) -> Option<(usize, &str, &s
     if outer_offset_args.len() != 2 {
         return None;
     }
-    let product_args = compact_ad_call_args(outer_offset_args[0], "mul_offset_lhs")?;
+    let (source, square_offset) = compact_offset_square_scratch_arg(outer_offset_args[0])?;
+    Some((source, square_offset, outer_offset_args[1]))
+}
+
+fn compact_offset_square_scratch_arg(value: &str) -> Option<(usize, &str)> {
+    if let Some(args) = compact_ad_call_args(value, "square") {
+        if args.len() != 1 {
+            return None;
+        }
+        return compact_offset_scratch_arg(args[0]);
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul") {
+        if args.len() != 2 {
+            return None;
+        }
+        return compact_matching_offset_operands(args[0], args[1]);
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "mul_scaled_output") {
+        if args.len() != 3 || !compact_scalar_same(args[2], "1.0") {
+            return None;
+        }
+        return compact_matching_offset_operands(args[0], args[1]);
+    }
+
+    let product_args = compact_ad_call_args(value, "mul_offset_lhs")?;
     if product_args.len() != 3 {
         return None;
     }
@@ -23636,7 +23756,16 @@ fn compact_sqrt_offset_square_offset_arg(value: &str) -> Option<(usize, &str, &s
     if source != right_source || product_args[1].trim() != right_offset.trim() {
         return None;
     }
-    Some((source, product_args[1], outer_offset_args[1]))
+    Some((source, product_args[1]))
+}
+
+fn compact_matching_offset_operands<'a>(left: &'a str, right: &'a str) -> Option<(usize, &'a str)> {
+    let (left_source, left_offset) = compact_offset_scratch_arg(left)?;
+    let (right_source, right_offset) = compact_offset_scratch_arg(right)?;
+    if left_source != right_source || !compact_scalar_same(left_offset, right_offset) {
+        return None;
+    }
+    Some((left_source, left_offset))
 }
 
 fn compact_sqrt_square_sum_arg(value: &str) -> Option<(usize, usize)> {
