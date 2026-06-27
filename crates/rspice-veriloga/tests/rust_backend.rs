@@ -2873,7 +2873,15 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
             && support.contains("right: usize, scale: f64)"),
         "{support}"
     );
-    assert!(stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
+    assert!(
+        support.contains("fn store_mul_scaled_ln_ad_rhs(&mut self, index: usize, source: usize"),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_scaled_ln_ad_rhs(2, 0, p.p0, A::offset(s.ad_value(1), p.p1));"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -5171,7 +5179,15 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
         .as_str();
     let support = render_runtime_support_module();
 
-    assert!(stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
+    assert!(
+        support.contains("fn store_mul_scaled_ln_ad_rhs(&mut self, index: usize, source: usize"),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_scaled_ln_ad_rhs(2, 0, p.p1, A::offset(s.ad_value(1), p.p0));"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(
         support.contains("fn store_scaled_div_ad_rhs(&mut self, index: usize, left: usize"),
