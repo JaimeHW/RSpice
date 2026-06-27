@@ -94,7 +94,7 @@ impl Instance {
 
         s.store_offset(1, 61, (-s.v[0]));
 
-        s.store_offset_add_scaled_inputs(61, s.ad_value(1), 0.5, A::sqrt(A::add(A::square(s.ad_value(1)), A::square(s.ad_value(17)))), 0.5, s.v[0]);
+        s.store_offset_add_scaled_inputs_mixed_ia(61, 1, 0.5, A::sqrt(A::add(A::square(s.ad_value(1)), A::square(s.ad_value(17)))), 0.5, s.v[0]);
 
         s.store_sqrt(71, 61);
 
@@ -407,11 +407,11 @@ impl Instance {
         s.v[254] = if s.b[254] { 1.0 } else { 0.0 };
 
         if ((!s.b[253]) && s.b[254]) {
-            s.store_offset_add_scaled_inputs(47, s.ad_value(101), s.v[37], s.ad_value(100), (s.v[39] * s.v[37]), 1.0);
+            s.store_offset_add_scaled_inputs_indices(47, 101, s.v[37], 100, (s.v[39] * s.v[37]), 1.0);
         }
 
         if ((!s.b[253]) && (!s.b[254])) {
-            s.store_sub_from_scalar_ad(47, 1.0, A::add_scaled_inputs(s.ad_value(101), s.v[37], s.ad_value(100), (s.v[39] * s.v[37])));
+            s.store_offset_add_scaled_inputs_indices(47, 101, (-s.v[37]), 100, (-(s.v[39] * s.v[37])), 1.0);
         }
 
         if (!s.b[253]) {
@@ -783,7 +783,7 @@ impl Instance {
 
         s.store_offset(1, 61, (-s.v[0]));
 
-        s.store_offset_add_scaled_inputs(61, s.ad_value(1), 0.5, A::sqrt(A::add(A::square(s.ad_value(1)), A::square(s.ad_value(17)))), 0.5, s.v[0]);
+        s.store_offset_add_scaled_inputs_mixed_ia(61, 1, 0.5, A::sqrt(A::add(A::square(s.ad_value(1)), A::square(s.ad_value(17)))), 0.5, s.v[0]);
 
         s.store_sqrt(71, 61);
 
@@ -1082,11 +1082,11 @@ impl Instance {
         s.v[254] = if s.b[254] { 1.0 } else { 0.0 };
 
         if ((!s.b[253]) && s.b[254]) {
-            s.store_offset_add_scaled_inputs(47, s.ad_value(101), s.v[37], s.ad_value(100), (s.v[39] * s.v[37]), 1.0);
+            s.store_offset_add_scaled_inputs_indices(47, 101, s.v[37], 100, (s.v[39] * s.v[37]), 1.0);
         }
 
         if ((!s.b[253]) && (!s.b[254])) {
-            s.store_sub_from_scalar_ad(47, 1.0, A::add_scaled_inputs(s.ad_value(101), s.v[37], s.ad_value(100), (s.v[39] * s.v[37])));
+            s.store_offset_add_scaled_inputs_indices(47, 101, (-s.v[37]), 100, (-(s.v[39] * s.v[37])), 1.0);
         }
 
         if (!s.b[253]) {

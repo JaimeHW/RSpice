@@ -891,7 +891,7 @@ impl Instance {
         if (s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) {
             s.store_sqrt_square_add(782, 781, 782);
             s.store_offset_scaled_div(334, 781, 782, 0.5, 0.5);
-            s.store_sub_from_scalar_ad(2096, 0.3, A::add_scaled_inputs(s.ad_value(781), 0.5, s.ad_value(782), 0.5));
+            s.store_offset_add_scaled_inputs_indices(2096, 781, (-0.5), 782, (-0.5), 0.3);
             s.store_add_scaled_inputs3_offset(781, s.ad_value(2096), 1.0, s.ad_value(2117), -1.0, s.ad_value(2091), 1.0, (-0.01));
             s.store_scaled_sub(782, 2117, 2091, (4.0 * 0.01));
         }

@@ -3245,7 +3245,7 @@ impl Instance {
         s.v[1155] = if s.b[1155] { 1.0 } else { 0.0 };
 
         if s.b[1155] {
-            s.store_offset_add_scaled_inputs(713, s.ad_value(282), 1.0, s.ad_value(283), s.v[358], s.v[23]);
+            s.store_offset_add_scaled_inputs_indices(713, 282, 1.0, 283, s.v[358], s.v[23]);
             s.store_exp_scaled_input(759, 288, s.v[360]);
             s.store_mul(714, 287, 759);
             s.store_scaled_mul(717, 714, 769, s.v[22]);

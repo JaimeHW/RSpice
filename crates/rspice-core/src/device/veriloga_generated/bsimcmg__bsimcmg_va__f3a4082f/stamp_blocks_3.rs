@@ -875,7 +875,7 @@ impl Instance {
 
         s.store_offset(170, 169, ((1.0) + ((-0.001))));
 
-        s.store_offset_add_scaled_inputs(171, s.ad_value(170), 0.5, A::sqrt(A::offset(A::square(s.ad_value(170)), 0.004)), 0.5, (-1.0));
+        s.store_offset_add_scaled_inputs_mixed_ia(171, 170, 0.5, A::sqrt(A::offset(A::square(s.ad_value(170)), 0.004)), 0.5, (-1.0));
 
         s.store_scaled_offset_ad(214, A::sqrt(A::offset(s.ad_value(171), 1.0)), 1.0, 0.5);
 

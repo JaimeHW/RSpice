@@ -5835,6 +5835,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_offset_add_scaled_inputs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64, offset: f64) {
+        self.v[index] = left.value * left_scale + self.v[right] * right_scale + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale + self.db[right][axis] * right_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_offset_add_scaled_inputs_mixed_ia(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64, offset: f64) {
+        self.v[index] = self.v[left] * left_scale + right.value * right_scale + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * left_scale + right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * left_scale + right.db[axis] * right_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_offset_add_scaled_inputs_indices(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64, offset: f64) {
+        self.v[index] = self.v[left] * left_scale + self.v[right] * right_scale + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * left_scale + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * left_scale + self.db[right][axis] * right_scale; }
+    }
+
+
+    #[inline]
     pub(crate) fn store_add_scaled_inputs_products_mixed_aaaaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, first_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_scale: f64, second_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, second_product_right: usize, second_product_scale: f64) {
         let second_product_right_value = self.v[second_product_right];
         let second_product_right_dn = self.dn[second_product_right];
@@ -15800,6 +15824,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let right_product_right_dn = self.dn[right_product_right];
         let right_product_right_db = self.db[right_product_right];
         self.store_add_scaled_products_components(index, left_product_left.value, left_product_left.dn, left_product_left.db, left_product_right.value, left_product_right.dn, left_product_right.db, left_scale, right_product_left_value, right_product_left_dn, right_product_left_db, right_product_right_value, right_product_right_dn, right_product_right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_offset_add_scaled_inputs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64, offset: f64) {
+        self.v[index] = left.value * left_scale + self.v[right] * right_scale + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] * left_scale + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] * left_scale + self.db[right][axis] * right_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_offset_add_scaled_inputs_mixed_ia(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64, offset: f64) {
+        self.v[index] = self.v[left] * left_scale + right.value * right_scale + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * left_scale + right.dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * left_scale + right.db[axis] * right_scale; }
+    }
+
+
+    #[inline]
+    pub(crate) fn store_offset_add_scaled_inputs_indices(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64, offset: f64) {
+        self.v[index] = self.v[left] * left_scale + self.v[right] * right_scale + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * left_scale + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * left_scale + self.db[right][axis] * right_scale; }
     }
 
 

@@ -2034,7 +2034,7 @@ impl Instance {
         if s.b[3301] {
             s.store_sqrt_square_add(782, 781, 782);
             s.store_offset_scaled_div(334, 781, 782, 0.5, 0.5);
-            s.store_sub_from_scalar_ad(915, p.p545, A::add_scaled_inputs(s.ad_value(781), 0.5, s.ad_value(782), 0.5));
+            s.store_offset_add_scaled_inputs_indices(915, 781, (-0.5), 782, (-0.5), p.p545);
         }
 
         s.b[3308] = (p.p546 > 0.0);

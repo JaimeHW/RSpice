@@ -5877,7 +5877,7 @@ impl Instance {
 
         s.store_sqrt_square_offset(1180, 1179, (-(0.004 * (-5.0))));
 
-        s.store_offset_add_scaled_inputs(1181, s.ad_value(1179), 0.5, s.ad_value(1180), 0.5, (-5.0));
+        s.store_offset_add_scaled_inputs_indices(1181, 1179, 0.5, 1180, 0.5, (-5.0));
 
         s.v[1179] = 1.5;
 
@@ -5885,7 +5885,7 @@ impl Instance {
 
         s.store_sqrt_square_offset(1182, 1180, (0.008 * s.v[1179]));
 
-        s.store_sub_from_scalar_ad(1297, s.v[1179], A::add_scaled_inputs(s.ad_value(1180), 0.5, s.ad_value(1182), 0.5));
+        s.store_offset_add_scaled_inputs_indices(1297, 1180, (-0.5), 1182, (-0.5), s.v[1179]);
 
         s.store_scale(1179, 1277, 0.95);
 
@@ -5899,7 +5899,7 @@ impl Instance {
 
         s.store_sqrt_square_offset(1180, 1179, (-(0.004 * (-5.0))));
 
-        s.store_offset_add_scaled_inputs(1181, s.ad_value(1179), 0.5, s.ad_value(1180), 0.5, (-5.0));
+        s.store_offset_add_scaled_inputs_indices(1181, 1179, 0.5, 1180, 0.5, (-5.0));
 
         s.v[1179] = 1.5;
 
@@ -5907,7 +5907,7 @@ impl Instance {
 
         s.store_sqrt_square_offset(1182, 1180, (0.008 * s.v[1179]));
 
-        s.store_sub_from_scalar_ad(1379, s.v[1179], A::add_scaled_inputs(s.ad_value(1180), 0.5, s.ad_value(1182), 0.5));
+        s.store_offset_add_scaled_inputs_indices(1379, 1180, (-0.5), 1182, (-0.5), s.v[1179]);
 
         s.store_scale(1179, 1277, 0.95);
 
