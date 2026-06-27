@@ -1,5 +1,6 @@
 //! Native XSPICE analog code models pinned against ngspice code-model semantics.
 
+use rspice_core::Complex64;
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::Netlist;
 
@@ -58,6 +59,22 @@ fn value_at_time(times: &[f64], values: &[f64], target: f64) -> f64 {
     }
 
     *values.last().expect("waveform has samples")
+}
+
+fn ac_voltage(deck: &str, node: &str) -> Complex64 {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_ac(&netlist, &[1.0e3])
+        .expect("ac solves")
+        .into_iter()
+        .next()
+        .expect("one ac result");
+    let idx = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} missing from {:?}", result.node_names));
+    result.voltages[idx]
 }
 
 #[test]
@@ -201,6 +218,46 @@ rl out 0 1k
     assert!(
         (out - 2.0).abs() < 1e-9,
         "d_dt alias should match differentiator offset behavior: got {out}"
+    );
+}
+
+#[test]
+fn xspice_gain_linearizes_voltage_output_in_ac() {
+    let deck = "\
+* XSPICE gain AC linearization
+vin in 0 dc 1 ac 1
+again in out amp
+.model amp gain (gain=3 in_offset=0.25 out_offset=5)
+rload out 0 1k
+.ac lin 1 1k 1k
+.end
+";
+
+    let out = ac_voltage(deck, "out");
+
+    assert!(
+        (out.re - 3.0).abs() < 1e-9 && out.im.abs() < 1e-12,
+        "gain AC output should be the small-signal gain, independent of DC offsets: got {out}"
+    );
+}
+
+#[test]
+fn xspice_pwl_linearizes_table_slope_in_ac() {
+    let deck = "\
+* XSPICE pwl AC linearization
+vin in 0 dc 0.5 ac 1
+apwl in out lut
+.model lut pwl (x_array=[0 1 2] y_array=[0 10 30] input_domain=0.01 fraction=false limit=false)
+rload out 0 1k
+.ac lin 1 1k 1k
+.end
+";
+
+    let out = ac_voltage(deck, "out");
+
+    assert!(
+        (out.re - 10.0).abs() < 1e-9 && out.im.abs() < 1e-12,
+        "pwl AC output should use the operating-point table slope: got {out}"
     );
 }
 
