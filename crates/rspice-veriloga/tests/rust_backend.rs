@@ -4442,8 +4442,14 @@ fn rust_backend_directly_stores_affine_division_expression_helpers() {
         ),
         "{support}"
     );
-    assert!(stamp.contains("s.store_div_scaled_inputs("), "{stamp}");
-    assert!(stamp.contains("s.store_div_scaled_inputs2("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_div_scaled_inputs_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_div_scaled_inputs2_indices("),
+        "{stamp}"
+    );
     assert!(stamp.contains("s.store_div_scaled_inputs3("), "{stamp}");
     assert!(stamp.contains("s.store_div_scaled_inputs4("), "{stamp}");
     assert!(
@@ -5870,7 +5876,10 @@ fn rust_backend_uses_compact_scaled_binary_operand_store_helpers() {
     assert!(stamp.contains("s.store_add_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_sub_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
-    assert!(stamp.contains("s.store_div_scaled_inputs("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_div_scaled_inputs_indices("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_add_ad("), "{stamp}");
     assert!(!stamp.contains("s.store_sub_ad("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
@@ -5899,7 +5908,10 @@ fn rust_backend_uses_compact_scaled_output_scaled_binary_operand_store_helpers()
     assert!(stamp.contains("s.store_add_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_sub_scaled_inputs("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
-    assert!(stamp.contains("s.store_div_scaled_inputs("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_div_scaled_inputs_indices("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -7160,7 +7172,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_div_scaled_inputs2(5, s.ad_value(0), 1.0, s.ad_value(1), 1.0, A::sub(s.ad_value(0), s.ad_value(1)), 1.0);"),
+        stamp.contains("s.store_div_scaled_inputs2_mixed_iia(5, 0, 1.0, 1, 1.0, A::sub(s.ad_value(0), s.ad_value(1)), 1.0);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_sqrt_add(6, 0, 1);"), "{stamp}");
