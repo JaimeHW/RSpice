@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::opt::{limexp_derivative, limexp_value, real_truth_value};
+use super::opt::{THERMAL_VOLTAGE_PER_K, limexp_derivative, limexp_value, real_truth_value};
 use super::{
     DerivativeLane, EquationId, IrDiagnostic, OptBinaryOp, OptModel, OptUnaryOp, OptValueKind,
     ValueId,
@@ -155,6 +155,11 @@ fn evaluate_value(
             &inputs.parameters,
             parameter.index(),
         )?)),
+        OptValueKind::ParamGiven { .. } => Ok(OptEvalValue::Real(0.0)),
+        OptValueKind::Temperature => Ok(OptEvalValue::Real(300.15)),
+        OptValueKind::ThermalVoltage => Ok(OptEvalValue::Real(300.15 * THERMAL_VOLTAGE_PER_K)),
+        OptValueKind::Multiplicity => Ok(OptEvalValue::Real(1.0)),
+        OptValueKind::Time => Ok(OptEvalValue::Real(0.0)),
         OptValueKind::NodePotential { node } => Ok(OptEvalValue::Real(input_at(
             "node_potential",
             &inputs.node_potentials,

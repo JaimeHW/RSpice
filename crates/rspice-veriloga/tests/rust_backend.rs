@@ -1226,6 +1226,45 @@ fn rust_backend_auto_scalarizes_static_equations_inside_dynamic_models() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_static_system_function_assignment_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(static_system_function_chain_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile static system function assignment chain");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let joined = generated
+        .files
+        .iter()
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(stamp.contains("ctx.temperature()"), "{stamp}");
+    assert!(joined.contains("param_given[0]"), "{joined}");
+    assert!(stamp.contains("multiplicity"), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("let eq0_value"),
+        "static system-function current should be scalarized instead of lowered through AD:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(assignment_fed_current_source())
@@ -15699,6 +15738,35 @@ module res_cap(p, n);
     analog begin
         I(p, n) <+ V(p, n) / r;
         I(p, n) <+ ddt(c * V(p, n));
+    end
+endmodule
+"#
+}
+
+fn static_system_function_chain_source() -> &'static str {
+    r#"
+module static_system_chain(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    parameter real w = 1.0 from (0:inf);
+    real base;
+    real tc;
+    real g;
+    real i;
+    real wn;
+    analog begin
+        tc = 1.0 + 1.0e-3 * ($temperature - 300.15);
+        if ($param_given(r) && !$param_given(w)) begin
+            base = r;
+        end else begin
+            base = r / w;
+        end
+        g = $mfactor / (base * tc);
+        i = g * V(p, n);
+        I(p, n) <+ i;
+        wn = 4.0 * g;
+        I(p, n) <+ white_noise(wn, "thermal");
     end
 endmodule
 "#

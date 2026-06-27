@@ -164,6 +164,9 @@ fn generate_stamp_file(
     let stamp_needs_params = artifact.opt.values.iter().any(|value| {
         stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::Parameter { .. })
     });
+    let stamp_needs_param_given = artifact.opt.values.iter().any(|value| {
+        stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::ParamGiven { .. })
+    });
     let stamp_needs_branches = artifact.opt.values.iter().any(|value| {
         stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::BranchFlow { .. })
     });
@@ -193,6 +196,9 @@ fn generate_stamp_file(
     }
     if stamp_needs_params {
         out.push_str("        let p = &(*self.params);\n");
+    }
+    if stamp_needs_param_given {
+        out.push_str("        let param_given = self.param_given.as_ref();\n");
     }
     out.push_str("        let multiplicity = self.multiplicity;\n");
     if ddt_slots.len() > 0 {
@@ -324,6 +330,15 @@ pub(super) fn scalar_state_extensions(
     recompute.push_str("\n    #[inline]\n");
     recompute.push_str("    fn recompute_instance_static(&mut self) {\n");
     recompute.push_str("        let p = &(*self.params);\n");
+    if static_cache.values.iter().any(|value_id| {
+        artifact
+            .opt
+            .values
+            .get(usize::from(*value_id))
+            .is_some_and(|value| matches!(value.kind, OptValueKind::ParamGiven { .. }))
+    }) {
+        recompute.push_str("        let param_given = self.param_given.as_ref();\n");
+    }
 
     for value_id in &static_cache.values {
         let value = artifact
@@ -1260,6 +1275,14 @@ fn emit_value_expr(
         OptValueKind::Parameter { parameter } => {
             emit_parameter_expr(artifact, parameter_fields, *parameter)?
         }
+        OptValueKind::ParamGiven { parameter } => {
+            let index = usize::from(*parameter);
+            format!("if param_given[{index}] {{ 1.0 }} else {{ 0.0 }}")
+        }
+        OptValueKind::Temperature => "ctx.temperature()".to_string(),
+        OptValueKind::ThermalVoltage => "ctx.thermal_voltage()".to_string(),
+        OptValueKind::Multiplicity => "multiplicity".to_string(),
+        OptValueKind::Time => "self.time".to_string(),
         OptValueKind::NodePotential { node } => {
             format!("ctx.node_voltage(nodes[{}])", node.index())
         }
@@ -1347,6 +1370,16 @@ fn value_ref(
             OptValueKind::Parameter { parameter } => {
                 return emit_parameter_expr(artifact, parameter_fields, parameter);
             }
+            OptValueKind::ParamGiven { parameter } => {
+                return Ok(format!(
+                    "if param_given[{}] {{ 1.0 }} else {{ 0.0 }}",
+                    usize::from(parameter)
+                ));
+            }
+            OptValueKind::Temperature => return Ok("ctx.temperature()".to_string()),
+            OptValueKind::ThermalVoltage => return Ok("ctx.thermal_voltage()".to_string()),
+            OptValueKind::Multiplicity => return Ok("multiplicity".to_string()),
+            OptValueKind::Time => return Ok("self.time".to_string()),
             _ => {}
         }
     }
@@ -1638,6 +1671,11 @@ fn mark_stamp_live_value(
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => {}
@@ -1704,6 +1742,11 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
             OptValueKind::BranchFlow { branch } => {
                 branch_flow_slot(artifact, branch)?;
             }
+            OptValueKind::ParamGiven { .. }
+            | OptValueKind::Temperature
+            | OptValueKind::ThermalVoltage
+            | OptValueKind::Multiplicity
+            | OptValueKind::Time => {}
             OptValueKind::EquationValue { .. } => {
                 return Err(unsupported(
                     artifact,

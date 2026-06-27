@@ -11,6 +11,7 @@ use super::{
 
 const MAX_SCALAR_LOOP_UNROLL_ITERATIONS: usize = 1024;
 pub(crate) const LIMEXP_MAX: f64 = 5.54062238439351e34;
+pub(crate) const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InvalidationClass {
@@ -103,6 +104,13 @@ pub enum OptValueKind {
     Parameter {
         parameter: ParamId,
     },
+    ParamGiven {
+        parameter: ParamId,
+    },
+    Temperature,
+    ThermalVoltage,
+    Multiplicity,
+    Time,
     NodePotential {
         node: NodeId,
     },
@@ -284,6 +292,11 @@ enum OptValueKey {
     RealConstant(u64),
     BooleanConstant(bool),
     Parameter(ParamId),
+    ParamGiven(ParamId),
+    Temperature,
+    ThermalVoltage,
+    Multiplicity,
+    Time,
     NodePotential(NodeId),
     BranchFlow(BranchId),
     Unary {
@@ -309,6 +322,11 @@ impl OptValueKey {
             OptValueKind::RealConstant(value) => Self::RealConstant(value.to_bits()),
             OptValueKind::BooleanConstant(value) => Self::BooleanConstant(*value),
             OptValueKind::Parameter { parameter } => Self::Parameter(*parameter),
+            OptValueKind::ParamGiven { parameter } => Self::ParamGiven(*parameter),
+            OptValueKind::Temperature => Self::Temperature,
+            OptValueKind::ThermalVoltage => Self::ThermalVoltage,
+            OptValueKind::Multiplicity => Self::Multiplicity,
+            OptValueKind::Time => Self::Time,
             OptValueKind::NodePotential { node } => Self::NodePotential(*node),
             OptValueKind::BranchFlow { branch } => Self::BranchFlow(*branch),
             OptValueKind::Unary { op, input } => Self::Unary {
@@ -424,6 +442,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             OptValueKind::RealConstant(_)
             | OptValueKind::BooleanConstant(_)
             | OptValueKind::Parameter { .. }
+            | OptValueKind::ParamGiven { .. }
+            | OptValueKind::Temperature
+            | OptValueKind::ThermalVoltage
+            | OptValueKind::Multiplicity
+            | OptValueKind::Time
             | OptValueKind::NodePotential { .. }
             | OptValueKind::BranchFlow { .. }
             | OptValueKind::EquationValue { .. } => {}
@@ -528,6 +551,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(*value)))
             }
             HirExprKind::Identifier { name } => self.lower_identifier(name),
+            HirExprKind::SystemFunction { name, args } => self.lower_system_function(name, args),
             HirExprKind::BranchAccess { access, pos, neg } => {
                 self.lower_branch_access(access, pos, neg.as_deref())
             }
@@ -785,6 +809,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             OptValueKind::RealConstant(_)
             | OptValueKind::BooleanConstant(_)
             | OptValueKind::Parameter { .. }
+            | OptValueKind::ParamGiven { .. }
+            | OptValueKind::Temperature
+            | OptValueKind::ThermalVoltage
+            | OptValueKind::Multiplicity
+            | OptValueKind::Time
             | OptValueKind::EquationValue { .. } => BTreeMap::new(),
             OptValueKind::NodePotential { node } => {
                 let derivative =
@@ -1229,13 +1258,31 @@ impl<'a> ScalarGraphBuilder<'a> {
         Some(self.push_value(OptValueType::Real, OptValueKind::Parameter { parameter }))
     }
 
-    fn lower_variable_identifier(&self, name: &SmolStr) -> Option<Option<ValueId>> {
+    fn lower_variable_identifier(&mut self, name: &SmolStr) -> Option<Option<ValueId>> {
         let variable = self
             .hir?
             .variables
             .iter()
             .find(|variable| variable.name == *name)?;
-        self.variable_values.get(&variable.id).copied()
+        if let Some(value) = self.variable_values.get(&variable.id).copied() {
+            return Some(value);
+        }
+
+        Some(Some(self.default_variable_value(variable.value_type)?))
+    }
+
+    fn default_variable_value(&mut self, value_type: CanonicalValueType) -> Option<ValueId> {
+        match value_type {
+            CanonicalValueType::Boolean => {
+                Some(self.push_value(OptValueType::Boolean, OptValueKind::BooleanConstant(false)))
+            }
+            CanonicalValueType::Real
+            | CanonicalValueType::Integer
+            | CanonicalValueType::NatureAccess => {
+                Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0)))
+            }
+            _ => None,
+        }
     }
 
     fn lower_branch_access(
@@ -1532,6 +1579,70 @@ impl<'a> ScalarGraphBuilder<'a> {
             },
         ))
     }
+
+    fn lower_system_function(&mut self, name: &SmolStr, args: &[ExprId]) -> Option<ValueId> {
+        match name.to_ascii_lowercase().as_str() {
+            "$temperature" if args.is_empty() => {
+                Some(self.push_value(OptValueType::Real, OptValueKind::Temperature))
+            }
+            "$abstime" | "$realtime" if args.is_empty() => {
+                Some(self.push_value(OptValueType::Real, OptValueKind::Time))
+            }
+            "$mfactor" if args.is_empty() => {
+                Some(self.push_value(OptValueType::Real, OptValueKind::Multiplicity))
+            }
+            "$vt" | "$thermal_vt" if args.is_empty() => {
+                Some(self.push_value(OptValueType::Real, OptValueKind::ThermalVoltage))
+            }
+            "$vt" | "$thermal_vt" if args.len() == 1 => {
+                let temperature = self.lower_expression(args[0])?;
+                let scale = self.push_value(
+                    OptValueType::Real,
+                    OptValueKind::RealConstant(THERMAL_VOLTAGE_PER_K),
+                );
+                Some(self.push_binary_value(OptBinaryOp::Mul, temperature, scale))
+            }
+            "$simparam" if args.len() == 1 => {
+                let default = self.simparam_default(args[0])?;
+                Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(default)))
+            }
+            "$simparam" if args.len() == 2 => self.lower_expression(args[1]),
+            "$param_given" if args.len() == 1 => {
+                let parameter = self.parameter_arg(args[0])?;
+                Some(self.push_value(OptValueType::Real, OptValueKind::ParamGiven { parameter }))
+            }
+            "$port_connected" if args.len() == 1 => {
+                Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0)))
+            }
+            _ => None,
+        }
+    }
+
+    fn parameter_arg(&self, expr: ExprId) -> Option<ParamId> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Identifier { name } = &expression.kind else {
+            return None;
+        };
+        self.mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == *name)
+            .map(|parameter| parameter.id)
+    }
+
+    fn simparam_default(&self, expr: ExprId) -> Option<f64> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::StringLiteral { value } = &expression.kind else {
+            return None;
+        };
+        match value.to_ascii_lowercase().as_str() {
+            "gmin" => Some(1.0e-12),
+            "tnom" => Some(27.0),
+            "scale" => Some(1.0),
+            "temp" | "temperature" => Some(27.0),
+            _ => None,
+        }
+    }
 }
 
 fn binary_op(op: &str) -> Option<OptBinaryOp> {
@@ -1606,6 +1717,13 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
         OptValueKind::Parameter { parameter } => OptValueKind::Parameter {
             parameter: *parameter,
         },
+        OptValueKind::ParamGiven { parameter } => OptValueKind::ParamGiven {
+            parameter: *parameter,
+        },
+        OptValueKind::Temperature => OptValueKind::Temperature,
+        OptValueKind::ThermalVoltage => OptValueKind::ThermalVoltage,
+        OptValueKind::Multiplicity => OptValueKind::Multiplicity,
+        OptValueKind::Time => OptValueKind::Time,
         OptValueKind::NodePotential { node } => OptValueKind::NodePotential { node: *node },
         OptValueKind::BranchFlow { branch } => OptValueKind::BranchFlow { branch: *branch },
         OptValueKind::Unary { op, input } => OptValueKind::Unary {
@@ -1642,7 +1760,7 @@ fn validate_values(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel) {
 fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, value: &OptValue) {
     match &value.kind {
         OptValueKind::RealConstant(_) | OptValueKind::BooleanConstant(_) => {}
-        OptValueKind::Parameter { parameter } => {
+        OptValueKind::Parameter { parameter } | OptValueKind::ParamGiven { parameter } => {
             if parameter.index() >= opt.parameter_count {
                 diagnostics.push(IrDiagnostic::global_error(
                     CompilerPhase::OptValidation,
@@ -1653,6 +1771,10 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
                 ));
             }
         }
+        OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time => {}
         OptValueKind::NodePotential { node } => {
             if node.index() >= opt.node_count {
                 diagnostics.push(IrDiagnostic::global_error(
@@ -1885,7 +2007,12 @@ fn value_invalidation(
     let invalidation = match values[index].kind {
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
-        | OptValueKind::Parameter { .. } => InvalidationClass::InstanceStatic,
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. } => InvalidationClass::InstanceStatic,
+        OptValueKind::Temperature | OptValueKind::ThermalVoltage => {
+            InvalidationClass::TemperatureStatic
+        }
+        OptValueKind::Multiplicity | OptValueKind::Time => InvalidationClass::NewtonIteration,
         OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => InvalidationClass::NewtonIteration,
@@ -1921,9 +2048,13 @@ fn value_depends_on_parameter(
     }
 
     let depends = match values[index].kind {
-        OptValueKind::Parameter { .. } => true,
+        OptValueKind::Parameter { .. } | OptValueKind::ParamGiven { .. } => true,
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
         | OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
         | OptValueKind::EquationValue { .. } => false,
