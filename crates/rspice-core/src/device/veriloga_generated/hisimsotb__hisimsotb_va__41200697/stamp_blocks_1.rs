@@ -3600,7 +3600,7 @@ impl Instance {
         }
 
         if (!s.b[725]) {
-            s.store_sub_ad_rhs(319, 76, A::div(s.ad_value(282), s.ad_value(270)));
+            s.store_sub_div_rhs_indices(319, 76, 282, 270);
             s.copy_ad(321, 319);
         }
 

@@ -1157,7 +1157,7 @@ impl Instance {
         if (((s.v[2623] != 0.0) && (!s.b[3026])) && s.b[3057]) {
             s.copy_ad(3047, 404);
             s.store_mul(354, 335, 3002);
-            s.store_sub_ad_rhs(404, 402, A::div(s.ad_value(354), s.ad_value(413)));
+            s.store_sub_div_rhs_indices(404, 402, 354, 413);
         }
 
         s.b[3058] = (p.p33 == 2.0);
@@ -2614,7 +2614,7 @@ impl Instance {
         if (((s.b[3109] && s.b[3110]) && (!s.b[3137])) && s.b[3168]) {
             s.copy_ad(3158, 404);
             s.store_mul(354, 335, 3113);
-            s.store_sub_ad_rhs(404, 402, A::div(s.ad_value(354), s.ad_value(413)));
+            s.store_sub_div_rhs_indices(404, 402, 354, 413);
         }
 
         s.b[3169] = (p.p33 == 2.0);

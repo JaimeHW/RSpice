@@ -2365,7 +2365,7 @@ impl Instance {
         s.v[1088] = if s.b[1088] { 1.0 } else { 0.0 };
 
         if (s.b[1087] && s.b[1088]) {
-            s.store_sub_ad_rhs(916, 916, A::div(s.ad_value(828), s.ad_value(829)));
+            s.store_sub_div_rhs_indices(916, 916, 828, 829);
         }
 
         s.store_mul(802, 911, 916);
@@ -2425,7 +2425,7 @@ impl Instance {
         s.v[1092] = if s.b[1092] { 1.0 } else { 0.0 };
 
         if (s.b[1091] && s.b[1092]) {
-            s.store_sub_ad_rhs(916, 916, A::div(s.ad_value(828), s.ad_value(829)));
+            s.store_sub_div_rhs_indices(916, 916, 828, 829);
         }
 
         s.store_mul(802, 911, 916);
@@ -3558,7 +3558,7 @@ impl Instance {
         s.v[1155] = if s.b[1155] { 1.0 } else { 0.0 };
 
         if (s.b[1154] && s.b[1155]) {
-            s.store_sub_ad_rhs(980, 980, A::div(s.ad_value(828), s.ad_value(829)));
+            s.store_sub_div_rhs_indices(980, 980, 828, 829);
         }
 
         s.store_mul(802, 911, 980);
@@ -3618,7 +3618,7 @@ impl Instance {
         s.v[1159] = if s.b[1159] { 1.0 } else { 0.0 };
 
         if (s.b[1158] && s.b[1159]) {
-            s.store_sub_ad_rhs(980, 980, A::div(s.ad_value(828), s.ad_value(829)));
+            s.store_sub_div_rhs_indices(980, 980, 828, 829);
         }
 
         s.store_mul(802, 911, 980);

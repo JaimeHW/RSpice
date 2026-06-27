@@ -1613,7 +1613,7 @@ impl Instance {
         s.v[1638] = if s.b[1638] { 1.0 } else { 0.0 };
 
         if ((s.b[1608] && s.b[1637]) && s.b[1638]) {
-            s.store_sub_ad_rhs(1465, 1465, A::div(s.ad_value(1377), s.ad_value(1378)));
+            s.store_sub_div_rhs_indices(1465, 1465, 1377, 1378);
         }
 
         if s.b[1608] {
@@ -1674,7 +1674,7 @@ impl Instance {
         s.v[1642] = if s.b[1642] { 1.0 } else { 0.0 };
 
         if ((s.b[1608] && s.b[1641]) && s.b[1642]) {
-            s.store_sub_ad_rhs(1465, 1465, A::div(s.ad_value(1377), s.ad_value(1378)));
+            s.store_sub_div_rhs_indices(1465, 1465, 1377, 1378);
         }
 
         if s.b[1608] {
@@ -2762,7 +2762,7 @@ impl Instance {
         s.v[1705] = if s.b[1705] { 1.0 } else { 0.0 };
 
         if ((s.b[1608] && s.b[1704]) && s.b[1705]) {
-            s.store_sub_ad_rhs(1529, 1529, A::div(s.ad_value(1377), s.ad_value(1378)));
+            s.store_sub_div_rhs_indices(1529, 1529, 1377, 1378);
         }
 
         if s.b[1608] {
@@ -2818,7 +2818,7 @@ impl Instance {
         s.v[1709] = if s.b[1709] { 1.0 } else { 0.0 };
 
         if ((s.b[1608] && s.b[1708]) && s.b[1709]) {
-            s.store_sub_ad_rhs(1529, 1529, A::div(s.ad_value(1377), s.ad_value(1378)));
+            s.store_sub_div_rhs_indices(1529, 1529, 1377, 1378);
         }
 
         if s.b[1608] {

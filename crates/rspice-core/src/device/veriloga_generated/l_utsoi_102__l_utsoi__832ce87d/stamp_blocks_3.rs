@@ -1589,7 +1589,7 @@ impl Instance {
         s.v[1634] = if s.b[1634] { 1.0 } else { 0.0 };
 
         if ((s.b[1604] && s.b[1633]) && s.b[1634]) {
-            s.store_sub_ad_rhs(1461, 1461, A::div(s.ad_value(1373), s.ad_value(1374)));
+            s.store_sub_div_rhs_indices(1461, 1461, 1373, 1374);
         }
 
         if s.b[1604] {
@@ -1650,7 +1650,7 @@ impl Instance {
         s.v[1638] = if s.b[1638] { 1.0 } else { 0.0 };
 
         if ((s.b[1604] && s.b[1637]) && s.b[1638]) {
-            s.store_sub_ad_rhs(1461, 1461, A::div(s.ad_value(1373), s.ad_value(1374)));
+            s.store_sub_div_rhs_indices(1461, 1461, 1373, 1374);
         }
 
         if s.b[1604] {
@@ -2726,7 +2726,7 @@ impl Instance {
         s: &mut ReactiveScratch,
     ) {
         if ((s.b[1604] && s.b[1700]) && s.b[1701]) {
-            s.store_sub_ad_rhs(1525, 1525, A::div(s.ad_value(1373), s.ad_value(1374)));
+            s.store_sub_div_rhs_indices(1525, 1525, 1373, 1374);
         }
 
         if s.b[1604] {
@@ -2782,7 +2782,7 @@ impl Instance {
         s.v[1705] = if s.b[1705] { 1.0 } else { 0.0 };
 
         if ((s.b[1604] && s.b[1704]) && s.b[1705]) {
-            s.store_sub_ad_rhs(1525, 1525, A::div(s.ad_value(1373), s.ad_value(1374)));
+            s.store_sub_div_rhs_indices(1525, 1525, 1373, 1374);
         }
 
         if s.b[1604] {
