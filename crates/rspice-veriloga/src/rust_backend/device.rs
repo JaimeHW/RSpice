@@ -1042,6 +1042,46 @@ fn compact_sqrt_square_ad_expression_call(value: &str) -> Option<String> {
         ));
     }
 
+    if let Some(replacement) =
+        compact_sqrt_product_offset_ad_expression(offset_args[0], offset_args[1])
+    {
+        return Some(replacement);
+    }
+
+    None
+}
+
+fn compact_sqrt_product_offset_ad_expression(product: &str, offset: &str) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(product, "mul") {
+        if args.len() != 2 || !compact_any_ad_value(args[0]) || !compact_any_ad_value(args[1]) {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::sqrt_product_offset({}, {}, {offset})",
+            args[0], args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(product, "mul_scaled_lhs") {
+        if args.len() != 3 || !compact_any_ad_value(args[0]) || !compact_any_ad_value(args[2]) {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::sqrt_scaled_lhs_product_offset({}, {}, {}, {offset})",
+            args[0], args[1], args[2]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(product, "mul_offset_rhs") {
+        if args.len() != 3 || !compact_any_ad_value(args[0]) || !compact_any_ad_value(args[1]) {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::sqrt_offset_rhs_product_offset({}, {}, {}, {offset})",
+            args[0], args[1], args[2]
+        ));
+    }
+
     None
 }
 
@@ -3131,8 +3171,14 @@ fn stamp() {
 fn stamp() {
     let custom_ad: AdValue = AdValue::add_scaled_inputs(AdValue::scale_offset(scratch.ad_value(2), params.input_scale, params.input_offset), 0.5, AdValue::sqrt(AdValue::offset(AdValue::mul(AdValue::scale_offset(scratch.ad_value(2), params.input_scale, params.input_offset), AdValue::scale_offset(scratch.ad_value(2), params.input_scale, params.input_offset)), params.sqrt_offset)), 0.5);
     let custom_shifted_ad: AdValue = AdValue::add_scaled_inputs(AdValue::offset(AdValue::mul(scratch.ad_value(3), scratch.ad_value(4)), params.left_offset), 0.5, AdValue::sqrt(AdValue::offset(AdValue::mul_offset_lhs(AdValue::mul(scratch.ad_value(3), scratch.ad_value(4)), params.square_offset, AdValue::offset(AdValue::mul(scratch.ad_value(3), scratch.ad_value(4)), params.square_offset)), params.sqrt_offset)), 0.5);
+    let custom_product_ad: AdValue = AdValue::sqrt(AdValue::offset(AdValue::mul(scratch.ad_value(5), scratch.ad_value(6)), params.sqrt_offset));
+    let custom_scaled_product_ad: AdValue = AdValue::sqrt(AdValue::offset(AdValue::mul_scaled_lhs(scratch.ad_value(7), params.product_scale, scratch.ad_value(8)), params.sqrt_offset));
+    let custom_offset_product_ad: AdValue = AdValue::sqrt(AdValue::offset(AdValue::mul_offset_rhs(scratch.ad_value(9), scratch.ad_value(10), params.product_offset), params.sqrt_offset));
     scratch.store_ad_value(20, custom_ad);
     scratch.store_ad_value(21, custom_shifted_ad);
+    scratch.store_ad_value(22, custom_product_ad);
+    scratch.store_ad_value(23, custom_scaled_product_ad);
+    scratch.store_ad_value(24, custom_offset_product_ad);
 }
 "#;
 
@@ -3150,7 +3196,31 @@ fn stamp() {
             ),
             "{compact}"
         );
+        assert!(
+            compact.contains("A::sqrt_product_offset(s.ad_value(5), s.ad_value(6), p.sqrt_offset)"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "A::sqrt_scaled_lhs_product_offset(s.ad_value(7), p.product_scale, s.ad_value(8), p.sqrt_offset)"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "A::sqrt_offset_rhs_product_offset(s.ad_value(9), s.ad_value(10), p.product_offset, p.sqrt_offset)"
+            ),
+            "{compact}"
+        );
         assert!(!compact.contains("A::sqrt(A::offset(A::mul("), "{compact}");
+        assert!(
+            !compact.contains("A::sqrt(A::offset(A::mul_scaled_lhs("),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("A::sqrt(A::offset(A::mul_offset_rhs("),
+            "{compact}"
+        );
         assert!(
             !compact.contains("A::sqrt(A::offset(A::mul_offset_lhs("),
             "{compact}"
@@ -15060,6 +15130,12 @@ fn generate_ad_value_struct() -> String {
         "    fn sqrt_square_offset(mut arg: Self, offset: f64) -> Self { let raw = arg.value; let value = (raw * raw + offset).sqrt(); arg.value = value; let derivative_scale = raw / value; for derivative in &mut arg.node_derivatives { *derivative *= derivative_scale; } for derivative in &mut arg.branch_derivatives { *derivative *= derivative_scale; } arg }",
         "    #[inline]",
         "    fn sqrt_offset_square_offset(mut arg: Self, square_offset: f64, sqrt_offset: f64) -> Self { let raw = arg.value + square_offset; let value = (raw * raw + sqrt_offset).sqrt(); arg.value = value; let derivative_scale = raw / value; for derivative in &mut arg.node_derivatives { *derivative *= derivative_scale; } for derivative in &mut arg.branch_derivatives { *derivative *= derivative_scale; } arg }",
+        "    #[inline]",
+        "    fn sqrt_product_offset(left: Self, right: Self, offset: f64) -> Self { let mut value = left; let left_value = value.value; let right_value = right.value; let product = left_value * right_value; let root = (product + offset).sqrt(); let derivative_scale = 1.0 / (2.0 * root); value.value = root; for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * right_value + left_value * right.node_derivatives[index]) * derivative_scale; } for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * right_value + left_value * right.branch_derivatives[index]) * derivative_scale; } value }",
+        "    #[inline]",
+        "    fn sqrt_scaled_lhs_product_offset(left: Self, left_scale: f64, right: Self, offset: f64) -> Self { let mut value = left; let left_value = value.value; let scaled_left_value = left_value * left_scale; let right_value = right.value; let product = scaled_left_value * right_value; let root = (product + offset).sqrt(); let derivative_scale = 1.0 / (2.0 * root); let product_derivative_scale = left_scale * derivative_scale; value.value = root; for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * right_value + left_value * right.node_derivatives[index]) * product_derivative_scale; } for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * right_value + left_value * right.branch_derivatives[index]) * product_derivative_scale; } value }",
+        "    #[inline]",
+        "    fn sqrt_offset_rhs_product_offset(left: Self, right: Self, right_offset: f64, sqrt_offset: f64) -> Self { let mut value = left; let left_value = value.value; let right_value = right.value + right_offset; let product = left_value * right_value; let root = (product + sqrt_offset).sqrt(); let derivative_scale = 1.0 / (2.0 * root); value.value = root; for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = (value.node_derivatives[index] * right_value + left_value * right.node_derivatives[index]) * derivative_scale; } for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = (value.branch_derivatives[index] * right_value + left_value * right.branch_derivatives[index]) * derivative_scale; } value }",
         "    #[inline]",
         "    fn exp(arg: Self) -> Self { let value = arg.value.exp(); Self::unary_intrinsic(arg, value, value) }",
         "    #[inline]",
