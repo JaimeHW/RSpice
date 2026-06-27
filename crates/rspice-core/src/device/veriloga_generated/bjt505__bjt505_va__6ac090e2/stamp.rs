@@ -5674,18 +5674,14 @@ impl Instance {
         let d2083_dn6: f64 = v5740;
         let d2083_dn7: f64 = v5741;
         let d2083_dn8: f64 = v5742;
-        let v2083_node_derivative_indices: [usize; 4] = [4, 6, 7, 8];
-        let v2083_node_derivatives: [f64; 4] = [d2083_dn4, d2083_dn6, d2083_dn7, d2083_dn8];
-        let v2083_branch_derivative_indices: [usize; 0] = [];
-        let v2083_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<4, 0>(
             Some(8),
             Some(4),
             multiplicity * (v2083),
-            &v2083_node_derivative_indices,
-            &v2083_node_derivatives,
-            &v2083_branch_derivative_indices,
-            &v2083_branch_derivatives,
+            [4, 6, 7, 8],
+            [d2083_dn4, d2083_dn6, d2083_dn7, d2083_dn8],
+            [],
+            [],
             multiplicity,
         );
         let d2085_dn4: f64 = v5749;
@@ -5694,18 +5690,14 @@ impl Instance {
         let d2085_dn7: f64 = v5752;
         let d2085_dn8: f64 = v5753;
         let d2085_dn10: f64 = v5754;
-        let v2085_node_derivative_indices: [usize; 6] = [4, 5, 6, 7, 8, 10];
-        let v2085_node_derivatives: [f64; 6] = [d2085_dn4, d2085_dn5, d2085_dn6, d2085_dn7, d2085_dn8, d2085_dn10];
-        let v2085_branch_derivative_indices: [usize; 0] = [];
-        let v2085_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<6, 0>(
             Some(5),
             Some(4),
             multiplicity * (v2085),
-            &v2085_node_derivative_indices,
-            &v2085_node_derivatives,
-            &v2085_branch_derivative_indices,
-            &v2085_branch_derivatives,
+            [4, 5, 6, 7, 8, 10],
+            [d2085_dn4, d2085_dn5, d2085_dn6, d2085_dn7, d2085_dn8, d2085_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2091_dn4: f64 = v5768;
@@ -5713,18 +5705,14 @@ impl Instance {
         let d2091_dn6: f64 = v5770;
         let d2091_dn7: f64 = v5771;
         let d2091_dn8: f64 = v5772;
-        let v2091_node_derivative_indices: [usize; 5] = [4, 5, 6, 7, 8];
-        let v2091_node_derivatives: [f64; 5] = [d2091_dn4, d2091_dn5, d2091_dn6, d2091_dn7, d2091_dn8];
-        let v2091_branch_derivative_indices: [usize; 0] = [];
-        let v2091_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<5, 0>(
             Some(6),
             Some(4),
             multiplicity * (v2091),
-            &v2091_node_derivative_indices,
-            &v2091_node_derivatives,
-            &v2091_branch_derivative_indices,
-            &v2091_branch_derivatives,
+            [4, 5, 6, 7, 8],
+            [d2091_dn4, d2091_dn5, d2091_dn6, d2091_dn7, d2091_dn8],
+            [],
+            [],
             multiplicity,
         );
         let d2095_dn0: f64 = v5800;
@@ -5736,18 +5724,14 @@ impl Instance {
         let d2095_dn8: f64 = v5806;
         let d2095_dn9: f64 = v5807;
         let d2095_dn10: f64 = v5808;
-        let v2095_node_derivative_indices: [usize; 9] = [0, 1, 4, 5, 6, 7, 8, 9, 10];
-        let v2095_node_derivatives: [f64; 9] = [d2095_dn0, d2095_dn1, d2095_dn4, d2095_dn5, d2095_dn6, d2095_dn7, d2095_dn8, d2095_dn9, d2095_dn10];
-        let v2095_branch_derivative_indices: [usize; 0] = [];
-        let v2095_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<9, 0>(
             Some(6),
             Some(7),
             multiplicity * (v2095),
-            &v2095_node_derivative_indices,
-            &v2095_node_derivatives,
-            &v2095_branch_derivative_indices,
-            &v2095_branch_derivatives,
+            [0, 1, 4, 5, 6, 7, 8, 9, 10],
+            [d2095_dn0, d2095_dn1, d2095_dn4, d2095_dn5, d2095_dn6, d2095_dn7, d2095_dn8, d2095_dn9, d2095_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2096_dn0: f64 = v5809;
@@ -5759,18 +5743,14 @@ impl Instance {
         let d2096_dn8: f64 = v5815;
         let d2096_dn9: f64 = v5816;
         let d2096_dn10: f64 = v5817;
-        let v2096_node_derivative_indices: [usize; 9] = [0, 1, 4, 5, 6, 7, 8, 9, 10];
-        let v2096_node_derivatives: [f64; 9] = [d2096_dn0, d2096_dn1, d2096_dn4, d2096_dn5, d2096_dn6, d2096_dn7, d2096_dn8, d2096_dn9, d2096_dn10];
-        let v2096_branch_derivative_indices: [usize; 0] = [];
-        let v2096_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<9, 0>(
             Some(6),
             Some(8),
             multiplicity * (v2096),
-            &v2096_node_derivative_indices,
-            &v2096_node_derivatives,
-            &v2096_branch_derivative_indices,
-            &v2096_branch_derivatives,
+            [0, 1, 4, 5, 6, 7, 8, 9, 10],
+            [d2096_dn0, d2096_dn1, d2096_dn4, d2096_dn5, d2096_dn6, d2096_dn7, d2096_dn8, d2096_dn9, d2096_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2098_dn3: f64 = v5824;
@@ -5779,36 +5759,28 @@ impl Instance {
         let d2098_dn7: f64 = v5827;
         let d2098_dn8: f64 = v5828;
         let d2098_dn10: f64 = v5829;
-        let v2098_node_derivative_indices: [usize; 6] = [3, 5, 6, 7, 8, 10];
-        let v2098_node_derivatives: [f64; 6] = [d2098_dn3, d2098_dn5, d2098_dn6, d2098_dn7, d2098_dn8, d2098_dn10];
-        let v2098_branch_derivative_indices: [usize; 0] = [];
-        let v2098_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<6, 0>(
             Some(5),
             Some(3),
             multiplicity * (v2098),
-            &v2098_node_derivative_indices,
-            &v2098_node_derivatives,
-            &v2098_branch_derivative_indices,
-            &v2098_branch_derivatives,
+            [3, 5, 6, 7, 8, 10],
+            [d2098_dn3, d2098_dn5, d2098_dn6, d2098_dn7, d2098_dn8, d2098_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2100_dn3: f64 = v5834;
         let d2100_dn6: f64 = v5835;
         let d2100_dn7: f64 = v5836;
         let d2100_dn8: f64 = v5837;
-        let v2100_node_derivative_indices: [usize; 4] = [3, 6, 7, 8];
-        let v2100_node_derivatives: [f64; 4] = [d2100_dn3, d2100_dn6, d2100_dn7, d2100_dn8];
-        let v2100_branch_derivative_indices: [usize; 0] = [];
-        let v2100_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<4, 0>(
             Some(6),
             Some(3),
             multiplicity * (v2100),
-            &v2100_node_derivative_indices,
-            &v2100_node_derivatives,
-            &v2100_branch_derivative_indices,
-            &v2100_branch_derivatives,
+            [3, 6, 7, 8],
+            [d2100_dn3, d2100_dn6, d2100_dn7, d2100_dn8],
+            [],
+            [],
             multiplicity,
         );
         let d2102_dn0: f64 = v5848;
@@ -5821,18 +5793,14 @@ impl Instance {
         let d2102_dn8: f64 = v5855;
         let d2102_dn9: f64 = v5856;
         let d2102_dn10: f64 = v5857;
-        let v2102_node_derivative_indices: [usize; 10] = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10];
-        let v2102_node_derivatives: [f64; 10] = [d2102_dn0, d2102_dn1, d2102_dn3, d2102_dn4, d2102_dn5, d2102_dn6, d2102_dn7, d2102_dn8, d2102_dn9, d2102_dn10];
-        let v2102_branch_derivative_indices: [usize; 0] = [];
-        let v2102_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<10, 0>(
             Some(1),
             Some(3),
             multiplicity * (v2102),
-            &v2102_node_derivative_indices,
-            &v2102_node_derivatives,
-            &v2102_branch_derivative_indices,
-            &v2102_branch_derivatives,
+            [0, 1, 3, 4, 5, 6, 7, 8, 9, 10],
+            [d2102_dn0, d2102_dn1, d2102_dn3, d2102_dn4, d2102_dn5, d2102_dn6, d2102_dn7, d2102_dn8, d2102_dn9, d2102_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2104_dn3: f64 = v5860;
@@ -5851,36 +5819,28 @@ impl Instance {
         let d2106_dn6: f64 = v5869;
         let d2106_dn7: f64 = v5870;
         let d2106_dn8: f64 = v5871;
-        let v2106_node_derivative_indices: [usize; 5] = [4, 5, 6, 7, 8];
-        let v2106_node_derivatives: [f64; 5] = [d2106_dn4, d2106_dn5, d2106_dn6, d2106_dn7, d2106_dn8];
-        let v2106_branch_derivative_indices: [usize; 0] = [];
-        let v2106_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(6),
             multiplicity * (v2106),
-            &v2106_node_derivative_indices,
-            &v2106_node_derivatives,
-            &v2106_branch_derivative_indices,
-            &v2106_branch_derivatives,
+            [4, 5, 6, 7, 8],
+            [d2106_dn4, d2106_dn5, d2106_dn6, d2106_dn7, d2106_dn8],
+            [],
+            [],
             multiplicity,
         );
         let d2109_dn4: f64 = v5880;
         let d2109_dn6: f64 = v5881;
         let d2109_dn7: f64 = v5882;
         let d2109_dn8: f64 = v5883;
-        let v2109_node_derivative_indices: [usize; 4] = [4, 6, 7, 8];
-        let v2109_node_derivatives: [f64; 4] = [d2109_dn4, d2109_dn6, d2109_dn7, d2109_dn8];
-        let v2109_branch_derivative_indices: [usize; 0] = [];
-        let v2109_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<4, 0>(
             Some(6),
             Some(8),
             multiplicity * (v2109),
-            &v2109_node_derivative_indices,
-            &v2109_node_derivatives,
-            &v2109_branch_derivative_indices,
-            &v2109_branch_derivatives,
+            [4, 6, 7, 8],
+            [d2109_dn4, d2109_dn6, d2109_dn7, d2109_dn8],
+            [],
+            [],
             multiplicity,
         );
         let d2112_dn2: f64 = v5888;
@@ -5915,18 +5875,14 @@ impl Instance {
         let d2117_dn8: f64 = v5911;
         let d2117_dn9: f64 = v5912;
         let d2117_dn10: f64 = v5913;
-        let v2117_node_derivative_indices: [usize; 10] = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10];
-        let v2117_node_derivatives: [f64; 10] = [d2117_dn0, d2117_dn1, d2117_dn3, d2117_dn4, d2117_dn5, d2117_dn6, d2117_dn7, d2117_dn8, d2117_dn9, d2117_dn10];
-        let v2117_branch_derivative_indices: [usize; 0] = [];
-        let v2117_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<10, 0>(
             Some(1),
             Some(9),
             multiplicity * (v2117),
-            &v2117_node_derivative_indices,
-            &v2117_node_derivatives,
-            &v2117_branch_derivative_indices,
-            &v2117_branch_derivatives,
+            [0, 1, 3, 4, 5, 6, 7, 8, 9, 10],
+            [d2117_dn0, d2117_dn1, d2117_dn3, d2117_dn4, d2117_dn5, d2117_dn6, d2117_dn7, d2117_dn8, d2117_dn9, d2117_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2120_dn0: f64 = v5926;
@@ -5937,18 +5893,14 @@ impl Instance {
         let d2120_dn8: f64 = v5930;
         let d2120_dn9: f64 = v5931;
         let d2120_dn10: f64 = v5929;
-        let v2120_node_derivative_indices: [usize; 8] = [0, 1, 5, 6, 7, 8, 9, 10];
-        let v2120_node_derivatives: [f64; 8] = [d2120_dn0, d2120_dn1, d2120_dn5, d2120_dn6, d2120_dn7, d2120_dn8, d2120_dn9, d2120_dn10];
-        let v2120_branch_derivative_indices: [usize; 0] = [];
-        let v2120_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<8, 0>(
             Some(0),
             Some(9),
             multiplicity * (v2120),
-            &v2120_node_derivative_indices,
-            &v2120_node_derivatives,
-            &v2120_branch_derivative_indices,
-            &v2120_branch_derivatives,
+            [0, 1, 5, 6, 7, 8, 9, 10],
+            [d2120_dn0, d2120_dn1, d2120_dn5, d2120_dn6, d2120_dn7, d2120_dn8, d2120_dn9, d2120_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2123_dn0: f64 = v5950;
@@ -5960,18 +5912,14 @@ impl Instance {
         let d2123_dn8: f64 = v5956;
         let d2123_dn9: f64 = v5957;
         let d2123_dn10: f64 = v5958;
-        let v2123_node_derivative_indices: [usize; 9] = [0, 1, 4, 5, 6, 7, 8, 9, 10];
-        let v2123_node_derivatives: [f64; 9] = [d2123_dn0, d2123_dn1, d2123_dn4, d2123_dn5, d2123_dn6, d2123_dn7, d2123_dn8, d2123_dn9, d2123_dn10];
-        let v2123_branch_derivative_indices: [usize; 0] = [];
-        let v2123_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<9, 0>(
             Some(5),
             Some(10),
             multiplicity * (v2123),
-            &v2123_node_derivative_indices,
-            &v2123_node_derivatives,
-            &v2123_branch_derivative_indices,
-            &v2123_branch_derivatives,
+            [0, 1, 4, 5, 6, 7, 8, 9, 10],
+            [d2123_dn0, d2123_dn1, d2123_dn4, d2123_dn5, d2123_dn6, d2123_dn7, d2123_dn8, d2123_dn9, d2123_dn10],
+            [],
+            [],
             multiplicity,
         );
         let d2127_dn9: f64 = v5963;
@@ -5985,6 +5933,16 @@ impl Instance {
             10,
             multiplicity * (d2127_dn10),
         );
+        stamper.stamp_potential_branch_local(
+            Some(9),
+            Some(10),
+            0,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            0,
+            self.scalar_v2128,
+        );
         let d2132_dn7: f64 = v5969;
         let d2132_dn10: f64 = v5970;
         stamper.stamp_current_node2_local(
@@ -5995,6 +5953,16 @@ impl Instance {
             multiplicity * (d2132_dn7),
             10,
             multiplicity * (d2132_dn10),
+        );
+        stamper.stamp_potential_branch_local(
+            Some(10),
+            Some(7),
+            1,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            1,
+            self.scalar_v2133,
         );
         let d2134_dn11: f64 = v1;
         stamper.stamp_current_node1_local(
@@ -6029,19 +5997,6 @@ impl Instance {
         Self::stamp_transient_block_1(ctx, s, p, nodes);
         Self::stamp_transient_block_2(s, p);
         Self::stamp_transient_block_3(s, p);
-
-        stamper.stamp_potential_branch_local(
-            Some(9),
-            Some(10),
-            0,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(10),
-            Some(7),
-            1,
-            multiplicity,
-        );
 
         Self::stamp_transient_equations_block_0(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);

@@ -4008,30 +4008,6 @@ impl Instance {
             &eq1_branch_derivatives,
             multiplicity,
         );
-        let (eq2_e1030,) = {
-    if (!s.b[3305]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq2_value: f64 = eq2_e1030;
-        stamper.stamp_potential_const_local(
-            0,
-            eq2_value,
-        );
-        let (eq3_e1035,) = {
-    if (!s.b[3305]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq3_value: f64 = eq3_e1035;
-        stamper.stamp_potential_const_local(
-            1,
-            eq3_value,
-        );
         let (eq4_e1042, eq4_e1042_d_n0, eq4_e1042_d_n1, eq4_e1042_d_n2, eq4_e1042_d_n3, eq4_e1042_d_n4, eq4_e1042_d_n5, eq4_e1042_d_n6, eq4_e1042_d_n7, eq4_e1042_d_n8, eq4_e1042_d_n9, eq4_e1042_d_n10, eq4_e1042_d_n11, eq4_e1042_d_n12, eq4_e1042_d_n13, eq4_e1042_d_n14, eq4_e1042_d_n15, eq4_e1042_d_n16, eq4_e1042_d_n17, eq4_e1042_d_b0, eq4_e1042_d_b1, eq4_e1042_d_b2, eq4_e1042_d_b3, eq4_e1042_d_b4, eq4_e1042_d_b5, eq4_e1042_d_b6, eq4_e1042_d_b7, eq4_e1042_d_b8, eq4_e1042_d_b9, eq4_e1042_d_b10, eq4_e1042_d_b11,) = {
     if s.b[3306] {
         let eq4_e1039: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, s.v[931]);
@@ -4111,18 +4087,6 @@ impl Instance {
             &eq4_node_derivatives,
             &eq4_branch_derivatives,
             multiplicity,
-        );
-        let (eq5_e1047,) = {
-    if (!s.b[3306]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq5_value: f64 = eq5_e1047;
-        stamper.stamp_potential_const_local(
-            2,
-            eq5_value,
         );
         let eq6_e1051: f64 = (s.v[134] + s.v[400]);
         let eq6_e1051_d_n0: f64 = (s.dn[134][0] + s.dn[400][0]);
@@ -5322,18 +5286,6 @@ impl Instance {
             &eq23_branch_derivatives,
             multiplicity,
         );
-        let (eq24_e1148,) = {
-    if (s.v[75] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq24_value: f64 = eq24_e1148;
-        stamper.stamp_potential_const_local(
-            3,
-            eq24_value,
-        );
         let (eq25_e1154, eq25_e1154_d_n0, eq25_e1154_d_n1, eq25_e1154_d_n2, eq25_e1154_d_n3, eq25_e1154_d_n4, eq25_e1154_d_n5, eq25_e1154_d_n6, eq25_e1154_d_n7, eq25_e1154_d_n8, eq25_e1154_d_n9, eq25_e1154_d_n10, eq25_e1154_d_n11, eq25_e1154_d_n12, eq25_e1154_d_n13, eq25_e1154_d_n14, eq25_e1154_d_n15, eq25_e1154_d_n16, eq25_e1154_d_n17, eq25_e1154_d_b0, eq25_e1154_d_b1, eq25_e1154_d_b2, eq25_e1154_d_b3, eq25_e1154_d_b4, eq25_e1154_d_b5, eq25_e1154_d_b6, eq25_e1154_d_b7, eq25_e1154_d_b8, eq25_e1154_d_b9, eq25_e1154_d_b10, eq25_e1154_d_b11,) = {
     if (s.v[76] != 0.0) {
         let eq25_e1152: f64 = ((nv7 - nv2) / s.v[5]);
@@ -5382,18 +5334,6 @@ impl Instance {
             &eq25_node_derivatives,
             &eq25_branch_derivatives,
             multiplicity,
-        );
-        let (eq26_e1159,) = {
-    if (s.v[76] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq26_value: f64 = eq26_e1159;
-        stamper.stamp_potential_const_local(
-            4,
-            eq26_value,
         );
         let eq27_e1163: f64 = (s.v[18] + s.v[753]);
         let eq27_e1163_d_n0: f64 = (s.dn[18][0] + s.dn[753][0]);

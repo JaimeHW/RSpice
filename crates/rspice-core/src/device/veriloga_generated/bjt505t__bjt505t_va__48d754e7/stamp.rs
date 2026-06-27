@@ -97,6 +97,26 @@ impl Instance {
         let v0: f64 = 1.0;
         let v10: f64 = nv12;
 
+        stamper.stamp_potential_branch_local(
+            Some(10),
+            Some(11),
+            0,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            0,
+            self.scalar_v8,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(11),
+            Some(8),
+            1,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            1,
+            self.scalar_v9,
+        );
         let d10_dn12: f64 = v0;
         stamper.stamp_current_node1_local(
             Some(12),
@@ -123,19 +143,6 @@ impl Instance {
         Self::stamp_transient_block_2(s, p);
         Self::stamp_transient_block_3(s, p);
         Self::stamp_transient_block_4(ctx, s, p, nodes, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-
-        stamper.stamp_potential_branch_local(
-            Some(10),
-            Some(11),
-            0,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(11),
-            Some(8),
-            1,
-            multiplicity,
-        );
 
         Self::stamp_transient_equations_block_0(stamper, s, p, multiplicity);
         Self::stamp_transient_equations_block_1(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);

@@ -163,6 +163,46 @@ impl Instance {
         let v145: f64 = (if self.scalar_v144 { v136 } else { v11 });
         let v146: f64 = (if self.scalar_v144 { v140 } else { v11 });
 
+        stamper.stamp_potential_branch_local(
+            Some(7),
+            Some(8),
+            0,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            0,
+            self.scalar_v109,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(1),
+            Some(7),
+            1,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            1,
+            self.scalar_v113,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(6),
+            Some(2),
+            2,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            2,
+            self.scalar_v115,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(5),
+            Some(0),
+            3,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            3,
+            self.scalar_v117,
+        );
         let d125_dn5: f64 = self.scalar_v166;
         let d125_dn9: f64 = self.scalar_v167;
         stamper.stamp_current_node2_local(
@@ -195,6 +235,26 @@ impl Instance {
             multiplicity * (d131_dn3),
             9,
             multiplicity * (d131_dn9),
+        );
+        stamper.stamp_potential_branch_local(
+            Some(9),
+            Some(3),
+            4,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            4,
+            self.scalar_v133,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(4),
+            None,
+            5,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            5,
+            self.scalar_v135,
         );
         let d138_dn13: f64 = self.scalar_v174;
         stamper.stamp_current_node1_local(
@@ -345,43 +405,6 @@ impl Instance {
         Self::stamp_transient_block_6(ctx, s, p, nodes);
         Self::stamp_transient_block_7(s, p);
         Self::stamp_transient_block_8(ctx, s, p, nodes);
-
-        stamper.stamp_potential_branch_local(
-            Some(7),
-            Some(8),
-            0,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(1),
-            Some(7),
-            1,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(6),
-            Some(2),
-            2,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(5),
-            Some(0),
-            3,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(9),
-            Some(3),
-            4,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(4),
-            None,
-            5,
-            multiplicity,
-        );
 
         Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);

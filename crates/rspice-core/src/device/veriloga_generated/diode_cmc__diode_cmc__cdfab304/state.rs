@@ -1112,6 +1112,10 @@ pub struct Instance {
     pub(crate) scalar_v11533: f64,
     pub(crate) scalar_v11556: f64,
     pub(crate) scalar_v11560: f64,
+    pub(crate) scalar_v11568: bool,
+    pub(crate) scalar_v11569: f64,
+    pub(crate) scalar_v11570: bool,
+    pub(crate) scalar_v11571: f64,
     pub(crate) scalar_v11671: f64,
     pub(crate) scalar_v11672: f64,
     pub(crate) scalar_v11673: f64,
@@ -1978,6 +1982,10 @@ impl Clone for Instance {
             scalar_v11533: self.scalar_v11533,
             scalar_v11556: self.scalar_v11556,
             scalar_v11560: self.scalar_v11560,
+            scalar_v11568: self.scalar_v11568,
+            scalar_v11569: self.scalar_v11569,
+            scalar_v11570: self.scalar_v11570,
+            scalar_v11571: self.scalar_v11571,
             scalar_v11671: self.scalar_v11671,
             scalar_v11672: self.scalar_v11672,
             scalar_v11673: self.scalar_v11673,
@@ -2861,6 +2869,10 @@ impl Instance {
             scalar_v11533: 0.0,
             scalar_v11556: 0.0,
             scalar_v11560: 0.0,
+            scalar_v11568: false,
+            scalar_v11569: 0.0,
+            scalar_v11570: false,
+            scalar_v11571: 0.0,
             scalar_v11671: 0.0,
             scalar_v11672: 0.0,
             scalar_v11673: 0.0,
@@ -3731,6 +3743,10 @@ impl Instance {
             scalar_v11533,
             scalar_v11556,
             scalar_v11560,
+            scalar_v11568,
+            scalar_v11569,
+            scalar_v11570,
+            scalar_v11571,
             scalar_v11671,
             scalar_v11672,
             scalar_v11673,
@@ -4593,6 +4609,10 @@ impl Instance {
             scalar_v11533,
             scalar_v11556,
             scalar_v11560,
+            scalar_v11568,
+            scalar_v11569,
+            scalar_v11570,
+            scalar_v11571,
             scalar_v11671,
             scalar_v11672,
             scalar_v11673,
@@ -6433,6 +6453,14 @@ impl Instance {
         self.scalar_v11556 = v11556;
         let v11560: f64 = p.p4;
         self.scalar_v11560 = v11560;
+        let v11568: bool = (!v11439);
+        self.scalar_v11568 = v11568;
+        let v11569: f64 = (if v11568 { 0.0 } else { 0.0 });
+        self.scalar_v11569 = v11569;
+        let v11570: bool = (!v11515);
+        self.scalar_v11570 = v11570;
+        let v11571: f64 = (if v11570 { 0.0 } else { 0.0 });
+        self.scalar_v11571 = v11571;
         let v11671: f64 = (if v720 { 1.0 } else { 0.0 });
         self.scalar_v11671 = v11671;
         let v11672: f64 = (if v720 { -1.0 } else { 0.0 });

@@ -1246,9 +1246,13 @@ pub struct Instance {
     pub(crate) scalar_v145: f64,
     pub(crate) scalar_v146: f64,
     pub(crate) scalar_v148: f64,
+    pub(crate) scalar_v153: f64,
     pub(crate) scalar_v154: f64,
+    pub(crate) scalar_v159: f64,
     pub(crate) scalar_v160: f64,
+    pub(crate) scalar_v165: f64,
     pub(crate) scalar_v166: f64,
+    pub(crate) scalar_v171: f64,
     pub(crate) scalar_v179: f64,
     pub(crate) scalar_v180: f64,
     pub(crate) scalar_v181: f64,
@@ -1419,9 +1423,13 @@ impl Clone for Instance {
             scalar_v145: self.scalar_v145,
             scalar_v146: self.scalar_v146,
             scalar_v148: self.scalar_v148,
+            scalar_v153: self.scalar_v153,
             scalar_v154: self.scalar_v154,
+            scalar_v159: self.scalar_v159,
             scalar_v160: self.scalar_v160,
+            scalar_v165: self.scalar_v165,
             scalar_v166: self.scalar_v166,
+            scalar_v171: self.scalar_v171,
             scalar_v179: self.scalar_v179,
             scalar_v180: self.scalar_v180,
             scalar_v181: self.scalar_v181,
@@ -1609,9 +1617,13 @@ impl Instance {
             scalar_v145: 0.0,
             scalar_v146: 0.0,
             scalar_v148: 0.0,
+            scalar_v153: 0.0,
             scalar_v154: 0.0,
+            scalar_v159: 0.0,
             scalar_v160: 0.0,
+            scalar_v165: 0.0,
             scalar_v166: 0.0,
+            scalar_v171: 0.0,
             scalar_v179: 0.0,
             scalar_v180: 0.0,
             scalar_v181: 0.0,
@@ -1786,9 +1798,13 @@ impl Instance {
             scalar_v145,
             scalar_v146,
             scalar_v148,
+            scalar_v153,
             scalar_v154,
+            scalar_v159,
             scalar_v160,
+            scalar_v165,
             scalar_v166,
+            scalar_v171,
             scalar_v179,
             scalar_v180,
             scalar_v181,
@@ -1955,9 +1971,13 @@ impl Instance {
             scalar_v145,
             scalar_v146,
             scalar_v148,
+            scalar_v153,
             scalar_v154,
+            scalar_v159,
             scalar_v160,
+            scalar_v165,
             scalar_v166,
+            scalar_v171,
             scalar_v179,
             scalar_v180,
             scalar_v181,
@@ -2829,12 +2849,20 @@ impl Instance {
         self.scalar_v146 = v146;
         let v148: f64 = (v145 * v123);
         self.scalar_v148 = v148;
+        let v153: f64 = (if v122 { 0.0 } else { 0.0 });
+        self.scalar_v153 = v153;
         let v154: f64 = (v145 * v128);
         self.scalar_v154 = v154;
+        let v159: f64 = (if v127 { 0.0 } else { 0.0 });
+        self.scalar_v159 = v159;
         let v160: f64 = (v145 * v133);
         self.scalar_v160 = v160;
+        let v165: f64 = (if v132 { 0.0 } else { 0.0 });
+        self.scalar_v165 = v165;
         let v166: f64 = (v145 * v138);
         self.scalar_v166 = v166;
+        let v171: f64 = (if v137 { 0.0 } else { 0.0 });
+        self.scalar_v171 = v171;
         let v179: f64 = (v146 * -1.0);
         self.scalar_v179 = v179;
         let v180: f64 = (v148 * -1.0);

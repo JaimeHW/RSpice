@@ -593,54 +593,6 @@ impl Instance {
             &eq41_branch_derivatives,
             multiplicity,
         );
-        let (eq48_e1288,) = {
-    if (s.v[3408] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq48_value: f64 = eq48_e1288;
-        stamper.stamp_potential_const_local(
-            5,
-            eq48_value,
-        );
-        let (eq52_e1311,) = {
-    if (p.p52 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq52_value: f64 = eq52_e1311;
-        stamper.stamp_potential_const_local(
-            6,
-            eq52_value,
-        );
-        let (eq53_e1316,) = {
-    if (p.p52 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq53_value: f64 = eq53_e1316;
-        stamper.stamp_potential_const_local(
-            7,
-            eq53_value,
-        );
-        let (eq54_e1321,) = {
-    if (p.p52 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq54_value: f64 = eq54_e1321;
-        stamper.stamp_potential_const_local(
-            8,
-            eq54_value,
-        );
         let (eq56_e1332, eq56_e1332_d_n0, eq56_e1332_d_n1, eq56_e1332_d_n2, eq56_e1332_d_n3, eq56_e1332_d_n4, eq56_e1332_d_n5, eq56_e1332_d_n6, eq56_e1332_d_n7, eq56_e1332_d_n8, eq56_e1332_d_n9, eq56_e1332_d_n10, eq56_e1332_d_n11, eq56_e1332_d_n12, eq56_e1332_d_n13, eq56_e1332_d_n14, eq56_e1332_d_n15, eq56_e1332_d_n16, eq56_e1332_d_n17, eq56_e1332_d_b0, eq56_e1332_d_b1, eq56_e1332_d_b2, eq56_e1332_d_b3, eq56_e1332_d_b4, eq56_e1332_d_b5, eq56_e1332_d_b6, eq56_e1332_d_b7, eq56_e1332_d_b8, eq56_e1332_d_b9, eq56_e1332_d_b10, eq56_e1332_d_b11,) = {
     if s.b[3409] {
         let eq56_e1330: f64 = (-s.v[802]);
@@ -886,30 +838,6 @@ impl Instance {
             &eq62_branch_derivatives,
             multiplicity,
         );
-        let (eq63_e1370,) = {
-    if (p.p28 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq63_value: f64 = eq63_e1370;
-        stamper.stamp_potential_const_local(
-            9,
-            eq63_value,
-        );
-        let (eq64_e1375,) = {
-    if (p.p28 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq64_value: f64 = eq64_e1375;
-        stamper.stamp_potential_const_local(
-            10,
-            eq64_value,
-        );
         let (eq65_e1379, eq65_e1379_d_n0, eq65_e1379_d_n1, eq65_e1379_d_n2, eq65_e1379_d_n3, eq65_e1379_d_n4, eq65_e1379_d_n5, eq65_e1379_d_n6, eq65_e1379_d_n7, eq65_e1379_d_n8, eq65_e1379_d_n9, eq65_e1379_d_n10, eq65_e1379_d_n11, eq65_e1379_d_n12, eq65_e1379_d_n13, eq65_e1379_d_n14, eq65_e1379_d_n15, eq65_e1379_d_n16, eq65_e1379_d_n17, eq65_e1379_d_b0, eq65_e1379_d_b1, eq65_e1379_d_b2, eq65_e1379_d_b3, eq65_e1379_d_b4, eq65_e1379_d_b5, eq65_e1379_d_b6, eq65_e1379_d_b7, eq65_e1379_d_b8, eq65_e1379_d_b9, eq65_e1379_d_b10, eq65_e1379_d_b11,) = {
     if (p.p29 != 0.0) {
         (s.v[815], s.dn[815][0], s.dn[815][1], s.dn[815][2], s.dn[815][3], s.dn[815][4], s.dn[815][5], s.dn[815][6], s.dn[815][7], s.dn[815][8], s.dn[815][9], s.dn[815][10], s.dn[815][11], s.dn[815][12], s.dn[815][13], s.dn[815][14], s.dn[815][15], s.dn[815][16], s.dn[815][17], s.db[815][0], s.db[815][1], s.db[815][2], s.db[815][3], s.db[815][4], s.db[815][5], s.db[815][6], s.db[815][7], s.db[815][8], s.db[815][9], s.db[815][10], s.db[815][11],)
@@ -943,18 +871,6 @@ impl Instance {
             multiplicity * (eq66_value),
             13,
             multiplicity * (eq66_e1384_d_n13),
-        );
-        let (eq67_e1389,) = {
-    if (p.p29 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq67_value: f64 = eq67_e1389;
-        stamper.stamp_potential_const_local(
-            11,
-            eq67_value,
         );
     }
 

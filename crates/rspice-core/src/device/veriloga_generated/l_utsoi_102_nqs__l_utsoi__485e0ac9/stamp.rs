@@ -183,6 +183,16 @@ impl Instance {
             9,
             multiplicity * (d152_dn9),
         );
+        stamper.stamp_potential_branch_local(
+            Some(1),
+            Some(9),
+            0,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            0,
+            self.scalar_v153,
+        );
         let d158_dn2: f64 = self.scalar_v184;
         let d158_dn6: f64 = self.scalar_v185;
         stamper.stamp_current_node2_local(
@@ -193,6 +203,16 @@ impl Instance {
             multiplicity * (d158_dn2),
             6,
             multiplicity * (d158_dn6),
+        );
+        stamper.stamp_potential_branch_local(
+            Some(2),
+            Some(6),
+            1,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            1,
+            self.scalar_v159,
         );
         let d164_dn0: f64 = self.scalar_v187;
         let d164_dn7: f64 = self.scalar_v188;
@@ -205,6 +225,16 @@ impl Instance {
             7,
             multiplicity * (d164_dn7),
         );
+        stamper.stamp_potential_branch_local(
+            Some(0),
+            Some(7),
+            2,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            2,
+            self.scalar_v165,
+        );
         let d170_dn3: f64 = self.scalar_v190;
         let d170_dn8: f64 = self.scalar_v191;
         stamper.stamp_current_node2_local(
@@ -215,6 +245,16 @@ impl Instance {
             multiplicity * (d170_dn3),
             8,
             multiplicity * (d170_dn8),
+        );
+        stamper.stamp_potential_branch_local(
+            Some(3),
+            Some(8),
+            3,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            3,
+            self.scalar_v171,
         );
         let d175_dn10: f64 = v22;
         let d175_dn13: f64 = v192;
@@ -278,42 +318,16 @@ impl Instance {
         Self::stamp_transient_block_30(s, p);
         Self::stamp_transient_block_31(s, p);
 
-        stamper.stamp_potential_branch_local(
-            Some(1),
-            Some(9),
-            0,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(2),
-            Some(6),
-            1,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(0),
-            Some(7),
-            2,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(3),
-            Some(8),
-            3,
-            multiplicity,
-        );
-
         Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_3(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq39_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(5),
             None,
             multiplicity * (eq39_value),
         );
-        Self::stamp_transient_equations_block_4(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_3(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq45_e779: f64 = (s.v[334] * s.v[1805]);
         let eq45_e779_d_n0: f64 = ((s.dn[334][0] * s.v[1805]) + (s.v[334] * s.dn[1805][0]));
         let eq45_e779_d_n1: f64 = ((s.dn[334][1] * s.v[1805]) + (s.v[334] * s.dn[1805][1]));

@@ -5421,18 +5421,6 @@ impl Instance {
             &eq29_branch_derivatives,
             multiplicity,
         );
-        let (eq30_e382,) = {
-    if (!s.b[612]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq30_value: f64 = eq30_e382;
-        stamper.stamp_potential_const_local(
-            0,
-            eq30_value,
-        );
         let (eq31_e392, eq31_e392_d_n0, eq31_e392_d_n1, eq31_e392_d_n2, eq31_e392_d_n3, eq31_e392_d_n4, eq31_e392_d_n5, eq31_e392_d_n6, eq31_e392_d_n7, eq31_e392_d_n8, eq31_e392_d_n9, eq31_e392_d_n10, eq31_e392_d_n11, eq31_e392_d_n12, eq31_e392_d_b0, eq31_e392_d_b1,) = {
     if s.b[613] {
         let eq31_e386: f64 = (p.p3 * s.v[258]);
@@ -5498,18 +5486,6 @@ impl Instance {
             &eq31_node_derivatives,
             &eq31_branch_derivatives,
             multiplicity,
-        );
-        let (eq32_e397,) = {
-    if (!s.b[613]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq32_value: f64 = eq32_e397;
-        stamper.stamp_potential_const_local(
-            1,
-            eq32_value,
         );
         let eq35_e406: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 10, (nv12 - 0.0));
         let eq35_e407: f64 = (s.v[336] * eq35_e406);

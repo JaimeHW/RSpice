@@ -182,18 +182,6 @@ impl Instance {
             &eq65_branch_derivatives,
             multiplicity,
         );
-        let (eq66_e2086,) = {
-    if (!s.b[2020]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq66_value: f64 = eq66_e2086;
-        stamper.stamp_potential_const_local(
-            5,
-            eq66_value,
-        );
         let (eq67_e2103, eq67_e2103_d_n0, eq67_e2103_d_n1, eq67_e2103_d_n2, eq67_e2103_d_n3, eq67_e2103_d_n4, eq67_e2103_d_n5, eq67_e2103_d_n6, eq67_e2103_d_n7, eq67_e2103_d_n8, eq67_e2103_d_n9, eq67_e2103_d_n10, eq67_e2103_d_n11, eq67_e2103_d_n12, eq67_e2103_d_n13, eq67_e2103_d_b0, eq67_e2103_d_b1, eq67_e2103_d_b2, eq67_e2103_d_b3, eq67_e2103_d_b4, eq67_e2103_d_b5, eq67_e2103_d_b6, eq67_e2103_d_b7, eq67_e2103_d_b8, eq67_e2103_d_b9, eq67_e2103_d_b10, eq67_e2103_d_b11,) = {
     if ((s.b[2021] && s.b[2024]) && s.b[2025]) {
         let eq67_e2094: f64 = (s.v[634] * s.v[1015]);
@@ -672,78 +660,6 @@ impl Instance {
             &eq69_branch_derivatives,
             multiplicity,
         );
-        let (eq70_e2146,) = {
-    if (((!s.b[2021]) && (s.v[2026] != 0.0)) && (s.v[2027] != 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq70_value: f64 = eq70_e2146;
-        stamper.stamp_potential_const_local(
-            6,
-            eq70_value,
-        );
-        let (eq71_e2156,) = {
-    if (((!s.b[2021]) && (s.v[2026] != 0.0)) && (s.v[2027] == 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq71_value: f64 = eq71_e2156;
-        stamper.stamp_potential_const_local(
-            7,
-            eq71_value,
-        );
-        let (eq72_e2164,) = {
-    if ((!s.b[2021]) && (s.v[2026] == 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq72_value: f64 = eq72_e2164;
-        stamper.stamp_potential_const_local(
-            8,
-            eq72_value,
-        );
-        let (eq73_e2168,) = {
-    if s.b[2028] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq73_value: f64 = eq73_e2168;
-        stamper.stamp_potential_const_local(
-            9,
-            eq73_value,
-        );
-        let (eq74_e2172,) = {
-    if s.b[2028] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq74_value: f64 = eq74_e2172;
-        stamper.stamp_potential_const_local(
-            10,
-            eq74_value,
-        );
-        let (eq75_e2179,) = {
-    if ((!s.b[2028]) && s.b[2029]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq75_value: f64 = eq75_e2179;
-        stamper.stamp_potential_const_local(
-            11,
-            eq75_value,
-        );
         let (eq76_e2187, eq76_e2187_d_n0, eq76_e2187_d_n1, eq76_e2187_d_n2, eq76_e2187_d_n3, eq76_e2187_d_n4, eq76_e2187_d_n5, eq76_e2187_d_n6, eq76_e2187_d_n7, eq76_e2187_d_n8, eq76_e2187_d_n9, eq76_e2187_d_n10, eq76_e2187_d_n11, eq76_e2187_d_n12, eq76_e2187_d_n13, eq76_e2187_d_b0, eq76_e2187_d_b1, eq76_e2187_d_b2, eq76_e2187_d_b3, eq76_e2187_d_b4, eq76_e2187_d_b5, eq76_e2187_d_b6, eq76_e2187_d_b7, eq76_e2187_d_b8, eq76_e2187_d_b9, eq76_e2187_d_b10, eq76_e2187_d_b11,) = {
     if (s.b[2037] && s.b[2038]) {
         let eq76_e2185: f64 = ((nv4 - nv10) * s.v[1021]);
@@ -987,18 +903,6 @@ impl Instance {
             &eq80_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_transient_equations_block_8(
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
         let eq81_e2216: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 22, s.v[525]);
         let eq81_e2216_d_n0: f64 = (s.dn[525][0] * ddt_scale);
         let eq81_e2216_d_n1: f64 = (s.dn[525][1] * ddt_scale);

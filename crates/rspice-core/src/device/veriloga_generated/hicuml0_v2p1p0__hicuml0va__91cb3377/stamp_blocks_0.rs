@@ -10,54 +10,6 @@ impl Instance {
         s: &mut Scratch,
         multiplicity: f64,
     ) {
-        let (eq9_e163,) = {
-    if (s.v[356] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq9_value: f64 = eq9_e163;
-        stamper.stamp_potential_const_local(
-            0,
-            eq9_value,
-        );
-        let (eq11_e174,) = {
-    if (s.v[357] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq11_value: f64 = eq11_e174;
-        stamper.stamp_potential_const_local(
-            1,
-            eq11_value,
-        );
-        let (eq13_e185,) = {
-    if (s.v[358] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq13_value: f64 = eq13_e185;
-        stamper.stamp_potential_const_local(
-            2,
-            eq13_value,
-        );
-        let (eq19_e196,) = {
-    if s.b[360] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq19_value: f64 = eq19_e196;
-        stamper.stamp_potential_const_local(
-            3,
-            eq19_value,
-        );
         let (eq21_e210, eq21_e210_d_n0, eq21_e210_d_n1, eq21_e210_d_n2, eq21_e210_d_n3, eq21_e210_d_n4, eq21_e210_d_n5, eq21_e210_d_n6, eq21_e210_d_n7, eq21_e210_d_n8, eq21_e210_d_n9, eq21_e210_d_b0, eq21_e210_d_b1, eq21_e210_d_b2, eq21_e210_d_b3,) = {
     if (!s.b[360]) {
         (s.v[167], s.dn[167][0], s.dn[167][1], s.dn[167][2], s.dn[167][3], s.dn[167][4], s.dn[167][5], s.dn[167][6], s.dn[167][7], s.dn[167][8], s.dn[167][9], s.db[167][0], s.db[167][1], s.db[167][2], s.db[167][3],)

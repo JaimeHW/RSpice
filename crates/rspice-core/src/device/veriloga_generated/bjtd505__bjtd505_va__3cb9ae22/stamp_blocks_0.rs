@@ -3683,30 +3683,6 @@ impl Instance {
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv10 = ctx.node_voltage(nodes[10]);
-        let (eq22_e331,) = {
-    if (s.v[553] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq22_value: f64 = eq22_e331;
-        stamper.stamp_potential_const_local(
-            0,
-            eq22_value,
-        );
-        let (eq24_e346,) = {
-    if (s.v[554] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq24_value: f64 = eq24_e346;
-        stamper.stamp_potential_const_local(
-            1,
-            eq24_value,
-        );
         let eq27_e355: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 8, (nv10 - 0.0));
         let eq27_e356: f64 = (s.v[306] * eq27_e355);
         let eq27_e356_d_n0: f64 = (s.dn[306][0] * eq27_e355);

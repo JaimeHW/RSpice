@@ -4304,18 +4304,6 @@ impl Instance {
     ) {
         let nv15 = ctx.node_voltage(nodes[15]);
         let nv16 = ctx.node_voltage(nodes[16]);
-        let (eq0_e1199,) = {
-    if ((s.v[896] != 0.0) && (s.v[897] != 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq0_value: f64 = eq0_e1199;
-        stamper.stamp_potential_const_local(
-            0,
-            eq0_value,
-        );
         let (eq1_e1207, eq1_e1207_d_n0, eq1_e1207_d_n1, eq1_e1207_d_n2, eq1_e1207_d_n3, eq1_e1207_d_n4, eq1_e1207_d_n5, eq1_e1207_d_n6, eq1_e1207_d_n7, eq1_e1207_d_n8, eq1_e1207_d_n9, eq1_e1207_d_n10, eq1_e1207_d_n11, eq1_e1207_d_n12, eq1_e1207_d_n13, eq1_e1207_d_n14, eq1_e1207_d_n15, eq1_e1207_d_n16, eq1_e1207_d_b0, eq1_e1207_d_b1, eq1_e1207_d_b2, eq1_e1207_d_b3, eq1_e1207_d_b4, eq1_e1207_d_b5, eq1_e1207_d_b6, eq1_e1207_d_b7, eq1_e1207_d_b8, eq1_e1207_d_b9, eq1_e1207_d_b10, eq1_e1207_d_b11, eq1_e1207_d_b12, eq1_e1207_d_b13,) = {
     if s.b[1538] {
         let eq1_e1203: f64 = (s.v[187] * p.p28);

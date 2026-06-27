@@ -648,6 +648,13 @@ pub struct Instance {
     pub(crate) scalar_v2448: bool,
     pub(crate) scalar_v2449: bool,
     pub(crate) scalar_v2450: bool,
+    pub(crate) scalar_v2456: bool,
+    pub(crate) scalar_v2457: f64,
+    pub(crate) scalar_v2460: bool,
+    pub(crate) scalar_v2461: f64,
+    pub(crate) scalar_v2464: bool,
+    pub(crate) scalar_v2465: f64,
+    pub(crate) scalar_v2466: f64,
     pub(crate) scalar_v2467: bool,
     pub(crate) scalar_v2472: f64,
     pub(crate) scalar_v2473: f64,
@@ -1019,6 +1026,13 @@ impl Clone for Instance {
             scalar_v2448: self.scalar_v2448,
             scalar_v2449: self.scalar_v2449,
             scalar_v2450: self.scalar_v2450,
+            scalar_v2456: self.scalar_v2456,
+            scalar_v2457: self.scalar_v2457,
+            scalar_v2460: self.scalar_v2460,
+            scalar_v2461: self.scalar_v2461,
+            scalar_v2464: self.scalar_v2464,
+            scalar_v2465: self.scalar_v2465,
+            scalar_v2466: self.scalar_v2466,
             scalar_v2467: self.scalar_v2467,
             scalar_v2472: self.scalar_v2472,
             scalar_v2473: self.scalar_v2473,
@@ -1407,6 +1421,13 @@ impl Instance {
             scalar_v2448: false,
             scalar_v2449: false,
             scalar_v2450: false,
+            scalar_v2456: false,
+            scalar_v2457: 0.0,
+            scalar_v2460: false,
+            scalar_v2461: 0.0,
+            scalar_v2464: false,
+            scalar_v2465: 0.0,
+            scalar_v2466: 0.0,
             scalar_v2467: false,
             scalar_v2472: 0.0,
             scalar_v2473: 0.0,
@@ -1782,6 +1803,13 @@ impl Instance {
             scalar_v2448,
             scalar_v2449,
             scalar_v2450,
+            scalar_v2456,
+            scalar_v2457,
+            scalar_v2460,
+            scalar_v2461,
+            scalar_v2464,
+            scalar_v2465,
+            scalar_v2466,
             scalar_v2467,
             scalar_v2472,
             scalar_v2473,
@@ -2149,6 +2177,13 @@ impl Instance {
             scalar_v2448,
             scalar_v2449,
             scalar_v2450,
+            scalar_v2456,
+            scalar_v2457,
+            scalar_v2460,
+            scalar_v2461,
+            scalar_v2464,
+            scalar_v2465,
+            scalar_v2466,
             scalar_v2467,
             scalar_v2472,
             scalar_v2473,
@@ -3012,6 +3047,20 @@ impl Instance {
         self.scalar_v2449 = v2449;
         let v2450: bool = (v2448 || v2449);
         self.scalar_v2450 = v2450;
+        let v2456: bool = (!v2443);
+        self.scalar_v2456 = v2456;
+        let v2457: f64 = (if v2456 { 0.0 } else { 0.0 });
+        self.scalar_v2457 = v2457;
+        let v2460: bool = (!v2444);
+        self.scalar_v2460 = v2460;
+        let v2461: f64 = (if v2460 { 0.0 } else { 0.0 });
+        self.scalar_v2461 = v2461;
+        let v2464: bool = (!v2447);
+        self.scalar_v2464 = v2464;
+        let v2465: f64 = (if v2464 { 0.0 } else { 0.0 });
+        self.scalar_v2465 = v2465;
+        let v2466: f64 = (if v2450 { 0.0 } else { 0.0 });
+        self.scalar_v2466 = v2466;
         let v2467: bool = (!v2450);
         self.scalar_v2467 = v2467;
         let v2472: f64 = (p.p110 * -1.0);

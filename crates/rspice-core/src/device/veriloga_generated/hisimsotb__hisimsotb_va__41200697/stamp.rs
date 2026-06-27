@@ -110,6 +110,26 @@ impl Instance {
         let v92: f64 = (self.scalar_v70 * v91);
         let v93: f64 = (if (self.scalar_v45 != 0.0) { v92 } else { v1 });
 
+        stamper.stamp_potential_branch_local(
+            Some(12),
+            Some(2),
+            0,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            0,
+            self.scalar_v86,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(0),
+            Some(11),
+            1,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            1,
+            self.scalar_v88,
+        );
         let d89_dn7: f64 = v3;
         stamper.stamp_current_node1_local(
             Some(7),
@@ -128,6 +148,66 @@ impl Instance {
             multiplicity * (d93_dn1),
             5,
             multiplicity * (d93_dn5),
+        );
+        stamper.stamp_potential_branch_local(
+            Some(1),
+            Some(5),
+            2,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            2,
+            self.scalar_v95,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(3),
+            Some(6),
+            3,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            3,
+            v1,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(4),
+            None,
+            4,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            4,
+            self.scalar_v96,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(10),
+            None,
+            5,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            5,
+            self.scalar_v98,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(8),
+            None,
+            6,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            6,
+            self.scalar_v99,
+        );
+        stamper.stamp_potential_branch_local(
+            Some(9),
+            None,
+            7,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            7,
+            self.scalar_v99,
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
@@ -157,55 +237,6 @@ impl Instance {
         Self::stamp_transient_block_20(s, p);
         Self::stamp_transient_block_21(ctx, s, p, nodes);
         Self::stamp_transient_block_22(s, p);
-
-        stamper.stamp_potential_branch_local(
-            Some(12),
-            Some(2),
-            0,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(0),
-            Some(11),
-            1,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(1),
-            Some(5),
-            2,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(3),
-            Some(6),
-            3,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(4),
-            None,
-            4,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(10),
-            None,
-            5,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(8),
-            None,
-            6,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(9),
-            None,
-            7,
-            multiplicity,
-        );
 
         Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);

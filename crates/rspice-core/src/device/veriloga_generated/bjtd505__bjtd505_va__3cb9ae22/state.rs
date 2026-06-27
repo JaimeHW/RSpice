@@ -706,6 +706,8 @@ pub struct Instance {
     pub(crate) scalar_v1903: f64,
     pub(crate) scalar_v1904: bool,
     pub(crate) scalar_v1908: bool,
+    pub(crate) scalar_v1956: f64,
+    pub(crate) scalar_v1961: f64,
     pub(crate) scalar_v1964: f64,
     pub(crate) scalar_v1965: f64,
     pub(crate) scalar_v1966: f64,
@@ -1105,6 +1107,8 @@ impl Clone for Instance {
             scalar_v1903: self.scalar_v1903,
             scalar_v1904: self.scalar_v1904,
             scalar_v1908: self.scalar_v1908,
+            scalar_v1956: self.scalar_v1956,
+            scalar_v1961: self.scalar_v1961,
             scalar_v1964: self.scalar_v1964,
             scalar_v1965: self.scalar_v1965,
             scalar_v1966: self.scalar_v1966,
@@ -1521,6 +1525,8 @@ impl Instance {
             scalar_v1903: 0.0,
             scalar_v1904: false,
             scalar_v1908: false,
+            scalar_v1956: 0.0,
+            scalar_v1961: 0.0,
             scalar_v1964: 0.0,
             scalar_v1965: 0.0,
             scalar_v1966: 0.0,
@@ -1924,6 +1930,8 @@ impl Instance {
             scalar_v1903,
             scalar_v1904,
             scalar_v1908,
+            scalar_v1956,
+            scalar_v1961,
             scalar_v1964,
             scalar_v1965,
             scalar_v1966,
@@ -2319,6 +2327,8 @@ impl Instance {
             scalar_v1903,
             scalar_v1904,
             scalar_v1908,
+            scalar_v1956,
+            scalar_v1961,
             scalar_v1964,
             scalar_v1965,
             scalar_v1966,
@@ -3240,6 +3250,10 @@ impl Instance {
         self.scalar_v1904 = v1904;
         let v1908: bool = (!v1904);
         self.scalar_v1908 = v1908;
+        let v1956: f64 = (if v604 { 0.0 } else { 0.0 });
+        self.scalar_v1956 = v1956;
+        let v1961: f64 = (if v612 { 0.0 } else { 0.0 });
+        self.scalar_v1961 = v1961;
         let v1964: f64 = (p.p3 * -1.0);
         self.scalar_v1964 = v1964;
         let v1965: f64 = (v1964 + p.p3);

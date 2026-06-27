@@ -94,6 +94,18 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
+        let v0: f64 = 0.0;
+
+        stamper.stamp_potential_branch_local(
+            Some(3),
+            Some(9),
+            2,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            2,
+            v0,
+        );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(Scratch::new_box()).as_mut(),
@@ -115,12 +127,6 @@ impl Instance {
             Some(0),
             Some(5),
             1,
-            multiplicity,
-        );
-        stamper.stamp_potential_branch_local(
-            Some(3),
-            Some(9),
-            2,
             multiplicity,
         );
 
@@ -152,11 +158,6 @@ impl Instance {
             eq2_value,
             &eq2_node_derivatives,
             &eq2_branch_derivatives,
-        );
-        let eq3_value: f64 = 0.0;
-        stamper.stamp_potential_const_local(
-            2,
-            eq3_value,
         );
         let (eq4_e64, eq4_e64_d_n4,) = {
     if s.b[148] {

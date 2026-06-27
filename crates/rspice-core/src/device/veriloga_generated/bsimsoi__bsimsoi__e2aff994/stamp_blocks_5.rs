@@ -2508,30 +2508,6 @@ impl Instance {
     ) {
         let nv12 = ctx.node_voltage(nodes[12]);
         let nv13 = ctx.node_voltage(nodes[13]);
-        let (eq0_e1463,) = {
-    if (s.v[1556] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq0_value: f64 = eq0_e1463;
-        stamper.stamp_potential_const_local(
-            0,
-            eq0_value,
-        );
-        let (eq3_e1486,) = {
-    if (s.b[1620] && s.b[1793]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq3_value: f64 = eq3_e1486;
-        stamper.stamp_potential_const_local(
-            1,
-            eq3_value,
-        );
         let (eq6_e1526, eq6_e1526_d_n0, eq6_e1526_d_n1, eq6_e1526_d_n2, eq6_e1526_d_n3, eq6_e1526_d_n4, eq6_e1526_d_n5, eq6_e1526_d_n6, eq6_e1526_d_n7, eq6_e1526_d_n8, eq6_e1526_d_n9, eq6_e1526_d_n10, eq6_e1526_d_n11, eq6_e1526_d_n12, eq6_e1526_d_n13, eq6_e1526_d_b0, eq6_e1526_d_b1, eq6_e1526_d_b2, eq6_e1526_d_b3, eq6_e1526_d_b4, eq6_e1526_d_b5, eq6_e1526_d_b6, eq6_e1526_d_b7, eq6_e1526_d_b8, eq6_e1526_d_b9, eq6_e1526_d_b10, eq6_e1526_d_b11,) = {
     if (s.b[1620] && (s.b[1794] && (!s.b[1793]))) {
         let eq6_e1522: f64 = (-s.v[629]);
@@ -5129,18 +5105,6 @@ impl Instance {
             &eq55_node_derivatives,
             &eq55_branch_derivatives,
             multiplicity,
-        );
-        let (eq56_e2021,) = {
-    if s.b[2012] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq56_value: f64 = eq56_e2021;
-        stamper.stamp_potential_const_local(
-            2,
-            eq56_value,
         );
         let (eq57_e2028, eq57_e2028_d_n0, eq57_e2028_d_n1, eq57_e2028_d_n2, eq57_e2028_d_n3, eq57_e2028_d_n4, eq57_e2028_d_n5, eq57_e2028_d_n6, eq57_e2028_d_n7, eq57_e2028_d_n8, eq57_e2028_d_n9, eq57_e2028_d_n10, eq57_e2028_d_n11, eq57_e2028_d_n12, eq57_e2028_d_n13, eq57_e2028_d_b0, eq57_e2028_d_b1, eq57_e2028_d_b2, eq57_e2028_d_b3, eq57_e2028_d_b4, eq57_e2028_d_b5, eq57_e2028_d_b6, eq57_e2028_d_b7, eq57_e2028_d_b8, eq57_e2028_d_b9, eq57_e2028_d_b10, eq57_e2028_d_b11,) = {
     if (!s.b[2012]) {

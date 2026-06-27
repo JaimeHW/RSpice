@@ -265,30 +265,6 @@ impl Instance {
             &eq18_branch_derivatives,
             multiplicity,
         );
-        let (eq19_e896,) = {
-    if s.b[663] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq19_value: f64 = eq19_e896;
-        stamper.stamp_potential_const_local(
-            0,
-            eq19_value,
-        );
-        let (eq20_e900,) = {
-    if s.b[663] {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq20_value: f64 = eq20_e900;
-        stamper.stamp_potential_const_local(
-            1,
-            eq20_value,
-        );
         let (eq21_e907, eq21_e907_d_n0, eq21_e907_d_n1, eq21_e907_d_n2, eq21_e907_d_n3, eq21_e907_d_n4, eq21_e907_d_n5, eq21_e907_d_n6, eq21_e907_d_n7, eq21_e907_d_n8, eq21_e907_d_b0, eq21_e907_d_b1, eq21_e907_d_b2, eq21_e907_d_b3, eq21_e907_d_b4,) = {
     if (!s.b[663]) {
         let eq21_e905: f64 = ((nv0 - nv5) * s.v[149]);
@@ -388,49 +364,6 @@ impl Instance {
             &eq25_branch_derivatives,
             multiplicity,
         );
-        let (eq26_e943,) = {
-    if (!s.b[664]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq26_value: f64 = eq26_e943;
-        stamper.stamp_potential_const_local(
-            2,
-            eq26_value,
-        );
-        let (eq27_e947,) = {
-    if (s.v[665] != 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq27_value: f64 = eq27_e947;
-        stamper.stamp_potential_const_local(
-            3,
-            eq27_value,
-        );
-    }
-
-    pub(super) fn stamp_transient_equations_block_2(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedStamper<'_>,
-        s: &mut Scratch,
-        nodes: &[usize; Instance::NODE_COUNT],
-        multiplicity: f64,
-        ddt_active: bool,
-        ddt_scale: f64,
-        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
-        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
-    ) {
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv2 = ctx.node_voltage(nodes[2]);
-        let nv4 = ctx.node_voltage(nodes[4]);
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv6 = ctx.node_voltage(nodes[6]);
         let (eq38_e1079, eq38_e1079_d_n0, eq38_e1079_d_n1, eq38_e1079_d_n2, eq38_e1079_d_n3, eq38_e1079_d_n4, eq38_e1079_d_n5, eq38_e1079_d_n6, eq38_e1079_d_n7, eq38_e1079_d_n8, eq38_e1079_d_b0, eq38_e1079_d_b1, eq38_e1079_d_b2, eq38_e1079_d_b3, eq38_e1079_d_b4,) = {
     if (s.b[671] && s.b[672]) {
         let eq38_e1060: f64 = (s.v[212] * s.v[27]);
@@ -575,6 +508,23 @@ impl Instance {
             &eq38_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_transient_equations_block_2(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedStamper<'_>,
+        s: &mut Scratch,
+        nodes: &[usize; Instance::NODE_COUNT],
+        multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
+    ) {
+        let nv4 = ctx.node_voltage(nodes[4]);
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv6 = ctx.node_voltage(nodes[6]);
         let (eq39_e1093, eq39_e1093_d_n0, eq39_e1093_d_n1, eq39_e1093_d_n2, eq39_e1093_d_n3, eq39_e1093_d_n4, eq39_e1093_d_n5, eq39_e1093_d_n6, eq39_e1093_d_n7, eq39_e1093_d_n8, eq39_e1093_d_b0, eq39_e1093_d_b1, eq39_e1093_d_b2, eq39_e1093_d_b3, eq39_e1093_d_b4,) = {
     if (s.b[671] && (!s.b[672])) {
         let eq39_e1086: f64 = (s.v[212] * s.v[27]);
@@ -733,18 +683,6 @@ impl Instance {
             &eq41_node_derivatives,
             &eq41_branch_derivatives,
             multiplicity,
-        );
-        let (eq42_e1111,) = {
-    if (!s.b[671]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq42_value: f64 = eq42_e1111;
-        stamper.stamp_potential_const_local(
-            4,
-            eq42_value,
         );
     }
 

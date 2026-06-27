@@ -3645,18 +3645,6 @@ impl Instance {
             &eq6_branch_derivatives,
             multiplicity,
         );
-        let (eq7_e372,) = {
-    if (p.p312 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq7_value: f64 = eq7_e372;
-        stamper.stamp_potential_const_local(
-            0,
-            eq7_value,
-        );
         let (eq8_e378, eq8_e378_d_n0, eq8_e378_d_n1, eq8_e378_d_n2, eq8_e378_d_n3, eq8_e378_d_n4, eq8_e378_d_n5, eq8_e378_d_n6, eq8_e378_d_n7, eq8_e378_d_n8, eq8_e378_d_n9, eq8_e378_d_n10, eq8_e378_d_n11, eq8_e378_d_n12, eq8_e378_d_b0, eq8_e378_d_b1, eq8_e378_d_b2, eq8_e378_d_b3, eq8_e378_d_b4, eq8_e378_d_b5, eq8_e378_d_b6, eq8_e378_d_b7,) = {
     if (p.p313 != 0.0) {
         let eq8_e376: f64 = ((nv0 - nv11) / s.v[26]);
@@ -3696,18 +3684,6 @@ impl Instance {
             &eq8_node_derivatives,
             &eq8_branch_derivatives,
             multiplicity,
-        );
-        let (eq9_e383,) = {
-    if (p.p313 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq9_value: f64 = eq9_e383;
-        stamper.stamp_potential_const_local(
-            1,
-            eq9_value,
         );
         let eq10_e387: f64 = (s.v[561] + s.v[554]);
         let eq10_e387_d_n0: f64 = (s.dn[561][0] + s.dn[554][0]);
@@ -4103,23 +4079,6 @@ impl Instance {
             &eq19_branch_derivatives,
             multiplicity,
         );
-        let (eq26_e483,) = {
-    if (p.p25 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq26_value: f64 = eq26_e483;
-        stamper.stamp_potential_const_local(
-            2,
-            eq26_value,
-        );
-        let eq27_value: f64 = 0.0;
-        stamper.stamp_potential_const_local(
-            3,
-            eq27_value,
-        );
         let (eq28_e498, eq28_e498_d_n0, eq28_e498_d_n1, eq28_e498_d_n2, eq28_e498_d_n3, eq28_e498_d_n4, eq28_e498_d_n5, eq28_e498_d_n6, eq28_e498_d_n7, eq28_e498_d_n8, eq28_e498_d_n9, eq28_e498_d_n10, eq28_e498_d_n11, eq28_e498_d_n12, eq28_e498_d_b0, eq28_e498_d_b1, eq28_e498_d_b2, eq28_e498_d_b3, eq28_e498_d_b4, eq28_e498_d_b5, eq28_e498_d_b6, eq28_e498_d_b7,) = {
     if s.b[1094] {
         let eq28_e487: f64 = (-s.v[547]);
@@ -4270,18 +4229,6 @@ impl Instance {
             &eq28_branch_derivatives,
             multiplicity,
         );
-        let (eq29_e503,) = {
-    if (!s.b[1094]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq29_value: f64 = eq29_e503;
-        stamper.stamp_potential_const_local(
-            4,
-            eq29_value,
-        );
         let (eq30_e512, eq30_e512_d_n0, eq30_e512_d_n1, eq30_e512_d_n2, eq30_e512_d_n3, eq30_e512_d_n4, eq30_e512_d_n5, eq30_e512_d_n6, eq30_e512_d_n7, eq30_e512_d_n8, eq30_e512_d_n9, eq30_e512_d_n10, eq30_e512_d_n11, eq30_e512_d_n12, eq30_e512_d_b0, eq30_e512_d_b1, eq30_e512_d_b2, eq30_e512_d_b3, eq30_e512_d_b4, eq30_e512_d_b5, eq30_e512_d_b6, eq30_e512_d_b7,) = {
     if s.b[1095] {
         let eq30_e508: f64 = (1e-9 * (nv10 - 0.0));
@@ -4305,18 +4252,6 @@ impl Instance {
             &eq30_node_derivatives,
             &eq30_branch_derivatives,
             multiplicity,
-        );
-        let (eq31_e517,) = {
-    if (!s.b[1095]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq31_value: f64 = eq31_e517;
-        stamper.stamp_potential_const_local(
-            5,
-            eq31_value,
         );
         let (eq32_e526, eq32_e526_d_n0, eq32_e526_d_n1, eq32_e526_d_n2, eq32_e526_d_n3, eq32_e526_d_n4, eq32_e526_d_n5, eq32_e526_d_n6, eq32_e526_d_n7, eq32_e526_d_n8, eq32_e526_d_n9, eq32_e526_d_n10, eq32_e526_d_n11, eq32_e526_d_n12, eq32_e526_d_b0, eq32_e526_d_b1, eq32_e526_d_b2, eq32_e526_d_b3, eq32_e526_d_b4, eq32_e526_d_b5, eq32_e526_d_b6, eq32_e526_d_b7,) = {
     if (p.p24 != 0.0) {
@@ -4365,30 +4300,6 @@ impl Instance {
             &eq33_node_derivatives,
             &eq33_branch_derivatives,
             multiplicity,
-        );
-        let (eq34_e540,) = {
-    if (p.p24 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq34_value: f64 = eq34_e540;
-        stamper.stamp_potential_const_local(
-            6,
-            eq34_value,
-        );
-        let (eq35_e545,) = {
-    if (p.p24 == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq35_value: f64 = eq35_e545;
-        stamper.stamp_potential_const_local(
-            7,
-            eq35_value,
         );
     }
 

@@ -3927,30 +3927,6 @@ impl Instance {
             &eq25_branch_derivatives,
             multiplicity,
         );
-        let (eq27_e370,) = {
-    if (s.v[598] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq27_value: f64 = eq27_e370;
-        stamper.stamp_potential_const_local(
-            0,
-            eq27_value,
-        );
-        let (eq29_e385,) = {
-    if (s.v[599] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq29_value: f64 = eq29_e385;
-        stamper.stamp_potential_const_local(
-            1,
-            eq29_value,
-        );
         let eq32_e394: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 9, (nv11 - 0.0));
         let eq32_e395: f64 = (s.v[330] * eq32_e394);
         let eq32_e395_d_n0: f64 = (s.dn[330][0] * eq32_e394);

@@ -4456,54 +4456,6 @@ impl Instance {
             &eq10_branch_derivatives,
             multiplicity,
         );
-        let (eq13_e553,) = {
-    if (s.v[1764] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq13_value: f64 = eq13_e553;
-        stamper.stamp_potential_const_local(
-            0,
-            eq13_value,
-        );
-        let (eq16_e578,) = {
-    if (s.v[1765] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq16_value: f64 = eq16_e578;
-        stamper.stamp_potential_const_local(
-            1,
-            eq16_value,
-        );
-        let (eq19_e603,) = {
-    if (s.v[1766] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq19_value: f64 = eq19_e603;
-        stamper.stamp_potential_const_local(
-            2,
-            eq19_value,
-        );
-        let (eq22_e628,) = {
-    if (s.v[1767] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq22_value: f64 = eq22_e628;
-        stamper.stamp_potential_const_local(
-            3,
-            eq22_value,
-        );
         let eq23_e631: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[358]);
         let eq23_e631_d_n0: f64 = (s.dn[358][0] * ddt_scale);
         let eq23_e631_d_n1: f64 = (s.dn[358][1] * ddt_scale);
@@ -4775,6 +4727,47 @@ impl Instance {
             multiplicity * (eq25_value),
             &eq25_node_derivatives,
             &eq25_branch_derivatives,
+            multiplicity,
+        );
+        let eq26_e658: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 8, s.v[370]);
+        let eq26_e658_d_n0: f64 = (s.dn[370][0] * ddt_scale);
+        let eq26_e658_d_n1: f64 = (s.dn[370][1] * ddt_scale);
+        let eq26_e658_d_n2: f64 = (s.dn[370][2] * ddt_scale);
+        let eq26_e658_d_n3: f64 = (s.dn[370][3] * ddt_scale);
+        let eq26_e658_d_n4: f64 = (s.dn[370][4] * ddt_scale);
+        let eq26_e658_d_n5: f64 = (s.dn[370][5] * ddt_scale);
+        let eq26_e658_d_n6: f64 = (s.dn[370][6] * ddt_scale);
+        let eq26_e658_d_n7: f64 = (s.dn[370][7] * ddt_scale);
+        let eq26_e658_d_n8: f64 = (s.dn[370][8] * ddt_scale);
+        let eq26_e658_d_n9: f64 = (s.dn[370][9] * ddt_scale);
+        let eq26_e658_d_b0: f64 = (s.db[370][0] * ddt_scale);
+        let eq26_e658_d_b1: f64 = (s.db[370][1] * ddt_scale);
+        let eq26_e658_d_b2: f64 = (s.db[370][2] * ddt_scale);
+        let eq26_e658_d_b3: f64 = (s.db[370][3] * ddt_scale);
+        let eq26_e659: f64 = (p.p14 * eq26_e658);
+        let eq26_e659_d_n0: f64 = (p.p14 * eq26_e658_d_n0);
+        let eq26_e659_d_n1: f64 = (p.p14 * eq26_e658_d_n1);
+        let eq26_e659_d_n2: f64 = (p.p14 * eq26_e658_d_n2);
+        let eq26_e659_d_n3: f64 = (p.p14 * eq26_e658_d_n3);
+        let eq26_e659_d_n4: f64 = (p.p14 * eq26_e658_d_n4);
+        let eq26_e659_d_n5: f64 = (p.p14 * eq26_e658_d_n5);
+        let eq26_e659_d_n6: f64 = (p.p14 * eq26_e658_d_n6);
+        let eq26_e659_d_n7: f64 = (p.p14 * eq26_e658_d_n7);
+        let eq26_e659_d_n8: f64 = (p.p14 * eq26_e658_d_n8);
+        let eq26_e659_d_n9: f64 = (p.p14 * eq26_e658_d_n9);
+        let eq26_e659_d_b0: f64 = (p.p14 * eq26_e658_d_b0);
+        let eq26_e659_d_b1: f64 = (p.p14 * eq26_e658_d_b1);
+        let eq26_e659_d_b2: f64 = (p.p14 * eq26_e658_d_b2);
+        let eq26_e659_d_b3: f64 = (p.p14 * eq26_e658_d_b3);
+        let eq26_value: f64 = eq26_e659;
+        let eq26_node_derivatives: [f64; 10] = [eq26_e659_d_n0, eq26_e659_d_n1, eq26_e659_d_n2, eq26_e659_d_n3, eq26_e659_d_n4, eq26_e659_d_n5, eq26_e659_d_n6, eq26_e659_d_n7, eq26_e659_d_n8, eq26_e659_d_n9];
+        let eq26_branch_derivatives: [f64; 4] = [eq26_e659_d_b0, eq26_e659_d_b1, eq26_e659_d_b2, eq26_e659_d_b3];
+        stamper.stamp_current_dense_local(
+            Some(9),
+            Some(8),
+            multiplicity * (eq26_value),
+            &eq26_node_derivatives,
+            &eq26_branch_derivatives,
             multiplicity,
         );
     }

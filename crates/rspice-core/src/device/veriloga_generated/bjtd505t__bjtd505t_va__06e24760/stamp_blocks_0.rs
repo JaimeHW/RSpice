@@ -4906,18 +4906,6 @@ impl Instance {
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv11 = ctx.node_voltage(nodes[11]);
-        let (eq25_e343,) = {
-    if (!s.b[567]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq25_value: f64 = eq25_e343;
-        stamper.stamp_potential_const_local(
-            0,
-            eq25_value,
-        );
         let (eq26_e353, eq26_e353_d_n0, eq26_e353_d_n1, eq26_e353_d_n2, eq26_e353_d_n3, eq26_e353_d_n4, eq26_e353_d_n5, eq26_e353_d_n6, eq26_e353_d_n7, eq26_e353_d_n8, eq26_e353_d_n9, eq26_e353_d_n10, eq26_e353_d_n11, eq26_e353_d_b0, eq26_e353_d_b1,) = {
     if s.b[568] {
         let eq26_e347: f64 = (p.p3 * s.v[244]);
@@ -4980,18 +4968,6 @@ impl Instance {
             &eq26_node_derivatives,
             &eq26_branch_derivatives,
             multiplicity,
-        );
-        let (eq27_e358,) = {
-    if (!s.b[568]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq27_value: f64 = eq27_e358;
-        stamper.stamp_potential_const_local(
-            1,
-            eq27_value,
         );
         let eq30_e367: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 9, (nv11 - 0.0));
         let eq30_e368: f64 = (s.v[312] * eq30_e367);

@@ -1115,54 +1115,6 @@ impl Instance {
             &eq76_branch_derivatives,
             multiplicity,
         );
-        let (eq77_e2001,) = {
-    if (((!s.b[1559]) && (s.v[1565] != 0.0)) && (s.v[1566] != 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq77_value: f64 = eq77_e2001;
-        stamper.stamp_potential_const_local(
-            15,
-            eq77_value,
-        );
-        let (eq78_e2013,) = {
-    if ((((!s.b[1559]) && (s.v[1565] != 0.0)) && (s.v[1566] == 0.0)) && (s.v[1567] != 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq78_value: f64 = eq78_e2013;
-        stamper.stamp_potential_const_local(
-            16,
-            eq78_value,
-        );
-        let (eq79_e2026,) = {
-    if ((((!s.b[1559]) && (s.v[1565] != 0.0)) && (s.v[1566] == 0.0)) && (s.v[1567] == 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq79_value: f64 = eq79_e2026;
-        stamper.stamp_potential_const_local(
-            17,
-            eq79_value,
-        );
-        let (eq80_e2034,) = {
-    if ((!s.b[1559]) && (s.v[1565] == 0.0)) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq80_value: f64 = eq80_e2034;
-        stamper.stamp_potential_const_local(
-            18,
-            eq80_value,
-        );
     }
 
     pub(super) fn stamp_reactive_equations_block_0(

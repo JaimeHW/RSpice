@@ -4526,18 +4526,6 @@ impl Instance {
         s: &mut Scratch,
         multiplicity: f64,
     ) {
-        let (eq7_e1998,) = {
-    if (s.v[1697] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq7_value: f64 = eq7_e1998;
-        stamper.stamp_potential_const_local(
-            0,
-            eq7_value,
-        );
         let (eq8_e2004, eq8_e2004_d_n0, eq8_e2004_d_n1, eq8_e2004_d_n2, eq8_e2004_d_n3, eq8_e2004_d_n4, eq8_e2004_d_n5, eq8_e2004_d_n6, eq8_e2004_d_n7, eq8_e2004_d_n8, eq8_e2004_d_n9, eq8_e2004_d_n10, eq8_e2004_d_n11, eq8_e2004_d_n12, eq8_e2004_d_n13, eq8_e2004_d_n14, eq8_e2004_d_n15, eq8_e2004_d_n16, eq8_e2004_d_b0, eq8_e2004_d_b1, eq8_e2004_d_b2, eq8_e2004_d_b3, eq8_e2004_d_b4, eq8_e2004_d_b5, eq8_e2004_d_b6, eq8_e2004_d_b7, eq8_e2004_d_b8, eq8_e2004_d_b9, eq8_e2004_d_b10, eq8_e2004_d_b11, eq8_e2004_d_b12, eq8_e2004_d_b13, eq8_e2004_d_b14, eq8_e2004_d_b15, eq8_e2004_d_b16, eq8_e2004_d_b17,) = {
     if s.b[1698] {
         let eq8_e2002: f64 = (s.v[114] * s.v[556]);

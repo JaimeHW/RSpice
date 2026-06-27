@@ -16,47 +16,6 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
-        let eq26_e658: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 8, s.v[370]);
-        let eq26_e658_d_n0: f64 = (s.dn[370][0] * ddt_scale);
-        let eq26_e658_d_n1: f64 = (s.dn[370][1] * ddt_scale);
-        let eq26_e658_d_n2: f64 = (s.dn[370][2] * ddt_scale);
-        let eq26_e658_d_n3: f64 = (s.dn[370][3] * ddt_scale);
-        let eq26_e658_d_n4: f64 = (s.dn[370][4] * ddt_scale);
-        let eq26_e658_d_n5: f64 = (s.dn[370][5] * ddt_scale);
-        let eq26_e658_d_n6: f64 = (s.dn[370][6] * ddt_scale);
-        let eq26_e658_d_n7: f64 = (s.dn[370][7] * ddt_scale);
-        let eq26_e658_d_n8: f64 = (s.dn[370][8] * ddt_scale);
-        let eq26_e658_d_n9: f64 = (s.dn[370][9] * ddt_scale);
-        let eq26_e658_d_b0: f64 = (s.db[370][0] * ddt_scale);
-        let eq26_e658_d_b1: f64 = (s.db[370][1] * ddt_scale);
-        let eq26_e658_d_b2: f64 = (s.db[370][2] * ddt_scale);
-        let eq26_e658_d_b3: f64 = (s.db[370][3] * ddt_scale);
-        let eq26_e659: f64 = (p.p14 * eq26_e658);
-        let eq26_e659_d_n0: f64 = (p.p14 * eq26_e658_d_n0);
-        let eq26_e659_d_n1: f64 = (p.p14 * eq26_e658_d_n1);
-        let eq26_e659_d_n2: f64 = (p.p14 * eq26_e658_d_n2);
-        let eq26_e659_d_n3: f64 = (p.p14 * eq26_e658_d_n3);
-        let eq26_e659_d_n4: f64 = (p.p14 * eq26_e658_d_n4);
-        let eq26_e659_d_n5: f64 = (p.p14 * eq26_e658_d_n5);
-        let eq26_e659_d_n6: f64 = (p.p14 * eq26_e658_d_n6);
-        let eq26_e659_d_n7: f64 = (p.p14 * eq26_e658_d_n7);
-        let eq26_e659_d_n8: f64 = (p.p14 * eq26_e658_d_n8);
-        let eq26_e659_d_n9: f64 = (p.p14 * eq26_e658_d_n9);
-        let eq26_e659_d_b0: f64 = (p.p14 * eq26_e658_d_b0);
-        let eq26_e659_d_b1: f64 = (p.p14 * eq26_e658_d_b1);
-        let eq26_e659_d_b2: f64 = (p.p14 * eq26_e658_d_b2);
-        let eq26_e659_d_b3: f64 = (p.p14 * eq26_e658_d_b3);
-        let eq26_value: f64 = eq26_e659;
-        let eq26_node_derivatives: [f64; 10] = [eq26_e659_d_n0, eq26_e659_d_n1, eq26_e659_d_n2, eq26_e659_d_n3, eq26_e659_d_n4, eq26_e659_d_n5, eq26_e659_d_n6, eq26_e659_d_n7, eq26_e659_d_n8, eq26_e659_d_n9];
-        let eq26_branch_derivatives: [f64; 4] = [eq26_e659_d_b0, eq26_e659_d_b1, eq26_e659_d_b2, eq26_e659_d_b3];
-        stamper.stamp_current_dense_local(
-            Some(9),
-            Some(8),
-            multiplicity * (eq26_value),
-            &eq26_node_derivatives,
-            &eq26_branch_derivatives,
-            multiplicity,
-        );
         let eq27_e662: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 9, s.v[357]);
         let eq27_e662_d_n0: f64 = (s.dn[357][0] * ddt_scale);
         let eq27_e662_d_n1: f64 = (s.dn[357][1] * ddt_scale);

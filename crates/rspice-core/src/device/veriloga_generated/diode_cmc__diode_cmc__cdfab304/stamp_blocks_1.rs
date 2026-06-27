@@ -2406,18 +2406,6 @@ impl Instance {
         ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
-        let (eq6_e135,) = {
-    if (s.v[957] == 0.0) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq6_value: f64 = eq6_e135;
-        stamper.stamp_potential_const_local(
-            0,
-            eq6_value,
-        );
         let (eq7_e144, eq7_e144_d_n0, eq7_e144_d_n1, eq7_e144_d_n2, eq7_e144_d_n3, eq7_e144_d_n4, eq7_e144_d_n5, eq7_e144_d_b0, eq7_e144_d_b1, eq7_e144_d_b2, eq7_e144_d_b3,) = {
     if s.b[958] {
         let eq7_e140: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[336]);
@@ -2520,30 +2508,6 @@ impl Instance {
             &eq8_branch_derivatives,
             multiplicity,
         );
-        let (eq9_e158,) = {
-    if (!s.b[958]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq9_value: f64 = eq9_e158;
-        stamper.stamp_potential_const_local(
-            1,
-            eq9_value,
-        );
-        let (eq10_e163,) = {
-    if (!s.b[958]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq10_value: f64 = eq10_e163;
-        stamper.stamp_potential_const_local(
-            2,
-            eq10_value,
-        );
         let (eq11_e172, eq11_e172_d_n0, eq11_e172_d_n1, eq11_e172_d_n2, eq11_e172_d_n3, eq11_e172_d_n4, eq11_e172_d_n5, eq11_e172_d_b0, eq11_e172_d_b1, eq11_e172_d_b2, eq11_e172_d_b3,) = {
     if s.b[959] {
         let eq11_e168: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, s.v[344]);
@@ -2594,18 +2558,6 @@ impl Instance {
             &eq11_node_derivatives,
             &eq11_branch_derivatives,
             multiplicity,
-        );
-        let (eq12_e177,) = {
-    if (!s.b[959]) {
-        (0.0,)
-    } else {
-        (0.0,)
-    }
-};
-        let eq12_value: f64 = eq12_e177;
-        stamper.stamp_potential_const_local(
-            3,
-            eq12_value,
         );
     }
 
