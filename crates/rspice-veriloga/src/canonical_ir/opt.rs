@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use super::{
     BranchId, BranchUnknownId, CanonicalValueType, CompilerPhase, EquationId, ExprId,
     HirAnalogOperator, HirExprKind, HirModel, HirStatement, IrDiagnostic, IrValidationResult,
-    MirModel, NodeId, ParamId, ScheduleId, ValueId, VariableId,
+    MirEquation, MirEquationKind, MirModel, NodeId, ParamId, ScheduleId, ValueId, VariableId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -183,11 +183,12 @@ impl OptModel {
         if let Some(hir) = hir {
             builder.lower_statements(&hir.statements);
         }
-        let mut equation_values: Vec<_> = mir
-            .equations
-            .iter()
-            .map(|equation| builder.lower_equation_expression(equation.expression.id))
-            .collect();
+        let mut equation_values = Vec::with_capacity(mir.equations.len());
+        for equation in &mir.equations {
+            let value = builder.lower_equation_expression(equation.expression.id);
+            builder.cache_declared_branch_current(equation, value);
+            equation_values.push(value);
+        }
         builder.add_sparse_derivatives();
         let values = builder.finish(&mut equation_values);
 
@@ -269,6 +270,7 @@ struct ScalarGraphBuilder<'a> {
     value_keys: HashMap<OptValueKey, ValueId>,
     expression_values: HashMap<ExprId, Option<ValueId>>,
     variable_values: HashMap<VariableId, Option<ValueId>>,
+    branch_current_values: HashMap<String, ValueId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -335,6 +337,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             value_keys: HashMap::new(),
             expression_values: HashMap::new(),
             variable_values: HashMap::new(),
+            branch_current_values: HashMap::new(),
         }
     }
 
@@ -466,6 +469,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             HirExprKind::Identifier { name } => self.lower_identifier(name),
             HirExprKind::BranchAccess { access, pos, neg } => {
                 self.lower_branch_access(access, pos, neg.as_deref())
+            }
+            HirExprKind::NamedBranchAccess { access, name } => {
+                self.lower_named_branch_access(access, name)
             }
             HirExprKind::Binary { op, left, right } => self.lower_binary(op, *left, *right),
             HirExprKind::Unary { op, operand } => self.lower_unary(op, *operand),
@@ -1056,6 +1062,22 @@ impl<'a> ScalarGraphBuilder<'a> {
         Some(self.lower_voltage(pos, neg))
     }
 
+    fn lower_named_branch_access(&mut self, access: &SmolStr, name: &SmolStr) -> Option<ValueId> {
+        match access.as_str() {
+            "I" => self.branch_current_values.get(name.as_str()).copied(),
+            "V" => {
+                let (pos, neg) = self
+                    .mir
+                    .branches
+                    .iter()
+                    .find(|branch| branch.name.as_str() == name)
+                    .map(|branch| (branch.pos_node, branch.neg_node))?;
+                Some(self.lower_voltage(pos, neg))
+            }
+            _ => None,
+        }
+    }
+
     fn lower_voltage(&mut self, pos: Option<NodeId>, neg: Option<NodeId>) -> ValueId {
         match (pos, neg) {
             (None, None) => self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0)),
@@ -1089,6 +1111,57 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn push_node_potential(&mut self, node: NodeId) -> ValueId {
         self.push_value(OptValueType::Real, OptValueKind::NodePotential { node })
+    }
+
+    fn cache_declared_branch_current(&mut self, equation: &MirEquation, value: Option<ValueId>) {
+        if equation.kind != MirEquationKind::Current {
+            return;
+        }
+        let Some(value) = value else {
+            return;
+        };
+        let Some(branch_name) = self.declared_contribution_branch_name(equation) else {
+            return;
+        };
+
+        let value = if let Some(previous) = self.branch_current_values.get(branch_name.as_str()) {
+            self.push_value(
+                OptValueType::Real,
+                OptValueKind::Binary {
+                    op: OptBinaryOp::Add,
+                    left: *previous,
+                    right: value,
+                },
+            )
+        } else {
+            value
+        };
+        self.branch_current_values.insert(branch_name, value);
+    }
+
+    fn declared_contribution_branch_name(&self, equation: &MirEquation) -> Option<String> {
+        if let Some(name) = equation.branch.declared_name.as_deref() {
+            return Some(name.to_string());
+        }
+        if self
+            .mir
+            .branches
+            .iter()
+            .any(|branch| branch.name.as_str() == equation.branch.label.as_str())
+        {
+            return Some(equation.branch.label.to_string());
+        }
+
+        let mut matches = self.mir.branches.iter().filter(|branch| {
+            branch.pos_node == equation.branch.pos_node
+                && branch.neg_node == equation.branch.neg_node
+        });
+        let first = matches.next()?;
+        if matches.next().is_none() {
+            Some(first.name.to_string())
+        } else {
+            None
+        }
     }
 
     fn resolve_endpoint(&self, name: &str) -> Option<Option<NodeId>> {

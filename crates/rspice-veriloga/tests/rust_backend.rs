@@ -936,6 +936,32 @@ fn rust_backend_auto_scalarizes_wide_ddt_reactive_current_equations() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_named_branch_current_probes() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(named_branch_current_probe())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile named branch current probe through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("2.0"), "{stamp}");
+    assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(comparison_value_device_source())
