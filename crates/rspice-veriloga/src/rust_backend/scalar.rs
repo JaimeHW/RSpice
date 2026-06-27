@@ -652,24 +652,7 @@ fn emit_current_reactive_stamp(
     static_cache: &ScalarStaticCache,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
-    let root_value = artifact
-        .opt
-        .values
-        .get(usize::from(root))
-        .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
-    let derivatives = root_value
-        .derivatives
-        .iter()
-        .map(|derivative| {
-            if derivative.lane.kind != DerivativeLaneKind::Node {
-                return Err(unsupported(
-                    artifact,
-                    format!("branch derivative lane on scalar equation {}", equation.id),
-                ));
-            }
-            Ok((derivative.lane.index, derivative.value))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let derivatives = scalar_node_derivatives(artifact, equation, root)?;
 
     for (node, value) in &derivatives {
         out.push_str(&format!(
@@ -732,13 +715,82 @@ fn emit_current_reactive_stamp(
             out.push_str("        );\n");
         }
         _ => {
-            return Err(unsupported(
-                artifact,
-                "wide ddt reactive stamps in scalar backend",
-            ));
+            emit_wide_current_reactive_stamp(artifact, root, &derivatives, &pos, &neg, out);
         }
     }
     Ok(())
+}
+
+fn emit_wide_current_reactive_stamp(
+    artifact: &CanonicalIrArtifact,
+    root: ValueId,
+    derivatives: &[(u32, ValueId)],
+    pos: &str,
+    neg: &str,
+    out: &mut String,
+) {
+    if derivatives.len() == artifact.mir.nodes.len() {
+        let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
+        for (node, _) in derivatives {
+            node_derivatives[*node as usize] = derivative_name(root, *node);
+        }
+        out.push_str(&format!(
+            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            node_derivatives.len(),
+            node_derivatives.join(", ")
+        ));
+        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str(&format!("            {pos},\n"));
+        out.push_str(&format!("            {neg},\n"));
+        out.push_str("            &nodes,\n");
+        out.push_str(&format!(
+            "            &{}_reactive_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            &[],\n");
+        out.push_str("            &[],\n");
+        out.push_str("            multiplicity,\n");
+        out.push_str("        );\n");
+    } else {
+        let node_indices = derivatives
+            .iter()
+            .map(|(node, _)| format!("nodes[{node}]"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let node_derivatives = derivatives
+            .iter()
+            .map(|(node, _)| derivative_name(root, *node))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "        let {}_reactive_nodes: [usize; {}] = [{}];\n",
+            value_name(root),
+            derivatives.len(),
+            node_indices
+        ));
+        out.push_str(&format!(
+            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            derivatives.len(),
+            node_derivatives
+        ));
+        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str(&format!("            {pos},\n"));
+        out.push_str(&format!("            {neg},\n"));
+        out.push_str(&format!(
+            "            &{}_reactive_nodes,\n",
+            value_name(root)
+        ));
+        out.push_str(&format!(
+            "            &{}_reactive_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            &[],\n");
+        out.push_str("            &[],\n");
+        out.push_str("            multiplicity,\n");
+        out.push_str("        );\n");
+    }
 }
 
 fn emit_wide_potential_stamp(
