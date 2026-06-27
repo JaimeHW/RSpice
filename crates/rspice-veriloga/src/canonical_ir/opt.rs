@@ -3,8 +3,9 @@ use smol_str::SmolStr;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::{
-    BranchId, BranchUnknownId, CompilerPhase, EquationId, ExprId, HirAnalogOperator, HirExprKind,
-    IrDiagnostic, IrValidationResult, MirModel, NodeId, ParamId, ScheduleId, ValueId,
+    BranchId, BranchUnknownId, CanonicalValueType, CompilerPhase, EquationId, ExprId,
+    HirAnalogOperator, HirExprKind, HirModel, HirStatement, IrDiagnostic, IrValidationResult,
+    MirModel, NodeId, ParamId, ScheduleId, ValueId, VariableId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -156,7 +157,24 @@ impl OptModel {
     pub fn from_mir(mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         mir.validate()?;
 
-        let mut builder = ScalarGraphBuilder::new(mir);
+        Self::from_validated_inputs(None, mir)
+    }
+
+    pub fn from_hir_and_mir(hir: &HirModel, mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
+        hir.validate()?;
+        mir.validate()?;
+
+        Self::from_validated_inputs(Some(hir), mir)
+    }
+
+    fn from_validated_inputs(
+        hir: Option<&HirModel>,
+        mir: &MirModel,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        let mut builder = ScalarGraphBuilder::new(hir, mir);
+        if let Some(hir) = hir {
+            builder.lower_statements(&hir.statements);
+        }
         let mut equation_values: Vec<_> = mir
             .equations
             .iter()
@@ -236,10 +254,12 @@ impl OptModel {
 }
 
 struct ScalarGraphBuilder<'a> {
+    hir: Option<&'a HirModel>,
     mir: &'a MirModel,
     values: Vec<OptValue>,
     value_keys: HashMap<OptValueKey, ValueId>,
     expression_values: HashMap<ExprId, Option<ValueId>>,
+    variable_values: HashMap<VariableId, Option<ValueId>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -298,12 +318,14 @@ impl OptValueKey {
 }
 
 impl<'a> ScalarGraphBuilder<'a> {
-    fn new(mir: &'a MirModel) -> Self {
+    fn new(hir: Option<&'a HirModel>, mir: &'a MirModel) -> Self {
         Self {
+            hir,
             mir,
             values: Vec::new(),
             value_keys: HashMap::new(),
             expression_values: HashMap::new(),
+            variable_values: HashMap::new(),
         }
     }
 
@@ -400,6 +422,24 @@ impl<'a> ScalarGraphBuilder<'a> {
                 self.mark_live_value(condition, live);
                 self.mark_live_value(then_value, live);
                 self.mark_live_value(else_value, live);
+            }
+        }
+    }
+
+    fn lower_statements(&mut self, statements: &[HirStatement]) {
+        for statement in statements {
+            match statement {
+                HirStatement::Assignment(assignment) => {
+                    let value = if assignment.index.is_none()
+                        && supported_assignment_value_type(assignment.expr_type)
+                    {
+                        self.lower_expression(assignment.expr.id)
+                    } else {
+                        None
+                    };
+                    self.variable_values.insert(assignment.target, value);
+                }
+                HirStatement::Loop(_) => {}
             }
         }
     }
@@ -859,6 +899,10 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_identifier(&mut self, name: &SmolStr) -> Option<ValueId> {
+        if let Some(value) = self.lower_variable_identifier(name) {
+            return value;
+        }
+
         let parameter = self
             .mir
             .parameters
@@ -867,6 +911,15 @@ impl<'a> ScalarGraphBuilder<'a> {
             .map(|parameter| parameter.id)?;
 
         Some(self.push_value(OptValueType::Real, OptValueKind::Parameter { parameter }))
+    }
+
+    fn lower_variable_identifier(&self, name: &SmolStr) -> Option<Option<ValueId>> {
+        let variable = self
+            .hir?
+            .variables
+            .iter()
+            .find(|variable| variable.name == *name)?;
+        self.variable_values.get(&variable.id).copied()
     }
 
     fn lower_branch_access(
@@ -1043,6 +1096,13 @@ fn unary_op(op: &str) -> Option<OptUnaryOp> {
         "Not" => Some(OptUnaryOp::Not),
         _ => None,
     }
+}
+
+fn supported_assignment_value_type(value_type: CanonicalValueType) -> bool {
+    matches!(
+        value_type,
+        CanonicalValueType::Real | CanonicalValueType::Integer | CanonicalValueType::Boolean
+    )
 }
 
 fn remap_value_id(value: ValueId, remap: &[Option<ValueId>]) -> ValueId {

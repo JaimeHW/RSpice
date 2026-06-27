@@ -773,6 +773,37 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
 }
 
 #[test]
+fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(assignment_fed_current_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile assignment-fed current with scalar backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("p.p0"), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("GenericAdValue"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("GeneratedDerivative"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(constant_current_source())
@@ -11241,6 +11272,21 @@ module tiny_res(p, n);
     electrical p, n;
     parameter real r = 1000.0 from (0:inf);
     analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#
+}
+
+fn assignment_fed_current_source() -> &'static str {
+    r#"
+module assigned_res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    real g;
+    analog begin
+        g = 1.0 / r;
+        I(p, n) <+ g * V(p, n);
+    end
 endmodule
 "#
 }

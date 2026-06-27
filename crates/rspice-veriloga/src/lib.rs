@@ -296,7 +296,8 @@ impl VerilogACompiler {
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         let hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
         let mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
-        let opt = canonical_ir::OptModel::from_mir(&mir).map_err(Self::canonical_ir_error)?;
+        let opt = canonical_ir::OptModel::from_hir_and_mir(&hir, &mir)
+            .map_err(Self::canonical_ir_error)?;
 
         canonical_ir::CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
             .map_err(Self::canonical_ir_error)

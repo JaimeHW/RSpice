@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use crate::canonical_ir::{
-    CanonicalIrArtifact, DerivativeLaneKind, EquationId, InvalidationClass, MirEquation,
-    MirEquationKind, OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind, OptValueType, ValueId,
+    CanonicalIrArtifact, CanonicalValueType, DerivativeLaneKind, EquationId, HirStatement,
+    InvalidationClass, MirEquation, MirEquationKind, OptBinaryOp, OptOp, OptUnaryOp, OptValue,
+    OptValueKind, OptValueType, ValueId,
 };
 
 use super::expr::parameter_field_names;
@@ -339,11 +340,42 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
     if !artifact.hir.arrays.is_empty() {
         return Err(unsupported(artifact, "arrays"));
     }
-    if !artifact.hir.variables.is_empty() {
-        return Err(unsupported(artifact, "analog variables"));
+    for variable in &artifact.hir.variables {
+        if variable.is_state {
+            return Err(unsupported(
+                artifact,
+                format!("state variable '{}'", variable.name),
+            ));
+        }
+        if !supported_scalar_value_type(variable.value_type) {
+            return Err(unsupported(
+                artifact,
+                format!(
+                    "non-numeric scalar variable '{}' with type {:?}",
+                    variable.name, variable.value_type
+                ),
+            ));
+        }
     }
-    if !artifact.hir.statements.is_empty() {
-        return Err(unsupported(artifact, "analog statements"));
+    for statement in &artifact.hir.statements {
+        match statement {
+            HirStatement::Assignment(assignment)
+                if assignment.index.is_none()
+                    && supported_scalar_value_type(assignment.expr_type) => {}
+            HirStatement::Assignment(assignment) if assignment.index.is_some() => {
+                return Err(unsupported(artifact, "indexed assignments"));
+            }
+            HirStatement::Assignment(assignment) => {
+                return Err(unsupported(
+                    artifact,
+                    format!(
+                        "assignment '{}' with type {:?}",
+                        assignment.target_name, assignment.expr_type
+                    ),
+                ));
+            }
+            HirStatement::Loop(_) => return Err(unsupported(artifact, "analog loops")),
+        }
     }
     if !artifact.mir.state_slots.is_empty() {
         return Err(unsupported(artifact, "state slots"));
@@ -371,6 +403,13 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
         }
     }
     Ok(())
+}
+
+fn supported_scalar_value_type(value_type: CanonicalValueType) -> bool {
+    matches!(
+        value_type,
+        CanonicalValueType::Real | CanonicalValueType::Integer | CanonicalValueType::Boolean
+    )
 }
 
 fn rust_type(value_type: OptValueType) -> &'static str {

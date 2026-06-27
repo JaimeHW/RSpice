@@ -119,7 +119,7 @@ fn lower_fixture_parts(
     let metadata = CanonicalMetadata::for_source("fixture", source);
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
     let mir = MirModel::from_hir(&hir).expect("lower MIR");
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+    let opt = OptModel::from_hir_and_mir(&hir, &mir).expect("lower OptIR");
 
     (metadata, hir, mir, opt)
 }
@@ -788,6 +788,36 @@ fn opt_lowering_reuses_common_scalar_values_across_equations() {
         .count();
 
     assert_eq!(mid_potential_count, 1);
+}
+
+#[test]
+fn opt_lowering_resolves_straight_line_scalar_assignment() {
+    let (_, _, _, opt) = lower_fixture_parts(scalar_assignment_source(), "scalar_assign");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("assignment-fed current should have a scalar root: {newton:?}");
+    };
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: Vec::new(),
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate assignment-fed scalar graph");
+
+    assert_eq!(snapshot.real(*root), Some(3.0));
+    assert!(
+        opt.values
+            .iter()
+            .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
+        "assignment-fed scalar graph should not fall back to legacy equation values: {:?}",
+        opt.values
+    );
 }
 
 #[test]
