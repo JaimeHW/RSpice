@@ -53,7 +53,7 @@ impl DerivativeLane {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OptUnaryOp {
     Pos,
     Neg,
@@ -64,7 +64,7 @@ pub enum OptUnaryOp {
     Abs,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OptBinaryOp {
     Add,
     Sub,
@@ -238,7 +238,63 @@ impl OptModel {
 struct ScalarGraphBuilder<'a> {
     mir: &'a MirModel,
     values: Vec<OptValue>,
+    value_keys: HashMap<OptValueKey, ValueId>,
     expression_values: HashMap<ExprId, Option<ValueId>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum OptValueKey {
+    RealConstant(u64),
+    BooleanConstant(bool),
+    Parameter(ParamId),
+    NodePotential(NodeId),
+    BranchFlow(BranchId),
+    Unary {
+        op: OptUnaryOp,
+        input: ValueId,
+    },
+    Binary {
+        op: OptBinaryOp,
+        left: ValueId,
+        right: ValueId,
+    },
+    Select {
+        condition: ValueId,
+        then_value: ValueId,
+        else_value: ValueId,
+    },
+    EquationValue(EquationId),
+}
+
+impl OptValueKey {
+    fn from_kind(kind: &OptValueKind) -> Self {
+        match kind {
+            OptValueKind::RealConstant(value) => Self::RealConstant(value.to_bits()),
+            OptValueKind::BooleanConstant(value) => Self::BooleanConstant(*value),
+            OptValueKind::Parameter { parameter } => Self::Parameter(*parameter),
+            OptValueKind::NodePotential { node } => Self::NodePotential(*node),
+            OptValueKind::BranchFlow { branch } => Self::BranchFlow(*branch),
+            OptValueKind::Unary { op, input } => Self::Unary {
+                op: *op,
+                input: *input,
+            },
+            OptValueKind::Binary { op, left, right } => Self::Binary {
+                op: *op,
+                left: *left,
+                right: *right,
+            },
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => Self::Select {
+                condition: *condition,
+                then_value: *then_value,
+                else_value: *else_value,
+            },
+            OptValueKind::EquationValue { equation } => Self::EquationValue(*equation),
+        }
+    }
 }
 
 impl<'a> ScalarGraphBuilder<'a> {
@@ -246,6 +302,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         Self {
             mir,
             values: Vec::new(),
+            value_keys: HashMap::new(),
             expression_values: HashMap::new(),
         }
     }
@@ -287,6 +344,11 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn push_value(&mut self, value_type: OptValueType, kind: OptValueKind) -> ValueId {
+        let key = OptValueKey::from_kind(&kind);
+        if let Some(value) = self.value_keys.get(&key) {
+            return *value;
+        }
+
         let id = ValueId::from(self.values.len());
         self.values.push(OptValue {
             id,
@@ -294,6 +356,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             kind,
             derivatives: Vec::new(),
         });
+        self.value_keys.insert(key, id);
         id
     }
 

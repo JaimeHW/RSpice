@@ -742,6 +742,25 @@ fn opt_lowering_adds_sparse_derivatives_for_tiny_resistor_expression() {
 }
 
 #[test]
+fn opt_lowering_reuses_common_scalar_values_across_equations() {
+    let mir = lower_internal_node_mir();
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+
+    let mid_potential_count = opt
+        .values
+        .iter()
+        .filter(|value| {
+            value.kind
+                == OptValueKind::NodePotential {
+                    node: NodeId::new(2),
+                }
+        })
+        .count();
+
+    assert_eq!(mid_potential_count, 1);
+}
+
+#[test]
 fn opt_validation_rejects_missing_newton_schedule() {
     let mir = lower_tiny_resistor_mir();
     let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
@@ -1387,7 +1406,7 @@ fn opt_lowering_preserves_multi_equation_order_in_newton_schedule() {
                 equation: EquationId::new(0)
             },
             OptOp::ComputeValue {
-                value: ValueId::new(5)
+                value: ValueId::new(4)
             },
             OptOp::EvaluateEquation {
                 equation: EquationId::new(1)
