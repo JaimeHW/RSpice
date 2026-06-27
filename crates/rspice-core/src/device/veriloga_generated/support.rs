@@ -1990,6 +1990,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_components(&mut self, index: usize, scalar: f64, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_offset: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], output_offset: f64) {
+        let offset_left = left_raw + left_offset;
+        let denominator = offset_left * right_raw + output_offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_raw + offset_left * right_dn[axis]) * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_raw + offset_left * right_db[axis]) * denominator_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_ad(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64) {
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left.value, left.dn, left.db, left_offset, right.value, right.dn, right.db, output_offset);
+    }
+
+    #[inline]
     pub(crate) fn store_div_from_scalar_scaled_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
         let denominator = value.value * scale;
         let reciprocal = 1.0 / denominator;
@@ -8983,6 +9000,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_dn = self.dn[denominator];
         let denominator_db = self.db[denominator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_mixed_ai(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: usize, output_offset: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left.value, left.dn, left.db, left_offset, right_value, right_dn, right_db, output_offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_mixed_ia(&mut self, index: usize, scalar: f64, left: usize, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left_value, left_dn, left_db, left_offset, right.value, right.dn, right.db, output_offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_indices(&mut self, index: usize, scalar: f64, left: usize, left_offset: f64, right: usize, output_offset: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left_value, left_dn, left_db, left_offset, right_value, right_dn, right_db, output_offset);
     }
 
 
@@ -11775,6 +11822,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_components(&mut self, index: usize, scalar: f64, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_offset: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], output_offset: f64) {
+        let offset_left = left_raw + left_offset;
+        let denominator = offset_left * right_raw + output_offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_raw + offset_left * right_dn[axis]) * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_raw + offset_left * right_db[axis]) * denominator_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_ad(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64) {
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left.value, left.dn, left.db, left_offset, right.value, right.dn, right.db, output_offset);
+    }
+
+    #[inline]
     pub(crate) fn store_div_from_scalar_scaled_ad(&mut self, index: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
         let denominator = value.value * scale;
         let reciprocal = 1.0 / denominator;
@@ -18768,6 +18832,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_dn = self.dn[denominator];
         let denominator_db = self.db[denominator];
         self.store_sub_div_rhs_components(index, left, numerator_value, numerator_dn, numerator_db, denominator_value, denominator_dn, denominator_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_mixed_ai(&mut self, index: usize, scalar: f64, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_offset: f64, right: usize, output_offset: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left.value, left.dn, left.db, left_offset, right_value, right_dn, right_db, output_offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_mixed_ia(&mut self, index: usize, scalar: f64, left: usize, left_offset: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, output_offset: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left_value, left_dn, left_db, left_offset, right.value, right.dn, right.db, output_offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_mul_offset_lhs_indices(&mut self, index: usize, scalar: f64, left: usize, left_offset: f64, right: usize, output_offset: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_div_from_scalar_offset_mul_offset_lhs_components(index, scalar, left_value, left_dn, left_db, left_offset, right_value, right_dn, right_db, output_offset);
     }
 
 
