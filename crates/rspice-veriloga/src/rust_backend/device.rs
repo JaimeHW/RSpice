@@ -23,6 +23,7 @@ use super::{
 const MAX_STAMP_HELPER_LINES: usize = 512;
 const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
+const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
 
 struct ScalarHybridStampPlan {
@@ -276,11 +277,18 @@ pub(super) fn generate_hybrid_device(
         )
     })?;
     let equation_inline = equation_inline_plan(artifact)?;
-    let large_signal_roots = exclude_legacy_branch_current_ordered_roots(
+    let current_roots = exclude_legacy_branch_current_ordered_roots(
         artifact,
         super::scalar::scalarizable_current_equation_roots(artifact)?,
         &equation_inline,
     )?;
+    let potential_roots = exclude_legacy_branch_current_ordered_roots(
+        artifact,
+        super::scalar::scalarizable_potential_equation_roots(artifact)?,
+        &equation_inline,
+    )?;
+    let large_signal_roots: HashMap<_, _> =
+        current_roots.into_iter().chain(potential_roots).collect();
     let ddt_roots = exclude_legacy_branch_current_ordered_roots(
         artifact,
         super::scalar::scalarizable_ddt_current_equation_roots(artifact)?,
@@ -14339,6 +14347,26 @@ fn compact_runtime_support_surface(mut source: String) -> String {
     source
 }
 
+fn scalarized_potential_branch_slots(
+    artifact: &CanonicalIrArtifact,
+    potential_branch_slots: &PotentialBranchSlots,
+    scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+) -> HashSet<usize> {
+    let Some(plan) = scalar_hybrid_plan else {
+        return HashSet::new();
+    };
+    artifact
+        .mir
+        .equations
+        .iter()
+        .filter(|equation| {
+            equation.kind == MirEquationKind::Potential
+                && plan.large_signal_roots.contains_key(&equation.id)
+        })
+        .filter_map(|equation| potential_branch_slots.slot_for(equation.id))
+        .collect()
+}
+
 fn emit_stamp_body(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
@@ -14487,7 +14515,13 @@ fn emit_stamp_body(
     );
 
     if !reactive {
+        let scalarized_potential_slots =
+            scalarized_potential_branch_slots(artifact, potential_branch_slots, scalar_hybrid_plan);
+        let mut emitted_potential_branch = false;
         for (slot, branch) in potential_branch_slots.branches().iter().enumerate() {
+            if scalarized_potential_slots.contains(&slot) {
+                continue;
+            }
             out.push_str("        stamper.stamp_potential_branch_local(\n");
             out.push_str(&format!(
                 "            {},\n",
@@ -14500,8 +14534,9 @@ fn emit_stamp_body(
             out.push_str(&format!("            {slot},\n"));
             out.push_str("            self.multiplicity,\n");
             out.push_str("        );\n");
+            emitted_potential_branch = true;
         }
-        if !potential_branch_slots.branches().is_empty() {
+        if emitted_potential_branch {
             out.push('\n');
         }
     }
@@ -14823,30 +14858,42 @@ fn emit_stamp_body(
         match equation.kind {
             MirEquationKind::Current => {
                 if indexed_dense_stamp {
-                    emit_indexed_dense_derivative_arrays(
+                    let value_expr = format!("self.multiplicity * ({value})");
+                    let emitted_fixed = emit_fixed_sparse_current_stamp(
                         out,
-                        &prefix,
+                        equation.branch.pos_node,
+                        equation.branch.neg_node,
+                        &value_expr,
                         &node_derivatives,
                         &branch_derivatives,
+                        Some("self.multiplicity"),
                     );
-                    out.push_str("        stamper.stamp_current_indexed_dense_local(\n");
-                    out.push_str(&format!(
-                        "            {},\n",
-                        optional_node_local_expr(equation.branch.pos_node)
-                    ));
-                    out.push_str(&format!(
-                        "            {},\n",
-                        optional_node_local_expr(equation.branch.neg_node)
-                    ));
-                    out.push_str(&format!("            self.multiplicity * ({value}),\n"));
-                    out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
-                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
-                    out.push_str(&format!(
-                        "            &{prefix}_branch_derivative_indices,\n"
-                    ));
-                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
-                    out.push_str("            self.multiplicity,\n");
-                    out.push_str("        );\n");
+                    if !emitted_fixed {
+                        emit_indexed_dense_derivative_arrays(
+                            out,
+                            &prefix,
+                            &node_derivatives,
+                            &branch_derivatives,
+                        );
+                        out.push_str("        stamper.stamp_current_indexed_dense_local(\n");
+                        out.push_str(&format!(
+                            "            {},\n",
+                            optional_node_local_expr(equation.branch.pos_node)
+                        ));
+                        out.push_str(&format!(
+                            "            {},\n",
+                            optional_node_local_expr(equation.branch.neg_node)
+                        ));
+                        out.push_str(&format!("            self.multiplicity * ({value}),\n"));
+                        out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
+                        out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
+                        out.push_str(&format!(
+                            "            &{prefix}_branch_derivative_indices,\n"
+                        ));
+                        out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                        out.push_str("            self.multiplicity,\n");
+                        out.push_str("        );\n");
+                    }
                 } else if dense_stamp {
                     emit_dense_derivative_arrays(
                         out,
@@ -14926,22 +14973,33 @@ fn emit_stamp_body(
                         )
                     })?;
                 if indexed_dense_stamp {
-                    emit_indexed_dense_derivative_arrays(
+                    let branch_expr = format!("{slot}");
+                    let emitted_fixed = emit_fixed_sparse_potential_stamp(
                         out,
-                        &prefix,
+                        &branch_expr,
+                        &value,
                         &node_derivatives,
                         &branch_derivatives,
+                        None,
                     );
-                    out.push_str("        stamper.stamp_potential_indexed_dense_local(\n");
-                    out.push_str(&format!("            {slot},\n"));
-                    out.push_str(&format!("            {value},\n"));
-                    out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
-                    out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
-                    out.push_str(&format!(
-                        "            &{prefix}_branch_derivative_indices,\n"
-                    ));
-                    out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
-                    out.push_str("        );\n");
+                    if !emitted_fixed {
+                        emit_indexed_dense_derivative_arrays(
+                            out,
+                            &prefix,
+                            &node_derivatives,
+                            &branch_derivatives,
+                        );
+                        out.push_str("        stamper.stamp_potential_indexed_dense_local(\n");
+                        out.push_str(&format!("            {slot},\n"));
+                        out.push_str(&format!("            {value},\n"));
+                        out.push_str(&format!("            &{prefix}_node_derivative_indices,\n"));
+                        out.push_str(&format!("            &{prefix}_node_derivatives,\n"));
+                        out.push_str(&format!(
+                            "            &{prefix}_branch_derivative_indices,\n"
+                        ));
+                        out.push_str(&format!("            &{prefix}_branch_derivatives,\n"));
+                        out.push_str("        );\n");
+                    }
                 } else if dense_stamp {
                     emit_dense_derivative_arrays(
                         out,
@@ -15048,6 +15106,110 @@ fn scaled_derivative_expr(scale: Option<&str>, derivative: &str) -> String {
     }
 }
 
+fn sparse_derivative_index_array(terms: &[SparseDerivativeTerm<'_>]) -> String {
+    terms
+        .iter()
+        .map(|term| term.index.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn sparse_derivative_value_array(
+    terms: &[SparseDerivativeTerm<'_>],
+    derivative_scale: Option<&str>,
+) -> String {
+    terms
+        .iter()
+        .map(|term| scaled_derivative_expr(derivative_scale, term.derivative))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn should_emit_sparse_stamp(
+    node_terms: &[SparseDerivativeTerm<'_>],
+    branch_terms: &[SparseDerivativeTerm<'_>],
+) -> bool {
+    let active = node_terms.len() + branch_terms.len();
+    active > 0 && active <= SPARSE_STAMP_DERIVATIVE_THRESHOLD
+}
+
+fn emit_sparse_current_stamp(
+    out: &mut String,
+    pos_node: Option<crate::canonical_ir::NodeId>,
+    neg_node: Option<crate::canonical_ir::NodeId>,
+    value_expr: &str,
+    node_terms: &[SparseDerivativeTerm<'_>],
+    branch_terms: &[SparseDerivativeTerm<'_>],
+    derivative_scale: Option<&str>,
+) {
+    out.push_str(&format!(
+        "        stamper.stamp_current_sparse_local::<{}, {}>(\n",
+        node_terms.len(),
+        branch_terms.len()
+    ));
+    out.push_str(&format!(
+        "            {},\n",
+        optional_node_local_expr(pos_node)
+    ));
+    out.push_str(&format!(
+        "            {},\n",
+        optional_node_local_expr(neg_node)
+    ));
+    out.push_str(&format!("            {value_expr},\n"));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_index_array(node_terms)
+    ));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_value_array(node_terms, derivative_scale)
+    ));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_index_array(branch_terms)
+    ));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_value_array(branch_terms, derivative_scale)
+    ));
+    out.push_str("            1.0,\n");
+    out.push_str("        );\n");
+}
+
+fn emit_sparse_potential_stamp(
+    out: &mut String,
+    branch_expr: &str,
+    value_expr: &str,
+    node_terms: &[SparseDerivativeTerm<'_>],
+    branch_terms: &[SparseDerivativeTerm<'_>],
+    derivative_scale: Option<&str>,
+) {
+    out.push_str(&format!(
+        "        stamper.stamp_potential_sparse_local::<{}, {}>(\n",
+        node_terms.len(),
+        branch_terms.len()
+    ));
+    out.push_str(&format!("            {branch_expr},\n"));
+    out.push_str(&format!("            {value_expr},\n"));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_index_array(node_terms)
+    ));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_value_array(node_terms, derivative_scale)
+    ));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_index_array(branch_terms)
+    ));
+    out.push_str(&format!(
+        "            [{}],\n",
+        sparse_derivative_value_array(branch_terms, derivative_scale)
+    ));
+    out.push_str("        );\n");
+}
+
 fn emit_fixed_sparse_current_stamp(
     out: &mut String,
     pos_node: Option<crate::canonical_ir::NodeId>,
@@ -15087,7 +15249,7 @@ fn emit_fixed_sparse_current_stamp(
             optional_node_local_expr(neg_node)
         ));
         out.push_str(&format!("            {value_expr},\n"));
-        for term in node_terms {
+        for term in &node_terms {
             out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
@@ -15111,7 +15273,7 @@ fn emit_fixed_sparse_current_stamp(
             optional_node_local_expr(neg_node)
         ));
         out.push_str(&format!("            {value_expr},\n"));
-        for term in branch_terms {
+        for term in &branch_terms {
             out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
@@ -15135,7 +15297,7 @@ fn emit_fixed_sparse_current_stamp(
             optional_node_local_expr(neg_node)
         ));
         out.push_str(&format!("            {value_expr},\n"));
-        for term in node_terms {
+        for term in &node_terms {
             out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
@@ -15149,6 +15311,18 @@ fn emit_fixed_sparse_current_stamp(
             scaled_derivative_expr(derivative_scale, term.derivative)
         ));
         out.push_str("        );\n");
+        return true;
+    }
+    if should_emit_sparse_stamp(&node_terms, &branch_terms) {
+        emit_sparse_current_stamp(
+            out,
+            pos_node,
+            neg_node,
+            value_expr,
+            &node_terms,
+            &branch_terms,
+            derivative_scale,
+        );
         return true;
     }
     false
@@ -15178,7 +15352,7 @@ fn emit_fixed_sparse_potential_stamp(
         ));
         out.push_str(&format!("            {branch_expr},\n"));
         out.push_str(&format!("            {value_expr},\n"));
-        for term in node_terms {
+        for term in &node_terms {
             out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
@@ -15195,7 +15369,7 @@ fn emit_fixed_sparse_potential_stamp(
         ));
         out.push_str(&format!("            {branch_expr},\n"));
         out.push_str(&format!("            {value_expr},\n"));
-        for term in branch_terms {
+        for term in &branch_terms {
             out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
@@ -15212,7 +15386,7 @@ fn emit_fixed_sparse_potential_stamp(
         ));
         out.push_str(&format!("            {branch_expr},\n"));
         out.push_str(&format!("            {value_expr},\n"));
-        for term in node_terms {
+        for term in &node_terms {
             out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
@@ -15226,6 +15400,17 @@ fn emit_fixed_sparse_potential_stamp(
             scaled_derivative_expr(derivative_scale, term.derivative)
         ));
         out.push_str("        );\n");
+        return true;
+    }
+    if should_emit_sparse_stamp(&node_terms, &branch_terms) {
+        emit_sparse_potential_stamp(
+            out,
+            branch_expr,
+            value_expr,
+            &node_terms,
+            &branch_terms,
+            derivative_scale,
+        );
         return true;
     }
     false

@@ -1439,6 +1439,58 @@ impl<'a> GeneratedStamper<'a> {
         }
     }
 
+    #[inline(always)]
+    pub fn stamp_current_sparse_local<const NODE_COUNT: usize, const BRANCH_COUNT: usize>(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        value: Value,
+        node_derivative_indices: [usize; NODE_COUNT],
+        node_derivatives: [Value; NODE_COUNT],
+        branch_derivative_indices: [usize; BRANCH_COUNT],
+        branch_derivatives: [Value; BRANCH_COUNT],
+        derivative_scale: Value,
+    ) {
+        let pos_axis = pos.and_then(|node| self.node_axis_local(node));
+        let neg_axis = neg.and_then(|node| self.node_axis_local(node));
+        if pos_axis.is_none() && neg_axis.is_none() {
+            return;
+        }
+
+        let needs_rhs = self.rhs.is_some();
+        let mut equivalent = value;
+        for (node, derivative) in node_derivative_indices
+            .iter()
+            .copied()
+            .zip(node_derivatives.iter().copied())
+        {
+            let derivative = derivative_scale * derivative;
+            if needs_rhs {
+                equivalent -= derivative * self.node_value_local(node);
+            }
+            if let Some(col_axis) = self.node_axis_local(node) {
+                self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, derivative);
+            }
+        }
+        for (branch, derivative) in branch_derivative_indices
+            .iter()
+            .copied()
+            .zip(branch_derivatives.iter().copied())
+        {
+            let derivative = derivative_scale * derivative;
+            if needs_rhs {
+                equivalent -= derivative * self.branch_value_local(branch);
+            }
+            if let Some(col_axis) = self.branch_axis_local(branch) {
+                self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, derivative);
+            }
+        }
+
+        if needs_rhs {
+            self.add_current_rhs_axis_pair(pos_axis, neg_axis, equivalent);
+        }
+    }
+
     #[inline]
     fn add_current_derivative_pair(
         &mut self,
@@ -1954,6 +2006,43 @@ impl<'a> GeneratedStamper<'a> {
         debug_assert_eq!(node_derivative_indices.len(), node_derivatives.len());
         debug_assert_eq!(branch_derivative_indices.len(), branch_derivatives.len());
 
+        let Some(row_axis) = self.branch_axis_local(branch_index) else {
+            return;
+        };
+        let mut equivalent = value;
+        for (node, derivative) in node_derivative_indices
+            .iter()
+            .copied()
+            .zip(node_derivatives.iter().copied())
+        {
+            equivalent -= derivative * self.node_value_local(node);
+            if let Some(col_axis) = self.node_axis_local(node) {
+                self.add_real_axis(row_axis, col_axis, -derivative);
+            }
+        }
+        for (branch, derivative) in branch_derivative_indices
+            .iter()
+            .copied()
+            .zip(branch_derivatives.iter().copied())
+        {
+            equivalent -= derivative * self.branch_value_local(branch);
+            if let Some(col_axis) = self.branch_axis_local(branch) {
+                self.add_real_axis(row_axis, col_axis, -derivative);
+            }
+        }
+        self.add_potential_rhs_axis(row_axis, equivalent);
+    }
+
+    #[inline(always)]
+    pub fn stamp_potential_sparse_local<const NODE_COUNT: usize, const BRANCH_COUNT: usize>(
+        &mut self,
+        branch_index: usize,
+        value: Value,
+        node_derivative_indices: [usize; NODE_COUNT],
+        node_derivatives: [Value; NODE_COUNT],
+        branch_derivative_indices: [usize; BRANCH_COUNT],
+        branch_derivatives: [Value; BRANCH_COUNT],
+    ) {
         let Some(row_axis) = self.branch_axis_local(branch_index) else {
             return;
         };

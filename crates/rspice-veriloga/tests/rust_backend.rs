@@ -1091,6 +1091,47 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_current_equations() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_hybrid_potential_equations() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(potential_runtime_bounded_loop_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile hybrid potential and runtime loop current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("while") && stamp.contains("loop_guard"),
+        "runtime loop should keep this model on the hybrid path:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("stamper.stamp_potential_node2_local("),
+        "scalarizable potential equation should use fixed-arity scalar potential stamps:\n{stamp}"
+    );
+    assert_eq!(
+        stamp
+            .matches("stamper.stamp_potential_branch_local(")
+            .count(),
+        1,
+        "scalarized hybrid potential equations should stamp branch coupling exactly once:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("let eq0_"),
+        "scalarized potential equation should not be lowered as legacy equation 0:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_preserves_hybrid_ddt_named_branch_current_cache() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddt_named_branch_runtime_loop_source())
@@ -9985,7 +10026,7 @@ fn rust_backend_auto_scalarizes_wide_dense_current_equations() {
 }
 
 #[test]
-fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
+fn rust_backend_unrolls_medium_sparse_wide_current_stamps() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(wide_static_zero_derivative_source())
         .expect("canonical IR");
@@ -9994,7 +10035,7 @@ fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
-    .expect("transpile indexed dense derivative device");
+    .expect("transpile medium-sparse derivative device");
     let stamp = generated
         .files
         .iter()
@@ -10004,12 +10045,16 @@ fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
         .as_str();
 
     assert!(
-        stamp.contains("stamp_current_indexed_dense_local"),
-        "{stamp}"
+        stamp.contains("stamper.stamp_current_sparse_local::<6, 0>("),
+        "six active node derivatives should use an unrolled fixed-size sparse stamp instead of indexed dense arrays:\n{stamp}"
     );
     assert!(
-        stamp.contains("eq0_node_derivative_indices"),
-        "wide derivative equations should carry static derivative lane indices:\n{stamp}"
+        !stamp.contains("stamp_current_indexed_dense_local"),
+        "medium-sparse derivative equations should avoid indexed dense stamp loops:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("eq0_node_derivative_indices"),
+        "medium-sparse derivative equations should not allocate static derivative index arrays:\n{stamp}"
     );
     assert!(
         !stamp.contains("GeneratedDerivative::node(nodes[4]"),
@@ -10024,16 +10069,16 @@ fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
 }
 
 #[test]
-fn rust_backend_auto_scalarizes_wide_indexed_current_equations() {
+fn rust_backend_uses_const_stamp_for_wide_zero_derivative_current() {
     let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(wide_static_zero_derivative_source())
+        .compile_canonical_ir(wide_runtime_zero_derivative_current_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+    let generated = RustTranspiler::new(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
-    .expect("transpile wide indexed current through auto backend");
+    .expect("transpile hybrid wide zero-derivative current");
     let stamp = generated
         .files
         .iter()
@@ -10043,9 +10088,48 @@ fn rust_backend_auto_scalarizes_wide_indexed_current_equations() {
         .as_str();
 
     assert!(
-        stamp.contains("stamper.stamp_current_indexed_dense_local("),
+        stamp.contains("while") && stamp.contains("loop_guard"),
+        "runtime loop should keep this model on the hybrid path:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("stamper.stamp_current_const_local("),
+        "wide zero-derivative currents should avoid derivative stamp helpers entirely:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("stamp_current_indexed_dense_local"),
+        "wide zero-derivative currents should not emit empty indexed dense derivative arrays:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_scalarizes_wide_indexed_current_equations() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(wide_static_zero_derivative_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile wide sparse current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_current_sparse_local::<6, 0>("),
         "{stamp}"
     );
+    assert!(
+        !stamp.contains("stamp_current_indexed_dense_local"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("node_derivative_indices"), "{stamp}");
     assert!(stamp.contains("let v"), "{stamp}");
     assert!(
         !stamp.contains("let eq0_"),
@@ -10791,6 +10875,25 @@ pub mod runtime {{
                         + branch_derivatives.iter().copied().sum::<f64>());
         }}
 
+        pub fn stamp_current_sparse_local<const NODE_COUNT: usize, const BRANCH_COUNT: usize>(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            value: f64,
+            node_derivative_indices: [usize; NODE_COUNT],
+            node_derivatives: [f64; NODE_COUNT],
+            branch_derivative_indices: [usize; BRANCH_COUNT],
+            branch_derivatives: [f64; BRANCH_COUNT],
+            derivative_scale: f64,
+        ) {{
+            *self.touched += value
+                + derivative_scale
+                    * (node_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
+                        + node_derivatives.iter().copied().sum::<f64>()
+                        + branch_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
+                        + branch_derivatives.iter().copied().sum::<f64>());
+        }}
+
         pub fn stamp_potential_branch_local(
             &mut self,
             _pos: Option<usize>,
@@ -10904,6 +11007,22 @@ pub mod runtime {{
             node_derivatives: &[f64],
             branch_derivative_indices: &[usize],
             branch_derivatives: &[f64],
+        ) {{
+            *self.touched += value
+                + node_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
+                + node_derivatives.iter().copied().sum::<f64>()
+                + branch_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
+                + branch_derivatives.iter().copied().sum::<f64>();
+        }}
+
+        pub fn stamp_potential_sparse_local<const NODE_COUNT: usize, const BRANCH_COUNT: usize>(
+            &mut self,
+            _branch: usize,
+            value: f64,
+            node_derivative_indices: [usize; NODE_COUNT],
+            node_derivatives: [f64; NODE_COUNT],
+            branch_derivative_indices: [usize; BRANCH_COUNT],
+            branch_derivatives: [f64; BRANCH_COUNT],
         ) {{
             *self.touched += value
                 + node_derivative_indices.iter().copied().map(|index| index as f64).sum::<f64>()
@@ -16435,6 +16554,28 @@ endmodule
 "#
 }
 
+fn wide_runtime_zero_derivative_current_source() -> &'static str {
+    r#"
+module wide_runtime_zero_derivative_current(p0, p1, p2, p3, p4, p5, p6, p7);
+    inout p0, p1, p2, p3, p4, p5, p6, p7;
+    electrical p0, p1, p2, p3, p4, p5, p6, p7;
+    parameter real bias = 2.0;
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+            acc = acc + bias;
+            loop = loop + 1.0;
+        end
+        I(p0, p1) <+ acc;
+    end
+endmodule
+"#
+}
+
 fn large_dense_equation_source() -> &'static str {
     r#"
 module large_dense_equation(p0, p1, p2, p3, p4, p5, p6, p7);
@@ -16628,6 +16769,29 @@ module ddt_runtime_loop(p, n);
     real acc;
     analog begin
         I(p, n) <+ ddt(c * V(p, n));
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+            acc = acc + V(p, n);
+            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#
+}
+
+fn potential_runtime_bounded_loop_source() -> &'static str {
+    r#"
+module potential_runtime_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 0.5;
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        V(p, n) <+ gain * V(p, n);
         loop = 0.0;
         acc = 0.0;
         while (loop < limit) begin

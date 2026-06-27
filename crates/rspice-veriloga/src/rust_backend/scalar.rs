@@ -11,6 +11,8 @@ use super::expr::{DdtSlots, parameter_field_names};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
 use super::{RustTranspileOptions, device};
 
+const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
+
 pub(super) struct ScalarStaticCache {
     values: Vec<ValueId>,
     set: HashSet<ValueId>,
@@ -393,6 +395,29 @@ pub(super) fn scalarizable_current_equation_roots(
             continue;
         };
         match validate_scalar_current_equation(artifact, equation, root) {
+            Ok(()) => {
+                selected.insert(equation.id, root);
+            }
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(selected)
+}
+
+pub(super) fn scalarizable_potential_equation_roots(
+    artifact: &CanonicalIrArtifact,
+) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
+    let roots = available_scalar_equation_roots(artifact);
+    let mut selected = HashMap::new();
+    for equation in &artifact.mir.equations {
+        if equation.kind != MirEquationKind::Potential {
+            continue;
+        }
+        let Some(root) = roots.get(&equation.id).copied() else {
+            continue;
+        };
+        match validate_scalar_potential_equation(artifact, equation, root) {
             Ok(()) => {
                 selected.insert(equation.id, root);
             }
@@ -1122,50 +1147,65 @@ fn emit_wide_potential_stamp(
             .map(|(branch, _)| branch_derivative_name(root, *branch))
             .collect::<Vec<_>>()
             .join(", ");
-        out.push_str(&format!(
-            "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
-            value_name(root),
-            node_derivatives.len(),
-            node_indices
-        ));
-        out.push_str(&format!(
-            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            node_derivatives.len(),
-            node_values
-        ));
-        out.push_str(&format!(
-            "        let {}_branch_derivative_indices: [usize; {}] = [{}];\n",
-            value_name(root),
-            branch_derivatives.len(),
-            branch_indices
-        ));
-        out.push_str(&format!(
-            "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            branch_derivatives.len(),
-            branch_values
-        ));
-        out.push_str("        stamper.stamp_potential_indexed_dense_local(\n");
-        out.push_str(&format!("            {branch_slot},\n"));
-        out.push_str(&format!("            {root_expr},\n"));
-        out.push_str(&format!(
-            "            &{}_node_derivative_indices,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_node_derivatives,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_branch_derivative_indices,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_branch_derivatives,\n",
-            value_name(root)
-        ));
-        out.push_str("        );\n");
+        if node_derivatives.len() + branch_derivatives.len() <= SPARSE_STAMP_DERIVATIVE_THRESHOLD {
+            out.push_str(&format!(
+                "        stamper.stamp_potential_sparse_local::<{}, {}>(\n",
+                node_derivatives.len(),
+                branch_derivatives.len()
+            ));
+            out.push_str(&format!("            {branch_slot},\n"));
+            out.push_str(&format!("            {root_expr},\n"));
+            out.push_str(&format!("            [{node_indices}],\n"));
+            out.push_str(&format!("            [{node_values}],\n"));
+            out.push_str(&format!("            [{branch_indices}],\n"));
+            out.push_str(&format!("            [{branch_values}],\n"));
+            out.push_str("        );\n");
+        } else {
+            out.push_str(&format!(
+                "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
+                value_name(root),
+                node_derivatives.len(),
+                node_indices
+            ));
+            out.push_str(&format!(
+                "        let {}_node_derivatives: [f64; {}] = [{}];\n",
+                value_name(root),
+                node_derivatives.len(),
+                node_values
+            ));
+            out.push_str(&format!(
+                "        let {}_branch_derivative_indices: [usize; {}] = [{}];\n",
+                value_name(root),
+                branch_derivatives.len(),
+                branch_indices
+            ));
+            out.push_str(&format!(
+                "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
+                value_name(root),
+                branch_derivatives.len(),
+                branch_values
+            ));
+            out.push_str("        stamper.stamp_potential_indexed_dense_local(\n");
+            out.push_str(&format!("            {branch_slot},\n"));
+            out.push_str(&format!("            {root_expr},\n"));
+            out.push_str(&format!(
+                "            &{}_node_derivative_indices,\n",
+                value_name(root)
+            ));
+            out.push_str(&format!(
+                "            &{}_node_derivatives,\n",
+                value_name(root)
+            ));
+            out.push_str(&format!(
+                "            &{}_branch_derivative_indices,\n",
+                value_name(root)
+            ));
+            out.push_str(&format!(
+                "            &{}_branch_derivatives,\n",
+                value_name(root)
+            ));
+            out.push_str("        );\n");
+        }
     }
 }
 
@@ -1242,52 +1282,69 @@ fn emit_wide_current_stamp(
             })
             .collect::<Vec<_>>()
             .join(", ");
-        out.push_str(&format!(
-            "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
-            value_name(root),
-            node_derivatives.len(),
-            node_indices
-        ));
-        out.push_str(&format!(
-            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            node_derivatives.len(),
-            node_values
-        ));
-        out.push_str(&format!(
-            "        let {}_branch_derivative_indices: [usize; {}] = [{}];\n",
-            value_name(root),
-            branch_derivatives.len(),
-            branch_indices
-        ));
-        out.push_str(&format!(
-            "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            branch_derivatives.len(),
-            branch_values
-        ));
-        out.push_str("        stamper.stamp_current_indexed_dense_local(\n");
-        out.push_str(&format!("            {pos},\n"));
-        out.push_str(&format!("            {neg},\n"));
-        out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
-        out.push_str(&format!(
-            "            &{}_node_derivative_indices,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_node_derivatives,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_branch_derivative_indices,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_branch_derivatives,\n",
-            value_name(root)
-        ));
-        out.push_str("            multiplicity,\n");
-        out.push_str("        );\n");
+        if node_derivatives.len() + branch_derivatives.len() <= SPARSE_STAMP_DERIVATIVE_THRESHOLD {
+            out.push_str(&format!(
+                "        stamper.stamp_current_sparse_local::<{}, {}>(\n",
+                node_derivatives.len(),
+                branch_derivatives.len()
+            ));
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+            out.push_str(&format!("            [{node_indices}],\n"));
+            out.push_str(&format!("            [{node_values}],\n"));
+            out.push_str(&format!("            [{branch_indices}],\n"));
+            out.push_str(&format!("            [{branch_values}],\n"));
+            out.push_str("            multiplicity,\n");
+            out.push_str("        );\n");
+        } else {
+            out.push_str(&format!(
+                "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
+                value_name(root),
+                node_derivatives.len(),
+                node_indices
+            ));
+            out.push_str(&format!(
+                "        let {}_node_derivatives: [f64; {}] = [{}];\n",
+                value_name(root),
+                node_derivatives.len(),
+                node_values
+            ));
+            out.push_str(&format!(
+                "        let {}_branch_derivative_indices: [usize; {}] = [{}];\n",
+                value_name(root),
+                branch_derivatives.len(),
+                branch_indices
+            ));
+            out.push_str(&format!(
+                "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
+                value_name(root),
+                branch_derivatives.len(),
+                branch_values
+            ));
+            out.push_str("        stamper.stamp_current_indexed_dense_local(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+            out.push_str(&format!(
+                "            &{}_node_derivative_indices,\n",
+                value_name(root)
+            ));
+            out.push_str(&format!(
+                "            &{}_node_derivatives,\n",
+                value_name(root)
+            ));
+            out.push_str(&format!(
+                "            &{}_branch_derivative_indices,\n",
+                value_name(root)
+            ));
+            out.push_str(&format!(
+                "            &{}_branch_derivatives,\n",
+                value_name(root)
+            ));
+            out.push_str("            multiplicity,\n");
+            out.push_str("        );\n");
+        }
     }
 }
 
