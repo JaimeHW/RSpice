@@ -3683,8 +3683,8 @@ impl Instance {
             s.store_mul(3, 1599, 1435);
             s.store_add(4, 2, 3);
             s.store_offset_ad(5, A::add_scaled_products(s.ad_value(1497), s.ad_value(1434), 2.0, s.ad_value(1498), s.ad_value(1435), 2.0), 3.0);
-            s.store_div_scaled_inputs3(1600, s.ad_value(3), 1.0, s.ad_value(0), 1.0, A::div(s.ad_value(4), s.ad_value(1500)), -1.0, s.ad_value(5), 1.0);
-            s.store_div_scaled_inputs3(1601, s.ad_value(2), 1.0, s.ad_value(0), (-1.0), A::div(s.ad_value(4), s.ad_value(1501)), -1.0, s.ad_value(5), 1.0);
+            s.store_div_scaled_inputs3_mixed_iiai(1600, 3, 1.0, 0, 1.0, A::div(s.ad_value(4), s.ad_value(1500)), -1.0, 5, 1.0);
+            s.store_div_scaled_inputs3_mixed_iiai(1601, 2, 1.0, 0, (-1.0), A::div(s.ad_value(4), s.ad_value(1501)), -1.0, 5, 1.0);
             s.store_mul_add_scaled_product_rhs(1594, 1500, s.ad_value(1503), -1.0, s.ad_value(1600), s.ad_value(1500), -1.0);
             s.store_mul_add_scaled_product_rhs(1597, 1501, s.ad_value(1503), -1.0, s.ad_value(1601), s.ad_value(1501), -1.0);
         }
