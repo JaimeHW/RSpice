@@ -4334,7 +4334,7 @@ impl Instance {
 
         s.store_scaled_mul(910, 335, 155, s.v[905]);
 
-        s.store_div_scaled_product_denominator_ad(911, 909, 910, 2.0, A::add(s.ad_value(909), s.ad_value(910)), 1.0);
+        s.store_div_scaled_product_add_scaled_denominator_indices(911, 909, 910, 2.0, 909, 1.0, 910, 1.0, 1.0);
 
         s.store_powf(336, 676, p.p547);
 

@@ -4357,7 +4357,7 @@ impl Instance {
 
         s.store_add_scaled_inputs_product_first_ad(1021, A::offset(A::exp(A::mul(s.ad_value(47), A::ln(A::offset(A::mul(s.ad_value(267), s.ad_value(1013)), 1e-6)))), 1.0), 1.0, 1018, 1.0, 39, 1019, 1.0);
 
-        s.store_div_scaled_product_denominator_ad(1022, 1017, 1016, 1.0, A::add(A::div(s.ad_value(1014), s.ad_value(1020)), A::div(s.ad_value(1015), s.ad_value(1021))), 1.0);
+        s.store_div_scaled_product_add_scaled_denominator(1022, 1017, 1016, 1.0, A::div(s.ad_value(1014), s.ad_value(1020)), 1.0, A::div(s.ad_value(1015), s.ad_value(1021)), 1.0, 1.0);
 
         s.store_div_from_scalar_offset_input(1023, 1.0, 995, 4.0);
 

@@ -1084,7 +1084,7 @@ impl Instance {
         }
 
         if (((s.b[1620] && s.b[1741]) && (!s.b[1755])) && (!s.b[1758])) {
-            s.store_div_scaled_product_denominator_ad(312, 311, 173, 1.0, A::add(s.ad_value(311), s.ad_value(173)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(312, 311, 173, 1.0, 311, 1.0, 173, 1.0, 1.0);
         }
 
         s.b[1759] = ((p.p1349 == 0.0) && (p.p1350 == 0.0));
@@ -2118,7 +2118,7 @@ impl Instance {
             s.store_sqrt(274, 273);
             s.store_mul(275, 277, 274);
             s.store_div_from_scalar(260, s.v[180], 275);
-            s.store_div_scaled_product_denominator_ad(169, 5, 7, 1.0, A::add(s.ad_value(5), s.ad_value(7)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(169, 5, 7, 1.0, 5, 1.0, 7, 1.0, 1.0);
             s.store_mul_add_scaled_inputs3_offset_rhs(170, 227, s.ad_value(838), 1.0, s.ad_value(220), p.p1183, s.ad_value(218), (-p.p1195), 0.0);
             s.store_add_scaled_inputs_products_mixed_aiiiia(171, A::add_scaled_product(s.ad_value(220), p.p1181, s.ad_value(220), s.ad_value(220), p.p1182), 1.0, 218, (-p.p1184), 218, 218, (-p.p1185), 955, A::add(A::add_scaled_product(A::add_scaled_value_products3(s.ad_value(715), 1.0, s.ad_value(712), s.ad_value(220), 1.0, s.ad_value(220), s.ad_value(220), p.p1180, s.ad_value(716), s.ad_value(218), 1.0), 1.0, s.ad_value(218), s.ad_value(218), p.p1190), s.ad_value(170)), 1.0);
             s.store_div_ad(168, A::add_scaled_inputs4_offset(s.ad_value(169), 1.0, s.ad_value(836), 1.0, s.ad_value(941), 1.0, s.ad_value(171), 1.0, s.v[199]), A::offset(s.ad_value(169), s.v[199]));
@@ -2871,7 +2871,7 @@ impl Instance {
         }
 
         if (((s.b[1620] && s.b[1799]) && (!s.b[1817])) && (!s.b[1820])) {
-            s.store_div_scaled_product_denominator_ad(312, 311, 173, 1.0, A::add(s.ad_value(311), s.ad_value(173)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(312, 311, 173, 1.0, 311, 1.0, 173, 1.0, 1.0);
         }
 
         s.b[1821] = ((p.p1349 == 0.0) && (p.p1350 == 0.0));

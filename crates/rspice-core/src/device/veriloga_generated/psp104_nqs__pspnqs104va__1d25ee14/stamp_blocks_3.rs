@@ -3907,7 +3907,7 @@ impl Instance {
 
         if s.b[3277] {
             s.store_div_scaled_inputs2(3259, s.ad_value(1882), s.v[715], s.ad_value(3255), s.v[715], s.ad_value(3255), 1.0);
-            s.store_div_scaled_product_denominator_ad(3260, 1824, 1882, 1.0 / (s.v[715]), A::add(s.ad_value(1882), s.ad_value(3255)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(3260, 1824, 1882, 1.0 / (s.v[715]), 1882, 1.0, 3255, 1.0, 1.0);
             s.store_div_scaled_product_indices(3261, 1884, 1881, (((-0.5) * 0.16666666666666666) * s.v[715]), 3259, 1.0);
             s.store_square(3262, 3261);
             s.store_scalar(3263, 0.0);

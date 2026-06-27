@@ -4460,7 +4460,7 @@ impl Instance {
             s.store_scalar(1834, 0.0);
             s.copy_ad(1887, 1435);
             s.store_offset(85, 85, ((10.0 * 2.220446049250313e-16) * 100000000.0));
-            s.store_div_scaled_product_denominator_ad(962, 1908, 622, 1.0, A::add(s.ad_value(964), s.ad_value(622)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(962, 1908, 622, 1.0, 964, 1.0, 622, 1.0, 1.0);
             s.store_sub(335, 1855, 1438);
         }
 

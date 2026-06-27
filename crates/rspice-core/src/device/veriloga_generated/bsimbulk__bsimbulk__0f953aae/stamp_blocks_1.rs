@@ -4438,7 +4438,7 @@ impl Instance {
         }
 
         if ((((!s.b[935]) && s.b[936]) && (!s.b[1100])) && (!s.b[1101])) {
-            s.store_div_scaled_product_denominator_ad(239, 704, 705, 1.0, A::add(s.ad_value(704), s.ad_value(705)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(239, 704, 705, 1.0, 704, 1.0, 705, 1.0, 1.0);
         }
 
         if ((!s.b[935]) && (!s.b[936])) {
@@ -5485,7 +5485,7 @@ impl Instance {
         }
 
         if ((((!s.b[1103]) && s.b[1104]) && (!s.b[1268])) && (!s.b[1269])) {
-            s.store_div_scaled_product_denominator_ad(240, 704, 705, 1.0, A::add(s.ad_value(704), s.ad_value(705)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(240, 704, 705, 1.0, 704, 1.0, 705, 1.0, 1.0);
         }
 
         if ((!s.b[1103]) && (!s.b[1104])) {

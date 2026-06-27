@@ -4187,7 +4187,7 @@ impl Instance {
             s.store_add_scaled_inputs3(2536, s.ad_value(960), 0.5, s.ad_value(1435), ((-1.0) * 0.5), s.ad_value(781), 0.5);
             s.store_sqrt_ad(2520, A::div_scaled_product_offset_denominator(s.ad_value(2536), s.ad_value(586), (((2.0 * 1.6021918e-19) * 1.0 / (1.034943e-10)) * s.v[489]), s.ad_value(586), s.v[489], 1.0));
             s.store_mul(2522, 2520, 162);
-            s.store_div_scaled_product_denominator_ad(993, 2522, 2522, (-0.25), A::add(s.ad_value(790), s.ad_value(2522)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(993, 2522, 2522, (-0.25), 790, 1.0, 2522, 1.0, 1.0);
         }
 
         s.b[2538] = (p.p457 > 0.0);

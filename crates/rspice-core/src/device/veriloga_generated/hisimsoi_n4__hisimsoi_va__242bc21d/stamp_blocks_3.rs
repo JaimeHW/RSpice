@@ -1027,7 +1027,7 @@ impl Instance {
         if s.b[1220] {
             s.store_sqrt_ad(1228, A::div_scaled_product3(A::sub(s.ad_value(1226), s.ad_value(1223)), s.ad_value(536), s.ad_value(1225), ((2.0 * 1.6021918e-19) * 1.0 / (1.034943e-10)), A::add(s.ad_value(536), s.ad_value(1225)), 1.0));
             s.store_mul(1222, 1228, 1227);
-            s.store_div_scaled_product_denominator_ad(1221, 1222, 1222, (-0.25), A::add(s.ad_value(157), s.ad_value(1222)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(1221, 1222, 1222, (-0.25), 157, 1.0, 1222, 1.0, 1.0);
             s.copy_ad(1247, 1221);
             s.copy_ad(1248, 1233);
             s.store_offset_div_scaled_offset_numerator(336, A::mul(s.ad_value(225), A::sub(s.ad_value(1232), s.ad_value(1247))), 4.0, ((-1.0) * 4.0), A::mul(s.ad_value(241), s.ad_value(226)), 1.0, 1.0);

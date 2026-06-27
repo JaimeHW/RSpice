@@ -341,7 +341,7 @@ impl Instance {
             s.store_add(2624, 658, 2623);
             s.store_sub(2625, 658, 2623);
             s.store_sqrt_square_add(2626, 2625, 2621);
-            s.store_div_scaled_product_denominator_ad(2664, 2663, 658, 2.0, A::add(s.ad_value(2624), s.ad_value(2626)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(2664, 2663, 658, 2.0, 2624, 1.0, 2626, 1.0, 1.0);
         }
 
         s.b[2744] = (s.v[410] == 0.5);
@@ -364,7 +364,7 @@ impl Instance {
             s.store_add(2624, 658, 2623);
             s.store_sub(2625, 658, 2623);
             s.store_sqrt_square_add(2626, 2625, 2621);
-            s.store_div_scaled_product_denominator_ad(2664, 2663, 658, 2.0, A::add(s.ad_value(2624), s.ad_value(2626)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(2664, 2663, 658, 2.0, 2624, 1.0, 2626, 1.0, 1.0);
         }
 
         s.b[2745] = (s.v[467] == 0.5);
@@ -443,7 +443,7 @@ impl Instance {
             s.store_add(2624, 685, 2623);
             s.store_sub(2625, 685, 2623);
             s.store_sqrt_square_add(2626, 2625, 2621);
-            s.store_div_scaled_product_denominator_ad(2628, 833, 685, 2.0, A::add(s.ad_value(2624), s.ad_value(2626)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(2628, 833, 685, 2.0, 2624, 1.0, 2626, 1.0, 1.0);
         }
 
         s.b[2750] = (s.v[833] < s.v[681]);
@@ -940,7 +940,7 @@ impl Instance {
             s.store_add(2624, 685, 2623);
             s.store_sub(2625, 685, 2623);
             s.store_sqrt_square_add(2626, 2625, 2621);
-            s.store_div_scaled_product_denominator_ad(2664, 2663, 685, 2.0, A::add(s.ad_value(2624), s.ad_value(2626)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(2664, 2663, 685, 2.0, 2624, 1.0, 2626, 1.0, 1.0);
         }
 
         s.b[2808] = (s.v[577] == 0.5);
@@ -963,7 +963,7 @@ impl Instance {
             s.store_add(2624, 685, 2623);
             s.store_sub(2625, 685, 2623);
             s.store_sqrt_square_add(2626, 2625, 2621);
-            s.store_div_scaled_product_denominator_ad(2664, 2663, 685, 2.0, A::add(s.ad_value(2624), s.ad_value(2626)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(2664, 2663, 685, 2.0, 2624, 1.0, 2626, 1.0, 1.0);
         }
 
         s.b[2809] = (s.v[630] == 0.5);

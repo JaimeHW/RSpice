@@ -629,7 +629,7 @@ impl Instance {
         }
 
         if (!s.b[1427]) {
-            s.store_div_scaled_product_denominator_ad(210, 217, 175, 1.0, A::add(s.ad_value(217), s.ad_value(175)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(210, 217, 175, 1.0, 217, 1.0, 175, 1.0, 1.0);
         }
 
         let assign21320_ad_e39524: A = {
@@ -1137,7 +1137,7 @@ impl Instance {
         }
 
         if (s.b[1431] && (!s.b[1440])) {
-            s.store_div_scaled_product_denominator_ad(211, 223, 175, 1.0, A::add(s.ad_value(223), s.ad_value(175)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(211, 223, 175, 1.0, 223, 1.0, 175, 1.0, 1.0);
         }
 
         if s.b[1431] {
@@ -2260,7 +2260,7 @@ impl Instance {
             s.store_scale(917, 916, p.p1);
             s.store_scalar(920, (1.0 / p.p530));
             s.store_add_scaled_inputs(175, 906, p.p491, 182, (2.0 * p.p491));
-            s.store_div_scaled_product_denominator_ad(918, 917, 175, 1.0, A::add(s.ad_value(917), s.ad_value(175)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(918, 917, 175, 1.0, 917, 1.0, 175, 1.0, 1.0);
         }
 
         if s.b[1484] {

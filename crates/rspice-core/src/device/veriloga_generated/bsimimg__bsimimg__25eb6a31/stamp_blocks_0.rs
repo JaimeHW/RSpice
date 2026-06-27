@@ -1724,7 +1724,7 @@ impl Instance {
         s.v[613] = if s.b[613] { 1.0 } else { 0.0 };
 
         if s.b[613] {
-            s.store_div_scaled_product_denominator_ad(162, 170, 40, 1.0, A::add(s.ad_value(170), s.ad_value(40)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(162, 170, 40, 1.0, 170, 1.0, 40, 1.0, 1.0);
         }
 
         if (!s.b[613]) {
@@ -4508,7 +4508,7 @@ impl Instance {
         s.v[613] = if s.b[613] { 1.0 } else { 0.0 };
 
         if s.b[613] {
-            s.store_div_scaled_product_denominator_ad(162, 170, 40, 1.0, A::add(s.ad_value(170), s.ad_value(40)), 1.0);
+            s.store_div_scaled_product_add_scaled_denominator_indices(162, 170, 40, 1.0, 170, 1.0, 40, 1.0, 1.0);
         }
 
         if (!s.b[613]) {
