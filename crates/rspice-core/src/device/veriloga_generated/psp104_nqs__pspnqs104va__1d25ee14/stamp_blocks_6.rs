@@ -14,7 +14,7 @@ impl Instance {
 
         if (((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3193])) && (!s.b[3194])) {
             s.store_sub_from_scalar_scaled_mul(2006, 1.0, 1939, 2005, 0.5);
-            s.store_add_scaled_inputs3(2007, s.ad_value(2027), 2.0, s.ad_value(2013), (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
+            s.store_add_scaled_inputs3_mixed_iia(2007, 2027, 2.0, 2013, (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
             s.store_add_scaled_products_mixed_aaia(2008, A::sub(s.ad_value(2027), s.ad_value(2013)), A::sub(s.ad_value(2027), s.ad_value(2013)), 1.0, 1939, A::add(A::offset(s.ad_value(2013), (-1.0)), s.ad_value(2005)), (-1.0));
             s.store_add_scaled_square_product_indices(2009, 2007, 1.0, 2006, 2008, (-4.0));
             s.store_div_scaled_inputs(2014, s.ad_value(2008), 2.0, A::add(s.ad_value(2007), A::sqrt(s.ad_value(2009))), 1.0);
@@ -40,7 +40,7 @@ impl Instance {
             s.store_div_scaled_inputs(2000, s.ad_value(1999), 1.25, s.ad_value(1940), 1.0);
             s.store_scaled_sub_ad(2001, A::offset(s.ad_value(2000), 10.0), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(2000), (-6.0), A::offset(s.ad_value(2000), (-6.0))), 64.0)), 0.5);
             s.store_add_scaled_products_mixed_aaia(2002, A::sub(s.ad_value(1999), s.ad_value(2001)), A::sub(s.ad_value(1999), s.ad_value(2001)), 1.0, 1939, A::offset(s.ad_value(2001), 1.0), 1.0);
-            s.store_add_scaled_inputs3(2003, s.ad_value(1999), 2.0, s.ad_value(2001), (-2.0), s.ad_value(1939), -1.0);
+            s.store_add_scaled_inputs3_indices(2003, 1999, 2.0, 2001, (-2.0), 1939, -1.0);
             s.store_sub_ad_lhs(2004, A::ln(A::div(s.ad_value(2002), s.ad_value(1939))), 2001);
             s.store_add(824, 2002, 2003);
             s.store_add_scaled_square_product_mixed_iia(823, 824, 1.0, 2004, A::sub_scaled_inputs(A::square(s.ad_value(2003)), 0.5, s.ad_value(2002), 1.0), 1.0);
@@ -123,7 +123,7 @@ impl Instance {
 
         if (((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3201])) && (!s.b[3202])) {
             s.store_sub_from_scalar_scaled_mul(2006, 1.0, 1939, 2005, 0.5);
-            s.store_add_scaled_inputs3(2007, s.ad_value(2027), 2.0, s.ad_value(2013), (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
+            s.store_add_scaled_inputs3_mixed_iia(2007, 2027, 2.0, 2013, (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
             s.store_add_scaled_products_mixed_aaia(2008, A::sub(s.ad_value(2027), s.ad_value(2013)), A::sub(s.ad_value(2027), s.ad_value(2013)), 1.0, 1939, A::add(A::offset(s.ad_value(2013), (-1.0)), s.ad_value(2005)), (-1.0));
             s.store_add_scaled_square_product_indices(2009, 2007, 1.0, 2006, 2008, (-4.0));
             s.store_div_scaled_inputs(2014, s.ad_value(2008), 2.0, A::add(s.ad_value(2007), A::sqrt(s.ad_value(2009))), 1.0);
@@ -149,7 +149,7 @@ impl Instance {
             s.store_div_scaled_inputs(2000, s.ad_value(1999), 1.25, s.ad_value(1940), 1.0);
             s.store_scaled_sub_ad(2001, A::offset(s.ad_value(2000), 10.0), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(2000), (-6.0), A::offset(s.ad_value(2000), (-6.0))), 64.0)), 0.5);
             s.store_add_scaled_products_mixed_aaia(2002, A::sub(s.ad_value(1999), s.ad_value(2001)), A::sub(s.ad_value(1999), s.ad_value(2001)), 1.0, 1939, A::offset(s.ad_value(2001), 1.0), 1.0);
-            s.store_add_scaled_inputs3(2003, s.ad_value(1999), 2.0, s.ad_value(2001), (-2.0), s.ad_value(1939), -1.0);
+            s.store_add_scaled_inputs3_indices(2003, 1999, 2.0, 2001, (-2.0), 1939, -1.0);
             s.store_sub_ad_lhs(2004, A::ln(A::div(s.ad_value(2002), s.ad_value(1939))), 2001);
             s.store_add(824, 2002, 2003);
             s.store_add_scaled_square_product_mixed_iia(823, 824, 1.0, 2004, A::sub_scaled_inputs(A::square(s.ad_value(2003)), 0.5, s.ad_value(2002), 1.0), 1.0);
@@ -232,7 +232,7 @@ impl Instance {
 
         if (((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3209])) && (!s.b[3210])) {
             s.store_sub_from_scalar_scaled_mul(2006, 1.0, 1939, 2005, 0.5);
-            s.store_add_scaled_inputs3(2007, s.ad_value(2027), 2.0, s.ad_value(2013), (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
+            s.store_add_scaled_inputs3_mixed_iia(2007, 2027, 2.0, 2013, (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
             s.store_add_scaled_products_mixed_aaia(2008, A::sub(s.ad_value(2027), s.ad_value(2013)), A::sub(s.ad_value(2027), s.ad_value(2013)), 1.0, 1939, A::add(A::offset(s.ad_value(2013), (-1.0)), s.ad_value(2005)), (-1.0));
             s.store_add_scaled_square_product_indices(2009, 2007, 1.0, 2006, 2008, (-4.0));
             s.store_div_scaled_inputs(2014, s.ad_value(2008), 2.0, A::add(s.ad_value(2007), A::sqrt(s.ad_value(2009))), 1.0);
@@ -258,7 +258,7 @@ impl Instance {
             s.store_div_scaled_inputs(2000, s.ad_value(1999), 1.25, s.ad_value(1940), 1.0);
             s.store_scaled_sub_ad(2001, A::offset(s.ad_value(2000), 10.0), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(2000), (-6.0), A::offset(s.ad_value(2000), (-6.0))), 64.0)), 0.5);
             s.store_add_scaled_products_mixed_aaia(2002, A::sub(s.ad_value(1999), s.ad_value(2001)), A::sub(s.ad_value(1999), s.ad_value(2001)), 1.0, 1939, A::offset(s.ad_value(2001), 1.0), 1.0);
-            s.store_add_scaled_inputs3(2003, s.ad_value(1999), 2.0, s.ad_value(2001), (-2.0), s.ad_value(1939), -1.0);
+            s.store_add_scaled_inputs3_indices(2003, 1999, 2.0, 2001, (-2.0), 1939, -1.0);
             s.store_sub_ad_lhs(2004, A::ln(A::div(s.ad_value(2002), s.ad_value(1939))), 2001);
             s.store_add(824, 2002, 2003);
             s.store_add_scaled_square_product_mixed_iia(823, 824, 1.0, 2004, A::sub_scaled_inputs(A::square(s.ad_value(2003)), 0.5, s.ad_value(2002), 1.0), 1.0);
@@ -347,7 +347,7 @@ impl Instance {
 
         if (((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3217])) && (!s.b[3218])) {
             s.store_sub_from_scalar_scaled_mul(2006, 1.0, 1939, 2005, 0.5);
-            s.store_add_scaled_inputs3(2007, s.ad_value(2027), 2.0, s.ad_value(2013), (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
+            s.store_add_scaled_inputs3_mixed_iia(2007, 2027, 2.0, 2013, (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
             s.store_add_scaled_products_mixed_aaia(2008, A::sub(s.ad_value(2027), s.ad_value(2013)), A::sub(s.ad_value(2027), s.ad_value(2013)), 1.0, 1939, A::add(A::offset(s.ad_value(2013), (-1.0)), s.ad_value(2005)), (-1.0));
             s.store_add_scaled_square_product_indices(2009, 2007, 1.0, 2006, 2008, (-4.0));
             s.store_div_scaled_inputs(2014, s.ad_value(2008), 2.0, A::add(s.ad_value(2007), A::sqrt(s.ad_value(2009))), 1.0);
@@ -373,7 +373,7 @@ impl Instance {
             s.store_div_scaled_inputs(2000, s.ad_value(1999), 1.25, s.ad_value(1940), 1.0);
             s.store_scaled_sub_ad(2001, A::offset(s.ad_value(2000), 10.0), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(2000), (-6.0), A::offset(s.ad_value(2000), (-6.0))), 64.0)), 0.5);
             s.store_add_scaled_products_mixed_aaia(2002, A::sub(s.ad_value(1999), s.ad_value(2001)), A::sub(s.ad_value(1999), s.ad_value(2001)), 1.0, 1939, A::offset(s.ad_value(2001), 1.0), 1.0);
-            s.store_add_scaled_inputs3(2003, s.ad_value(1999), 2.0, s.ad_value(2001), (-2.0), s.ad_value(1939), -1.0);
+            s.store_add_scaled_inputs3_indices(2003, 1999, 2.0, 2001, (-2.0), 1939, -1.0);
             s.store_sub_ad_lhs(2004, A::ln(A::div(s.ad_value(2002), s.ad_value(1939))), 2001);
             s.store_add(824, 2002, 2003);
             s.store_add_scaled_square_product_mixed_iia(823, 824, 1.0, 2004, A::sub_scaled_inputs(A::square(s.ad_value(2003)), 0.5, s.ad_value(2002), 1.0), 1.0);
@@ -456,7 +456,7 @@ impl Instance {
 
         if (((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3225])) && (!s.b[3226])) {
             s.store_sub_from_scalar_scaled_mul(2006, 1.0, 1939, 2005, 0.5);
-            s.store_add_scaled_inputs3(2007, s.ad_value(2027), 2.0, s.ad_value(2013), (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
+            s.store_add_scaled_inputs3_mixed_iia(2007, 2027, 2.0, 2013, (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
             s.store_add_scaled_products_mixed_aaia(2008, A::sub(s.ad_value(2027), s.ad_value(2013)), A::sub(s.ad_value(2027), s.ad_value(2013)), 1.0, 1939, A::add(A::offset(s.ad_value(2013), (-1.0)), s.ad_value(2005)), (-1.0));
             s.store_add_scaled_square_product_indices(2009, 2007, 1.0, 2006, 2008, (-4.0));
             s.store_div_scaled_inputs(2014, s.ad_value(2008), 2.0, A::add(s.ad_value(2007), A::sqrt(s.ad_value(2009))), 1.0);
@@ -486,7 +486,7 @@ impl Instance {
 
         if s.b[3067] {
             s.store_mul3_lhs(851, 1904, 1888, 1980);
-            s.store_add_scaled_inputs3(852, s.ad_value(851), -1.0, s.ad_value(850), (-1.0), s.ad_value(853), -1.0);
+            s.store_add_scaled_inputs3_indices(852, 851, -1.0, 850, (-1.0), 853, -1.0);
         }
 
         s.store_neg_ad(850, A::add_scaled_inputs3(s.ad_value(851), 1.0, s.ad_value(852), 1.0, s.ad_value(853), 1.0));
