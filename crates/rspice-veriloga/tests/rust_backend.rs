@@ -1091,7 +1091,7 @@ fn rust_backend_auto_scalarizes_pow_intrinsic_currents_with_derivatives() {
         .contents
         .as_str();
 
-    assert!(stamp.contains(".powf("), "{stamp}");
+    assert!(stamp.contains("f64::powf("), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
@@ -1260,6 +1260,32 @@ fn rust_backend_auto_scalarizes_static_system_function_assignment_chains() {
     assert!(
         !stamp.contains("let eq0_value"),
         "static system-function current should be scalarized instead of lowered through AD:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_scalarizes_numeric_select_conditions_in_static_system_chains() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(static_numeric_select_chain_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile numeric select static chain");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -15763,6 +15789,31 @@ module static_system_chain(p, n);
             base = r / w;
         end
         g = $mfactor / (base * tc);
+        i = g * V(p, n);
+        I(p, n) <+ i;
+        wn = 4.0 * g;
+        I(p, n) <+ white_noise(wn, "thermal");
+    end
+endmodule
+"#
+}
+
+fn static_numeric_select_chain_source() -> &'static str {
+    r#"
+module static_numeric_select_chain(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    parameter real enabled = 1.0;
+    real base;
+    real scale;
+    real g;
+    real i;
+    real wn;
+    analog begin
+        base = $param_given(r) ? r : 1000.0;
+        scale = enabled ? pow(2.0, enabled) : 1.0;
+        g = 1.0 / (base * scale);
         i = g * V(p, n);
         I(p, n) <+ i;
         wn = 4.0 * g;

@@ -1311,12 +1311,18 @@ fn emit_value_expr(
             condition,
             then_value,
             else_value,
-        } => format!(
-            "(if {} {{ {} }} else {{ {} }})",
-            value_ref(artifact, parameter_fields, *condition, context)?,
-            value_ref(artifact, parameter_fields, *then_value, context)?,
-            value_ref(artifact, parameter_fields, *else_value, context)?
-        ),
+        } => {
+            let condition_type = value_type(artifact, *condition)?;
+            format!(
+                "(if {} {{ {} }} else {{ {} }})",
+                truth_expr(
+                    value_ref(artifact, parameter_fields, *condition, context)?,
+                    condition_type,
+                ),
+                value_ref(artifact, parameter_fields, *then_value, context)?,
+                value_ref(artifact, parameter_fields, *else_value, context)?
+            )
+        }
         OptValueKind::EquationValue { .. } => {
             return Err(unsupported(
                 artifact,
@@ -1442,7 +1448,7 @@ fn emit_binary_expr(
         OptBinaryOp::Sub => format!("({left} - {right})"),
         OptBinaryOp::Mul => format!("({left} * {right})"),
         OptBinaryOp::Div => format!("({left} / {right})"),
-        OptBinaryOp::Pow => format!("{left}.powf({right})"),
+        OptBinaryOp::Pow => format!("f64::powf({left}, {right})"),
         OptBinaryOp::Eq => format!("({left} == {right})"),
         OptBinaryOp::Ne => format!("({left} != {right})"),
         OptBinaryOp::Lt => format!("({left} < {right})"),
