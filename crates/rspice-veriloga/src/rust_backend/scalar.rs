@@ -10,7 +10,7 @@ use super::expr::parameter_field_names;
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
 use super::{RustTranspileOptions, device};
 
-struct ScalarStaticCache {
+pub(super) struct ScalarStaticCache {
     values: Vec<ValueId>,
     set: HashSet<ValueId>,
 }
@@ -32,11 +32,35 @@ impl ScalarStaticCache {
         Self { values, set }
     }
 
+    pub(super) fn from_roots(
+        artifact: &CanonicalIrArtifact,
+        roots: &HashMap<EquationId, ValueId>,
+    ) -> Result<Self, RustBackendError> {
+        let empty_cache = Self {
+            values: Vec::new(),
+            set: HashSet::new(),
+        };
+        let live = collect_stamp_live_values(artifact, roots, &empty_cache)?;
+        let values: Vec<_> = artifact
+            .opt
+            .schedules
+            .iter()
+            .filter(|schedule| schedule.invalidation == InvalidationClass::InstanceStatic)
+            .flat_map(|schedule| schedule.ops.iter())
+            .filter_map(|op| match op {
+                OptOp::ComputeValue { value } if live.contains(value) => Some(*value),
+                OptOp::ComputeValue { .. } | OptOp::EvaluateEquation { .. } => None,
+            })
+            .collect();
+        let set = values.iter().copied().collect();
+        Ok(Self { values, set })
+    }
+
     fn contains(&self, value: ValueId) -> bool {
         self.set.contains(&value)
     }
 
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 }
@@ -152,15 +176,7 @@ fn generate_stamp_file(
         out.push('\n');
     }
 
-    for equation in &artifact.mir.equations {
-        let root = roots.get(&equation.id).copied().ok_or_else(|| {
-            unsupported(
-                artifact,
-                format!("missing scalar value for {}", equation.id),
-            )
-        })?;
-        emit_current_stamp(artifact, equation, root, static_cache, &mut out)?;
-    }
+    emit_static_current_stamps(artifact, &roots, static_cache, &mut out)?;
 
     out.push_str("    }\n\n");
     out.push_str(
@@ -171,7 +187,7 @@ fn generate_stamp_file(
     Ok(out)
 }
 
-fn scalar_state_extensions(
+pub(super) fn scalar_state_extensions(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     static_cache: &ScalarStaticCache,
@@ -228,6 +244,72 @@ fn scalar_state_extensions(
     extensions.set_parameter_hook = "self.recompute_instance_static(); ".to_string();
     extensions.impl_methods = recompute;
     Ok(extensions)
+}
+
+pub(super) fn scalarizable_current_equation_roots(
+    artifact: &CanonicalIrArtifact,
+) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
+    let roots = available_scalar_equation_roots(artifact);
+    let mut selected = HashMap::new();
+    for equation in &artifact.mir.equations {
+        let Some(root) = roots.get(&equation.id).copied() else {
+            continue;
+        };
+        match validate_scalar_current_equation(artifact, equation, root) {
+            Ok(()) => {
+                selected.insert(equation.id, root);
+            }
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(selected)
+}
+
+pub(super) fn emit_static_current_values(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    roots: &HashMap<EquationId, ValueId>,
+    static_cache: &ScalarStaticCache,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let stamp_live = collect_stamp_live_values(artifact, roots, static_cache)?;
+    let stamp_context = ValueEmitContext {
+        cached_values: &static_cache.set,
+        use_cached_fields: true,
+        inline_uncached_constants: false,
+    };
+    for value in &artifact.opt.values {
+        if !stamp_live.contains(&value.id) {
+            continue;
+        }
+        let expr = emit_value_expr(artifact, parameter_fields, value, &stamp_context)?;
+        out.push_str(&format!(
+            "        let {}: {} = {};\n",
+            value_name(value.id),
+            rust_type(value.value_type),
+            expr
+        ));
+    }
+    if !stamp_live.is_empty() {
+        out.push('\n');
+    }
+    Ok(())
+}
+
+pub(super) fn emit_static_current_stamps(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+    static_cache: &ScalarStaticCache,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    for equation in &artifact.mir.equations {
+        let Some(root) = roots.get(&equation.id).copied() else {
+            continue;
+        };
+        emit_current_stamp(artifact, equation, root, static_cache, out)?;
+    }
+    Ok(())
 }
 
 fn emit_current_stamp(
@@ -488,6 +570,21 @@ fn emit_binary_expr(op: OptBinaryOp, left: String, right: String) -> String {
 fn scalar_equation_roots(
     artifact: &CanonicalIrArtifact,
 ) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
+    let roots = available_scalar_equation_roots(artifact);
+    for equation in &artifact.mir.equations {
+        let root = roots.get(&equation.id).copied().ok_or_else(|| {
+            unsupported(
+                artifact,
+                format!("missing scalar root for equation {}", equation.id),
+            )
+        })?;
+        validate_scalar_current_equation(artifact, equation, root)?;
+    }
+
+    Ok(roots)
+}
+
+fn available_scalar_equation_roots(artifact: &CanonicalIrArtifact) -> HashMap<EquationId, ValueId> {
     let mut roots = HashMap::new();
     for schedule in &artifact.opt.schedules {
         if schedule.invalidation != InvalidationClass::NewtonIteration {
@@ -499,25 +596,70 @@ fn scalar_equation_roots(
             match *op {
                 OptOp::ComputeValue { value } => pending_value = Some(value),
                 OptOp::EvaluateEquation { equation } => {
-                    let value = pending_value.take().ok_or_else(|| {
-                        unsupported(artifact, format!("non-scalar equation {}", equation))
-                    })?;
-                    roots.insert(equation, value);
+                    if let Some(value) = pending_value.take() {
+                        roots.insert(equation, value);
+                    }
                 }
             }
         }
     }
+    roots
+}
 
-    for equation in &artifact.mir.equations {
-        if !roots.contains_key(&equation.id) {
+fn validate_scalar_current_equation(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+) -> Result<(), RustBackendError> {
+    if equation.kind != MirEquationKind::Current {
+        return Err(unsupported(artifact, "non-current equations"));
+    }
+    let root_value = artifact
+        .opt
+        .values
+        .get(usize::from(root))
+        .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
+    if root_value.derivatives.len() > 3 {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "scalar current equation {} with {} node derivative lanes",
+                equation.id,
+                root_value.derivatives.len()
+            ),
+        ));
+    }
+    for derivative in &root_value.derivatives {
+        if derivative.lane.kind != DerivativeLaneKind::Node {
             return Err(unsupported(
                 artifact,
-                format!("missing scalar root for equation {}", equation.id),
+                format!("branch derivative lane on scalar equation {}", equation.id),
             ));
         }
     }
-
-    Ok(roots)
+    let roots = HashMap::from([(equation.id, root)]);
+    let empty_cache = ScalarStaticCache {
+        values: Vec::new(),
+        set: HashSet::new(),
+    };
+    let live = collect_stamp_live_values(artifact, &roots, &empty_cache)?;
+    for value in live {
+        let value_slot = artifact
+            .opt
+            .values
+            .get(usize::from(value))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+        if matches!(
+            value_slot.kind,
+            OptValueKind::BranchFlow { .. } | OptValueKind::EquationValue { .. }
+        ) {
+            return Err(unsupported(
+                artifact,
+                "branch flows or legacy equation values in scalar OptIR",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn collect_stamp_live_values(
@@ -526,13 +668,7 @@ fn collect_stamp_live_values(
     static_cache: &ScalarStaticCache,
 ) -> Result<HashSet<ValueId>, RustBackendError> {
     let mut live = HashSet::new();
-    for equation in &artifact.mir.equations {
-        let root = roots.get(&equation.id).copied().ok_or_else(|| {
-            unsupported(
-                artifact,
-                format!("missing scalar root for equation {}", equation.id),
-            )
-        })?;
+    for root in roots.values().copied() {
         mark_stamp_live_value(artifact, root, static_cache, &mut live)?;
         let root_value =
             artifact.opt.values.get(usize::from(root)).ok_or_else(|| {

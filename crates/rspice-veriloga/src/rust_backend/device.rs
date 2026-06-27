@@ -5,7 +5,7 @@ use std::{
 
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, EquationId, ExprId, HirAnalogOperator, HirExprKind,
-    HirStatement, MirBranchRef, MirEquation, MirEquationKind, MirParameterSlot,
+    HirStatement, MirBranchRef, MirEquation, MirEquationKind, MirParameterSlot, ValueId,
 };
 
 use super::expr::{
@@ -24,6 +24,11 @@ const MAX_STAMP_HELPER_LINES: usize = 512;
 const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
+
+struct ScalarStaticStampPlan {
+    roots: HashMap<EquationId, ValueId>,
+    static_cache: super::scalar::ScalarStaticCache,
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct StampCommonUsage {
@@ -228,6 +233,41 @@ pub fn generate_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
+    generate_device_with_scalar_static_plan(artifact, options, None)
+}
+
+pub(super) fn generate_hybrid_device(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+) -> Result<GeneratedRustDevice, RustBackendError> {
+    reject_unsupported_model_shape(artifact)?;
+    artifact.opt.validate().map_err(|diagnostics| {
+        RustBackendError::internal(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            format!("invalid scalar OptIR: {diagnostics:?}"),
+        )
+    })?;
+    let roots = super::scalar::scalarizable_current_equation_roots(artifact)?;
+    if roots.is_empty() {
+        return Err(unsupported(
+            artifact,
+            "no scalarizable static current equations",
+        ));
+    }
+    let static_cache = super::scalar::ScalarStaticCache::from_roots(artifact, &roots)?;
+    let scalar_static_plan = ScalarStaticStampPlan {
+        roots,
+        static_cache,
+    };
+    generate_device_with_scalar_static_plan(artifact, options, Some(&scalar_static_plan))
+}
+
+fn generate_device_with_scalar_static_plan(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+    scalar_static_plan: Option<&ScalarStaticStampPlan>,
+) -> Result<GeneratedRustDevice, RustBackendError> {
     reject_unsupported_model_shape(artifact)?;
 
     let source_file_name = artifact.metadata.source_package.as_str();
@@ -244,7 +284,14 @@ pub fn generate_device(
     } else {
         collect_reactive_liveness(artifact)?
     };
-    let transient_liveness = collect_transient_liveness(artifact)?;
+    let scalar_equations: HashSet<_> = scalar_static_plan
+        .map(|plan| plan.roots.keys().copied().collect())
+        .unwrap_or_default();
+    let transient_liveness = if scalar_equations.is_empty() {
+        collect_transient_liveness(artifact)?
+    } else {
+        collect_transient_liveness_excluding(artifact, &scalar_equations)?
+    };
     let potential_branch_slots = collect_potential_branch_slots(artifact)?;
 
     let stamp_files = compact_stamp_files(generate_stamp_file(
@@ -256,7 +303,34 @@ pub fn generate_device(
         &transient_liveness,
         &reactive_liveness,
         &potential_branch_slots,
+        scalar_static_plan,
     )?);
+    let state = if let Some(plan) = scalar_static_plan.filter(|plan| !plan.static_cache.is_empty())
+    {
+        let extensions = super::scalar::scalar_state_extensions(
+            artifact,
+            &parameter_fields,
+            &plan.static_cache,
+        )?;
+        generate_state_file_with_extensions(
+            artifact,
+            options,
+            &parameter_fields,
+            ddt_slots.len(),
+            ddt_slots.idt_len(),
+            potential_branch_slots.len(),
+            &extensions,
+        )?
+    } else {
+        generate_state_file(
+            artifact,
+            options,
+            &parameter_fields,
+            ddt_slots.len(),
+            ddt_slots.idt_len(),
+            potential_branch_slots.len(),
+        )?
+    };
     let mut files = vec![
         GeneratedRustFile {
             relative_path: "mod.rs".to_string(),
@@ -264,14 +338,7 @@ pub fn generate_device(
         },
         GeneratedRustFile {
             relative_path: "state.rs".to_string(),
-            contents: generate_state_file(
-                artifact,
-                options,
-                &parameter_fields,
-                ddt_slots.len(),
-                ddt_slots.idt_len(),
-                potential_branch_slots.len(),
-            )?,
+            contents: state,
         },
         GeneratedRustFile {
             relative_path: "stamp.rs".to_string(),
@@ -3480,9 +3547,19 @@ impl TransientLiveness {
 fn collect_transient_liveness(
     artifact: &CanonicalIrArtifact,
 ) -> Result<TransientLiveness, RustBackendError> {
+    collect_transient_liveness_excluding(artifact, &HashSet::new())
+}
+
+fn collect_transient_liveness_excluding(
+    artifact: &CanonicalIrArtifact,
+    excluded_equations: &HashSet<EquationId>,
+) -> Result<TransientLiveness, RustBackendError> {
     let mut values = HashSet::new();
     let mut derivatives = HashSet::new();
     for equation in &artifact.mir.equations {
+        if excluded_equations.contains(&equation.id) {
+            continue;
+        }
         collect_expression_identifiers(
             artifact,
             equation.expression.id,
@@ -5183,6 +5260,7 @@ fn generate_stamp_file(
     transient_liveness: &TransientLiveness,
     reactive_liveness: &ReactiveLiveness,
     potential_branch_slots: &PotentialBranchSlots,
+    scalar_static_plan: Option<&ScalarStaticStampPlan>,
 ) -> Result<StampFiles, RustBackendError> {
     let mut out = String::new();
     out.push_str("#![allow(dead_code, unused_assignments, unused_parens, unused_variables)]\n\n");
@@ -5293,6 +5371,7 @@ fn generate_stamp_file(
         false,
         "stamp_transient",
         common_usage,
+        scalar_static_plan,
         &mut helper_modules,
         &mut out,
     )?;
@@ -5313,6 +5392,7 @@ fn generate_stamp_file(
             true,
             "stamp_reactive",
             common_usage,
+            None,
             &mut helper_modules,
             &mut out,
         )?;
@@ -12708,6 +12788,7 @@ fn emit_stamp_body(
     reactive: bool,
     helper_prefix: &str,
     common_usage: StampCommonUsage,
+    scalar_static_plan: Option<&ScalarStaticStampPlan>,
     helper_modules: &mut StampHelperModules,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
@@ -12740,7 +12821,25 @@ fn emit_stamp_body(
         out.push_str("        let idt_scale = if ddt_active { timestep } else { 0.0 };\n");
     }
 
-    let uses_scratch = !artifact.hir.variables.is_empty();
+    if !reactive && let Some(plan) = scalar_static_plan {
+        super::scalar::emit_static_current_values(
+            artifact,
+            parameter_fields,
+            &plan.roots,
+            &plan.static_cache,
+            out,
+        )?;
+        super::scalar::emit_static_current_stamps(artifact, &plan.roots, &plan.static_cache, out)?;
+    }
+
+    let uses_scratch = artifact.hir.variables.iter().any(|variable| {
+        if reactive {
+            reactive_liveness.is_variable_live(variable.name.as_str())
+        } else {
+            transient_liveness.is_value_live(variable.name.as_str())
+                || transient_liveness.is_derivative_live(variable.name.as_str())
+        }
+    });
     if uses_scratch {
         let scratch_field = if reactive {
             "reactive_scratch"
@@ -12818,6 +12917,13 @@ fn emit_stamp_body(
     let split_equations = uses_scratch && artifact.mir.equations.len() > 8;
     let mut branch_currents = HashMap::new();
     for (index, equation) in artifact.mir.equations.iter().enumerate() {
+        if !reactive
+            && scalar_static_plan
+                .map(|plan| plan.roots.contains_key(&equation.id))
+                .unwrap_or(false)
+        {
+            continue;
+        }
         if reactive && !reactive_liveness.is_equation_reactive(equation.id) {
             continue;
         }

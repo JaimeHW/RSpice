@@ -921,6 +921,39 @@ fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_static_equations_inside_dynamic_models() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(resistor_capacitor_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile mixed static and ddt current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+    assert!(stamp.contains("let v"), "{stamp}");
+    let stamp_body = stamp.split("pub fn stamp(").nth(1).expect("stamp body");
+    assert!(
+        stamp_body.find("let v").expect("scalar value")
+            < stamp_body
+                .find("let eq1_e8")
+                .expect("legacy ddt equation evaluation"),
+        "static scalar values should be emitted before the legacy ddt path:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(assignment_fed_current_source())
@@ -15225,6 +15258,21 @@ module cap(p, n);
     electrical p, n;
     parameter real c = 1e-12 from (0:inf);
     analog I(p, n) <+ ddt(c * V(p, n));
+endmodule
+"#
+}
+
+fn resistor_capacitor_source() -> &'static str {
+    r#"
+module res_cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    parameter real c = 1e-12 from [0:inf);
+    analog begin
+        I(p, n) <+ V(p, n) / r;
+        I(p, n) <+ ddt(c * V(p, n));
+    end
 endmodule
 "#
 }

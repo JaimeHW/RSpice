@@ -100,7 +100,13 @@ impl RustTranspiler {
             RustBackendKind::Auto => match scalar::generate_device(artifact, &self.options) {
                 Ok(device) => Ok(device),
                 Err(error) if error.is_unsupported() => {
-                    device::generate_device(artifact, &self.options)
+                    match device::generate_hybrid_device(artifact, &self.options) {
+                        Ok(device) => Ok(device),
+                        Err(error) if error.is_unsupported() => {
+                            device::generate_device(artifact, &self.options)
+                        }
+                        Err(error) => Err(error),
+                    }
                 }
                 Err(error) => Err(error),
             },
