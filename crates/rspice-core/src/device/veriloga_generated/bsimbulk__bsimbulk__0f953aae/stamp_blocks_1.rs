@@ -5559,7 +5559,7 @@ impl Instance {
 
         s.store_mul_ad(13, A::div(s.ad_value(391), s.ad_value(392)), A::sqrt(A::div(s.ad_value(391), s.ad_value(392))));
 
-        s.store_mul_scaled_ad_rhs(28, 13, p.p108, A::limited_exp(A::sub(A::div_scaled_inputs(s.ad_value(36), 1.0, s.ad_value(394), 2.0), A::div_scaled_inputs(s.ad_value(36), 1.0, s.ad_value(393), 2.0))));
+        s.store_mul_scaled_limited_exp_ad_rhs(28, 13, p.p108, A::sub(A::div_scaled_inputs(s.ad_value(36), 1.0, s.ad_value(394), 2.0), A::div_scaled_inputs(s.ad_value(36), 1.0, s.ad_value(393), 2.0)));
 
         s.b[1308] = (((p.p49 != 0.0) && (p.p909 > 0.0)) && (s.v[38] > 0.0));
         s.v[1308] = if s.b[1308] { 1.0 } else { 0.0 };

@@ -3418,6 +3418,159 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_scaled_unary_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, unary_value: f64, derivative_scale: f64) {
+        let scaled_source_value = self.v[source] * output_scale;
+        self.v[index] = scaled_source_value * unary_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[source][axis] * output_scale * unary_value + scaled_source_value * self.dn[value_source][axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[source][axis] * output_scale * unary_value + scaled_source_value * self.db[value_source][axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_unary_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, unary_value: f64, derivative_scale: f64) {
+        let scaled_source_value = self.v[source] * output_scale;
+        self.v[index] = scaled_source_value * unary_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[source][axis] * output_scale * unary_value + scaled_source_value * value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[source][axis] * output_scale * unary_value + scaled_source_value * value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_powf_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, exponent: f64) {
+        let base = self.v[value_source];
+        let output = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, 1.0, 0.0);
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_powf_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: f64) {
+        let base = value.value;
+        let output = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, 1.0, 0.0);
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_exp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let output = self.v[value_source].exp();
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, output);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_exp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let output = value.value.exp();
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, output);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_one_plus_exp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[value_source]);
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_one_plus_exp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_sqrt_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let output = self.v[value_source].sqrt();
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, 1.0 / (2.0 * output));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_sqrt_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let output = value.value.sqrt();
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, 1.0 / (2.0 * output));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_abs_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_abs_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_offset_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, offset: f64) {
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, self.v[value_source] + offset, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_offset_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
+        let output = value.value + offset;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_cos_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.cos(), -raw.sin());
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_cos_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.cos(), -raw.sin());
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_tanh_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        let cosh = raw.cosh();
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.tanh(), 1.0 / (cosh * cosh));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_tanh_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        let cosh = raw.cosh();
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.tanh(), 1.0 / (cosh * cosh));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limexp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        if raw < 80.0 { let output = raw.exp(); self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, output); } else { self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limexp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        if raw < 80.0 { let output = raw.exp(); self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, output); } else { self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limited_exp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        if raw > 80.0 { self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, 1.804851387e-35, 0.0); } else { let output = raw.exp(); self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, output); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limited_exp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        if raw > 80.0 { self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, 1.804851387e-35, 0.0); } else { let output = raw.exp(); self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, output); }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_exp_lhs(&mut self, index: usize, value_source: usize, source: usize) {
         let unary_value = self.v[value_source].exp();
         self.store_mul_unary_lhs(index, value_source, source, unary_value, unary_value);
@@ -13514,6 +13667,159 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = source_value * unary_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * unary_value + source_value * value.dn[axis] * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * unary_value + source_value * value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_unary_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, unary_value: f64, derivative_scale: f64) {
+        let scaled_source_value = self.v[source] * output_scale;
+        self.v[index] = scaled_source_value * unary_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[source][axis] * output_scale * unary_value + scaled_source_value * self.dn[value_source][axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[source][axis] * output_scale * unary_value + scaled_source_value * self.db[value_source][axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_unary_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, unary_value: f64, derivative_scale: f64) {
+        let scaled_source_value = self.v[source] * output_scale;
+        self.v[index] = scaled_source_value * unary_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[source][axis] * output_scale * unary_value + scaled_source_value * value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[source][axis] * output_scale * unary_value + scaled_source_value * value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_powf_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, exponent: f64) {
+        let base = self.v[value_source];
+        let output = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, 1.0, 0.0);
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_powf_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: f64) {
+        let base = value.value;
+        let output = base.powf(exponent);
+        let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, 1.0, 0.0);
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_exp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let output = self.v[value_source].exp();
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, output);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_exp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let output = value.value.exp();
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, output);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.ln(), 1.0 / raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_one_plus_exp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(self.v[value_source]);
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_ln_one_plus_exp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_sqrt_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let output = self.v[value_source].sqrt();
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, 1.0 / (2.0 * output));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_sqrt_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let output = value.value.sqrt();
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, 1.0 / (2.0 * output));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_abs_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_abs_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_offset_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, offset: f64) {
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, self.v[value_source] + offset, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_offset_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
+        let output = value.value + offset;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, 1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_cos_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.cos(), -raw.sin());
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_cos_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.cos(), -raw.sin());
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_tanh_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        let cosh = raw.cosh();
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.tanh(), 1.0 / (cosh * cosh));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_tanh_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        let cosh = raw.cosh();
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.tanh(), 1.0 / (cosh * cosh));
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limexp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        if raw < 80.0 { let output = raw.exp(); self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, output); } else { self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limexp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        if raw < 80.0 { let output = raw.exp(); self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, output); } else { self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limited_exp_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        if raw > 80.0 { self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, 1.804851387e-35, 0.0); } else { let output = raw.exp(); self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, output); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_limited_exp_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        if raw > 80.0 { self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, 1.804851387e-35, 0.0); } else { let output = raw.exp(); self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, output); }
     }
 
     #[inline]

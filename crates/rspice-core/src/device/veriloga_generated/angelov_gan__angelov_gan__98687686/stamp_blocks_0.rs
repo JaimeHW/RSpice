@@ -768,7 +768,7 @@ impl Instance {
         if s.b[128] {
             s.store_add_ad(132, A::abs(s.ad_value(18)), A::abs(s.ad_value(9)));
             s.store_scaled_offset_ad(133, A::mul3_scaled_output(s.ad_value(75), A::abs(s.ad_value(79)), A::scale_offset(s.ad_value(5), p.p16, 1.0), p.p95), 1.0, (p.p93 + 273.15));
-            s.store_mul_scaled_ad_rhs(131, 15, ((p.p99 * 4.0) * 1.3806503e-23), A::sqrt(A::abs(A::add_scaled_products(A::div(s.ad_value(133), s.ad_value(15)), s.ad_value(132), 1.0, s.ad_value(132), s.ad_value(132), p.p94))));
+            s.store_mul_scaled_sqrt_ad_rhs(131, 15, ((p.p99 * 4.0) * 1.3806503e-23), A::abs(A::add_scaled_products(A::div(s.ad_value(133), s.ad_value(15)), s.ad_value(132), 1.0, s.ad_value(132), s.ad_value(132), p.p94)));
         }
 
         if ((s.b[129] && (!s.b[128])) && (p.p0 != 0.0)) {

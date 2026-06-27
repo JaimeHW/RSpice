@@ -1212,8 +1212,8 @@ impl Instance {
         }
 
         if (!s.b[668]) {
-            s.store_mul_scaled_ad_rhs(243, 0, -1.0, A::offset(s.ad_value(533), (p.p13 * 4e-10)));
-            s.store_mul_scaled_ad_rhs(244, 0, -1.0, A::offset(s.ad_value(534), (p.p13 * 4e-10)));
+            s.store_mul_scaled_offset_rhs(243, 0, -1.0, 533, (p.p13 * 4e-10));
+            s.store_mul_scaled_offset_rhs(244, 0, -1.0, 534, (p.p13 * 4e-10));
         }
 
         s.store_sqrt_scaled_input(0, 217, 0.0033333333333);

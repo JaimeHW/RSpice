@@ -652,8 +652,8 @@ impl Instance {
         if s.b[1748] {
             s.store_mul_scaled_ad_rhs(272, 271, -1.0, A::sub(s.ad_value(158), s.ad_value(513)));
             s.store_scalar(276, 0.0);
-            s.store_mul_scaled_ad_rhs(274, 276, p.p9, A::offset(s.ad_value(518), s.v[101]));
-            s.store_mul_scaled_ad_rhs(275, 276, p.p9, A::offset(s.ad_value(519), s.v[101]));
+            s.store_mul_scaled_offset_rhs(274, 276, p.p9, 518, s.v[101]);
+            s.store_mul_scaled_offset_rhs(275, 276, p.p9, 519, s.v[101]);
             s.store_mul_sub_rhs(277, 274, 158, 157);
             s.store_mul(278, 275, 158);
             s.store_mul_scaled_ad_rhs(279, 276, (p.p19 * p.p9), A::sub(s.ad_value(158), s.ad_value(513)));

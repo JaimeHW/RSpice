@@ -1955,7 +1955,7 @@ impl Instance {
         s.v[338] = assign20980_e28865;
 
         if ((s.b[1222] && s.b[1268]) && s.b[1271]) {
-            s.store_mul_scaled_ad_rhs(254, 227, 2.0, A::ln(A::div_from_scalar((-s.v[139]), s.ad_value(240))));
+            s.store_mul_scaled_ln_ad_rhs(254, 227, 2.0, A::div_from_scalar((-s.v[139]), s.ad_value(240)));
             s.store_mul_sub_rhs(336, 225, 1234, 1269);
             s.store_div_from_scalar_mul_ad(328, 1.0, s.ad_value(225), s.ad_value(238));
             s.store_mul(337, 328, 323);
@@ -2177,7 +2177,7 @@ impl Instance {
         s.v[1283] = if s.b[1283] { 1.0 } else { 0.0 };
 
         if (s.b[1222] && s.b[1283]) {
-            s.store_mul_scaled_ad_rhs(437, 238, -1.0, A::sqrt(s.ad_value(334)));
+            s.store_mul_scaled_sqrt_rhs(437, 238, -1.0, 334);
         }
 
         s.b[1284] = (s.v[1248] > 1e-7);

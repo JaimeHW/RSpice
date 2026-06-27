@@ -1533,7 +1533,7 @@ impl Instance {
 
         s.v[223] = (((4.0 * s.v[95]) * s.v[6]) / s.v[31]);
 
-        s.store_mul_scaled_ad_rhs(224, 115, (0.5 * s.v[223]), A::offset(A::add(s.ad_value(119), s.ad_value(106)), 2.0));
+        s.store_mul_scaled_offset_ad_rhs(224, 115, (0.5 * s.v[223]), A::add(s.ad_value(119), s.ad_value(106)), 2.0);
 
         s.b[545] = (p.p78 == 0.0);
         s.v[545] = if s.b[545] { 1.0 } else { 0.0 };
@@ -3013,7 +3013,7 @@ impl Instance {
     ) {
         s.v[223] = (((4.0 * s.v[95]) * s.v[6]) / s.v[31]);
 
-        s.store_mul_scaled_ad_rhs(224, 115, (0.5 * s.v[223]), A::offset(A::add(s.ad_value(119), s.ad_value(106)), 2.0));
+        s.store_mul_scaled_offset_ad_rhs(224, 115, (0.5 * s.v[223]), A::add(s.ad_value(119), s.ad_value(106)), 2.0);
 
         s.b[545] = (p.p78 == 0.0);
         s.v[545] = if s.b[545] { 1.0 } else { 0.0 };

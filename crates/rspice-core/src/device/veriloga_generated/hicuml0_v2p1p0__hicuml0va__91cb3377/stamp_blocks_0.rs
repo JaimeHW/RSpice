@@ -968,7 +968,7 @@ impl Instance {
         }
 
         if (((!s.b[311]) && (!s.b[314])) && (!s.b[315])) {
-            s.store_mul_scaled_ad_rhs(87, 89, (-0.5), A::sqrt(A::div_from_scalar((-27.0), A::mul(A::square(s.ad_value(88)), s.ad_value(88)))));
+            s.store_mul_scaled_sqrt_ad_rhs(87, 89, (-0.5), A::div_from_scalar((-27.0), A::mul(A::square(s.ad_value(88)), s.ad_value(88))));
             s.store_square(92, 87);
         }
 
@@ -2209,7 +2209,7 @@ impl Instance {
         }
 
         if (((!s.b[311]) && (!s.b[314])) && (!s.b[315])) {
-            s.store_mul_scaled_ad_rhs(87, 89, (-0.5), A::sqrt(A::div_from_scalar((-27.0), A::mul(A::square(s.ad_value(88)), s.ad_value(88)))));
+            s.store_mul_scaled_sqrt_ad_rhs(87, 89, (-0.5), A::div_from_scalar((-27.0), A::mul(A::square(s.ad_value(88)), s.ad_value(88))));
             s.store_square(92, 87);
         }
 

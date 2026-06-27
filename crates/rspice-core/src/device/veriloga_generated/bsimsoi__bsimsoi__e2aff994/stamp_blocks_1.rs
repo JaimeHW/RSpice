@@ -115,8 +115,8 @@ impl Instance {
             s.store_div_scaled_product_indices(174, 556, 171, 1.0, 557, 1.0);
             s.store_limited_exp(169, 174);
             s.store_mul(554, 552, 169);
-            s.store_mul_scaled_ad_rhs(562, 557, p.p925, A::offset(A::mul_offset_rhs(s.ad_value(565), s.ad_value(639), (-1.0)), 1.0));
-            s.store_mul_scaled_ad_rhs(563, 564, p.p925, A::offset(A::mul_offset_rhs(s.ad_value(566), s.ad_value(639), (-1.0)), 1.0));
+            s.store_mul_scaled_offset_ad_rhs(562, 557, p.p925, A::mul_offset_rhs(s.ad_value(565), s.ad_value(639), (-1.0)), 1.0);
+            s.store_mul_scaled_offset_ad_rhs(563, 564, p.p925, A::mul_offset_rhs(s.ad_value(566), s.ad_value(639), (-1.0)), 1.0);
             s.store_div(167, 498, 562);
             s.store_limited_exp(177, 167);
         }
@@ -154,8 +154,8 @@ impl Instance {
             s.store_div_scaled_product_indices(174, 556, 171, 1.0, 557, 1.0);
             s.store_limited_exp(169, 174);
             s.store_mul(555, 553, 169);
-            s.store_mul_scaled_ad_rhs(562, 557, p.p925, A::offset(A::mul_offset_rhs(s.ad_value(565), s.ad_value(639), (-1.0)), 1.0));
-            s.store_mul_scaled_ad_rhs(563, 564, p.p925, A::offset(A::mul_offset_rhs(s.ad_value(566), s.ad_value(639), (-1.0)), 1.0));
+            s.store_mul_scaled_offset_ad_rhs(562, 557, p.p925, A::mul_offset_rhs(s.ad_value(565), s.ad_value(639), (-1.0)), 1.0);
+            s.store_mul_scaled_offset_ad_rhs(563, 564, p.p925, A::mul_offset_rhs(s.ad_value(566), s.ad_value(639), (-1.0)), 1.0);
             s.store_div(167, 499, 562);
             s.store_limited_exp(177, 167);
         }
@@ -3216,7 +3216,7 @@ impl Instance {
 
         if ((s.b[1620] && s.b[1799]) && s.b[1802]) {
             s.store_offset_mul_offset_rhs(170, 280, 169, 1.0, s.v[184]);
-            s.store_mul_scaled_ad_rhs(278, 269, -1.0, A::ln(A::max_with_scalar(A::div_from_scalar(s.v[184], s.ad_value(170)), 1e-38)));
+            s.store_mul_scaled_ln_ad_rhs(278, 269, -1.0, A::max_with_scalar(A::div_from_scalar(s.v[184], s.ad_value(170)), 1e-38));
         }
 
         if ((s.b[1620] && s.b[1799]) && (!s.b[1802])) {

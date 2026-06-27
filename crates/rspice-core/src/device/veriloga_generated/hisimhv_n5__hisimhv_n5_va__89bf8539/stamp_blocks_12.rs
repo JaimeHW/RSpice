@@ -295,7 +295,7 @@ impl Instance {
         }
 
         if (((s.b[3109] && s.b[3110]) && (!s.b[3137])) && (!s.b[3156])) {
-            s.store_mul_scaled_ad_rhs(336, 116, 0.7071067811865475, A::sqrt(A::sub_from_scalar(1.0, A::scale(s.ad_value(116), 0.3333333333333333))));
+            s.store_mul_scaled_sqrt_ad_rhs(336, 116, 0.7071067811865475, A::sub_from_scalar(1.0, A::scale(s.ad_value(116), 0.3333333333333333)));
         }
 
         if ((s.b[3109] && s.b[3110]) && (!s.b[3137])) {
@@ -2164,7 +2164,7 @@ impl Instance {
 
         s.store_sqrt_mul(912, 913, 911);
 
-        s.store_mul_scaled_ad_rhs(934, 155, s.v[906], A::ln(A::div_from_scalar(s.v[903], s.ad_value(907))));
+        s.store_mul_scaled_ln_ad_rhs(934, 155, s.v[906], A::div_from_scalar(s.v[903], s.ad_value(907)));
 
         s.store_mul_scaled_ad_rhs(935, 155, s.v[906], A::add(A::ln(A::div_from_scalar(s.v[903], s.ad_value(907))), A::div_from_scalar(p.p545, s.ad_value(912))));
 
@@ -2195,7 +2195,7 @@ impl Instance {
         }
 
         if (s.b[3299] && (!s.b[3301])) {
-            s.store_mul_scaled_ad_rhs(941, 937, p.p541, A::exp(A::mul3_scaled_output(A::sub(s.ad_value(860), s.ad_value(934)), A::sub(s.ad_value(860), s.ad_value(934)), A::exp_scaled_input(A::ln(A::div_from_scalar(1.0, s.ad_value(676))), p.p548), (-p.p542))));
+            s.store_mul_scaled_exp_ad_rhs(941, 937, p.p541, A::mul3_scaled_output(A::sub(s.ad_value(860), s.ad_value(934)), A::sub(s.ad_value(860), s.ad_value(934)), A::exp_scaled_input(A::ln(A::div_from_scalar(1.0, s.ad_value(676))), p.p548), (-p.p542)));
         }
 
         if s.b[3299] {
@@ -2233,7 +2233,7 @@ impl Instance {
         }
 
         if (s.b[3299] && (!s.b[3303])) {
-            s.store_mul_scaled_ad_rhs(942, 938, p.p541, A::exp(A::mul3_scaled_output(A::sub(s.ad_value(860), s.ad_value(935)), A::sub(s.ad_value(860), s.ad_value(935)), A::exp_scaled_input(A::ln(A::div_from_scalar(1.0, s.ad_value(676))), p.p548), (-p.p542))));
+            s.store_mul_scaled_exp_ad_rhs(942, 938, p.p541, A::mul3_scaled_output(A::sub(s.ad_value(860), s.ad_value(935)), A::sub(s.ad_value(860), s.ad_value(935)), A::exp_scaled_input(A::ln(A::div_from_scalar(1.0, s.ad_value(676))), p.p548), (-p.p542)));
         }
 
         if s.b[3299] {

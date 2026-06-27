@@ -3603,7 +3603,7 @@ impl Instance {
             }
         });
 
-        s.store_mul_scaled_ad_rhs(834, 780, 1.0 / (s.v[753]), A::sqrt(A::abs(s.ad_value(479))));
+        s.store_mul_scaled_sqrt_ad_rhs(834, 780, 1.0 / (s.v[753]), A::abs(s.ad_value(479)));
 
         s.b[934] = (!param_given[341]);
         s.v[934] = if s.b[934] { 1.0 } else { 0.0 };

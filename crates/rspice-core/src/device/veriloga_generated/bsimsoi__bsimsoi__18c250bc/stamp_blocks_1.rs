@@ -2679,7 +2679,7 @@ impl Instance {
             }
         }, s.ad_value(530)));
 
-        s.store_mul_scaled_ad_rhs(482, 419, 1.0 / (s.v[392]), A::sqrt(A::abs(s.ad_value(109))));
+        s.store_mul_scaled_sqrt_ad_rhs(482, 419, 1.0 / (s.v[392]), A::abs(s.ad_value(109)));
 
         s.b[588] = (!param_given[354]);
         s.v[588] = if s.b[588] { 1.0 } else { 0.0 };
