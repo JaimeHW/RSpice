@@ -5836,7 +5836,7 @@ impl Instance {
         if (!s.b[1540]) {
             s.store_mul3_lhs(1404, 1182, 1474, 1158);
             s.store_sqrt_offset_scaled_input(1423, 738, 1.0 / (s.v[1227]), 1.0);
-            s.store_exp_ad(1179, A::mul_scaled_lhs(s.ad_value(743), 2.0, s.ad_value(1158)));
+            s.store_exp_mul_scaled_lhs_indices(1179, 743, 2.0, 1158);
             s.store_div_scaled_product_offset_denominator(1425, s.ad_value(752), A::offset(s.ad_value(1179), (-1.0)), 1.0, s.ad_value(1179), 1.0, 1.0);
         }
 

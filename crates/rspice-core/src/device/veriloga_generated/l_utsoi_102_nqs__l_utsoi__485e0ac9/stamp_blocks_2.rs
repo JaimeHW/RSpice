@@ -1435,7 +1435,7 @@ impl Instance {
 
         s.store_mul(275, 64, 227);
 
-        s.store_exp_ad(304, A::mul_scaled_lhs(s.ad_value(76), -1.0, s.ad_value(295)));
+        s.store_exp_mul_scaled_lhs_indices(304, 76, -1.0, 295);
 
         s.store_mul(68, 201, 304);
 
@@ -1447,7 +1447,7 @@ impl Instance {
 
         s.store_mul(72, 205, 304);
 
-        s.store_exp_ad(304, A::mul_scaled_lhs(s.ad_value(77), -1.0, s.ad_value(295)));
+        s.store_exp_mul_scaled_lhs_indices(304, 77, -1.0, 295);
 
         s.store_div_from_scalar(276, 1.0, 87);
 
@@ -1664,13 +1664,13 @@ impl Instance {
             s.store_mul3_lhs(147, 200, 303, 296);
             s.store_mul(274, 147, 226);
             s.store_mul(275, 64, 227);
-            s.store_exp_ad(304, A::mul_scaled_lhs(s.ad_value(76), -1.0, s.ad_value(295)));
+            s.store_exp_mul_scaled_lhs_indices(304, 76, -1.0, 295);
             s.store_mul(68, 201, 304);
             s.store_mul(69, 202, 304);
             s.store_mul(70, 203, 304);
             s.store_mul(71, 204, 304);
             s.store_mul(72, 205, 304);
-            s.store_exp_ad(304, A::mul_scaled_lhs(s.ad_value(77), -1.0, s.ad_value(295)));
+            s.store_exp_mul_scaled_lhs_indices(304, 77, -1.0, 295);
             s.store_scale(283, 233, 0.5);
             s.store_mul(284, 75, 226);
             s.store_mul(285, 75, 223);

@@ -1037,13 +1037,13 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((!s.b[1454]) && (!s.b[1455])) {
-            s.store_exp_ad(858, A::mul_scaled_lhs(s.ad_value(816), -1.0, {
+            s.store_exp_mul_scaled_lhs_mixed_ia(858, 816, -1.0, {
                 if (s.v[811] > 1e-38) {
                     A::ln(s.ad_value(811))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }));
+            });
         }
 
         if (!s.b[1454]) {
@@ -1084,13 +1084,13 @@ impl Instance {
         }
 
         if ((!s.b[1454]) && (!s.b[1457])) {
-            s.store_exp_ad(858, A::mul_scaled_lhs(s.ad_value(816), -1.0, {
+            s.store_exp_mul_scaled_lhs_mixed_ia(858, 816, -1.0, {
                 if (s.v[811] > 1e-38) {
                     A::ln(s.ad_value(811))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }));
+            });
         }
 
         if (!s.b[1454]) {
@@ -4974,7 +4974,7 @@ impl Instance {
         if (!s.b[1202]) {
             s.store_mul3_lhs(1070, 846, 1141, 822);
             s.store_sqrt_offset_scaled_input(1089, 377, 1.0 / (s.v[892]), 1.0);
-            s.store_exp_ad(843, A::mul_scaled_lhs(s.ad_value(382), 2.0, s.ad_value(822)));
+            s.store_exp_mul_scaled_lhs_indices(843, 382, 2.0, 822);
             s.store_div_scaled_product_offset_denominator(1091, s.ad_value(391), A::offset(s.ad_value(843), (-1.0)), 1.0, s.ad_value(843), 1.0, 1.0);
         }
 
@@ -5439,7 +5439,7 @@ impl Instance {
 
         s.store_add_scaled_product_right_ad(963, 828, 1.0, 852, A::sub(s.ad_value(962), s.ad_value(841)), (-1.0));
 
-        s.store_exp_ad(843, A::mul_scaled_lhs(s.ad_value(382), 2.0, s.ad_value(822)));
+        s.store_exp_mul_scaled_lhs_indices(843, 382, 2.0, 822);
 
         s.store_div_scaled_product_offset_denominator(1091, s.ad_value(391), A::offset(s.ad_value(843), (-1.0)), 1.0, s.ad_value(843), 1.0, 1.0);
 
@@ -5617,7 +5617,7 @@ impl Instance {
 
         s.store_add_scaled_product_right_ad(1072, 1054, 1.0, 852, A::sub(s.ad_value(1045), s.ad_value(1044)), (-1.0));
 
-        s.store_exp_ad(843, A::mul_scaled_lhs(s.ad_value(382), 2.0, s.ad_value(822)));
+        s.store_exp_mul_scaled_lhs_indices(843, 382, 2.0, 822);
 
         s.store_div_scaled_product_offset_denominator(1091, s.ad_value(391), A::offset(s.ad_value(843), (-1.0)), 1.0, s.ad_value(843), 1.0, 1.0);
 

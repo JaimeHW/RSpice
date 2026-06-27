@@ -2534,13 +2534,13 @@ impl Instance {
         }
 
         if ((!s.b[1454]) && (!s.b[1455])) {
-            s.store_exp_ad(858, A::mul_scaled_lhs(s.ad_value(816), -1.0, {
+            s.store_exp_mul_scaled_lhs_mixed_ia(858, 816, -1.0, {
                 if (s.v[811] > 1e-38) {
                     A::ln(s.ad_value(811))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }));
+            });
         }
 
         if (!s.b[1454]) {
@@ -2581,13 +2581,13 @@ impl Instance {
         }
 
         if ((!s.b[1454]) && (!s.b[1457])) {
-            s.store_exp_ad(858, A::mul_scaled_lhs(s.ad_value(816), -1.0, {
+            s.store_exp_mul_scaled_lhs_mixed_ia(858, 816, -1.0, {
                 if (s.v[811] > 1e-38) {
                     A::ln(s.ad_value(811))
                 } else {
                     A::neg(A::constant(87.49823353377374))
                 }
-            }));
+            });
         }
 
     }

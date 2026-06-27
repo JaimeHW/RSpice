@@ -1229,7 +1229,7 @@ impl Instance {
         }
 
         if (s.b[1310] && (!s.b[1311])) {
-            s.store_exp_ad(2, A::mul_scaled_lhs(s.ad_value(774), -1.0, s.ad_value(778)));
+            s.store_exp_mul_scaled_lhs_indices(2, 774, -1.0, 778);
             s.store_exp_ad(3, A::mul(A::sub(s.ad_value(775), A::div_from_scalar(1.0, s.ad_value(776))), s.ad_value(778)));
             s.store_div_scaled_product_right_ad(4, 777, A::sub(s.ad_value(2), s.ad_value(3)), 1.0, 778, 2.0);
         }

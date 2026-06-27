@@ -1786,6 +1786,22 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_components(&mut self, index: usize, left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], scale: f64, right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let scaled_left_value = left_value * scale;
+        let output = (scaled_left_value * right_value).exp();
+        let left_derivative_scale = output * scale * right_value;
+        let right_derivative_scale = output * scaled_left_value;
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_exp_mul_scaled_lhs_components(index, left.value, left.dn, left.db, scale, right.value, right.dn, right.db);
+    }
+
+    #[inline]
     pub(crate) fn store_ln_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         self.v[index] = value.value.ln();
         let derivative_scale = 1.0 / value.value;
@@ -9086,6 +9102,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_right_dn = self.dn[denominator_right];
         let denominator_right_db = self.db[denominator_right];
         self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left_value, denominator_left_dn, denominator_left_db, denominator_left_scale, denominator_right_value, denominator_right_dn, denominator_right_db, denominator_right_scale, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_exp_mul_scaled_lhs_components(index, left.value, left.dn, left.db, scale, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_mixed_ia(&mut self, index: usize, left: usize, scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_exp_mul_scaled_lhs_components(index, left_value, left_dn, left_db, scale, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_indices(&mut self, index: usize, left: usize, scale: f64, right: usize) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_exp_mul_scaled_lhs_components(index, left_value, left_dn, left_db, scale, right_value, right_dn, right_db);
     }
 
 
@@ -11674,6 +11720,22 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_components(&mut self, index: usize, left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], scale: f64, right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let scaled_left_value = left_value * scale;
+        let output = (scaled_left_value * right_value).exp();
+        let left_derivative_scale = output * scale * right_value;
+        let right_derivative_scale = output * scaled_left_value;
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_exp_mul_scaled_lhs_components(index, left.value, left.dn, left.db, scale, right.value, right.dn, right.db);
+    }
+
+    #[inline]
     pub(crate) fn store_ln_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         self.v[index] = value.value.ln();
         let derivative_scale = 1.0 / value.value;
@@ -18974,6 +19036,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let denominator_right_dn = self.dn[denominator_right];
         let denominator_right_db = self.db[denominator_right];
         self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left_value, denominator_left_dn, denominator_left_db, denominator_left_scale, denominator_right_value, denominator_right_dn, denominator_right_db, denominator_right_scale, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_exp_mul_scaled_lhs_components(index, left.value, left.dn, left.db, scale, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_mixed_ia(&mut self, index: usize, left: usize, scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_exp_mul_scaled_lhs_components(index, left_value, left_dn, left_db, scale, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_exp_mul_scaled_lhs_indices(&mut self, index: usize, left: usize, scale: f64, right: usize) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_exp_mul_scaled_lhs_components(index, left_value, left_dn, left_db, scale, right_value, right_dn, right_db);
     }
 
 
