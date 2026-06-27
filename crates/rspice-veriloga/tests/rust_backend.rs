@@ -726,6 +726,53 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
 }
 
 #[test]
+fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(tiny_resistor_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile simple resistor with scalar backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("let v0: f64 = ctx.node_voltage(nodes[0]);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("let v1: f64 = ctx.node_voltage(nodes[1]);"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("let v4: f64 = (v2 / v3);"), "{stamp}");
+    assert!(stamp.contains("= (v5 / v3);"), "{stamp}");
+    assert!(stamp.contains("= (v6 / v3);"), "{stamp}");
+    assert!(stamp.contains("let d4_dn0: f64 = v"), "{stamp}");
+    assert!(stamp.contains("let d4_dn1: f64 = v"), "{stamp}");
+    assert!(!stamp.contains("(v3 * v3)"), "{stamp}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("multiplicity * (v4)"), "{stamp}");
+    assert!(stamp.contains("multiplicity * (d4_dn0)"), "{stamp}");
+    assert!(stamp.contains("multiplicity * (d4_dn1)"), "{stamp}");
+    assert!(!stamp.contains("GenericAdValue"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("s."), "{stamp}");
+    assert!(!stamp.contains("GeneratedDerivative"), "{stamp}");
+}
+
+#[test]
 fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(constant_current_source())

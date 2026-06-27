@@ -92,13 +92,13 @@
 
 ## Phase 6: Scalar Rust Emitter
 
-- [ ] Add a new Rust backend emitter beside the current backend.
+- [x] Add a new Rust backend emitter beside the current backend.
   - Emit `f64` locals for primal values.
   - Emit sparse derivative locals for Jacobian lanes.
   - Emit direct RHS and matrix stamp updates.
   - Partition large schedules deterministically.
 
-- [ ] Add an explicit backend selection option.
+- [x] Add an explicit backend selection option.
   - Default remains current backend until scalar coverage is broad enough.
   - Tests can force scalar backend for supported fixtures.
 
@@ -129,7 +129,7 @@
 
 ## Checkpoints
 
-- [ ] `cargo test -p rspice-veriloga canonical_ir --test canonical_ir`
+- [x] `cargo test -p rspice-veriloga canonical_ir --test canonical_ir`
 - [ ] `cargo test -p rspice-veriloga`
 - [ ] Generated runtime tests for scalar-enabled fixtures.
 - [ ] Full relevant workspace tests before large generated-device commits.

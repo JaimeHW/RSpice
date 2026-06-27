@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::{
     BranchId, BranchUnknownId, CompilerPhase, EquationId, ExprId, HirAnalogOperator, HirExprKind,
@@ -521,7 +521,7 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> BTreeMap<DerivativeLane, ValueId> {
         let left_derivatives = self.derivative_map(left);
         let right_derivatives = self.derivative_map(right);
-        let mut lanes: HashSet<_> = left_derivatives.keys().copied().collect();
+        let mut lanes: BTreeSet<_> = left_derivatives.keys().copied().collect();
         lanes.extend(right_derivatives.keys().copied());
 
         let mut derivatives = BTreeMap::new();
@@ -548,7 +548,7 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> BTreeMap<DerivativeLane, ValueId> {
         let left_derivatives = self.derivative_map(left);
         let right_derivatives = self.derivative_map(right);
-        let mut lanes: HashSet<_> = left_derivatives.keys().copied().collect();
+        let mut lanes: BTreeSet<_> = left_derivatives.keys().copied().collect();
         lanes.extend(right_derivatives.keys().copied());
 
         let mut derivatives = BTreeMap::new();
@@ -582,7 +582,7 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> BTreeMap<DerivativeLane, ValueId> {
         let left_derivatives = self.derivative_map(left);
         let right_derivatives = self.derivative_map(right);
-        let mut lanes: HashSet<_> = left_derivatives.keys().copied().collect();
+        let mut lanes: BTreeSet<_> = left_derivatives.keys().copied().collect();
         lanes.extend(right_derivatives.keys().copied());
 
         let mut derivatives = BTreeMap::new();
@@ -599,7 +599,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                     self.push_binary_value(OptBinaryOp::Sub, left_term, right_term)
                 }
                 (Some(left_derivative), None) => {
-                    self.push_binary_value(OptBinaryOp::Mul, left_derivative, right)
+                    derivatives.insert(
+                        lane,
+                        self.push_binary_value(OptBinaryOp::Div, left_derivative, right),
+                    );
+                    continue;
                 }
                 (None, Some(right_derivative)) => {
                     let right_term =
@@ -630,7 +634,7 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> BTreeMap<DerivativeLane, ValueId> {
         let then_derivatives = self.derivative_map(then_value);
         let else_derivatives = self.derivative_map(else_value);
-        let mut lanes: HashSet<_> = then_derivatives.keys().copied().collect();
+        let mut lanes: BTreeSet<_> = then_derivatives.keys().copied().collect();
         lanes.extend(else_derivatives.keys().copied());
 
         let mut derivatives = BTreeMap::new();

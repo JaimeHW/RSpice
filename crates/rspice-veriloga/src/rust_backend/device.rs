@@ -4326,7 +4326,7 @@ fn is_noise_name(name: &str) -> bool {
     )
 }
 
-fn generate_mod_file() -> String {
+pub(super) fn generate_mod_file() -> String {
     [
         "pub mod state;",
         "mod stamp;",
@@ -4337,7 +4337,7 @@ fn generate_mod_file() -> String {
     .join("\n")
 }
 
-fn generate_state_file(
+pub(super) fn generate_state_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
     parameter_fields: &HashMap<String, String>,

@@ -6,6 +6,7 @@ mod files;
 mod manifest;
 mod names;
 mod registry;
+mod scalar;
 
 pub use device::render_runtime_support_module;
 pub use discover::{
@@ -54,11 +55,29 @@ impl Default for RustTranspileOptions {
 #[derive(Debug, Clone, Default)]
 pub struct RustTranspiler {
     options: RustTranspileOptions,
+    backend: RustBackendKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum RustBackendKind {
+    #[default]
+    Legacy,
+    ScalarOptIr,
 }
 
 impl RustTranspiler {
     pub fn new(options: RustTranspileOptions) -> Self {
-        Self { options }
+        Self {
+            options,
+            backend: RustBackendKind::Legacy,
+        }
+    }
+
+    pub fn new_scalar(options: RustTranspileOptions) -> Self {
+        Self {
+            options,
+            backend: RustBackendKind::ScalarOptIr,
+        }
     }
 
     pub fn options(&self) -> &RustTranspileOptions {
@@ -69,6 +88,9 @@ impl RustTranspiler {
         &self,
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDevice, RustBackendError> {
-        device::generate_device(artifact, &self.options)
+        match self.backend {
+            RustBackendKind::Legacy => device::generate_device(artifact, &self.options),
+            RustBackendKind::ScalarOptIr => scalar::generate_device(artifact, &self.options),
+        }
     }
 }
