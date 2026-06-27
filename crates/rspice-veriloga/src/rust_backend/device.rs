@@ -1679,9 +1679,19 @@ fn stamp() {
         for helper in [
             "fn store_mul_add_scaled_inputs_rhs",
             "fn store_offset_add_scaled_inputs",
+            "fn store_offset_add_scaled_inputs_indices",
+            "fn store_offset_add_scaled_inputs_mixed_ia",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            support.contains("self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_scale + self.node_derivatives[right][axis] * right_scale;"),
+            "{support}"
+        );
+        assert!(
+            !support.contains("fn store_offset_add_scaled_inputs_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -1689,6 +1699,8 @@ fn stamp() {
     let assign61_ad_e20: AdValue = AdValue::mul(AdValue::add_scaled_inputs(AdValue::div_from_scalar(1.0, scratch.ad_value(5)), 1.0, scratch.ad_value(6), params.right_scale), scratch.ad_value(7));
     scratch.store_ad_value(61, assign61_ad_e20);
     scratch.store_ad_value(62, AdValue::offset(AdValue::add_scaled_inputs(scratch.ad_value(8), params.left_scale, AdValue::sqrt(scratch.ad_value(9)), 0.5), params.bias));
+    scratch.store_ad_value(63, AdValue::offset(AdValue::add_scaled_inputs(scratch.ad_value(8), params.left_scale, scratch.ad_value(9), params.right_scale), params.bias));
+    scratch.store_ad_value(64, AdValue::sub_from_scalar(params.scalar, AdValue::add_scaled_inputs(scratch.ad_value(10), params.left_scale, scratch.ad_value(11), params.right_scale)));
 }
 "#;
 
@@ -1703,7 +1715,15 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_offset_add_scaled_inputs(62, s.ad_value(8), p.left_scale, A::sqrt(s.ad_value(9)), 0.5, p.bias);"),
+            compact.contains("s.store_offset_add_scaled_inputs_mixed_ia(62, 8, p.left_scale, A::sqrt(s.ad_value(9)), 0.5, p.bias);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_offset_add_scaled_inputs_indices(63, 8, p.left_scale, 9, p.right_scale, p.bias);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_offset_add_scaled_inputs_indices(64, 10, (-p.left_scale), 11, (-p.right_scale), p.scalar);"),
             "{compact}"
         );
         assert!(!compact.contains("A::add_scaled_inputs("), "{compact}");
@@ -11494,6 +11514,11 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_mixed_add_scaled_inputs_product_helper(mask));
         out.push_str(&generate_mixed_add_scaled_products_helper(mask));
     }
+    for mask in index_or_mixed_masks(2) {
+        out.push_str(&generate_index_or_mixed_offset_add_scaled_inputs_helper(
+            &mask,
+        ));
+    }
     for mask in index_or_mixed_masks(6) {
         out.push_str(&generate_index_or_mixed_add_scaled_inputs_products_helper(
             &mask,
@@ -11655,6 +11680,53 @@ fn generate_mixed_add_scaled_inputs_product_helper(mask: &str) -> String {
         product_left_ty = mixed_helper_type(mask, 2),
         product_right_ty = mixed_helper_type(mask, 3),
     )
+}
+
+fn generate_index_or_mixed_offset_add_scaled_inputs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_offset_add_scaled_inputs", mask);
+    let left_value = index_or_mixed_value_expr(mask, 0, "left");
+    let left_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "left");
+    let left_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "left");
+    let right_value = index_or_mixed_value_expr(mask, 1, "right");
+    let right_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "right");
+    let right_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64, offset: f64) {{
+        self.values[index] = {left_value} * left_scale + {right_value} * right_scale + offset;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_scale + {right_node_derivative} * right_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_scale + {right_branch_derivative} * right_scale; }}
+    }}
+"#,
+        left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn index_or_mixed_value_expr(mask: &str, index: usize, operand: &str) -> String {
+    if mask.as_bytes()[index] == b'i' {
+        format!("self.values[{operand}]")
+    } else {
+        format!("{operand}.value")
+    }
+}
+
+fn index_or_mixed_node_derivative_expr(mask: &str, index: usize, operand: &str) -> String {
+    if mask.as_bytes()[index] == b'i' {
+        format!("self.node_derivatives[{operand}][axis]")
+    } else {
+        format!("{operand}.node_derivatives[axis]")
+    }
+}
+
+fn index_or_mixed_branch_derivative_expr(mask: &str, index: usize, operand: &str) -> String {
+    if mask.as_bytes()[index] == b'i' {
+        format!("self.branch_derivatives[{operand}][axis]")
+    } else {
+        format!("{operand}.branch_derivatives[axis]")
+    }
 }
 
 fn generate_index_or_mixed_add_scaled_inputs_products_helper(mask: &str) -> String {
@@ -15803,6 +15875,11 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_offset_add_scaled_inputs_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) =
+        compact_sub_from_scalar_add_scaled_inputs_store_helper_call(target_index, value)
+    {
+        return Some(line);
+    }
     if let Some(line) = compact_offset_sub_scaled_inputs_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -18861,10 +18938,72 @@ fn compact_offset_add_scaled_inputs_store_helper_call(
     }
 
     let (left, left_scale, right, right_scale) = compact_add_scaled_inputs_args(args[0])?;
-    Some(format!(
-        "scratch.store_offset_add_scaled_inputs({target_index}, {left}, {left_scale}, {right}, {right_scale}, {});",
-        args[1]
-    ))
+    compact_offset_add_scaled_inputs_helper_line(
+        target_index,
+        left,
+        left_scale,
+        right,
+        right_scale,
+        args[1],
+    )
+}
+
+fn compact_sub_from_scalar_add_scaled_inputs_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "sub_from_scalar")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    let (left, left_scale, right, right_scale) = compact_add_scaled_inputs_args(args[1])?;
+    let negated_left_scale = compact_scalar_negate(left_scale);
+    let negated_right_scale = compact_scalar_negate(right_scale);
+    compact_offset_add_scaled_inputs_helper_line(
+        target_index,
+        left,
+        &negated_left_scale,
+        right,
+        &negated_right_scale,
+        args[0],
+    )
+}
+
+fn compact_offset_add_scaled_inputs_helper_line(
+    target_index: usize,
+    left: &str,
+    left_scale: &str,
+    right: &str,
+    right_scale: &str,
+    offset: &str,
+) -> Option<String> {
+    let left_index = compact_scratch_ad_value_index(left);
+    let right_index = compact_scratch_ad_value_index(right);
+    match (left_index, right_index) {
+        (Some(left), Some(right)) => Some(format!(
+            "scratch.store_offset_add_scaled_inputs_indices({target_index}, {left}, {left_scale}, {right}, {right_scale}, {offset});"
+        )),
+        (Some(left), None) => {
+            let right = compact_scratch_or_non_atomic_ad_arg(right)?;
+            Some(format!(
+                "scratch.store_offset_add_scaled_inputs_mixed_ia({target_index}, {left}, {left_scale}, {right}, {right_scale}, {offset});"
+            ))
+        }
+        (None, Some(right)) => {
+            let left = compact_scratch_or_non_atomic_ad_arg(left)?;
+            Some(format!(
+                "scratch.store_offset_add_scaled_inputs_mixed_ai({target_index}, {left}, {left_scale}, {right}, {right_scale}, {offset});"
+            ))
+        }
+        (None, None) => {
+            let left = compact_scratch_or_non_atomic_ad_arg(left)?;
+            let right = compact_scratch_or_non_atomic_ad_arg(right)?;
+            Some(format!(
+                "scratch.store_offset_add_scaled_inputs({target_index}, {left}, {left_scale}, {right}, {right_scale}, {offset});"
+            ))
+        }
+    }
 }
 
 fn compact_offset_sub_scaled_inputs_store_helper_call(
