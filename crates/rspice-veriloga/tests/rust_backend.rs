@@ -830,6 +830,35 @@ fn scalar_rust_backend_emits_native_math_for_sine_current() {
 }
 
 #[test]
+fn scalar_rust_backend_emits_native_inverse_math_intrinsics() {
+    for (source, expected_call) in [
+        (atan_intrinsic_source(), ".atan()"),
+        (asinh_intrinsic_source(), ".asinh()"),
+    ] {
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .expect("canonical IR");
+        let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+            runtime_path: "crate::runtime".to_string(),
+        })
+        .transpile(&artifact)
+        .expect("transpile inverse math current with scalar backend");
+        let stamp = generated
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert!(stamp.contains(expected_call), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+        assert!(!stamp.contains("Scratch"), "{stamp}");
+        assert_generated_rust_compiles(&generated);
+    }
+}
+
+#[test]
 fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(constant_current_source())

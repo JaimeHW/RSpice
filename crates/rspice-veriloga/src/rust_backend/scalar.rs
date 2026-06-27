@@ -284,6 +284,8 @@ fn emit_unary_expr(op: OptUnaryOp, input: ValueId) -> String {
         OptUnaryOp::Sinh => format!("{input}.sinh()"),
         OptUnaryOp::Cosh => format!("{input}.cosh()"),
         OptUnaryOp::Tanh => format!("{input}.tanh()"),
+        OptUnaryOp::Atan => format!("{input}.atan()"),
+        OptUnaryOp::Asinh => format!("{input}.asinh()"),
     }
 }
 

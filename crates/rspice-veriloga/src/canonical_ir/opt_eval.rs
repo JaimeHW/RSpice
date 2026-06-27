@@ -206,6 +206,8 @@ fn evaluate_unary(
         OptUnaryOp::Sinh => Ok(OptEvalValue::Real(real_value(values, input)?.sinh())),
         OptUnaryOp::Cosh => Ok(OptEvalValue::Real(real_value(values, input)?.cosh())),
         OptUnaryOp::Tanh => Ok(OptEvalValue::Real(real_value(values, input)?.tanh())),
+        OptUnaryOp::Atan => Ok(OptEvalValue::Real(real_value(values, input)?.atan())),
+        OptUnaryOp::Asinh => Ok(OptEvalValue::Real(real_value(values, input)?.asinh())),
     })();
 
     result.map_err(|error| remap_type_mismatch(owner, error))

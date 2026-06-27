@@ -256,6 +256,26 @@ endmodule
 "#
 }
 
+fn atan_current_source() -> &'static str {
+    r#"
+module atan_i(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ atan(V(p, n));
+endmodule
+"#
+}
+
+fn asinh_current_source() -> &'static str {
+    r#"
+module asinh_i(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ asinh(V(p, n));
+endmodule
+"#
+}
+
 fn named_branch_potential_source() -> &'static str {
     r#"
 module branch_potential(p, n);
@@ -869,6 +889,62 @@ fn opt_lowering_adds_sparse_derivatives_for_sine_current() {
             .abs()
             < 1.0e-15
     );
+}
+
+#[test]
+fn opt_lowering_adds_sparse_derivatives_for_inverse_math_currents() {
+    let cases = [
+        (
+            atan_current_source(),
+            "atan_i",
+            0.5_f64.atan(),
+            1.0 / (1.0 + 0.5_f64 * 0.5_f64),
+        ),
+        (
+            asinh_current_source(),
+            "asinh_i",
+            0.5_f64.asinh(),
+            1.0 / (1.0 + 0.5_f64 * 0.5_f64).sqrt(),
+        ),
+    ];
+
+    for (source, module, expected_value, expected_derivative) in cases {
+        let (_, _, _, opt) = lower_fixture_parts(source, module);
+        let newton = opt
+            .schedules
+            .iter()
+            .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+            .expect("NewtonIteration schedule");
+        let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+            panic!("inverse math current should have a scalar root: {newton:?}");
+        };
+
+        let snapshot = opt
+            .evaluate(&OptEvalInputs {
+                parameters: Vec::new(),
+                node_potentials: vec![0.75, 0.25],
+                branch_flows: Vec::new(),
+            })
+            .expect("evaluate inverse math scalar graph");
+
+        assert!((snapshot.real(*root).expect("root value") - expected_value).abs() < 1.0e-15);
+        assert!(
+            (snapshot
+                .derivative(*root, DerivativeLane::node(NodeId::new(0)))
+                .expect("positive node derivative")
+                - expected_derivative)
+                .abs()
+                < 1.0e-15
+        );
+        assert!(
+            (snapshot
+                .derivative(*root, DerivativeLane::node(NodeId::new(1)))
+                .expect("negative node derivative")
+                + expected_derivative)
+                .abs()
+                < 1.0e-15
+        );
+    }
 }
 
 #[test]
