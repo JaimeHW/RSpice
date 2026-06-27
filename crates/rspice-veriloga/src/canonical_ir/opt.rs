@@ -1209,7 +1209,10 @@ fn unary_op(op: &str) -> Option<OptUnaryOp> {
 fn supported_assignment_value_type(value_type: CanonicalValueType) -> bool {
     matches!(
         value_type,
-        CanonicalValueType::Real | CanonicalValueType::Integer | CanonicalValueType::Boolean
+        CanonicalValueType::Real
+            | CanonicalValueType::Integer
+            | CanonicalValueType::Boolean
+            | CanonicalValueType::NatureAccess
     )
 }
 

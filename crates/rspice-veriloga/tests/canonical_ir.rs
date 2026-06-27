@@ -207,6 +207,56 @@ endmodule
 "#
 }
 
+fn mixed_dynamic_assignment_source() -> &'static str {
+    r#"
+module mixed_dynamic_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    real x, q;
+    analog begin
+        x = V(p, n) + 3.0;
+        I(p, n) <+ x;
+        q = c * V(p, n);
+        I(p, n) <+ ddt(q);
+    end
+endmodule
+"#
+}
+
+fn chunked_dynamic_assignment_source(count: usize) -> String {
+    assert!(count > 0);
+    let mut source = String::from(
+        r#"
+module chunked_dynamic_assignments(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+"#,
+    );
+    for index in 0..count {
+        source.push_str(&format!("    real x{index};\n"));
+    }
+    source.push_str(
+        r#"    real q;
+    analog begin
+        x0 = V(p, n);
+"#,
+    );
+    for index in 1..count {
+        source.push_str(&format!("        x{index} = x{} + 1.0;\n", index - 1));
+    }
+    source.push_str(&format!("        I(p, n) <+ x{};\n", count - 1));
+    source.push_str(
+        r#"        q = c * V(p, n);
+        I(p, n) <+ ddt(q);
+    end
+endmodule
+"#,
+    );
+    source
+}
+
 fn internal_node_source() -> &'static str {
     r#"
 module has_mid(p, n);
@@ -853,6 +903,60 @@ fn opt_lowering_resolves_straight_line_scalar_assignment() {
         "assignment-fed scalar graph should not fall back to legacy equation values: {:?}",
         opt.values
     );
+}
+
+#[test]
+fn opt_lowering_keeps_assignment_fed_static_roots_in_dynamic_models() {
+    let (_, _, _, opt) = lower_fixture_parts(
+        mixed_dynamic_assignment_source(),
+        "mixed_dynamic_assignment",
+    );
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("assignment-fed static current should have a scalar root: {newton:?}");
+    };
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![1.0e-12],
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate mixed dynamic scalar graph");
+
+    assert_eq!(snapshot.real(*root), Some(6.0));
+    assert_eq!(
+        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(0))),
+        Some(1.0)
+    );
+    assert_eq!(
+        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(1))),
+        Some(-1.0)
+    );
+}
+
+#[test]
+fn opt_lowering_keeps_large_assignment_chain_roots_in_dynamic_models() {
+    let source = chunked_dynamic_assignment_source(320);
+    let analyzed =
+        analyze_fixture(&source, "chunked_dynamic_assignments").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", &source);
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+    let opt = OptModel::from_hir_and_mir(&hir, &mir).expect("lower OptIR");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+
+    let Some(OptOp::ComputeValue { .. }) = newton.ops.first() else {
+        panic!("large assignment-fed static current should have a scalar root: {newton:?}");
+    };
 }
 
 #[test]

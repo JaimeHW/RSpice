@@ -8081,6 +8081,37 @@ fn rust_backend_omits_dynamic_operator_state_from_algebraic_helpers_in_dynamic_m
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_large_assignment_chains_inside_dynamic_models() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_dynamic_assignment_source(320))
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile mixed algebraic assignment chain and ddt device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("eval_ddt"), "{stamp}");
+    assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+    assert!(
+        !stamp.contains("stamp_transient_block_0"),
+        "static assignment chain should be scalarized instead of emitted as a legacy helper:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("Ad::"),
+        "static assignment chain should avoid legacy AD temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_borrowed_helper_arrays_compile_with_dense_stamps() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_dense_equation_source(120))
