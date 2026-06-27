@@ -173,4 +173,13 @@ mod tests {
             "d_rom must fail closed until a real code model is implemented"
         );
     }
+
+    #[test]
+    fn builtins_register_official_analog_aliases() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("divide"));
+        assert!(registry.contains("int"));
+        assert!(registry.contains("d_dt"));
+    }
 }

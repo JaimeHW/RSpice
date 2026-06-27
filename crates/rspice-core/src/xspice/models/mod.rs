@@ -7,11 +7,11 @@
 //! - **gain** - Voltage gain block
 //! - **summer** - Analog summer
 //! - **mult** - Analog multiplier  
-//! - **divider** - Analog divider
+//! - **divider** / **divide** - Analog divider
 //! - **limit** - Limiter with clipping
 //! - **climit** - Controlled limiter
-//! - **integrator** - Continuous-time integrator
-//! - **differentiator** - Continuous-time differentiator
+//! - **integrator** / **int** - Continuous-time integrator
+//! - **differentiator** / **d_dt** - Continuous-time differentiator
 //! - **aswitch** - Analog switch
 //! - **s_xfer** - S-domain transfer function (future)
 //!
