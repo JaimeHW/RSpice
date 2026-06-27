@@ -78,17 +78,17 @@
   Add fields:
 
   ```rust
-  pub real_vector_params: std::collections::HashMap<String, Vec<Value>>,
-  pub integer_vector_params: std::collections::HashMap<String, Vec<i64>>,
+  pub real_vector_params: Vec<(String, Vec<Value>)>,
+  pub integer_vector_params: Vec<(String, Vec<i64>)>,
   ```
 
-  Initialize both maps anywhere `ModelDef` is constructed.
+  Initialize both vectors anywhere `ModelDef` is constructed.
 
 - [ ] Extend parsed model parameter storage.
 
   File: `crates/rspice-core/src/netlist/parser/values.rs`
 
-  Add the same two fields to the parser's intermediate model-parameter struct. Preserve existing numeric, expression, and string parameter behavior.
+  Add the same two fields to the parser's intermediate model-parameter struct. Preserve existing numeric, expression, and string parameter behavior. Keep ordered vectors instead of maps to match the existing `params`, `expr_params`, and `string_params` AST pattern.
 
 - [ ] Parse bracketed vectors in `.model` cards.
 
