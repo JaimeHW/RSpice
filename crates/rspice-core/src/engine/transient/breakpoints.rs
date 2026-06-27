@@ -202,46 +202,52 @@ impl Engine {
         }
 
         for instance in &circuit.xspice_instances {
-            if !instance.model_name().eq_ignore_ascii_case("d_source") {
-                continue;
+            if instance.model_name().eq_ignore_ascii_case("pwlts")
+                && let Some(times) = instance.real_vector_param("x_array")
+            {
+                for &time in times {
+                    Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+                }
             }
 
-            let input_file = instance
-                .string_param("input_file")
-                .filter(|path| !path.trim().is_empty())
-                .unwrap_or("source.txt");
-            match std::fs::read_to_string(input_file) {
-                Ok(contents) => {
-                    for (line_idx, line) in contents.lines().enumerate() {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() || trimmed.starts_with('*') {
-                            continue;
-                        }
-                        let Some(time_token) = trimmed.split_whitespace().next() else {
-                            continue;
-                        };
-                        match crate::netlist::lexer::parse_spice_value(time_token) {
-                            Ok(time) => {
-                                Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+            if instance.model_name().eq_ignore_ascii_case("d_source") {
+                let input_file = instance
+                    .string_param("input_file")
+                    .filter(|path| !path.trim().is_empty())
+                    .unwrap_or("source.txt");
+                match std::fs::read_to_string(input_file) {
+                    Ok(contents) => {
+                        for (line_idx, line) in contents.lines().enumerate() {
+                            let trimmed = line.trim();
+                            if trimmed.is_empty() || trimmed.starts_with('*') {
+                                continue;
                             }
-                            Err(err) => {
-                                log::warn!(
-                                    "Failed to parse d_source breakpoint time '{}' in '{}' line {}: {:?}",
-                                    time_token,
-                                    input_file,
-                                    line_idx + 1,
-                                    err
-                                );
+                            let Some(time_token) = trimmed.split_whitespace().next() else {
+                                continue;
+                            };
+                            match crate::netlist::lexer::parse_spice_value(time_token) {
+                                Ok(time) => {
+                                    Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+                                }
+                                Err(err) => {
+                                    log::warn!(
+                                        "Failed to parse d_source breakpoint time '{}' in '{}' line {}: {:?}",
+                                        time_token,
+                                        input_file,
+                                        line_idx + 1,
+                                        err
+                                    );
+                                }
                             }
                         }
                     }
-                }
-                Err(err) => {
-                    log::warn!(
-                        "Failed to load d_source input_file '{}' for breakpoint extraction: {}",
-                        input_file,
-                        err
-                    );
+                    Err(err) => {
+                        log::warn!(
+                            "Failed to load d_source input_file '{}' for breakpoint extraction: {}",
+                            input_file,
+                            err
+                        );
+                    }
                 }
             }
         }
@@ -521,6 +527,32 @@ mod tests {
         let delays = Engine::transmission_line_delays(&circuit);
 
         assert_delays_close(&delays, &[1.0e-9, 2.0e-9, 3.0e-9]);
+    }
+
+    #[test]
+    fn pwlts_models_schedule_table_time_breakpoints() {
+        use std::sync::Arc;
+
+        let instance = crate::xspice::XspiceInstance::new(
+            "ATABLE",
+            Arc::new(crate::xspice::models::PiecewiseLinearTimeSeries),
+            vec![crate::xspice::PortConnection::Analog(1)],
+            &[],
+            &[],
+            &[
+                ("x_array".to_string(), vec![0.0, 1.0e-9, 2.0e-9, 3.0e-9]),
+                ("y_array".to_string(), vec![0.0, 10.0, 20.0, 30.0]),
+            ],
+            &[],
+        )
+        .expect("pwlts instance constructs");
+        let mut circuit = crate::circuit::Circuit::new();
+        circuit.xspice_instances.push(instance);
+
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
+        Engine::collect_transient_source_breakpoints(&circuit, 2.5e-9, 1.0e-9, &mut breakpoints);
+
+        assert_delays_close(breakpoints.times(), &[0.0, 1.0e-9, 2.0e-9]);
     }
 
     #[test]

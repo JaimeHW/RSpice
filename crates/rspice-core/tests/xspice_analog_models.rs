@@ -1,6 +1,6 @@
 //! Native XSPICE analog code models pinned against ngspice code-model semantics.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::Netlist;
 
 fn op_voltage(deck: &str, node: &str) -> f64 {
@@ -13,6 +13,51 @@ fn op_voltage(deck: &str, node: &str) -> f64 {
         .position(|name| name.eq_ignore_ascii_case(node))
         .unwrap_or_else(|| panic!("node {node} missing from OP result"));
     op.node_voltages[idx]
+}
+
+fn op_error(deck: &str) -> String {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    Engine::default()
+        .run_dc_op(&netlist)
+        .expect_err("operating point must fail")
+        .to_string()
+}
+
+fn transient_node_series<'a>(result: &'a TransientResult, node: &str) -> &'a [f64] {
+    let idx = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} missing from {:?}", result.node_names));
+    &result.voltages[idx]
+}
+
+fn value_at_time(times: &[f64], values: &[f64], target: f64) -> f64 {
+    assert_eq!(
+        times.len(),
+        values.len(),
+        "time/value waveform lengths must match"
+    );
+    let first_time = *times.first().expect("waveform has samples");
+    let first_value = *values.first().expect("waveform has samples");
+    if target <= first_time {
+        return first_value;
+    }
+
+    for (time_pair, value_pair) in times.windows(2).zip(values.windows(2)) {
+        let (t0, t1) = (time_pair[0], time_pair[1]);
+        if target <= t1 {
+            let (v0, v1) = (value_pair[0], value_pair[1]);
+            let span = t1 - t0;
+            if span.abs() <= f64::EPSILON {
+                return v1;
+            }
+            let alpha = (target - t0) / span;
+            return v0 + alpha * (v1 - v0);
+        }
+    }
+
+    *values.last().expect("waveform has samples")
 }
 
 #[test]
@@ -156,5 +201,240 @@ rl out 0 1k
     assert!(
         (out - 2.0).abs() < 1e-9,
         "d_dt alias should match differentiator offset behavior: got {out}"
+    );
+}
+
+#[test]
+fn xspice_pwl_interpolates_smooths_extrapolates_and_limits_like_ngspice() {
+    let deck = "\
+* XSPICE pwl lookup oracle
+vbelow below 0 dc -1
+vfirst first 0 dc 0
+vmid mid 0 dc 0.5
+vbreak break 0 dc 1
+vabove above 0 dc 3
+vlimbelow limbelow 0 dc -1
+vlimabove limabove 0 dc 3
+abelow below out_below lut
+afirst first out_first lut
+amid mid out_mid lut
+abreak break out_break lut
+aabove above out_above lut
+alimbelow limbelow out_limbelow lutlim
+alimabove limabove out_limabove lutlim
+.model lut pwl (x_array=[0 1 2] y_array=[0 10 30] input_domain=0.01 fraction=false limit=false)
+.model lutlim pwl (x_array=[0 1 2] y_array=[0 10 30] input_domain=0.01 fraction=false limit=true)
+r1 out_below 0 1meg
+r2 out_first 0 1meg
+r3 out_mid 0 1meg
+r4 out_break 0 1meg
+r5 out_above 0 1meg
+r6 out_limbelow 0 1meg
+r7 out_limabove 0 1meg
+.op
+.end
+";
+
+    let below = op_voltage(deck, "out_below");
+    let first = op_voltage(deck, "out_first");
+    let mid = op_voltage(deck, "out_mid");
+    let break_point = op_voltage(deck, "out_break");
+    let above = op_voltage(deck, "out_above");
+    let lim_below = op_voltage(deck, "out_limbelow");
+    let lim_above = op_voltage(deck, "out_limabove");
+
+    assert!(
+        (below + 10.0).abs() < 1e-9,
+        "pwl lower extrapolation should match ngspice: got {below}"
+    );
+    assert!(
+        first.abs() < 1e-9,
+        "pwl first endpoint should match ngspice: got {first}"
+    );
+    assert!(
+        (mid - 5.0).abs() < 1e-9,
+        "pwl interpolation should match ngspice: got {mid}"
+    );
+    assert!(
+        (break_point - 10.025).abs() < 1e-9,
+        "pwl smoothed breakpoint should match ngspice: got {break_point}"
+    );
+    assert!(
+        (above - 50.0).abs() < 1e-9,
+        "pwl upper extrapolation should match ngspice: got {above}"
+    );
+    assert!(
+        lim_below.abs() < 1e-9,
+        "pwl limit=true lower clamp should match ngspice: got {lim_below}"
+    );
+    assert!(
+        (lim_above - 30.0).abs() < 1e-9,
+        "pwl limit=true upper clamp should match ngspice: got {lim_above}"
+    );
+}
+
+#[test]
+fn xspice_pwlts_uses_simulation_time_like_ngspice() {
+    let deck = "\
+* XSPICE pwlts time lookup oracle
+apw out lut
+alim out_lim lutlim
+.model lut pwlts (x_array=[0 1n 2n] y_array=[0 10 30] input_domain=1e-12 fraction=false limit=false)
+.model lutlim pwlts (x_array=[0 1n 2n] y_array=[0 10 30] input_domain=1e-12 fraction=false limit=true)
+r1 out 0 1meg
+r2 out_lim 0 1meg
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 3.0e-9, 0.5e-9)
+        .expect("transient solves");
+    let out = transient_node_series(&result, "out");
+    let out_lim = transient_node_series(&result, "out_lim");
+
+    assert!(
+        (value_at_time(&result.time, out, 0.5e-9) - 5.0).abs() < 1e-9,
+        "pwlts interpolation at 0.5 ns should match ngspice"
+    );
+    assert!(
+        (value_at_time(&result.time, out, 1.5e-9) - 20.0).abs() < 1e-9,
+        "pwlts interpolation at 1.5 ns should match ngspice"
+    );
+    assert!(
+        (value_at_time(&result.time, out, 3.0e-9) - 50.0).abs() < 1e-9,
+        "pwlts upper extrapolation should match ngspice"
+    );
+    assert!(
+        (value_at_time(&result.time, out_lim, 3.0e-9) - 30.0).abs() < 1e-9,
+        "pwlts limit=true upper clamp should match ngspice"
+    );
+}
+
+#[test]
+fn xspice_pwl_rejects_malformed_lookup_table() {
+    let deck = "\
+* XSPICE pwl malformed table
+vin in 0 dc 0.5
+apwl in out lut
+.model lut pwl (x_array=[0 1] y_array=[0] input_domain=0.01 fraction=false)
+r1 out 0 1k
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let err = Engine::default()
+        .run_dc_op(&netlist)
+        .expect_err("mismatched lookup table must fail");
+    let message = err.to_string();
+
+    assert!(
+        message.contains("x_array") && message.contains("y_array"),
+        "malformed lookup table error should identify both arrays, got {message}"
+    );
+}
+
+#[test]
+fn xspice_pwl_accepts_ngspice_input_domain_limit_clamping() {
+    // ngspice accepts these values with parameter-limit warnings and clamps
+    // them to the official input_domain bounds before evaluating the table.
+    let deck = "\
+* XSPICE pwl input_domain limit oracle
+vbreak break 0 dc 10
+azero break out_zero zero
+awide break out_wide wide
+.model zero pwl (x_array=[0 10 20] y_array=[0 10 30] input_domain=0 fraction=false limit=false)
+.model wide pwl (x_array=[0 10 20] y_array=[0 10 30] input_domain=1 fraction=false limit=false)
+r1 out_zero 0 1meg
+r2 out_wide 0 1meg
+.op
+.end
+";
+
+    let out_zero = op_voltage(deck, "out_zero");
+    let out_wide = op_voltage(deck, "out_wide");
+
+    assert!(
+        (out_zero - 10.0).abs() < 1e-9,
+        "input_domain=0 clamps to ngspice lower limit without visible smoothing: got {out_zero}"
+    );
+    assert!(
+        (out_wide - 10.125).abs() < 1e-9,
+        "input_domain=1 clamps to ngspice upper limit 0.5: got {out_wide}"
+    );
+}
+
+#[test]
+fn xspice_lookup_tables_fail_closed_for_invalid_shapes() {
+    let cases = [
+        (
+            "duplicate x",
+            "x_array=[0 1 1] y_array=[0 10 20]",
+            "strictly increasing",
+        ),
+        (
+            "decreasing x",
+            "x_array=[0 2 1] y_array=[0 20 10]",
+            "strictly increasing",
+        ),
+        ("short table", "x_array=[0] y_array=[0]", "at least 2"),
+    ];
+
+    for (name, params, needle) in cases {
+        let deck = format!(
+            "\
+* XSPICE pwl invalid table: {name}
+vin in 0 dc 0.5
+apwl in out lut
+.model lut pwl ({params})
+r1 out 0 1k
+.op
+.end
+"
+        );
+        let message = op_error(&deck);
+        assert!(
+            message.contains(needle),
+            "{name}: expected error containing {needle:?}, got {message}"
+        );
+    }
+}
+
+#[test]
+fn xspice_pwl_rejects_missing_required_lookup_arrays() {
+    let deck = "\
+* XSPICE pwl missing required table
+vin in 0 dc 0.5
+apwl in out lut
+.model lut pwl (y_array=[0 1])
+r1 out 0 1k
+.op
+.end
+";
+    let message = op_error(deck);
+
+    assert!(
+        message.contains("Missing required parameter: x_array"),
+        "missing required lookup array should be explicit, got {message}"
+    );
+}
+
+#[test]
+fn xspice_pwlts_rejects_malformed_lookup_table() {
+    let deck = "\
+* XSPICE pwlts malformed table
+apw out lut
+.model lut pwlts (x_array=[0 1n] y_array=[0])
+r1 out 0 1k
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let err = Engine::default()
+        .run_tran(&netlist, 2.0e-9, 1.0e-9)
+        .expect_err("mismatched pwlts table must fail");
+    let message = err.to_string();
+
+    assert!(
+        message.contains("x_array") && message.contains("y_array"),
+        "malformed pwlts table error should identify both arrays, got {message}"
     );
 }

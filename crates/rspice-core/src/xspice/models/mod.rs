@@ -8,6 +8,8 @@
 //! - **summer** - Analog summer
 //! - **mult** - Analog multiplier  
 //! - **divider** / **divide** - Analog divider
+//! - **pwl** - Piecewise-linear controlled source
+//! - **pwlts** - Piecewise-linear time-series source
 //! - **limit** - Limiter with clipping
 //! - **climit** - Controlled limiter
 //! - **integrator** / **int** - Continuous-time integrator
@@ -45,6 +47,9 @@ mod analog;
 // A/D and D/A bridges
 mod bridges;
 
+// Lookup-table analog sources
+mod lookup;
+
 // Digital primitives
 mod digital;
 
@@ -61,3 +66,5 @@ pub use digital::{
     DigitalOr, DigitalPulldown, DigitalPullup, DigitalRam, DigitalSource, DigitalStateMachine,
     DigitalTristate, DigitalXnor, DigitalXor, JkFlipFlop, SrFlipFlop, SrLatch, TFlipFlop,
 };
+
+pub use lookup::{PiecewiseLinear, PiecewiseLinearTimeSeries};

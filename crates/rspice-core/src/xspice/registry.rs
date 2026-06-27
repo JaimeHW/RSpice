@@ -75,6 +75,8 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::Multiplier));
         self.register(Arc::new(super::models::Divider));
         self.register(Arc::new(super::models::DivideAlias));
+        self.register(Arc::new(super::models::PiecewiseLinear));
+        self.register(Arc::new(super::models::PiecewiseLinearTimeSeries));
         self.register(Arc::new(super::models::Limiter));
         self.register(Arc::new(super::models::ControlledLimiter));
         self.register(Arc::new(super::models::Integrator));
@@ -181,5 +183,13 @@ mod tests {
         assert!(registry.contains("divide"));
         assert!(registry.contains("int"));
         assert!(registry.contains("d_dt"));
+    }
+
+    #[test]
+    fn builtins_register_lookup_models() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("pwl"));
+        assert!(registry.contains("pwlts"));
     }
 }
