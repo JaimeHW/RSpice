@@ -8988,11 +8988,39 @@ fn rust_backend_lowers_noise_terms_to_zero_for_large_signal_stamps() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("eq0_value"), "{stamp}");
-    assert!(stamp.contains("0.0"), "{stamp}");
+    assert!(!stamp.contains("eq0_value"), "{stamp}");
+    assert!(!stamp.contains("stamp_current_const_local"), "{stamp}");
     assert!(!stamp.contains("white_noise"), "{stamp}");
     assert!(!stamp.contains("flicker_noise"), "{stamp}");
     assert!(!stamp.contains("Interpreter"), "{stamp}");
+}
+
+#[test]
+fn rust_backend_omits_large_signal_work_for_noise_only_contributions() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(noise_only_assignment_chain_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile noise-only assignment chain");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        !stamp.contains("let s = match &mut self.scratch"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("store_"), "{stamp}");
+    assert!(!stamp.contains("stamp_current_const_local"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -16252,7 +16280,7 @@ module forward_branch_probe(p, n);
     analog begin
         seen = I(probe);
         V(probe) <+ 0.0;
-        I(p, n) <+ 0.0 * seen;
+        I(p, n) <+ seen;
     end
 endmodule
 "#
@@ -16473,6 +16501,23 @@ module noisy_source(p, n);
     parameter real flicker = 1e-20 from [0:inf);
     parameter real af = 1.0 from [0:inf);
     analog I(p, n) <+ white_noise(thermal, "thermal") + flicker_noise(flicker, af, "flicker");
+endmodule
+"#
+}
+
+fn noise_only_assignment_chain_source() -> &'static str {
+    r#"
+module noise_only_assignment_chain(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real rs = 10.0 from [0:inf);
+    real thermal;
+    real shaped;
+    analog begin
+        thermal = 4.0 * 1.380649e-23 * (300.15 + V(p, n)) / rs;
+        shaped = thermal * (1.0 + abs(V(p, n)));
+        I(p, n) <+ white_noise(shaped, "thermal");
+    end
 endmodule
 "#
 }

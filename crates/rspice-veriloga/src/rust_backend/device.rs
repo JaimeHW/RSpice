@@ -3562,13 +3562,13 @@ fn collect_transient_liveness_excluding(
         if excluded_equations.contains(&equation.id) {
             continue;
         }
-        collect_expression_identifiers(
+        collect_large_signal_expression_identifiers(
             artifact,
             equation.expression.id,
             &mut values,
             &mut HashSet::new(),
         )?;
-        collect_expression_identifiers(
+        collect_large_signal_expression_identifiers(
             artifact,
             equation.expression.id,
             &mut derivatives,
@@ -3733,7 +3733,7 @@ fn collect_live_statement_dependencies(
         match statement {
             HirStatement::Assignment(assignment) => {
                 if live_variables.contains(assignment.target_name.as_str()) {
-                    collect_expression_identifiers(
+                    collect_large_signal_expression_identifiers(
                         artifact,
                         assignment.expr.id,
                         live_variables,
@@ -3866,6 +3866,146 @@ fn collect_expression_identifiers(
         collect_expression_identifiers(artifact, child, identifiers, visited)?;
     }
     Ok(())
+}
+
+fn collect_large_signal_expression_identifiers(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    identifiers: &mut HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<(), RustBackendError> {
+    if !visited.insert(id) {
+        return Ok(());
+    }
+    if expression_large_signal_is_zero(artifact, id, &mut HashSet::new())? {
+        return Ok(());
+    }
+
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    match &expression.kind {
+        HirExprKind::Identifier { name } => {
+            identifiers.insert(name.to_string());
+        }
+        HirExprKind::NoiseSource { .. } => {}
+        HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {}
+        HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Pos" | "Neg") => {
+            collect_large_signal_expression_identifiers(artifact, *operand, identifiers, visited)?;
+        }
+        HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Add" | "Sub") => {
+            collect_large_signal_expression_identifiers(artifact, *left, identifiers, visited)?;
+            collect_large_signal_expression_identifiers(artifact, *right, identifiers, visited)?;
+        }
+        HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Mul") => {
+            if !expression_large_signal_is_zero(artifact, *left, &mut HashSet::new())?
+                && !expression_large_signal_is_zero(artifact, *right, &mut HashSet::new())?
+            {
+                collect_large_signal_expression_identifiers(artifact, *left, identifiers, visited)?;
+                collect_large_signal_expression_identifiers(
+                    artifact,
+                    *right,
+                    identifiers,
+                    visited,
+                )?;
+            }
+        }
+        HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Div" | "Mod") => {
+            if !expression_large_signal_is_zero(artifact, *left, &mut HashSet::new())? {
+                collect_large_signal_expression_identifiers(artifact, *left, identifiers, visited)?;
+                collect_large_signal_expression_identifiers(
+                    artifact,
+                    *right,
+                    identifiers,
+                    visited,
+                )?;
+            }
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            collect_expression_identifiers(artifact, *condition, identifiers, &mut HashSet::new())?;
+            collect_large_signal_expression_identifiers(
+                artifact,
+                *then_expr,
+                identifiers,
+                visited,
+            )?;
+            collect_large_signal_expression_identifiers(
+                artifact,
+                *else_expr,
+                identifiers,
+                visited,
+            )?;
+        }
+        other => {
+            for child in expression_children(other) {
+                collect_large_signal_expression_identifiers(artifact, child, identifiers, visited)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn expression_large_signal_is_zero(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    visited: &mut HashSet<ExprId>,
+) -> Result<bool, RustBackendError> {
+    if !visited.insert(id) {
+        return Ok(false);
+    }
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    match &expression.kind {
+        HirExprKind::Number { value, .. } => Ok(*value == 0.0),
+        HirExprKind::NoiseSource { .. } => Ok(true),
+        HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => Ok(true),
+        HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Pos" | "Neg") => {
+            expression_large_signal_is_zero(artifact, *operand, visited)
+        }
+        HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Add" | "Sub") => Ok(
+            expression_large_signal_is_zero(artifact, *left, &mut HashSet::new())?
+                && expression_large_signal_is_zero(artifact, *right, &mut HashSet::new())?,
+        ),
+        HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Mul") => Ok(
+            expression_large_signal_is_zero(artifact, *left, &mut HashSet::new())?
+                || expression_large_signal_is_zero(artifact, *right, &mut HashSet::new())?,
+        ),
+        HirExprKind::Binary { op, left, .. } if matches!(op.as_str(), "Div" | "Mod") => {
+            expression_large_signal_is_zero(artifact, *left, &mut HashSet::new())
+        }
+        HirExprKind::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => Ok(
+            expression_large_signal_is_zero(artifact, *then_expr, visited)?
+                && expression_large_signal_is_zero(artifact, *else_expr, &mut HashSet::new())?,
+        ),
+        _ => Ok(false),
+    }
 }
 
 fn collect_named_current_accesses(
@@ -12927,6 +13067,17 @@ fn emit_stamp_body(
             continue;
         }
         if reactive && !reactive_liveness.is_equation_reactive(equation.id) {
+            continue;
+        }
+        if !reactive
+            && equation.kind == MirEquationKind::Current
+            && !equation_inline[index]
+            && expression_large_signal_is_zero(
+                artifact,
+                equation.expression.id,
+                &mut HashSet::new(),
+            )?
+        {
             continue;
         }
 
