@@ -1515,7 +1515,11 @@ impl ExprEmitter<'_> {
             "atanh" => format!("({}).atanh()", args[0].value),
             "floor" => format!("({}).floor()", args[0].value),
             "ceil" => format!("({}).ceil()", args[0].value),
-            "pow" => format!("({}).powf({})", args[0].value, args[1].value),
+            "pow" => format!(
+                "{}.powf({})",
+                f64_binary_receiver(&args[0].value),
+                args[1].value
+            ),
             "min" => format!(
                 "{}.min({})",
                 f64_binary_receiver(&args[0].value),
@@ -2435,7 +2439,7 @@ fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackend
         "Mul" => Ok(mul_expr(left, right)),
         "Div" => Ok(div_expr(left, right)),
         "Mod" => Ok(mod_expr(left, right)),
-        "Pow" => Ok(format!("({left}).powf({right})")),
+        "Pow" => Ok(format!("{}.powf({right})", f64_binary_receiver(left))),
         _ => Err(RustBackendError::unsupported(
             "<generated>",
             "<expr>",

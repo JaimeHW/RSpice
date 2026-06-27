@@ -9527,6 +9527,35 @@ fn generated_compact_scalar_literal_pow_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
+fn generated_guard_scalar_literal_pow_types_receiver() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(guard_scalar_literal_pow_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile guard scalar literal pow");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("(2.0_f64).powf(") || stamp.contains("((2.0) as f64).powf("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("(2.0).powf("),
+        "literal pow receivers must be typed before method resolution:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_evaluates_scalar_limexp_argument_once() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_limexp_argument_source())
@@ -16833,6 +16862,23 @@ module compact_scalar_literal_pow_assignment(p, n);
     analog begin
         scale = pow(2.0, exponent);
         I(p, n) <+ scale * V(p, n);
+    end
+endmodule
+"#
+}
+
+fn guard_scalar_literal_pow_source() -> &'static str {
+    r#"
+module guard_scalar_literal_pow(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exponent = 0.5;
+    real threshold;
+    real selected;
+    analog begin
+        threshold = pow(2.0, 2.0 - exponent);
+        selected = (V(p, n) > threshold) ? V(p, n) : 0.0;
+        I(p, n) <+ selected;
     end
 endmodule
 "#
