@@ -3599,7 +3599,7 @@ impl Instance {
             s.store_add_scaled_product_indices(1583, 4, 1.0, 1505, 1541, (-1.0));
             s.store_sqrt_square_add(1584, 1582, 3);
             s.store_sqrt_square_add(1585, 1583, 3);
-            s.store_mul_ad(1586, A::div_from_scalar(0.25, s.ad_value(2)), A::add_scaled_products3(s.ad_value(1585), s.ad_value(1582), 1.0, s.ad_value(1584), s.ad_value(1583), (-1.0), s.ad_value(3), A::ln(A::div_scaled_inputs2(s.ad_value(1583), 1.0, s.ad_value(1585), 1.0, A::add(s.ad_value(1582), s.ad_value(1584)), 1.0)), 1.0));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1586, 0.25, 2, A::add_scaled_products3(s.ad_value(1585), s.ad_value(1582), 1.0, s.ad_value(1584), s.ad_value(1583), (-1.0), s.ad_value(3), A::ln(A::div_scaled_inputs2(s.ad_value(1583), 1.0, s.ad_value(1585), 1.0, A::add(s.ad_value(1582), s.ad_value(1584)), 1.0)), 1.0));
         }
 
         if ((s.b[1604] && s.b[1752]) && (!s.b[1755])) {
@@ -3997,7 +3997,7 @@ impl Instance {
         s.v[1874] = if s.b[1874] { 1.0 } else { 0.0 };
 
         if s.b[1874] {
-            s.store_mul_ad(1822, A::div_from_scalar(1.0, s.ad_value(1813)), A::ln(A::div(s.ad_value(24), s.ad_value(247))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1822, 1.0, 1813, A::ln(A::div(s.ad_value(24), s.ad_value(247))));
         }
 
         s.b[1875] = (p.p13 > 0.0);

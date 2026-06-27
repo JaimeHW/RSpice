@@ -547,7 +547,7 @@ impl Instance {
             s.store_scale(144, 437, s.v[436]);
             s.store_square(145, 144);
             s.store_sub_from_scalar(404, p.p39, 414);
-            s.store_mul_ad(417, A::div_from_scalar(2.0, s.ad_value(120)), A::ln(A::div_from_scalar(s.v[624], s.ad_value(127))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(417, 2.0, 120, A::ln(A::div_from_scalar(s.v[624], s.ad_value(127))));
         }
 
         let (assign18310_e22251,) = {
@@ -955,7 +955,7 @@ impl Instance {
             s.store_scale(144, 437, s.v[436]);
             s.store_square(145, 144);
             s.store_sub_from_scalar(404, p.p39, 414);
-            s.store_mul_ad(417, A::div_from_scalar(2.0, s.ad_value(120)), A::ln(A::div_from_scalar(s.v[624], s.ad_value(127))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(417, 2.0, 120, A::ln(A::div_from_scalar(s.v[624], s.ad_value(127))));
         }
 
         let (assign19700_e24406,) = {
@@ -3537,7 +3537,7 @@ impl Instance {
             s.store_div_scaled_inputs2_mixed_iaa(331, 284, 1.0, A::sqrt(s.ad_value(285)), 1.0, A::mul_scaled_lhs(s.ad_value(282), 2.0, s.ad_value(282)), 1.0);
         }
 
-        s.store_mul_ad(326, A::div_from_scalar(2.0, s.ad_value(120)), A::ln(A::div(s.ad_value(462), s.ad_value(127))));
+        s.store_mul_div_from_scalar_lhs_ad_mixed_ia(326, 2.0, 120, A::ln(A::div(s.ad_value(462), s.ad_value(127))));
 
         s.store_scaled_square(278, 439, (s.v[293] * s.v[293]));
 

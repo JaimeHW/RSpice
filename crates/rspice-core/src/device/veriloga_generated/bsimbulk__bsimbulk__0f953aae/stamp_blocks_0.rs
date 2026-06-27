@@ -4732,9 +4732,9 @@ impl Instance {
             s.store_mul_div_from_scalar_lhs(656, p.p915, 648, 655);
             s.store_div_scaled_offset_numerator(657, s.ad_value(656), 1.0, 1.0, A::offset(s.ad_value(654), 1.0), 1.0);
             s.store_div_scaled_offset_numerator(658, s.ad_value(656), p.p916, 1.0, A::scale_offset(s.ad_value(654), p.p916, 1.0), 1.0);
-            s.store_mul_ad(659, A::div_from_scalar(p.p923, s.ad_value(647)), A::sub(s.ad_value(655), s.ad_value(653)));
-            s.store_mul_ad(660, A::div_from_scalar(p.p929, A::powf(s.ad_value(647), p.p930)), A::sub(s.ad_value(655), s.ad_value(653)));
-            s.store_mul_ad(661, A::div_from_scalar(p.p931, A::powf(s.ad_value(647), p.p932)), A::sub(s.ad_value(655), s.ad_value(653)));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(659, p.p923, 647, A::sub(s.ad_value(655), s.ad_value(653)));
+            s.store_mul_div_from_scalar_lhs_ad(660, p.p929, A::powf(s.ad_value(647), p.p930), A::sub(s.ad_value(655), s.ad_value(653)));
+            s.store_mul_div_from_scalar_lhs_ad(661, p.p931, A::powf(s.ad_value(647), p.p932), A::sub(s.ad_value(655), s.ad_value(653)));
             s.store_mul(397, 397, 657);
             s.store_mul(409, 409, 658);
             s.store_add(494, 494, 660);

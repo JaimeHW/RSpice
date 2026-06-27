@@ -13,10 +13,10 @@ impl Instance {
             s.store_scale(2048, 834, 30.0);
             s.store_scalar(818, (4.0 - 0.9));
             s.store_add(819, 2046, 2048);
-            s.store_mul_ad(2027, A::div_from_scalar(2.0, s.ad_value(818)), A::sub(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2046), s.ad_value(2048))))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(2027, 2.0, 818, A::sub(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2046), s.ad_value(2048))))));
             s.store_scalar(818, (4.0 - 0.3));
             s.store_add(819, 2047, 2027);
-            s.store_mul_ad(2049, A::div_from_scalar(2.0, s.ad_value(818)), A::add(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2047), s.ad_value(2027))))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(2049, 2.0, 818, A::add(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2047), s.ad_value(2027))))));
             s.store_mul3_lhs(839, 237, 2045, 2049);
         }
 
@@ -62,10 +62,10 @@ impl Instance {
             s.store_scale(2048, 837, 30.0);
             s.store_scalar(818, (4.0 - 0.9));
             s.store_add(819, 2046, 2048);
-            s.store_mul_ad(2027, A::div_from_scalar(2.0, s.ad_value(818)), A::sub(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2046), s.ad_value(2048))))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(2027, 2.0, 818, A::sub(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2046), s.ad_value(2048))))));
             s.store_scalar(818, (4.0 - 0.3));
             s.store_add(819, 2047, 2027);
-            s.store_mul_ad(2049, A::div_from_scalar(2.0, s.ad_value(818)), A::add(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2047), s.ad_value(2027))))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(2049, 2.0, 818, A::add(s.ad_value(819), A::sqrt(A::sub(A::square(s.ad_value(819)), A::mul3(s.ad_value(818), s.ad_value(2047), s.ad_value(2027))))));
             s.store_mul3_lhs(840, 238, 2045, 2049);
         }
 

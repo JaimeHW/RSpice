@@ -2441,7 +2441,7 @@ impl Instance {
         if (((s.b[1291] && (!s.b[1304])) && (!s.b[1305])) && (!s.b[1306])) {
             s.store_mul(1292, 134, 445);
             s.store_div_ad_rhs(1294, 545, A::square(s.ad_value(323)));
-            s.store_mul_ad(1295, A::div_from_scalar(2.0, s.ad_value(545)), A::square(s.ad_value(323)));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1295, 2.0, 545, A::square(s.ad_value(323)));
             s.store_add_scaled_inputs_product_indices(1296, 1292, 1.0, 227, (-1.0), 130, 514, (-1.0));
             s.store_scale(483, 393, (p.p49 * 1.0 / (s.v[89])));
             s.store_add_scaled_product_indices(1296, 1296, 1.0, 130, 483, (-1.0));
@@ -3164,7 +3164,7 @@ impl Instance {
             s.store_square(1425, 1424);
             s.store_sub(1426, 1422, 523);
             s.store_div(1394, 521, 230);
-            s.store_mul_ad(1427, A::div_from_scalar(2.0, s.ad_value(225)), A::ln(s.ad_value(1394)));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1427, 2.0, 225, A::ln(s.ad_value(1394)));
         }
 
         let (assign25240_e34261,) = {
@@ -3544,7 +3544,7 @@ impl Instance {
             s.store_square(1425, 1424);
             s.store_sub(1426, 1422, 523);
             s.store_div(1394, 521, 230);
-            s.store_mul_ad(1427, A::div_from_scalar(2.0, s.ad_value(225)), A::ln(s.ad_value(1394)));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1427, 2.0, 225, A::ln(s.ad_value(1394)));
         }
 
         let (assign26790_e37204,) = {
@@ -4026,7 +4026,7 @@ impl Instance {
             s.store_square(1554, 1553);
             s.store_sub_from_scalar(1555, s.v[82], 1551);
             s.store_div_from_scalar(1519, s.v[69], 230);
-            s.store_mul_ad(1556, A::div_from_scalar(2.0, s.ad_value(225)), A::ln(s.ad_value(1519)));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1556, 2.0, 225, A::ln(s.ad_value(1519)));
         }
 
         let (assign28760_e40563,) = {
@@ -4434,7 +4434,7 @@ impl Instance {
             s.store_square(1554, 1553);
             s.store_sub_from_scalar(1555, s.v[82], 1551);
             s.store_div_from_scalar(1519, s.v[69], 230);
-            s.store_mul_ad(1556, A::div_from_scalar(2.0, s.ad_value(225)), A::ln(s.ad_value(1519)));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1556, 2.0, 225, A::ln(s.ad_value(1519)));
         }
 
         let (assign30360_e43799,) = {

@@ -6363,10 +6363,10 @@ impl Instance {
             s.store_scale(1950, 823, 30.0);
             s.store_scalar(807, (4.0 - 0.9));
             s.store_add(808, 1948, 1950);
-            s.store_mul_ad(1929, A::div_from_scalar(2.0, s.ad_value(807)), A::sub(s.ad_value(808), A::sqrt(A::sub(A::square(s.ad_value(808)), A::mul3(s.ad_value(807), s.ad_value(1948), s.ad_value(1950))))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1929, 2.0, 807, A::sub(s.ad_value(808), A::sqrt(A::sub(A::square(s.ad_value(808)), A::mul3(s.ad_value(807), s.ad_value(1948), s.ad_value(1950))))));
             s.store_scalar(807, (4.0 - 0.3));
             s.store_add(808, 1949, 1929);
-            s.store_mul_ad(1951, A::div_from_scalar(2.0, s.ad_value(807)), A::add(s.ad_value(808), A::sqrt(A::sub(A::square(s.ad_value(808)), A::mul3(s.ad_value(807), s.ad_value(1949), s.ad_value(1929))))));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1951, 2.0, 807, A::add(s.ad_value(808), A::sqrt(A::sub(A::square(s.ad_value(808)), A::mul3(s.ad_value(807), s.ad_value(1949), s.ad_value(1929))))));
             s.store_mul3_lhs(828, 235, 1947, 1951);
         }
 

@@ -4474,7 +4474,7 @@ impl Instance {
             s.store_add_scaled_product_indices(1038, 4, 1.0, 960, 996, (-1.0));
             s.store_sqrt_square_add(1039, 1037, 3);
             s.store_sqrt_square_add(1040, 1038, 3);
-            s.store_mul_ad(1041, A::div_from_scalar(0.25, s.ad_value(2)), A::add_scaled_products3(s.ad_value(1040), s.ad_value(1037), 1.0, s.ad_value(1039), s.ad_value(1038), (-1.0), s.ad_value(3), A::ln(A::div_scaled_inputs2(s.ad_value(1038), 1.0, s.ad_value(1040), 1.0, A::add(s.ad_value(1037), s.ad_value(1039)), 1.0)), 1.0));
+            s.store_mul_div_from_scalar_lhs_ad_mixed_ia(1041, 0.25, 2, A::add_scaled_products3(s.ad_value(1040), s.ad_value(1037), 1.0, s.ad_value(1039), s.ad_value(1038), (-1.0), s.ad_value(3), A::ln(A::div_scaled_inputs2(s.ad_value(1038), 1.0, s.ad_value(1040), 1.0, A::add(s.ad_value(1037), s.ad_value(1039)), 1.0)), 1.0));
         }
 
         if (s.b[1206] && (!s.b[1209])) {

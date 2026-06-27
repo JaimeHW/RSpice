@@ -1056,6 +1056,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad_components(&mut self, index: usize, scalar: f64, denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = scalar * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = quotient * right_raw;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = denominator_dn[axis] * denominator_derivative_scale * right_raw + quotient * right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = denominator_db[axis] * denominator_derivative_scale * right_raw + quotient * right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad(&mut self, index: usize, scalar: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, denominator.value, denominator.dn, denominator.db, right.value, right.dn, right.db);
+    }
+
+    #[inline]
     pub(crate) fn store_div_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let reciprocal = 1.0 / right.value;
         let quotient = left.value * reciprocal;
@@ -11224,6 +11239,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad_mixed_ai(&mut self, index: usize, scalar: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, denominator.value, denominator.dn, denominator.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
     pub(crate) fn store_exp_mul_scaled_lhs_mixed_ia(&mut self, index: usize, left: usize, scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let left_value = self.v[left];
         let left_dn = self.dn[left];
@@ -11238,6 +11262,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let left_dn = self.dn[left];
         let left_db = self.db[left];
         self.store_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right.value, right.dn, right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad_mixed_ia(&mut self, index: usize, scalar: f64, denominator: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, denominator_value, denominator_dn, denominator_db, right.value, right.dn, right.db);
     }
 
 
@@ -13120,6 +13153,21 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad_components(&mut self, index: usize, scalar: f64, denominator_raw: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let reciprocal = 1.0 / denominator_raw;
+        let quotient = scalar * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.v[index] = quotient * right_raw;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = denominator_dn[axis] * denominator_derivative_scale * right_raw + quotient * right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = denominator_db[axis] * denominator_derivative_scale * right_raw + quotient * right_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad(&mut self, index: usize, scalar: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, denominator.value, denominator.dn, denominator.db, right.value, right.dn, right.db);
+    }
+
+    #[inline]
     pub(crate) fn store_div_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let reciprocal = 1.0 / right.value;
         let quotient = left.value * reciprocal;
@@ -23288,6 +23336,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad_mixed_ai(&mut self, index: usize, scalar: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, denominator.value, denominator.dn, denominator.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
     pub(crate) fn store_exp_mul_scaled_lhs_mixed_ia(&mut self, index: usize, left: usize, scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let left_value = self.v[left];
         let left_dn = self.dn[left];
@@ -23302,6 +23359,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let left_dn = self.dn[left];
         let left_db = self.db[left];
         self.store_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right.value, right.dn, right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_from_scalar_lhs_ad_mixed_ia(&mut self, index: usize, scalar: f64, denominator: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_from_scalar_lhs_ad_components(index, scalar, denominator_value, denominator_dn, denominator_db, right.value, right.dn, right.db);
     }
 
 
