@@ -186,7 +186,7 @@ impl OptModel {
         let mut equation_values: Vec<_> = mir
             .equations
             .iter()
-            .map(|equation| builder.lower_expression(equation.expression.id))
+            .map(|equation| builder.lower_equation_expression(equation.expression.id))
             .collect();
         builder.add_sparse_derivatives();
         let values = builder.finish(&mut equation_values);
@@ -483,6 +483,21 @@ impl<'a> ScalarGraphBuilder<'a> {
 
         self.expression_values.insert(expr, lowered);
         lowered
+    }
+
+    fn lower_equation_expression(&mut self, expr: ExprId) -> Option<ValueId> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        match &expression.kind {
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Ddt { expr, abstol: None },
+            } => self.lower_expression(*expr),
+            HirExprKind::Call { name, args }
+                if name.eq_ignore_ascii_case("ddt") && args.len() == 1 =>
+            {
+                self.lower_expression(args[0])
+            }
+            _ => self.lower_expression(expr),
+        }
     }
 
     fn push_value(&mut self, value_type: OptValueType, kind: OptValueKind) -> ValueId {

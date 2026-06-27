@@ -940,6 +940,29 @@ fn opt_lowering_keeps_assignment_fed_static_roots_in_dynamic_models() {
 }
 
 #[test]
+fn opt_lowering_keeps_ddt_operand_roots_in_dynamic_models() {
+    let (_, _, _, opt) = lower_fixture_parts(
+        mixed_dynamic_assignment_source(),
+        "mixed_dynamic_assignment",
+    );
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+
+    assert!(
+        matches!(newton.ops.as_slice(), [
+            OptOp::ComputeValue { .. },
+            OptOp::EvaluateEquation { equation: eq0 },
+            OptOp::ComputeValue { .. },
+            OptOp::EvaluateEquation { equation: eq1 },
+        ] if *eq0 == EquationId::new(0) && *eq1 == EquationId::new(1)),
+        "static and ddt equations should both have scalar roots: {newton:?}"
+    );
+}
+
+#[test]
 fn opt_lowering_keeps_large_assignment_chain_roots_in_dynamic_models() {
     let source = chunked_dynamic_assignment_source(320);
     let analyzed =

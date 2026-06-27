@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::{
-    CanonicalIrArtifact, CanonicalValueType, DerivativeLaneKind, EquationId, HirStatement,
-    InvalidationClass, MirEquation, MirEquationKind, OptBinaryOp, OptOp, OptUnaryOp, OptValue,
-    OptValueKind, OptValueType, ValueId,
+    CanonicalIrArtifact, CanonicalValueType, DerivativeLaneKind, EquationId, ExprId,
+    HirAnalogOperator, HirExprKind, HirStatement, InvalidationClass, MirEquation, MirEquationKind,
+    OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind, OptValueType, ValueId,
 };
 
-use super::expr::parameter_field_names;
+use super::expr::{DdtSlots, parameter_field_names};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
 use super::{RustTranspileOptions, device};
 
@@ -88,16 +88,26 @@ pub fn generate_device(
     );
     let parameter_fields = parameter_field_names(artifact);
     let static_cache = ScalarStaticCache::from_artifact(artifact);
-    let stamp = generate_stamp_file(artifact, options, &parameter_fields, &static_cache)?;
+    let ddt_slots = device::collect_ddt_slots(artifact)?;
+    if ddt_slots.idt_len() > 0 {
+        return Err(unsupported(artifact, "idt equations in scalar backend"));
+    }
+    let stamp = generate_stamp_file(
+        artifact,
+        options,
+        &parameter_fields,
+        &static_cache,
+        &ddt_slots,
+    )?;
     let state = if static_cache.is_empty() {
-        device::generate_state_file(artifact, options, &parameter_fields, 0, 0, 0)?
+        device::generate_state_file(artifact, options, &parameter_fields, ddt_slots.len(), 0, 0)?
     } else {
         let extensions = scalar_state_extensions(artifact, &parameter_fields, &static_cache)?;
         device::generate_state_file_with_extensions(
             artifact,
             options,
             &parameter_fields,
-            0,
+            ddt_slots.len(),
             0,
             0,
             &extensions,
@@ -132,6 +142,7 @@ fn generate_stamp_file(
     options: &RustTranspileOptions,
     parameter_fields: &HashMap<String, String>,
     static_cache: &ScalarStaticCache,
+    ddt_slots: &DdtSlots,
 ) -> Result<String, RustBackendError> {
     let roots = scalar_equation_roots(artifact)?;
     let stamp_live = collect_stamp_live_values(artifact, &roots, static_cache)?;
@@ -145,6 +156,9 @@ fn generate_stamp_file(
         "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};\n\n",
         options.runtime_path
     ));
+    if ddt_slots.len() > 0 {
+        emit_ddt_helpers(&mut out);
+    }
     out.push_str("impl Instance {\n");
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
@@ -154,6 +168,14 @@ fn generate_stamp_file(
         out.push_str("        let p = &(*self.params);\n");
     }
     out.push_str("        let multiplicity = self.multiplicity;\n");
+    if ddt_slots.len() > 0 {
+        out.push_str("        let timestep = self.timestep;\n");
+        out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
+        out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
+        out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str("        let ddt_active = timestep.abs() > Instance::DDT_EPSILON;\n");
+        out.push_str("        let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };\n");
+    }
 
     let stamp_context = ValueEmitContext {
         cached_values: &static_cache.set,
@@ -176,15 +198,71 @@ fn generate_stamp_file(
         out.push('\n');
     }
 
-    emit_static_current_stamps(artifact, &roots, static_cache, &mut out)?;
+    emit_current_stamps(artifact, &roots, static_cache, Some(ddt_slots), &mut out)?;
 
     out.push_str("    }\n\n");
-    out.push_str(
-        "    pub fn stamp_reactive(&mut self, _ctx: &GeneratedEvalContext<'_>, _stamper: &mut GeneratedReactiveStamper<'_>) {\n",
-    );
-    out.push_str("    }\n");
+    let reactive_roots = ddt_equation_roots(artifact, &roots);
+    if reactive_roots.is_empty() {
+        out.push_str(
+            "    pub fn stamp_reactive(&mut self, _ctx: &GeneratedEvalContext<'_>, _stamper: &mut GeneratedReactiveStamper<'_>) {\n",
+        );
+        out.push_str("    }\n");
+    } else {
+        let reactive_live = collect_stamp_live_values(artifact, &reactive_roots, static_cache)?;
+        out.push_str(
+            "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
+        );
+        out.push_str("        let nodes = self.nodes;\n");
+        out.push_str("        let p = &(*self.params);\n");
+        out.push_str("        let multiplicity = self.multiplicity;\n");
+        for value in &artifact.opt.values {
+            if !reactive_live.contains(&value.id) {
+                continue;
+            }
+            let expr = emit_value_expr(artifact, parameter_fields, value, &stamp_context)?;
+            out.push_str(&format!(
+                "        let {}: {} = {};\n",
+                value_name(value.id),
+                rust_type(value.value_type),
+                expr
+            ));
+        }
+        if !reactive_live.is_empty() {
+            out.push('\n');
+        }
+        emit_current_reactive_stamps(artifact, &reactive_roots, static_cache, &mut out)?;
+        out.push_str("    }\n");
+    }
     out.push_str("}\n");
     Ok(out)
+}
+
+fn emit_ddt_helpers(out: &mut String) {
+    out.push_str("#[inline]\n");
+    out.push_str("fn eval_ddt<const STATE_COUNT: usize>(\n");
+    out.push_str("    current: &mut [f64; STATE_COUNT],\n");
+    out.push_str("    previous: &mut [f64; STATE_COUNT],\n");
+    out.push_str("    initialized: &mut [bool; STATE_COUNT],\n");
+    out.push_str("    ddt_active: bool,\n");
+    out.push_str("    ddt_scale: f64,\n");
+    out.push_str("    slot: usize,\n");
+    out.push_str("    value: f64,\n");
+    out.push_str(") -> f64 {\n");
+    out.push_str(
+        "    debug_assert!(slot < STATE_COUNT, \"generated ddt state slot out of range\");\n",
+    );
+    out.push_str(
+        "    let previous_value = if initialized[slot] { previous[slot] } else { value };\n",
+    );
+    out.push_str("    current[slot] = value;\n");
+    out.push_str("    if ddt_active {\n");
+    out.push_str("        (value - previous_value) * ddt_scale\n");
+    out.push_str("    } else {\n");
+    out.push_str("        previous[slot] = value;\n");
+    out.push_str("        initialized[slot] = true;\n");
+    out.push_str("        0.0\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
 }
 
 pub(super) fn scalar_state_extensions(
@@ -252,6 +330,9 @@ pub(super) fn scalarizable_current_equation_roots(
     let roots = available_scalar_equation_roots(artifact);
     let mut selected = HashMap::new();
     for equation in &artifact.mir.equations {
+        if equation_ddt_expr(artifact, equation)?.is_some() {
+            continue;
+        }
         let Some(root) = roots.get(&equation.id).copied() else {
             continue;
         };
@@ -303,16 +384,171 @@ pub(super) fn emit_static_current_stamps(
     static_cache: &ScalarStaticCache,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
+    emit_current_stamps(artifact, roots, static_cache, None, out)
+}
+
+fn emit_current_stamps(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+    static_cache: &ScalarStaticCache,
+    ddt_slots: Option<&DdtSlots>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
     for equation in &artifact.mir.equations {
         let Some(root) = roots.get(&equation.id).copied() else {
             continue;
         };
-        emit_current_stamp(artifact, equation, root, static_cache, out)?;
+        emit_current_stamp(artifact, equation, root, static_cache, ddt_slots, out)?;
+    }
+    Ok(())
+}
+
+fn emit_current_reactive_stamps(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+    static_cache: &ScalarStaticCache,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    for equation in &artifact.mir.equations {
+        let Some(root) = roots.get(&equation.id).copied() else {
+            continue;
+        };
+        emit_current_reactive_stamp(artifact, equation, root, static_cache, out)?;
     }
     Ok(())
 }
 
 fn emit_current_stamp(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+    static_cache: &ScalarStaticCache,
+    ddt_slots: Option<&DdtSlots>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let root_value = artifact
+        .opt
+        .values
+        .get(usize::from(root))
+        .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
+    let derivatives = root_value
+        .derivatives
+        .iter()
+        .map(|derivative| {
+            if derivative.lane.kind != DerivativeLaneKind::Node {
+                return Err(unsupported(
+                    artifact,
+                    format!("branch derivative lane on scalar equation {}", equation.id),
+                ));
+            }
+            Ok((derivative.lane.index, derivative.value))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for (node, value) in &derivatives {
+        out.push_str(&format!(
+            "        let {}: f64 = {};\n",
+            derivative_name(root, *node),
+            cached_or_local_value_name(*value, static_cache)
+        ));
+    }
+
+    let pos = optional_node_local_expr(equation.branch.pos_node);
+    let neg = optional_node_local_expr(equation.branch.neg_node);
+    let root_name = cached_or_local_value_name(root, static_cache);
+    let mut root_expr = current_root_expr(root_value.value_type, &root_name);
+    let mut derivative_scale = "1.0".to_string();
+    if let Some(ddt_expr) = equation_ddt_expr(artifact, equation)? {
+        let slots = ddt_slots.ok_or_else(|| unsupported(artifact, "ddt scalar stamp context"))?;
+        let slot = slots.slot_for(ddt_expr).ok_or_else(|| {
+            internal(
+                artifact,
+                format!("ddt expression {ddt_expr} has no generated state slot"),
+            )
+        })?;
+        let ddt_value = format!("{}_ddt", value_name(root));
+        out.push_str(&format!(
+            "        let {ddt_value}: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, {slot}, {root_expr});\n"
+        ));
+        root_expr = ddt_value;
+        derivative_scale = "ddt_scale".to_string();
+    }
+    match derivatives.as_slice() {
+        [] => {
+            out.push_str("        stamper.stamp_current_const_local(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+            out.push_str("        );\n");
+        }
+        [(node0, _)] => {
+            out.push_str("        stamper.stamp_current_node1_local(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+            ));
+            out.push_str("        );\n");
+        }
+        [(node0, _), (node1, _)] => {
+            out.push_str("        stamper.stamp_current_node2_local(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+            ));
+            out.push_str(&format!("            {node1},\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+            ));
+            out.push_str("        );\n");
+        }
+        [(node0, _), (node1, _), (node2, _)] => {
+            out.push_str("        stamper.stamp_current_node3_local(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+            ));
+            out.push_str(&format!("            {node1},\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+            ));
+            out.push_str(&format!("            {node2},\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                scaled_derivative_expr(derivative_name(root, *node2), derivative_scale.as_str())
+            ));
+            out.push_str("        );\n");
+        }
+        _ => {
+            emit_wide_current_stamp(
+                artifact,
+                root,
+                &derivatives,
+                &pos,
+                &neg,
+                &root_expr,
+                derivative_scale.as_str(),
+                out,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn emit_current_reactive_stamp(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
     root: ValueId,
@@ -346,24 +582,15 @@ fn emit_current_stamp(
         ));
     }
 
-    let pos = optional_node_local_expr(equation.branch.pos_node);
-    let neg = optional_node_local_expr(equation.branch.neg_node);
-    let root_name = cached_or_local_value_name(root, static_cache);
-    let root_expr = current_root_expr(root_value.value_type, &root_name);
+    let pos = optional_node_global_expr(equation.branch.pos_node);
+    let neg = optional_node_global_expr(equation.branch.neg_node);
     match derivatives.as_slice() {
-        [] => {
-            out.push_str("        stamper.stamp_current_const_local(\n");
-            out.push_str(&format!("            {pos},\n"));
-            out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
-            out.push_str("        );\n");
-        }
+        [] => {}
         [(node0, _)] => {
-            out.push_str("        stamper.stamp_current_node1_local(\n");
+            out.push_str("        stamper.stamp_current_reactive_node1(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
-            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 derivative_name(root, *node0)
@@ -371,16 +598,15 @@ fn emit_current_stamp(
             out.push_str("        );\n");
         }
         [(node0, _), (node1, _)] => {
-            out.push_str("        stamper.stamp_current_node2_local(\n");
+            out.push_str("        stamper.stamp_current_reactive_node2(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
-            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 derivative_name(root, *node0)
             ));
-            out.push_str(&format!("            {node1},\n"));
+            out.push_str(&format!("            nodes[{node1}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 derivative_name(root, *node1)
@@ -388,21 +614,20 @@ fn emit_current_stamp(
             out.push_str("        );\n");
         }
         [(node0, _), (node1, _), (node2, _)] => {
-            out.push_str("        stamper.stamp_current_node3_local(\n");
+            out.push_str("        stamper.stamp_current_reactive_node3(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
-            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 derivative_name(root, *node0)
             ));
-            out.push_str(&format!("            {node1},\n"));
+            out.push_str(&format!("            nodes[{node1}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 derivative_name(root, *node1)
             ));
-            out.push_str(&format!("            {node2},\n"));
+            out.push_str(&format!("            nodes[{node2}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 derivative_name(root, *node2)
@@ -410,7 +635,10 @@ fn emit_current_stamp(
             out.push_str("        );\n");
         }
         _ => {
-            emit_wide_current_stamp(artifact, root, &derivatives, &pos, &neg, &root_expr, out);
+            return Err(unsupported(
+                artifact,
+                "wide ddt reactive stamps in scalar backend",
+            ));
         }
     }
     Ok(())
@@ -423,12 +651,14 @@ fn emit_wide_current_stamp(
     pos: &str,
     neg: &str,
     root_expr: &str,
+    derivative_scale: &str,
     out: &mut String,
 ) {
     if derivatives.len() == artifact.mir.nodes.len() {
         let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
         for (node, _) in derivatives {
-            node_derivatives[*node as usize] = derivative_name(root, *node);
+            node_derivatives[*node as usize] =
+                scaled_derivative_expr(derivative_name(root, *node), derivative_scale);
         }
         out.push_str(&format!(
             "        let {}_node_derivatives: [f64; {}] = [{}];\n",
@@ -455,7 +685,7 @@ fn emit_wide_current_stamp(
             .join(", ");
         let node_derivatives = derivatives
             .iter()
-            .map(|(node, _)| derivative_name(root, *node))
+            .map(|(node, _)| scaled_derivative_expr(derivative_name(root, *node), derivative_scale))
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
@@ -630,6 +860,63 @@ fn emit_binary_expr(op: OptBinaryOp, left: String, right: String) -> String {
         OptBinaryOp::Ge => format!("({left} >= {right})"),
         OptBinaryOp::And => format!("({left} && {right})"),
         OptBinaryOp::Or => format!("({left} || {right})"),
+    }
+}
+
+fn ddt_equation_roots(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+) -> HashMap<EquationId, ValueId> {
+    artifact
+        .mir
+        .equations
+        .iter()
+        .filter(|equation| equation_ddt_expr(artifact, equation).is_ok_and(|expr| expr.is_some()))
+        .filter_map(|equation| {
+            roots
+                .get(&equation.id)
+                .copied()
+                .map(|root| (equation.id, root))
+        })
+        .collect()
+}
+
+fn equation_ddt_expr(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+) -> Result<Option<ExprId>, RustBackendError> {
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(equation.expression.id))
+        .ok_or_else(|| {
+            unsupported(
+                artifact,
+                format!("missing equation expression {}", equation.expression.id),
+            )
+        })?;
+    match &expression.kind {
+        HirExprKind::AnalogOperator {
+            op:
+                HirAnalogOperator::Ddt {
+                    expr: _,
+                    abstol: Some(_),
+                },
+        } => Err(unsupported(artifact, "ddt abstol argument")),
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Ddt { .. },
+        } => Ok(Some(equation.expression.id)),
+        HirExprKind::Call { name, args } if name.eq_ignore_ascii_case("ddt") => {
+            if args.len() == 1 {
+                Ok(Some(equation.expression.id))
+            } else {
+                Err(unsupported(
+                    artifact,
+                    format!("ddt expects one operand, found {}", args.len()),
+                ))
+            }
+        }
+        _ => Ok(None),
     }
 }
 
@@ -892,8 +1179,21 @@ fn derivative_name(root: ValueId, node: u32) -> String {
     format!("d{}_dn{node}", root.index())
 }
 
+fn scaled_derivative_expr(derivative: String, scale: &str) -> String {
+    if scale == "1.0" {
+        derivative
+    } else {
+        format!("(({derivative}) * {scale})")
+    }
+}
+
 fn optional_node_local_expr(node: Option<crate::canonical_ir::NodeId>) -> String {
     node.map(|node| format!("Some({})", node.index()))
+        .unwrap_or_else(|| "None".to_string())
+}
+
+fn optional_node_global_expr(node: Option<crate::canonical_ir::NodeId>) -> String {
+    node.map(|node| format!("Some(nodes[{}])", node.index()))
         .unwrap_or_else(|| "None".to_string())
 }
 

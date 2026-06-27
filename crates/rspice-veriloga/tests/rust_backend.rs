@@ -871,7 +871,7 @@ fn rust_backend_auto_selects_scalar_for_supported_algebraic_current() {
 }
 
 #[test]
-fn rust_backend_auto_falls_back_to_legacy_for_unsupported_stateful_model() {
+fn rust_backend_auto_scalarizes_ddt_current_equations() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(capacitor_source())
         .expect("canonical IR");
@@ -881,6 +881,13 @@ fn rust_backend_auto_falls_back_to_legacy_for_unsupported_stateful_model() {
     })
     .transpile(&artifact)
     .expect("transpile ddt current through auto backend");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
     let stamp = generated
         .files
         .iter()
@@ -889,8 +896,12 @@ fn rust_backend_auto_falls_back_to_legacy_for_unsupported_stateful_model() {
         .contents
         .as_str();
 
+    assert!(state.contains("DDT_STATE_COUNT: usize = 1"), "{state}");
     assert!(stamp.contains("eval_ddt"), "{stamp}");
-    assert!(stamp.contains("Scratch"), "{stamp}");
+    assert!(stamp.contains("ddt_scale"), "{stamp}");
+    assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -942,14 +953,12 @@ fn rust_backend_auto_scalarizes_static_equations_inside_dynamic_models() {
     assert!(stamp.contains("eval_ddt"), "{stamp}");
     assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
     assert!(stamp.contains("let v"), "{stamp}");
-    let stamp_body = stamp.split("pub fn stamp(").nth(1).expect("stamp body");
     assert!(
-        stamp_body.find("let v").expect("scalar value")
-            < stamp_body
-                .find("let eq1_e8")
-                .expect("legacy ddt equation evaluation"),
-        "static scalar values should be emitted before the legacy ddt path:\n{stamp}"
+        !stamp.contains("let eq"),
+        "mixed static and ddt currents should stay on scalar OptIR output:\n{stamp}"
     );
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 

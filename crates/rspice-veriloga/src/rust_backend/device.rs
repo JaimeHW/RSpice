@@ -3427,7 +3427,9 @@ fn reject_unsupported_statements(
     Ok(())
 }
 
-fn collect_ddt_slots(artifact: &CanonicalIrArtifact) -> Result<DdtSlots, RustBackendError> {
+pub(super) fn collect_ddt_slots(
+    artifact: &CanonicalIrArtifact,
+) -> Result<DdtSlots, RustBackendError> {
     let mut collector = DdtSlotCollector {
         artifact,
         slots: HashMap::new(),
