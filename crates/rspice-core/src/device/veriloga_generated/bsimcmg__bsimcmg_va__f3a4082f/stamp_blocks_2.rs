@@ -2947,7 +2947,7 @@ impl Instance {
 
         if s.b[1291] {
             s.store_scaled_add_offset_sqrt_square_offset(119, 116, s.v[121], (-s.v[121]), ((0.25 * p.p1788) * p.p1788), 0.5);
-            s.store_scaled_add_ad(120, A::scaled_offset(s.ad_value(116), (-p.p1787), (-p.p1790)), A::sqrt(A::offset(A::mul(A::scaled_offset(s.ad_value(116), (-p.p1787), (-p.p1790)), A::scaled_offset(s.ad_value(116), (-p.p1787), (-p.p1790))), ((0.25 * p.p1789) * p.p1789))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_ad(120, A::scaled_offset(s.ad_value(116), (-p.p1787), (-p.p1790)), ((0.25 * p.p1789) * p.p1789), 0.5);
         }
 
         s.b[1292] = (p.p80 == 1.0);
@@ -2955,7 +2955,7 @@ impl Instance {
 
         if (s.b[1291] && s.b[1292]) {
             s.store_scaled_add_offset_sqrt_square_offset(169, 228, s.v[121], (-s.v[121]), ((0.25 * p.p1788) * p.p1788), 0.5);
-            s.store_scaled_add_ad(170, A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790)), A::sqrt(A::offset(A::mul(A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790)), A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790))), ((0.25 * p.p1789) * p.p1789))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_ad(170, A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790)), ((0.25 * p.p1789) * p.p1789), 0.5);
         }
 
         s.b[1293] = (s.v[228] > s.v[121]);
@@ -2997,7 +2997,7 @@ impl Instance {
 
         if ((s.b[1291] && (!s.b[1292])) && (!s.b[1295])) {
             s.store_add_scaled_inputs3_sqrt_third_mixed_iia(169, 228, 0.5, 121, 0.5, A::offset(A::mul(A::sub(s.ad_value(228), s.ad_value(121)), A::sub(s.ad_value(228), s.ad_value(121))), ((0.25 * p.p1788) * p.p1788)), 0.5);
-            s.store_scaled_add_ad(170, A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790)), A::sqrt(A::offset(A::mul(A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790)), A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790))), ((0.25 * p.p1789) * p.p1789))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_ad(170, A::scaled_offset(s.ad_value(228), (-p.p1787), (-p.p1790)), ((0.25 * p.p1789) * p.p1789), 0.5);
         }
 
         s.b[1296] = (s.v[228] > s.v[121]);

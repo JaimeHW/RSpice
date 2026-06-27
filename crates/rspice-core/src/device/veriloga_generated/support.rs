@@ -2541,6 +2541,26 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_scaled_add_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
+        let source_value = source.value;
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let derivative_scale = (1.0 + source_value / rhs_value) * scale;
+        self.v[index] = (source_value + rhs_value) * scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_sub_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
+        let source_value = source.value;
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let derivative_scale = (1.0 - source_value / rhs_value) * scale;
+        self.v[index] = (source_value - rhs_value) * scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_add_offset_sqrt_square_offset(&mut self, index: usize, source: usize, left_offset: f64, square_offset: f64, sqrt_offset: f64, scale: f64) {
         let source_value = self.v[source];
         let source_dn = self.dn[source];
@@ -14387,6 +14407,26 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = (left_value + rhs_sign * rhs_value) * scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] + rhs_sign * source_dn[axis] * rhs_derivative_scale) * scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] + rhs_sign * source_db[axis] * rhs_derivative_scale) * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_add_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
+        let source_value = source.value;
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let derivative_scale = (1.0 + source_value / rhs_value) * scale;
+        self.v[index] = (source_value + rhs_value) * scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_sub_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
+        let source_value = source.value;
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let derivative_scale = (1.0 - source_value / rhs_value) * scale;
+        self.v[index] = (source_value - rhs_value) * scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source.db[axis] * derivative_scale; }
     }
 
     #[inline]
