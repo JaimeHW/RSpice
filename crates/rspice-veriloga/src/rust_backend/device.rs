@@ -1615,6 +1615,65 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_add_scaled_inputs3_sqrt_operands_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_add_scaled_inputs3_sqrt_third_indices",
+            "fn store_add_scaled_inputs3_sqrt_third_mixed_iaa",
+            "fn store_add_scaled_inputs3_sqrt_third_ad",
+            "fn store_add_scaled_inputs3_sqrt_first_indices",
+            "fn store_add_scaled_inputs3_sqrt_first_mixed_aii",
+            "fn store_add_scaled_inputs3_sqrt_first_ad",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(80, AdValue::add_scaled_inputs3(scratch.ad_value(2), params.first_scale, scratch.ad_value(3), params.second_scale, AdValue::sqrt(scratch.ad_value(4)), params.sqrt_scale));
+    scratch.store_ad_value(81, AdValue::add_scaled_inputs3(AdValue::sqrt(scratch.ad_value(5)), params.sqrt_scale, scratch.ad_value(6), params.second_scale, scratch.ad_value(7), params.third_scale));
+    scratch.store_ad_value(82, AdValue::add_scaled_inputs3(scratch.ad_value(8), params.first_scale, AdValue::ln(scratch.ad_value(9)), params.second_scale, AdValue::sqrt(AdValue::offset(scratch.ad_value(10), params.bias)), params.sqrt_scale));
+    scratch.store_ad_value(83, AdValue::add_scaled_inputs3(AdValue::sqrt(AdValue::offset(scratch.ad_value(11), params.bias)), params.sqrt_scale, scratch.ad_value(12), params.second_scale, scratch.ad_value(13), params.third_scale));
+    scratch.store_ad_value(84, AdValue::add_scaled_inputs3(AdValue::ln(scratch.ad_value(14)), params.first_scale, AdValue::exp(scratch.ad_value(15)), params.second_scale, AdValue::sqrt(AdValue::offset(scratch.ad_value(16), params.bias)), params.sqrt_scale));
+    scratch.store_ad_value(85, AdValue::add_scaled_inputs3(AdValue::sqrt(AdValue::offset(scratch.ad_value(17), params.bias)), params.sqrt_scale, AdValue::ln(scratch.ad_value(18)), params.second_scale, AdValue::exp(scratch.ad_value(19)), params.third_scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_add_scaled_inputs3_sqrt_third_indices(80, 2, p.first_scale, 3, p.second_scale, 4, p.sqrt_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_scaled_inputs3_sqrt_first_indices(81, 5, p.sqrt_scale, 6, p.second_scale, 7, p.third_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_scaled_inputs3_sqrt_third_mixed_iaa(82, 8, p.first_scale, A::ln(s.ad_value(9)), p.second_scale, A::offset(s.ad_value(10), p.bias), p.sqrt_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_scaled_inputs3_sqrt_first_mixed_aii(83, A::offset(s.ad_value(11), p.bias), p.sqrt_scale, 12, p.second_scale, 13, p.third_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_scaled_inputs3_sqrt_third_ad(84, A::ln(s.ad_value(14)), p.first_scale, A::exp(s.ad_value(15)), p.second_scale, A::offset(s.ad_value(16), p.bias), p.sqrt_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_scaled_inputs3_sqrt_first_ad(85, A::offset(s.ad_value(17), p.bias), p.sqrt_scale, A::ln(s.ad_value(18)), p.second_scale, A::exp(s.ad_value(19)), p.third_scale);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::sqrt("), "{compact}");
+        assert!(
+            !compact.contains("s.store_add_scaled_inputs3("),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_div_scaled_product_consumers_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
@@ -5648,6 +5707,34 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = (first_value + second_value) + third_value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_inputs3_sqrt_third_components(&mut self, index: usize, first_raw: f64, first_node_derivatives: [f64; Instance::NODE_COUNT], first_branch_derivatives: [f64; Instance::BRANCH_COUNT], first_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, sqrt_raw: f64, sqrt_node_derivatives: [f64; Instance::NODE_COUNT], sqrt_branch_derivatives: [f64; Instance::BRANCH_COUNT], sqrt_scale: f64) {",
+        "        let root = sqrt_raw.sqrt();",
+        "        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);",
+        "        self.values[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first_node_derivatives[axis] * first_scale + second_node_derivatives[axis] * second_scale) + sqrt_node_derivatives[axis] * sqrt_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first_branch_derivatives[axis] * first_scale + second_branch_derivatives[axis] * second_scale) + sqrt_branch_derivatives[axis] * sqrt_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_inputs3_sqrt_third_ad(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, sqrt_value: AdValue, sqrt_scale: f64) {",
+        "        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.node_derivatives, first.branch_derivatives, first_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, sqrt_value.value, sqrt_value.node_derivatives, sqrt_value.branch_derivatives, sqrt_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_inputs3_sqrt_first_components(&mut self, index: usize, sqrt_raw: f64, sqrt_node_derivatives: [f64; Instance::NODE_COUNT], sqrt_branch_derivatives: [f64; Instance::BRANCH_COUNT], sqrt_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, third_raw: f64, third_node_derivatives: [f64; Instance::NODE_COUNT], third_branch_derivatives: [f64; Instance::BRANCH_COUNT], third_scale: f64) {",
+        "        let root = sqrt_raw.sqrt();",
+        "        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);",
+        "        self.values[index] = (root * sqrt_scale + second_raw * second_scale) + third_raw * third_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (sqrt_node_derivatives[axis] * sqrt_derivative_scale + second_node_derivatives[axis] * second_scale) + third_node_derivatives[axis] * third_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (sqrt_branch_derivatives[axis] * sqrt_derivative_scale + second_branch_derivatives[axis] * second_scale) + third_branch_derivatives[axis] * third_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_inputs3_sqrt_first_ad(&mut self, index: usize, sqrt_value: AdValue, sqrt_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64) {",
+        "        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.node_derivatives, sqrt_value.branch_derivatives, sqrt_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, third.value, third.node_derivatives, third.branch_derivatives, third_scale);",
         "    }",
         "",
         "    #[inline]",
@@ -10267,6 +10354,10 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
             &mask,
         ));
     }
+    for mask in index_or_mixed_masks(3) {
+        out.push_str(&generate_index_or_mixed_add_scaled_inputs3_sqrt_third_helper(&mask));
+        out.push_str(&generate_index_or_mixed_add_scaled_inputs3_sqrt_first_helper(&mask));
+    }
     for mask in index_or_mixed_masks(5) {
         out.push_str(&generate_index_or_mixed_add_scaled_offset_product_lhs_product_helper(&mask));
     }
@@ -10470,6 +10561,48 @@ fn generate_index_or_mixed_add_scaled_value_products3_helper(mask: &str) -> Stri
         second_product_right_ty = mixed_helper_type(mask, 4),
         third_product_left_ty = mixed_helper_type(mask, 5),
         third_product_right_ty = mixed_helper_type(mask, 6),
+    )
+}
+
+fn generate_index_or_mixed_add_scaled_inputs3_sqrt_third_helper(mask: &str) -> String {
+    let operands = ["first", "second", "sqrt_value"];
+    let helper = index_or_mixed_helper_name("store_add_scaled_inputs3_sqrt_third", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let first = mixed_helper_component_args(mask, 0, "first");
+    let second = mixed_helper_component_args(mask, 1, "second");
+    let sqrt_value = mixed_helper_component_args(mask, 2, "sqrt_value");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, sqrt_value: {sqrt_value_ty}, sqrt_scale: f64) {{
+{locals}        self.store_add_scaled_inputs3_sqrt_third_components(index, {first}, first_scale, {second}, second_scale, {sqrt_value}, sqrt_scale);
+    }}
+"#,
+        first_ty = mixed_helper_type(mask, 0),
+        second_ty = mixed_helper_type(mask, 1),
+        sqrt_value_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_index_or_mixed_add_scaled_inputs3_sqrt_first_helper(mask: &str) -> String {
+    let operands = ["sqrt_value", "second", "third"];
+    let helper = index_or_mixed_helper_name("store_add_scaled_inputs3_sqrt_first", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let sqrt_value = mixed_helper_component_args(mask, 0, "sqrt_value");
+    let second = mixed_helper_component_args(mask, 1, "second");
+    let third = mixed_helper_component_args(mask, 2, "third");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, sqrt_value: {sqrt_value_ty}, sqrt_scale: f64, second: {second_ty}, second_scale: f64, third: {third_ty}, third_scale: f64) {{
+{locals}        self.store_add_scaled_inputs3_sqrt_first_components(index, {sqrt_value}, sqrt_scale, {second}, second_scale, {third}, third_scale);
+    }}
+"#,
+        sqrt_value_ty = mixed_helper_type(mask, 0),
+        second_ty = mixed_helper_type(mask, 1),
+        third_ty = mixed_helper_type(mask, 2),
     )
 }
 
@@ -15590,6 +15723,10 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "add_scaled_inputs3")
         && args.len() == 6
     {
+        if let Some(line) = compact_add_scaled_inputs3_sqrt_store_helper_call(target_index, &args) {
+            return Some(line);
+        }
+
         return Some(format!(
             "scratch.store_add_scaled_inputs3({target_index}, {}, {}, {}, {}, {}, {});",
             args[0], args[1], args[2], args[3], args[4], args[5]
@@ -17818,6 +17955,105 @@ fn compact_add_scaled_inputs3_args(
         return None;
     }
     Some((args[0], args[1], args[2], args[3], args[4], args[5], "0.0"))
+}
+
+fn compact_add_scaled_inputs3_sqrt_store_helper_call(
+    target_index: usize,
+    args: &[&str],
+) -> Option<String> {
+    if args.len() != 6 {
+        return None;
+    }
+
+    if let Some(sqrt_args) = compact_ad_call_args(args[4], "sqrt") {
+        if sqrt_args.len() != 1 {
+            return None;
+        }
+        return compact_add_scaled_inputs3_sqrt_third_store_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            sqrt_args[0],
+            args[5],
+        );
+    }
+
+    if let Some(sqrt_args) = compact_ad_call_args(args[0], "sqrt") {
+        if sqrt_args.len() != 1 {
+            return None;
+        }
+        return compact_add_scaled_inputs3_sqrt_first_store_helper_line(
+            target_index,
+            sqrt_args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+        );
+    }
+
+    None
+}
+
+fn compact_add_scaled_inputs3_sqrt_third_store_helper_line(
+    target_index: usize,
+    first: &str,
+    first_scale: &str,
+    second: &str,
+    second_scale: &str,
+    sqrt_value: &str,
+    sqrt_scale: &str,
+) -> Option<String> {
+    let first_index = compact_scratch_ad_value_index(first);
+    let second_index = compact_scratch_ad_value_index(second);
+    let sqrt_value_index = compact_scratch_ad_value_index(sqrt_value);
+    if let Some(helper) = compact_index_or_mixed_product_store_helper_name(
+        "store_add_scaled_inputs3_sqrt_third",
+        &[first_index, second_index, sqrt_value_index],
+    ) {
+        return Some(format!(
+            "scratch.{helper}({target_index}, {}, {first_scale}, {}, {second_scale}, {}, {sqrt_scale});",
+            compact_mixed_index_product_arg(first_index, first),
+            compact_mixed_index_product_arg(second_index, second),
+            compact_mixed_index_product_arg(sqrt_value_index, sqrt_value)
+        ));
+    }
+
+    Some(format!(
+        "scratch.store_add_scaled_inputs3_sqrt_third_ad({target_index}, {first}, {first_scale}, {second}, {second_scale}, {sqrt_value}, {sqrt_scale});"
+    ))
+}
+
+fn compact_add_scaled_inputs3_sqrt_first_store_helper_line(
+    target_index: usize,
+    sqrt_value: &str,
+    sqrt_scale: &str,
+    second: &str,
+    second_scale: &str,
+    third: &str,
+    third_scale: &str,
+) -> Option<String> {
+    let sqrt_value_index = compact_scratch_ad_value_index(sqrt_value);
+    let second_index = compact_scratch_ad_value_index(second);
+    let third_index = compact_scratch_ad_value_index(third);
+    if let Some(helper) = compact_index_or_mixed_product_store_helper_name(
+        "store_add_scaled_inputs3_sqrt_first",
+        &[sqrt_value_index, second_index, third_index],
+    ) {
+        return Some(format!(
+            "scratch.{helper}({target_index}, {}, {sqrt_scale}, {}, {second_scale}, {}, {third_scale});",
+            compact_mixed_index_product_arg(sqrt_value_index, sqrt_value),
+            compact_mixed_index_product_arg(second_index, second),
+            compact_mixed_index_product_arg(third_index, third)
+        ));
+    }
+
+    Some(format!(
+        "scratch.store_add_scaled_inputs3_sqrt_first_ad({target_index}, {sqrt_value}, {sqrt_scale}, {second}, {second_scale}, {third}, {third_scale});"
+    ))
 }
 
 fn compact_mul_scale_offset_store_helper_call(target_index: usize, value: &str) -> Option<String> {
