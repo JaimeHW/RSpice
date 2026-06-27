@@ -3293,7 +3293,7 @@ impl Instance {
             s.store_div_from_scalar_mul_ad(282, (((((13.0 * 1e-7) / 0.0001)) as f64).sqrt() * ((((36.0 * 1e-7) / 0.0001)) as f64).sqrt()), s.ad_value(279), s.ad_value(280));
             s.store_scale(283, 122, 0.0);
             s.store_sqrt_ad(284, A::mul_scaled_lhs(s.ad_value(471), ((2.0 * 1.034943e-10) * 1.6021918e-19), s.ad_value(122)));
-            s.store_sqrt_mul_ad(285, s.ad_value(120), A::sub(s.ad_value(339), s.ad_value(283)));
+            s.store_sqrt_mul_sub_rhs(285, 120, 339, 283);
             s.store_sqrt_mul(286, 120, 339);
             s.store_mul_sub_scaled_inputs_rhs(337, 284, s.ad_value(285), -1.0, s.ad_value(286), -1.0);
         }

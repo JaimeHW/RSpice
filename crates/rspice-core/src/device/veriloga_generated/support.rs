@@ -1848,6 +1848,44 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sqrt_mul_sub_lhs(&mut self, index: usize, sub_left: usize, sub_right: usize, right: usize) {
+        let sub_left_value = self.v[sub_left];
+        let sub_right_value = self.v[sub_right];
+        let right_value = self.v[right];
+        let sub_left_dn = self.dn[sub_left];
+        let sub_right_dn = self.dn[sub_right];
+        let right_dn = self.dn[right];
+        let sub_left_db = self.db[sub_left];
+        let sub_right_db = self.db[sub_right];
+        let right_db = self.db[right];
+        let left_value = sub_left_value - sub_right_value;
+        let root = (left_value * right_value).sqrt();
+        let derivative_scale = 1.0 / (2.0 * root);
+        self.v[index] = root;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = ((sub_left_dn[axis] - sub_right_dn[axis]) * right_value + left_value * right_dn[axis]) * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = ((sub_left_db[axis] - sub_right_db[axis]) * right_value + left_value * right_db[axis]) * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_mul_sub_rhs(&mut self, index: usize, left: usize, sub_left: usize, sub_right: usize) {
+        let left_value = self.v[left];
+        let sub_left_value = self.v[sub_left];
+        let sub_right_value = self.v[sub_right];
+        let left_dn = self.dn[left];
+        let sub_left_dn = self.dn[sub_left];
+        let sub_right_dn = self.dn[sub_right];
+        let left_db = self.db[left];
+        let sub_left_db = self.db[sub_left];
+        let sub_right_db = self.db[sub_right];
+        let right_value = sub_left_value - sub_right_value;
+        let root = (left_value * right_value).sqrt();
+        let derivative_scale = 1.0 / (2.0 * root);
+        self.v[index] = root;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_value + left_value * (sub_left_dn[axis] - sub_right_dn[axis])) * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_value + left_value * (sub_left_db[axis] - sub_right_db[axis])) * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_sqrt_div_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let reciprocal = 1.0 / right.value;
         let raw = left.value * reciprocal;
@@ -14283,6 +14321,44 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = root;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = (left.dn[axis] * right.value + left.value * right.dn[axis]) * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left.db[axis] * right.value + left.value * right.db[axis]) * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_mul_sub_lhs(&mut self, index: usize, sub_left: usize, sub_right: usize, right: usize) {
+        let sub_left_value = self.v[sub_left];
+        let sub_right_value = self.v[sub_right];
+        let right_value = self.v[right];
+        let sub_left_dn = self.dn[sub_left];
+        let sub_right_dn = self.dn[sub_right];
+        let right_dn = self.dn[right];
+        let sub_left_db = self.db[sub_left];
+        let sub_right_db = self.db[sub_right];
+        let right_db = self.db[right];
+        let left_value = sub_left_value - sub_right_value;
+        let root = (left_value * right_value).sqrt();
+        let derivative_scale = 1.0 / (2.0 * root);
+        self.v[index] = root;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = ((sub_left_dn[axis] - sub_right_dn[axis]) * right_value + left_value * right_dn[axis]) * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = ((sub_left_db[axis] - sub_right_db[axis]) * right_value + left_value * right_db[axis]) * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_mul_sub_rhs(&mut self, index: usize, left: usize, sub_left: usize, sub_right: usize) {
+        let left_value = self.v[left];
+        let sub_left_value = self.v[sub_left];
+        let sub_right_value = self.v[sub_right];
+        let left_dn = self.dn[left];
+        let sub_left_dn = self.dn[sub_left];
+        let sub_right_dn = self.dn[sub_right];
+        let left_db = self.db[left];
+        let sub_left_db = self.db[sub_left];
+        let sub_right_db = self.db[sub_right];
+        let right_value = sub_left_value - sub_right_value;
+        let root = (left_value * right_value).sqrt();
+        let derivative_scale = 1.0 / (2.0 * root);
+        self.v[index] = root;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_value + left_value * (sub_left_dn[axis] - sub_right_dn[axis])) * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_value + left_value * (sub_left_db[axis] - sub_right_db[axis])) * derivative_scale; }
     }
 
     #[inline]

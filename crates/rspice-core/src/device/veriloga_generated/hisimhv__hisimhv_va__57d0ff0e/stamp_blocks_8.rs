@@ -364,7 +364,7 @@ impl Instance {
             assign31400_loop_guard += 1;
             assert!(assign31400_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
             if (((s.b[1443] && s.b[1444]) && (!s.b[1711])) && s.b[1712]) {
-                s.store_sqrt_mul_ad(1448, s.ad_value(1547), A::sub(s.ad_value(1484), s.ad_value(1465)));
+                s.store_sqrt_mul_sub_rhs(1448, 1547, 1484, 1465);
             }
             s.b[1713] = ((s.v[1448] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));
             s.v[1713] = if s.b[1713] { 1.0 } else { 0.0 };
@@ -674,8 +674,8 @@ impl Instance {
         }
 
         if (((((s.b[1443] && s.b[1444]) && (!s.b[1711])) && (!s.b[1731])) && (!s.b[1733])) && s.b[1734]) {
-            s.store_sqrt_mul_ad(1450, s.ad_value(1547), A::sub(s.ad_value(1484), s.ad_value(1481)));
-            s.store_sqrt_mul_ad(1448, s.ad_value(1547), A::sub(s.ad_value(1484), s.ad_value(1465)));
+            s.store_sqrt_mul_sub_rhs(1450, 1547, 1484, 1481);
+            s.store_sqrt_mul_sub_rhs(1448, 1547, 1484, 1465);
         }
 
         s.b[1736] = ((s.v[1450] + s.v[1448]) > s.v[965]);
@@ -734,9 +734,9 @@ impl Instance {
                 s.store_scalar(97, (150.0 + 1.0));
             }
             if ((((((s.b[1443] && s.b[1444]) && (!s.b[1711])) && (!s.b[1731])) && (!s.b[1733])) && s.b[1734]) && s.b[1736]) {
-                s.store_sqrt_mul_ad(1450, s.ad_value(1547), A::sub(s.ad_value(1484), s.ad_value(1481)));
+                s.store_sqrt_mul_sub_rhs(1450, 1547, 1484, 1481);
                 s.store_div_scaled_inputs2_mixed_aia(1465, A::add_scaled_product(s.ad_value(1435), 1.0, s.ad_value(1536), s.ad_value(1484), 1.0), 1.0, 1463, (-1.0), A::offset(s.ad_value(1536), 1.0), 1.0);
-                s.store_sqrt_mul_ad(1448, s.ad_value(1547), A::sub(s.ad_value(1484), s.ad_value(1465)));
+                s.store_sqrt_mul_sub_rhs(1448, 1547, 1484, 1465);
             }
             s.b[1742] = ((((s.v[1484] - s.v[1471])) as f64).abs() <= 1e-8);
             s.v[1742] = if s.b[1742] { 1.0 } else { 0.0 };
@@ -1204,7 +1204,7 @@ impl Instance {
             s.copy_ad(1539, 1476);
             s.store_scalar(1518, 0.0);
             s.store_scalar(1478, 0.0);
-            s.store_sqrt_mul_ad(1448, s.ad_value(1547), A::sub(s.ad_value(1484), s.ad_value(1465)));
+            s.store_sqrt_mul_sub_rhs(1448, 1547, 1484, 1465);
         }
 
         s.b[1773] = ((s.v[1448] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));

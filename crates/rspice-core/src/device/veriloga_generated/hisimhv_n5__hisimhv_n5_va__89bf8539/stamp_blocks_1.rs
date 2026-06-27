@@ -674,7 +674,7 @@ impl Instance {
             s.copy_ad(1536, 1473);
             s.store_scalar(1515, 0.0);
             s.store_scalar(1475, 0.0);
-            s.store_sqrt_mul_ad(1445, s.ad_value(1545), A::sub(s.ad_value(1481), s.ad_value(1462)));
+            s.store_sqrt_mul_sub_rhs(1445, 1545, 1481, 1462);
         }
 
         s.b[1622] = ((s.v[1445] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));
@@ -2948,7 +2948,7 @@ impl Instance {
             assign31380_loop_guard += 1;
             assert!(assign31380_loop_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
             if (((s.b[1441] && s.b[1442]) && (!s.b[1709])) && s.b[1710]) {
-                s.store_sqrt_mul_ad(1446, s.ad_value(1545), A::sub(s.ad_value(1482), s.ad_value(1463)));
+                s.store_sqrt_mul_sub_rhs(1446, 1545, 1482, 1463);
             }
             s.b[1711] = ((s.v[1446] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));
             s.v[1711] = if s.b[1711] { 1.0 } else { 0.0 };
@@ -3457,8 +3457,8 @@ impl Instance {
         }
 
         if (((((s.b[1441] && s.b[1442]) && (!s.b[1709])) && (!s.b[1729])) && (!s.b[1731])) && s.b[1732]) {
-            s.store_sqrt_mul_ad(1448, s.ad_value(1545), A::sub(s.ad_value(1482), s.ad_value(1479)));
-            s.store_sqrt_mul_ad(1446, s.ad_value(1545), A::sub(s.ad_value(1482), s.ad_value(1463)));
+            s.store_sqrt_mul_sub_rhs(1448, 1545, 1482, 1479);
+            s.store_sqrt_mul_sub_rhs(1446, 1545, 1482, 1463);
         }
 
         s.b[1734] = ((s.v[1448] + s.v[1446]) > s.v[965]);
@@ -3530,9 +3530,9 @@ impl Instance {
 };
             s.v[97] = assign31860_body16_e33464;
             if ((((((s.b[1441] && s.b[1442]) && (!s.b[1709])) && (!s.b[1729])) && (!s.b[1731])) && s.b[1732]) && s.b[1734]) {
-                s.store_sqrt_mul_ad(1448, s.ad_value(1545), A::sub(s.ad_value(1482), s.ad_value(1479)));
+                s.store_sqrt_mul_sub_rhs(1448, 1545, 1482, 1479);
                 s.store_div_scaled_inputs2_mixed_aia(1463, A::add_scaled_product(s.ad_value(1433), 1.0, s.ad_value(1534), s.ad_value(1482), 1.0), 1.0, 1461, (-1.0), A::offset(s.ad_value(1534), 1.0), 1.0);
-                s.store_sqrt_mul_ad(1446, s.ad_value(1545), A::sub(s.ad_value(1482), s.ad_value(1463)));
+                s.store_sqrt_mul_sub_rhs(1446, 1545, 1482, 1463);
             }
             s.b[1740] = ((((s.v[1482] - s.v[1469])) as f64).abs() <= 1e-8);
             s.v[1740] = if s.b[1740] { 1.0 } else { 0.0 };
@@ -4286,7 +4286,7 @@ impl Instance {
             s.copy_ad(1537, 1474);
             s.store_scalar(1516, 0.0);
             s.store_scalar(1476, 0.0);
-            s.store_sqrt_mul_ad(1446, s.ad_value(1545), A::sub(s.ad_value(1482), s.ad_value(1463)));
+            s.store_sqrt_mul_sub_rhs(1446, 1545, 1482, 1463);
         }
 
         s.b[1771] = ((s.v[1446] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));
