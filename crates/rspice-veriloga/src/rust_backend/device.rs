@@ -3799,6 +3799,29 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_negated_powf_add_input_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_neg_powf_add_input"), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(110, AdValue::neg(AdValue::powf(AdValue::add(scratch.ad_value(2), scratch.ad_value(3)), params.exponent)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_neg_powf_add_input(110, 2, 3, p.exponent);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_neg_ad("), "{compact}");
+        assert!(!compact.contains("A::powf("), "{compact}");
+        assert!(!compact.contains("A::add(s.ad_value("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sqrt_shifted_square_offset_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -14261,6 +14284,14 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_neg_powf_add_input(&mut self, index: usize, left: usize, right: usize, exponent: f64) {",
+        "        let base = self.values[left] + self.values[right];",
+        "        let output = base.powf(exponent);",
+        "        let derivative_scale = -AdValue::pow_derivative(output, base, exponent, 1.0, 0.0);",
+        "        self.store_unary_add_scaled(index, left, right, -output, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_powf_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: f64) {",
         "        let base = self.values[source] * input_scale;",
         "        let value = base.powf(exponent);",
@@ -21721,6 +21752,18 @@ fn compact_negated_binary_input_store_helper_line(
     let args = compact_ad_call_args(value, "neg")?;
     if args.len() != 1 {
         return None;
+    }
+
+    if let Some(powf_args) = compact_ad_call_args(args[0], "powf") {
+        if powf_args.len() != 2 {
+            return None;
+        }
+        if let Some((left, right)) = compact_binary_scratch_ad_indices(powf_args[0], "add") {
+            return Some(format!(
+                "scratch.store_neg_powf_add_input({target_index}, {left}, {right}, {});",
+                powf_args[1]
+            ));
+        }
     }
 
     if let Some((left, right)) = compact_binary_scratch_ad_indices(args[0], "add") {
