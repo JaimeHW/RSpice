@@ -1109,6 +1109,42 @@ fn rust_backend_uses_derivative_free_stamp_for_constant_potential() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_constant_potential_equations() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(constant_potential_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile constant potential source through auto backend");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(state.contains("BRANCH_COUNT: usize = 1"), "{state}");
+    assert!(state.contains("set_branch_indices"), "{state}");
+    assert!(
+        stamp.contains("stamper.stamp_potential_const_local("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_fixed_arity_stamp_for_three_node_sparse_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(three_node_sparse_current_source())

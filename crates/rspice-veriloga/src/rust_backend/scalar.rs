@@ -92,6 +92,7 @@ pub fn generate_device(
     if ddt_slots.idt_len() > 0 {
         return Err(unsupported(artifact, "idt equations in scalar backend"));
     }
+    let potential_branch_count = artifact.mir.branch_unknowns.len();
     let stamp = generate_stamp_file(
         artifact,
         options,
@@ -100,7 +101,14 @@ pub fn generate_device(
         &ddt_slots,
     )?;
     let state = if static_cache.is_empty() {
-        device::generate_state_file(artifact, options, &parameter_fields, ddt_slots.len(), 0, 0)?
+        device::generate_state_file(
+            artifact,
+            options,
+            &parameter_fields,
+            ddt_slots.len(),
+            0,
+            potential_branch_count,
+        )?
     } else {
         let extensions = scalar_state_extensions(artifact, &parameter_fields, &static_cache)?;
         device::generate_state_file_with_extensions(
@@ -109,7 +117,7 @@ pub fn generate_device(
             &parameter_fields,
             ddt_slots.len(),
             0,
-            0,
+            potential_branch_count,
             &extensions,
         )?
     };
@@ -398,7 +406,17 @@ fn emit_current_stamps(
         let Some(root) = roots.get(&equation.id).copied() else {
             continue;
         };
-        emit_current_stamp(artifact, equation, root, static_cache, ddt_slots, out)?;
+        match equation.kind {
+            MirEquationKind::Current => {
+                emit_current_stamp(artifact, equation, root, static_cache, ddt_slots, out)?;
+            }
+            MirEquationKind::Potential => {
+                emit_potential_stamp(artifact, equation, root, static_cache, out)?;
+            }
+            MirEquationKind::Indirect => {
+                return Err(unsupported(artifact, "indirect contributions"));
+            }
+        }
     }
     Ok(())
 }
@@ -418,6 +436,31 @@ fn emit_current_reactive_stamps(
     Ok(())
 }
 
+fn scalar_node_derivatives(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+) -> Result<Vec<(u32, ValueId)>, RustBackendError> {
+    let root_value = artifact
+        .opt
+        .values
+        .get(usize::from(root))
+        .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
+    root_value
+        .derivatives
+        .iter()
+        .map(|derivative| {
+            if derivative.lane.kind != DerivativeLaneKind::Node {
+                return Err(unsupported(
+                    artifact,
+                    format!("branch derivative lane on scalar equation {}", equation.id),
+                ));
+            }
+            Ok((derivative.lane.index, derivative.value))
+        })
+        .collect()
+}
+
 fn emit_current_stamp(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
@@ -431,19 +474,7 @@ fn emit_current_stamp(
         .values
         .get(usize::from(root))
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
-    let derivatives = root_value
-        .derivatives
-        .iter()
-        .map(|derivative| {
-            if derivative.lane.kind != DerivativeLaneKind::Node {
-                return Err(unsupported(
-                    artifact,
-                    format!("branch derivative lane on scalar equation {}", equation.id),
-                ));
-            }
-            Ok((derivative.lane.index, derivative.value))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let derivatives = scalar_node_derivatives(artifact, equation, root)?;
 
     for (node, value) in &derivatives {
         out.push_str(&format!(
@@ -548,6 +579,72 @@ fn emit_current_stamp(
     Ok(())
 }
 
+fn emit_potential_stamp(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+    static_cache: &ScalarStaticCache,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let root_value = artifact
+        .opt
+        .values
+        .get(usize::from(root))
+        .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
+    let derivatives = scalar_node_derivatives(artifact, equation, root)?;
+
+    for (node, value) in &derivatives {
+        out.push_str(&format!(
+            "        let {}: f64 = {};\n",
+            derivative_name(root, *node),
+            cached_or_local_value_name(*value, static_cache)
+        ));
+    }
+
+    let branch_slot = potential_branch_slot(artifact, equation)?;
+    let pos = optional_node_local_expr(equation.branch.pos_node);
+    let neg = optional_node_local_expr(equation.branch.neg_node);
+    let root_name = cached_or_local_value_name(root, static_cache);
+    let root_expr = current_root_expr(root_value.value_type, &root_name);
+    out.push_str("        stamper.stamp_potential_branch_local(\n");
+    out.push_str(&format!("            {pos},\n"));
+    out.push_str(&format!("            {neg},\n"));
+    out.push_str(&format!("            {branch_slot},\n"));
+    out.push_str("            multiplicity,\n");
+    out.push_str("        );\n");
+
+    match derivatives.as_slice() {
+        [] => {
+            out.push_str("        stamper.stamp_potential_const_local(\n");
+            out.push_str(&format!("            {branch_slot},\n"));
+            out.push_str(&format!("            {root_expr},\n"));
+            out.push_str("        );\n");
+        }
+        [(node0, _)] => {
+            out.push_str("        stamper.stamp_potential_node1_local(\n");
+            out.push_str(&format!("            {branch_slot},\n"));
+            out.push_str(&format!("            {root_expr},\n"));
+            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!("            {},\n", derivative_name(root, *node0)));
+            out.push_str("        );\n");
+        }
+        [(node0, _), (node1, _)] => {
+            out.push_str("        stamper.stamp_potential_node2_local(\n");
+            out.push_str(&format!("            {branch_slot},\n"));
+            out.push_str(&format!("            {root_expr},\n"));
+            out.push_str(&format!("            {node0},\n"));
+            out.push_str(&format!("            {},\n", derivative_name(root, *node0)));
+            out.push_str(&format!("            {node1},\n"));
+            out.push_str(&format!("            {},\n", derivative_name(root, *node1)));
+            out.push_str("        );\n");
+        }
+        _ => {
+            emit_wide_potential_stamp(artifact, root, &derivatives, branch_slot, &root_expr, out);
+        }
+    }
+    Ok(())
+}
+
 fn emit_current_reactive_stamp(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
@@ -642,6 +739,74 @@ fn emit_current_reactive_stamp(
         }
     }
     Ok(())
+}
+
+fn emit_wide_potential_stamp(
+    artifact: &CanonicalIrArtifact,
+    root: ValueId,
+    derivatives: &[(u32, ValueId)],
+    branch_slot: usize,
+    root_expr: &str,
+    out: &mut String,
+) {
+    if derivatives.len() == artifact.mir.nodes.len() {
+        let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
+        for (node, _) in derivatives {
+            node_derivatives[*node as usize] = derivative_name(root, *node);
+        }
+        out.push_str(&format!(
+            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            node_derivatives.len(),
+            node_derivatives.join(", ")
+        ));
+        out.push_str("        stamper.stamp_potential_dense_local(\n");
+        out.push_str(&format!("            {branch_slot},\n"));
+        out.push_str(&format!("            {root_expr},\n"));
+        out.push_str(&format!(
+            "            &{}_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            &[],\n");
+        out.push_str("        );\n");
+    } else {
+        let node_indices = derivatives
+            .iter()
+            .map(|(node, _)| node.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let node_derivatives = derivatives
+            .iter()
+            .map(|(node, _)| derivative_name(root, *node))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
+            value_name(root),
+            derivatives.len(),
+            node_indices
+        ));
+        out.push_str(&format!(
+            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            derivatives.len(),
+            node_derivatives
+        ));
+        out.push_str("        stamper.stamp_potential_indexed_dense_local(\n");
+        out.push_str(&format!("            {branch_slot},\n"));
+        out.push_str(&format!("            {root_expr},\n"));
+        out.push_str(&format!(
+            "            &{}_node_derivative_indices,\n",
+            value_name(root)
+        ));
+        out.push_str(&format!(
+            "            &{}_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            &[],\n");
+        out.push_str("            &[],\n");
+        out.push_str("        );\n");
+    }
 }
 
 fn emit_wide_current_stamp(
@@ -931,10 +1096,22 @@ fn scalar_equation_roots(
                 format!("missing scalar root for equation {}", equation.id),
             )
         })?;
-        validate_scalar_current_equation(artifact, equation, root)?;
+        validate_scalar_equation(artifact, equation, root)?;
     }
 
     Ok(roots)
+}
+
+fn validate_scalar_equation(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+) -> Result<(), RustBackendError> {
+    match equation.kind {
+        MirEquationKind::Current => validate_scalar_current_equation(artifact, equation, root),
+        MirEquationKind::Potential => validate_scalar_potential_equation(artifact, equation, root),
+        MirEquationKind::Indirect => Err(unsupported(artifact, "indirect contributions")),
+    }
 }
 
 fn available_scalar_equation_roots(artifact: &CanonicalIrArtifact) -> HashMap<EquationId, ValueId> {
@@ -967,6 +1144,26 @@ fn validate_scalar_current_equation(
     if equation.kind != MirEquationKind::Current {
         return Err(unsupported(artifact, "non-current equations"));
     }
+    validate_scalar_value_graph(artifact, equation, root)
+}
+
+fn validate_scalar_potential_equation(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+) -> Result<(), RustBackendError> {
+    if equation.kind != MirEquationKind::Potential {
+        return Err(unsupported(artifact, "non-potential equations"));
+    }
+    potential_branch_slot(artifact, equation)?;
+    validate_scalar_value_graph(artifact, equation, root)
+}
+
+fn validate_scalar_value_graph(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+    root: ValueId,
+) -> Result<(), RustBackendError> {
     let root_value = artifact
         .opt
         .values
@@ -1110,15 +1307,15 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
     if !artifact.mir.state_slots.is_empty() {
         return Err(unsupported(artifact, "state slots"));
     }
-    if !artifact.mir.branches.is_empty() {
-        return Err(unsupported(artifact, "declared branches"));
-    }
-    if !artifact.mir.branch_unknowns.is_empty() {
-        return Err(unsupported(artifact, "branch unknowns"));
-    }
     for equation in &artifact.mir.equations {
-        if equation.kind != MirEquationKind::Current {
-            return Err(unsupported(artifact, "non-current equations"));
+        match equation.kind {
+            MirEquationKind::Current => {}
+            MirEquationKind::Potential => {
+                potential_branch_slot(artifact, equation)?;
+            }
+            MirEquationKind::Indirect => {
+                return Err(unsupported(artifact, "indirect contributions"));
+            }
         }
     }
     for value in &artifact.opt.values {
@@ -1195,6 +1392,24 @@ fn optional_node_local_expr(node: Option<crate::canonical_ir::NodeId>) -> String
 fn optional_node_global_expr(node: Option<crate::canonical_ir::NodeId>) -> String {
     node.map(|node| format!("Some(nodes[{}])", node.index()))
         .unwrap_or_else(|| "None".to_string())
+}
+
+fn potential_branch_slot(
+    artifact: &CanonicalIrArtifact,
+    equation: &MirEquation,
+) -> Result<usize, RustBackendError> {
+    artifact
+        .mir
+        .branch_unknowns
+        .iter()
+        .find(|unknown| unknown.equation == equation.id)
+        .map(|unknown| usize::from(unknown.id))
+        .ok_or_else(|| {
+            unsupported(
+                artifact,
+                format!("potential equation {} has no branch unknown", equation.id),
+            )
+        })
 }
 
 fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> RustBackendError {
