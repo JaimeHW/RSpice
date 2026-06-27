@@ -2804,7 +2804,7 @@ impl Instance {
 
         s.store_scale(227, 227, p.p2);
 
-        s.store_neg_ad(265, A::add(s.ad_value(222), s.ad_value(223)));
+        s.store_neg_add(265, 222, 223);
 
         s.store_mul(34, 121, 265);
 
@@ -5448,7 +5448,7 @@ impl Instance {
 
         s.store_scale(227, 227, p.p2);
 
-        s.store_neg_ad(265, A::add(s.ad_value(222), s.ad_value(223)));
+        s.store_neg_add(265, 222, 223);
 
         s.store_mul(34, 121, 265);
 

@@ -5133,7 +5133,7 @@ impl Instance {
         }
 
         if (s.b[737] && (!s.b[929])) {
-            s.store_neg_ad(414, A::sub(s.ad_value(358), s.ad_value(355)));
+            s.store_sub(414, 355, 358);
         }
 
         s.b[1049] = ((s.v[414] < (s.v[341] * 1e-5)) && ((s.v[341] * 1e-5) >= 0.0));

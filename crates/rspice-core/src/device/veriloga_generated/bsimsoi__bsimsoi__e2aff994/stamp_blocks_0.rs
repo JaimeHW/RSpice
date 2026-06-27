@@ -4460,7 +4460,7 @@ impl Instance {
             s.store_sub_from_scalar_scaled_mul(144, 1.0, 129, 141, 0.5);
             s.store_add_scaled_square_product_indices(142, 143, 1.0, 144, 136, (-4.0));
             s.store_scaled_div_ad_rhs(145, 136, A::add(s.ad_value(143), A::sqrt(s.ad_value(142))), 2.0);
-            s.store_neg_ad(131, A::add(s.ad_value(140), s.ad_value(145)));
+            s.store_neg_add(131, 140, 145);
         }
 
         if ((s.b[1620] && (!s.b[1621])) && (!s.b[1622])) {

@@ -4930,7 +4930,7 @@ impl Instance {
             s.copy_ad(87, 1461);
             s.copy_ad(91, 1462);
             s.store_sub(94, 1462, 1461);
-            s.store_neg_ad(335, A::add(s.ad_value(1475), s.ad_value(1476)));
+            s.store_neg_add(335, 1475, 1476);
         }
 
         s.b[1798] = ((s.v[335] < s.v[1540]) && (s.v[1540] >= 0.0));
@@ -5079,7 +5079,7 @@ impl Instance {
 
         if (s.b[1443] && s.b[1444]) {
             s.store_mul3_affine_lhs(1503, 154, 1556, 1.0 / (2.0), 0.0, 94);
-            s.store_neg_ad(1504, A::sub(s.ad_value(1515), s.ad_value(1516)));
+            s.store_sub(1504, 1516, 1515);
             s.store_add(248, 1503, 1504);
             s.store_neg(133, 1515);
             s.copy_ad(170, 162);

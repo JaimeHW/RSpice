@@ -698,7 +698,7 @@ impl Instance {
             s.store_scaled_add(424, 359, 356, 0.5);
             s.store_scaled_add(425, 358, 355, (-0.5));
             s.store_sub(426, 359, 356);
-            s.store_neg_ad(427, A::sub(s.ad_value(358), s.ad_value(355)));
+            s.store_sub(427, 355, 358);
             s.store_square(428, 238);
         }
 

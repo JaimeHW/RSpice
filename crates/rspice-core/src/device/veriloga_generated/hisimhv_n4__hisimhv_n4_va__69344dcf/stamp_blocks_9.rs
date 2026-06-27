@@ -59,7 +59,7 @@ impl Instance {
         }
 
         if (s.b[1439] && (s.b[1441] && (!s.b[1440]))) {
-            s.store_neg_ad(1890, A::add(s.ad_value(1885), s.ad_value(1886)));
+            s.store_neg_add(1890, 1885, 1886);
         }
 
         s.b[2048] = (s.v[94] < 0.0);
