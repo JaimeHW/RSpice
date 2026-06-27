@@ -459,6 +459,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_div_scaled_product_add_scaled_denominator_helper_calls(source);
     source = compact_exp_div_scaled_inputs_helper_calls(source);
     source = compact_add_sub_div_lhs_helper_calls(source);
+    source = compact_div_ln_lhs_helper_calls(source);
     source = compact_mul_div_from_scalar_lhs_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
@@ -1152,6 +1153,80 @@ fn compact_add_sub_div_helper_call_replacement(
             div_args[1],
             right_index,
         )?,
+    };
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_div_ln_lhs_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_div_ad_lhs(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_div_ln_lhs_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_div_ln_lhs_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_div_ad_lhs(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let right_index = args[2].trim().parse::<usize>().ok()?;
+    let ln_args = compact_ad_call_args(args[1].trim(), "ln")?;
+    if ln_args.len() != 1 {
+        return None;
+    }
+    let line = if let Some(left_index) = compact_scratch_ad_value_index(ln_args[0]) {
+        format!("scratch.store_div_ln_lhs({target_index}, {left_index}, {right_index});")
+    } else {
+        let offset_args = compact_ad_call_args(ln_args[0], "offset")?;
+        if offset_args.len() != 2 {
+            return None;
+        }
+        let left_index = compact_scratch_ad_value_index(offset_args[0])?;
+        format!(
+            "scratch.store_div_ln_offset_lhs({target_index}, {left_index}, {}, {right_index});",
+            offset_args[1]
+        )
     };
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
@@ -3794,6 +3869,33 @@ fn stamp() {
         assert!(!compact.contains("s.store_add_ad_lhs("), "{compact}");
         assert!(!compact.contains("s.store_add_ad_rhs("), "{compact}");
         assert!(!compact.contains("s.store_sub_ad_lhs("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_div_ln_lhs_helper_calls_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_div_ln_lhs("), "{support}");
+        assert!(support.contains("fn store_div_ln_offset_lhs("), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_div_ad_lhs(90, AdValue::ln(scratch.ad_value(2)), 3);
+    scratch.store_div_ad_lhs(91, AdValue::ln(AdValue::offset(scratch.ad_value(4), params.offset)), 5);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_div_ln_lhs(90, 2, 3);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_div_ln_offset_lhs(91, 4, p.offset, 5);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::ln("), "{compact}");
+        assert!(!compact.contains("s.store_div_ad_lhs("), "{compact}");
     }
 
     #[test]
@@ -12082,6 +12184,42 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_div_add_scaled_inputs_rhs_ad(&mut self, index: usize, left: usize, denominator_left: AdValue, denominator_left_scale: f64, denominator_right: AdValue, denominator_right_scale: f64) {",
         "        self.store_div_add_scaled_inputs_rhs_components(index, left, denominator_left.value, denominator_left.node_derivatives, denominator_left.branch_derivatives, denominator_left_scale, denominator_right.value, denominator_right.node_derivatives, denominator_right.branch_derivatives, denominator_right_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_ln_lhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_raw = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_raw = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let left_value = left_raw.ln();",
+        "        let reciprocal = 1.0 / right_raw;",
+        "        let quotient = left_value * reciprocal;",
+        "        let left_scale = reciprocal / left_raw;",
+        "        let right_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_ln_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
+        "        let left_raw = self.values[left] + offset;",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_raw = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let left_value = left_raw.ln();",
+        "        let reciprocal = 1.0 / right_raw;",
+        "        let quotient = left_value * reciprocal;",
+        "        let left_scale = reciprocal / left_raw;",
+        "        let right_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + right_branch_derivatives[axis] * right_scale; }",
         "    }",
         "",
         "    #[inline]",
