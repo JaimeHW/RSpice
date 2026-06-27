@@ -780,7 +780,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             }
             OptValueKind::Unary { op, input } => self.lower_unary_derivatives(value, op, input),
             OptValueKind::Binary { op, left, right } => {
-                self.lower_binary_derivatives(op, left, right)
+                self.lower_binary_derivatives(value, op, left, right)
             }
             OptValueKind::Select {
                 condition,
@@ -911,6 +911,7 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn lower_binary_derivatives(
         &mut self,
+        value: ValueId,
         op: OptBinaryOp,
         left: ValueId,
         right: ValueId,
@@ -940,8 +941,8 @@ impl<'a> ScalarGraphBuilder<'a> {
             ),
             OptBinaryOp::Mul => self.product_derivatives(left, right),
             OptBinaryOp::Div => self.quotient_derivatives(left, right),
-            OptBinaryOp::Pow
-            | OptBinaryOp::Eq
+            OptBinaryOp::Pow => self.pow_derivatives(value, left, right),
+            OptBinaryOp::Eq
             | OptBinaryOp::Ne
             | OptBinaryOp::Lt
             | OptBinaryOp::Le
@@ -1014,6 +1015,75 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
 
         derivatives
+    }
+
+    fn pow_derivatives(
+        &mut self,
+        value: ValueId,
+        left: ValueId,
+        right: ValueId,
+    ) -> BTreeMap<DerivativeLane, ValueId> {
+        let left_derivatives = self.derivative_map(left);
+        let right_derivatives = self.derivative_map(right);
+        let mut lanes: BTreeSet<_> = left_derivatives.keys().copied().collect();
+        lanes.extend(right_derivatives.keys().copied());
+
+        let mut derivatives = BTreeMap::new();
+        for lane in lanes {
+            let left_term = left_derivatives
+                .get(&lane)
+                .copied()
+                .map(|derivative| self.pow_base_derivative(left, right, derivative));
+            let right_term = right_derivatives
+                .get(&lane)
+                .copied()
+                .map(|derivative| self.pow_exponent_derivative(value, left, derivative));
+
+            let derivative = match (left_term, right_term) {
+                (Some(left_term), Some(right_term)) => {
+                    self.push_binary_value(OptBinaryOp::Add, left_term, right_term)
+                }
+                (Some(term), None) | (None, Some(term)) => term,
+                (None, None) => continue,
+            };
+            derivatives.insert(lane, derivative);
+        }
+
+        derivatives
+    }
+
+    fn pow_base_derivative(
+        &mut self,
+        left: ValueId,
+        right: ValueId,
+        derivative: ValueId,
+    ) -> ValueId {
+        if self.is_real_constant(right, 0.0) {
+            return self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0));
+        }
+
+        let one = self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+        let exponent_minus_one = self.push_binary_value(OptBinaryOp::Sub, right, one);
+        let reduced_power = self.push_binary_value(OptBinaryOp::Pow, left, exponent_minus_one);
+        let scaled_power = self.push_binary_value(OptBinaryOp::Mul, right, reduced_power);
+        self.push_binary_value(OptBinaryOp::Mul, scaled_power, derivative)
+    }
+
+    fn pow_exponent_derivative(
+        &mut self,
+        value: ValueId,
+        left: ValueId,
+        derivative: ValueId,
+    ) -> ValueId {
+        let ln_base = self.push_value(
+            OptValueType::Real,
+            OptValueKind::Unary {
+                op: OptUnaryOp::Ln,
+                input: left,
+            },
+        );
+        let scaled = self.push_binary_value(OptBinaryOp::Mul, value, ln_base);
+        self.push_binary_value(OptBinaryOp::Mul, scaled, derivative)
     }
 
     fn quotient_derivatives(
@@ -1407,6 +1477,11 @@ impl<'a> ScalarGraphBuilder<'a> {
         let op = match name.as_str() {
             "min" => OptBinaryOp::Lt,
             "max" => OptBinaryOp::Gt,
+            "pow" => {
+                let left = self.lower_expression(left)?;
+                let right = self.lower_expression(right)?;
+                return Some(self.push_binary_value(OptBinaryOp::Pow, left, right));
+            }
             _ => return None,
         };
         let left = self.lower_expression(left)?;
