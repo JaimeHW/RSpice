@@ -5410,7 +5410,7 @@ impl Instance {
             s.store_sub(2144, 2147, 2149);
             s.store_add_scaled_square_product_mixed_iia(2150, 2144, 1.0, 2021, A::offset(s.ad_value(2149), 1.0), 1.0);
             s.store_sub_scaled_inputs(2151, 2144, 2.0, 2021, 1.0);
-            s.store_sub_ad_lhs(2152, A::ln(A::mul(s.ad_value(2150), s.ad_value(2037))), 2149);
+            s.store_sub_ln_mul_lhs(2152, 2150, 2037, 2149);
             s.store_add(813, 2150, 2151);
             s.store_add_scaled_square_product_mixed_iia(812, 813, 1.0, 2152, A::sub_scaled_inputs(A::square(s.ad_value(2151)), 0.5, s.ad_value(2150), 1.0), 1.0);
         }
