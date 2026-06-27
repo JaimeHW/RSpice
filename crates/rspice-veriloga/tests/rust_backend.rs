@@ -990,6 +990,60 @@ fn rust_backend_auto_scalarizes_mixed_sparse_potential_branch_derivatives() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_constant_bounded_scalar_loops() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(loop_accumulator_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile constant-bounded loop through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("while"), "{stamp}");
+    assert!(!stamp.contains("loop_guard"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_falls_back_for_runtime_bounded_scalar_loops() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(runtime_bounded_loop_accumulator_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile runtime-bounded loop through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("while"), "{stamp}");
+    assert!(stamp.contains("loop_guard"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(comparison_value_device_source())
@@ -4376,7 +4430,7 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "fn store_add_scaled_products_right_right_ad(",
         "fn store_div_scaled_product_left_ad(",
         "fn store_div_scaled_product_right_ad(",
-        "fn store_div_scaled_product_denominator_ad(",
+        "fn store_div_scaled_product_add_scaled_denominator_indices(",
     ] {
         assert!(support.contains(helper), "missing {helper}\n{support}");
     }
@@ -4395,7 +4449,7 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "s.store_add_scaled_products_right_right_ad(",
         "s.store_div_scaled_product_left_ad(",
         "s.store_div_scaled_product_right_ad(",
-        "s.store_div_scaled_product_denominator_ad(",
+        "s.store_div_scaled_product_add_scaled_denominator_indices(",
     ] {
         assert!(stamp.contains(helper), "missing {helper}\n{stamp}");
     }
@@ -16036,6 +16090,27 @@ module loop_accum(p, n);
         loop = 0.0;
         acc = 0.0;
         while (loop < 3.0) begin
+            acc = acc + V(p, n);
+            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#
+}
+
+fn runtime_bounded_loop_accumulator_source() -> &'static str {
+    r#"
+module runtime_loop_accum(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real limit = 3.0 from [0:inf);
+    real loop;
+    real acc;
+    analog begin
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
             acc = acc + V(p, n);
             loop = loop + 1.0;
         end

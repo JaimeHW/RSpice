@@ -1607,24 +1607,7 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
         }
     }
     for statement in &artifact.hir.statements {
-        match statement {
-            HirStatement::Assignment(assignment)
-                if assignment.index.is_none()
-                    && supported_scalar_value_type(assignment.expr_type) => {}
-            HirStatement::Assignment(assignment) if assignment.index.is_some() => {
-                return Err(unsupported(artifact, "indexed assignments"));
-            }
-            HirStatement::Assignment(assignment) => {
-                return Err(unsupported(
-                    artifact,
-                    format!(
-                        "assignment '{}' with type {:?}",
-                        assignment.target_name, assignment.expr_type
-                    ),
-                ));
-            }
-            HirStatement::Loop(_) => return Err(unsupported(artifact, "analog loops")),
-        }
+        reject_unsupported_scalar_statement_shape(artifact, statement)?;
     }
     if !artifact.mir.state_slots.is_empty() {
         return Err(unsupported(artifact, "state slots"));
@@ -1655,6 +1638,35 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
         }
     }
     Ok(())
+}
+
+fn reject_unsupported_scalar_statement_shape(
+    artifact: &CanonicalIrArtifact,
+    statement: &HirStatement,
+) -> Result<(), RustBackendError> {
+    match statement {
+        HirStatement::Assignment(assignment)
+            if assignment.index.is_none() && supported_scalar_value_type(assignment.expr_type) =>
+        {
+            Ok(())
+        }
+        HirStatement::Assignment(assignment) if assignment.index.is_some() => {
+            Err(unsupported(artifact, "indexed assignments"))
+        }
+        HirStatement::Assignment(assignment) => Err(unsupported(
+            artifact,
+            format!(
+                "assignment '{}' with type {:?}",
+                assignment.target_name, assignment.expr_type
+            ),
+        )),
+        HirStatement::Loop(loop_statement) => {
+            for statement in &loop_statement.body {
+                reject_unsupported_scalar_statement_shape(artifact, statement)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn supported_scalar_value_type(value_type: CanonicalValueType) -> bool {

@@ -4,9 +4,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::{
     BranchId, BranchUnknownId, CanonicalValueType, CompilerPhase, EquationId, ExprId,
-    HirAnalogOperator, HirExprKind, HirModel, HirStatement, IrDiagnostic, IrValidationResult,
-    MirEquation, MirEquationKind, MirModel, NodeId, ParamId, ScheduleId, ValueId, VariableId,
+    HirAnalogOperator, HirAssignment, HirExprKind, HirLoop, HirModel, HirStatement, IrDiagnostic,
+    IrValidationResult, MirEquation, MirEquationKind, MirModel, NodeId, ParamId, ScheduleId,
+    ValueId, VariableId,
 };
+
+const MAX_SCALAR_LOOP_UNROLL_ITERATIONS: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InvalidationClass {
@@ -440,18 +443,73 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn lower_statements(&mut self, statements: &[HirStatement]) {
         for statement in statements {
+            self.lower_statement(statement);
+        }
+    }
+
+    fn lower_statement(&mut self, statement: &HirStatement) {
+        match statement {
+            HirStatement::Assignment(assignment) => self.lower_assignment_statement(assignment),
+            HirStatement::Loop(loop_statement) => self.lower_loop_statement(loop_statement),
+        }
+    }
+
+    fn lower_assignment_statement(&mut self, assignment: &HirAssignment) {
+        let value = if assignment.index.is_none()
+            && supported_assignment_value_type(assignment.expr_type)
+        {
+            self.lower_expression(assignment.expr.id)
+        } else {
+            None
+        };
+        self.variable_values.insert(assignment.target, value);
+        self.expression_values.clear();
+    }
+
+    fn lower_loop_statement(&mut self, loop_statement: &HirLoop) {
+        let mut iterations = 0;
+        loop {
+            self.expression_values.clear();
+            let Some(condition) = self.lower_expression(loop_statement.condition.id) else {
+                self.mark_loop_assignments_unknown(loop_statement);
+                return;
+            };
+            match self.boolean_constant(condition) {
+                Some(false) => {
+                    self.expression_values.clear();
+                    return;
+                }
+                Some(true) => {}
+                None => {
+                    self.mark_loop_assignments_unknown(loop_statement);
+                    return;
+                }
+            }
+
+            if iterations == MAX_SCALAR_LOOP_UNROLL_ITERATIONS {
+                self.mark_loop_assignments_unknown(loop_statement);
+                return;
+            }
+            iterations += 1;
+            self.expression_values.clear();
+            self.lower_statements(&loop_statement.body);
+        }
+    }
+
+    fn mark_loop_assignments_unknown(&mut self, loop_statement: &HirLoop) {
+        self.mark_statement_assignments_unknown(&loop_statement.body);
+        self.expression_values.clear();
+    }
+
+    fn mark_statement_assignments_unknown(&mut self, statements: &[HirStatement]) {
+        for statement in statements {
             match statement {
                 HirStatement::Assignment(assignment) => {
-                    let value = if assignment.index.is_none()
-                        && supported_assignment_value_type(assignment.expr_type)
-                    {
-                        self.lower_expression(assignment.expr.id)
-                    } else {
-                        None
-                    };
-                    self.variable_values.insert(assignment.target, value);
+                    self.variable_values.insert(assignment.target, None);
                 }
-                HirStatement::Loop(_) => {}
+                HirStatement::Loop(loop_statement) => {
+                    self.mark_statement_assignments_unknown(&loop_statement.body);
+                }
             }
         }
     }
