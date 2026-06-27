@@ -274,6 +274,253 @@ impl CodeModel for DigitalSource {
 #[derive(Debug, Default)]
 pub struct DigitalStateMachine;
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct DStateCacheKey {
+    state_file: String,
+    input_width: usize,
+    output_width: usize,
+    len: u64,
+    modified_nanos: u128,
+}
+
+#[derive(Debug, Clone)]
+struct DStateTransition {
+    state: i64,
+    outputs: Vec<DigitalValue>,
+    inputs: Vec<Option<bool>>,
+    next_state: i64,
+}
+
+#[derive(Debug, Clone)]
+struct DStateTable {
+    transitions: Vec<DStateTransition>,
+}
+
+fn d_state_cache() -> &'static Mutex<HashMap<DStateCacheKey, Arc<DStateTable>>> {
+    static CACHE: OnceLock<Mutex<HashMap<DStateCacheKey, Arc<DStateTable>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn d_state_file_error(state_file: &str, message: impl Into<String>) -> CmError {
+    CmError::EvaluationError(format!(
+        "d_state state_file '{}': {}",
+        state_file,
+        message.into()
+    ))
+}
+
+fn d_state_error(state_file: &str, line: usize, message: impl Into<String>) -> CmError {
+    CmError::EvaluationError(format!(
+        "d_state state_file '{}' line {}: {}",
+        state_file,
+        line,
+        message.into()
+    ))
+}
+
+fn d_state_cache_key(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+) -> CmResult<DStateCacheKey> {
+    let metadata =
+        fs::metadata(state_file).map_err(|err| d_state_file_error(state_file, err.to_string()))?;
+    let modified_nanos = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+
+    Ok(DStateCacheKey {
+        state_file: state_file.to_string(),
+        input_width,
+        output_width,
+        len: metadata.len(),
+        modified_nanos,
+    })
+}
+
+fn parse_d_state_input_token(state_file: &str, line: usize, token: &str) -> CmResult<Option<bool>> {
+    match token {
+        "0" => Ok(Some(false)),
+        "1" => Ok(Some(true)),
+        "x" | "X" => Ok(None),
+        _ => Err(d_state_error(
+            state_file,
+            line,
+            format!("invalid input token '{token}'"),
+        )),
+    }
+}
+
+fn parse_d_state_i64(state_file: &str, line: usize, token: &str) -> CmResult<i64> {
+    crate::netlist::lexer::parse_spice_value(token)
+        .map(|value| value as i64)
+        .or_else(|_| token.parse::<i64>())
+        .map_err(|err| {
+            d_state_error(
+                state_file,
+                line,
+                format!("invalid integer '{token}': {err:?}"),
+            )
+        })
+}
+
+fn parse_d_state_file(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+) -> CmResult<DStateTable> {
+    let contents = fs::read_to_string(state_file)
+        .map_err(|err| d_state_file_error(state_file, err.to_string()))?;
+    let mut transitions = Vec::new();
+    let mut last_state = None;
+    let mut last_outputs: Option<Vec<DigitalValue>> = None;
+
+    for (line_idx, line) in contents.lines().enumerate() {
+        let line_no = line_idx + 1;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+
+        let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+        let header_len = output_width + input_width + 3;
+        let continuation_len = input_width + 2;
+        let (state, outputs, input_start, arrow_idx, next_idx) = if tokens.len() == header_len {
+            let state = parse_d_state_i64(state_file, line_no, tokens[0])?;
+            let outputs = tokens[1..1 + output_width]
+                .iter()
+                .map(|token| parse_d_source_token(state_file, line_no, token))
+                .collect::<CmResult<Vec<_>>>()?;
+            last_state = Some(state);
+            last_outputs = Some(outputs.clone());
+            (
+                state,
+                outputs,
+                1 + output_width,
+                1 + output_width + input_width,
+                header_len - 1,
+            )
+        } else if tokens.len() == continuation_len {
+            let state = last_state.ok_or_else(|| {
+                d_state_error(
+                    state_file,
+                    line_no,
+                    "continuation row appears before any state header",
+                )
+            })?;
+            let outputs = last_outputs.clone().ok_or_else(|| {
+                d_state_error(
+                    state_file,
+                    line_no,
+                    "continuation row has no previous output vector",
+                )
+            })?;
+            (state, outputs, 0, input_width, continuation_len - 1)
+        } else {
+            return Err(d_state_error(
+                state_file,
+                line_no,
+                format!(
+                    "expected {} header token(s) or {} continuation token(s), got {}",
+                    header_len,
+                    continuation_len,
+                    tokens.len()
+                ),
+            ));
+        };
+
+        if tokens.get(arrow_idx) != Some(&"->") {
+            return Err(d_state_error(
+                state_file,
+                line_no,
+                format!("expected '->', got '{}'", tokens[arrow_idx]),
+            ));
+        }
+
+        let inputs = tokens[input_start..input_start + input_width]
+            .iter()
+            .map(|token| parse_d_state_input_token(state_file, line_no, token))
+            .collect::<CmResult<Vec<_>>>()?;
+        let next_state = parse_d_state_i64(state_file, line_no, tokens[next_idx])?;
+        transitions.push(DStateTransition {
+            state,
+            outputs,
+            inputs,
+            next_state,
+        });
+    }
+
+    if transitions.is_empty() {
+        return Err(d_state_file_error(state_file, "contains no state rows"));
+    }
+
+    Ok(DStateTable { transitions })
+}
+
+fn load_d_state_table(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+) -> CmResult<Arc<DStateTable>> {
+    let key = d_state_cache_key(state_file, input_width, output_width)?;
+    let cache = d_state_cache();
+
+    {
+        let guard = cache
+            .lock()
+            .map_err(|_| CmError::Internal("d_state table cache poisoned".to_string()))?;
+        if let Some(table) = guard.get(&key) {
+            return Ok(Arc::clone(table));
+        }
+    }
+
+    let table = Arc::new(parse_d_state_file(state_file, input_width, output_width)?);
+    let mut guard = cache
+        .lock()
+        .map_err(|_| CmError::Internal("d_state table cache poisoned".to_string()))?;
+    guard.insert(key, Arc::clone(&table));
+    Ok(table)
+}
+
+fn d_state_logic(value: DigitalValue) -> Option<bool> {
+    value.state.logic_level()
+}
+
+fn d_state_state_code(value: DigitalValue) -> i64 {
+    match value.state {
+        DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => 0,
+        DigitalState::One | DigitalState::OneR | DigitalState::OneZ => 1,
+        _ => 2,
+    }
+}
+
+fn d_state_outputs(table: &DStateTable, state: i64) -> Option<Vec<DigitalValue>> {
+    table
+        .transitions
+        .iter()
+        .find(|row| row.state == state)
+        .map(|row| row.outputs.clone())
+}
+
+fn d_state_next(table: &DStateTable, state: i64, inputs: &[DigitalValue]) -> Option<i64> {
+    table
+        .transitions
+        .iter()
+        .filter(|row| row.state == state)
+        .find(|row| {
+            row.inputs
+                .iter()
+                .zip(inputs.iter())
+                .all(|(pattern, value)| {
+                    pattern.is_none_or(|expected| d_state_logic(*value) == Some(expected))
+                })
+        })
+        .map(|row| row.next_state)
+}
+
 impl CodeModel for DigitalStateMachine {
     fn name(&self) -> &str {
         "d_state"
@@ -298,13 +545,87 @@ impl CodeModel for DigitalStateMachine {
     fn parameters(&self) -> &[ParamSpec] {
         use std::sync::OnceLock;
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
-        PARAMS.get_or_init(|| vec![ParamSpec::string("state_file", "").required()])
+        PARAMS.get_or_init(|| {
+            vec![
+                ParamSpec::real("clk_delay", 1.0e-9).with_min(0.0),
+                ParamSpec::real("reset_delay", 1.0e-9).with_min(0.0),
+                ParamSpec::string("state_file", "state.txt"),
+                ParamSpec::integer("reset_state", 0),
+                ParamSpec::real("input_load", 1.0e-12).with_min(0.0),
+                ParamSpec::real("clk_load", 1.0e-12).with_min(0.0),
+                ParamSpec::real("reset_load", 1.0e-12).with_min(0.0),
+            ]
+        })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ctx.allocate_int_states(4);
+        ctx.set_int_state(0, 0); // initialized
+        ctx.set_int_state(1, 0); // current_state
+        ctx.set_int_state(2, 0); // previous clock state
+        ctx.set_int_state(3, 0); // previous reset state
         Ok(())
     }
-    fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let state_file = ctx
+            .string_param("state_file")
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or("state.txt");
+        let input_width = ctx.port_width("in");
+        let output_width = ctx.port_width("out").max(1);
+        let table = load_d_state_table(state_file, input_width, output_width)?;
+        let reset_state = ctx.param_or("reset_state", 0.0) as i64;
+        let clk_delay = ctx.param_or("clk_delay", 1.0e-9);
+        let reset_delay = ctx.param_or("reset_delay", 1.0e-9);
+
+        if ctx.time == 0.0 || ctx.int_state(0) == 0 {
+            let outputs = d_state_outputs(&table, reset_state).ok_or_else(|| {
+                CmError::EvaluationError(format!(
+                    "d_state state_file '{state_file}' does not define reset_state {reset_state}"
+                ))
+            })?;
+            ctx.set_int_state(0, 1);
+            ctx.set_int_state(1, reset_state);
+            ctx.set_int_state(2, 0);
+            ctx.set_int_state(3, 0);
+            ctx.set_output_digital_vector("out", outputs, 0.0);
+            return Ok(());
+        }
+
+        let clk = ctx.input_digital("clk").unwrap_or_default();
+        let reset = ctx.input_digital("reset").unwrap_or_default();
+        let clk_state = d_state_state_code(clk);
+        let reset_state_code = d_state_state_code(reset);
+        let prev_clk = ctx.int_state(2);
+        let prev_reset = ctx.int_state(3);
+        let mut current_state = ctx.int_state(1);
+
+        if reset_state_code != prev_reset {
+            if reset_state_code == 1 {
+                current_state = reset_state;
+                let outputs = d_state_outputs(&table, current_state).ok_or_else(|| {
+                    CmError::EvaluationError(format!(
+                        "d_state state_file '{state_file}' does not define state {current_state}"
+                    ))
+                })?;
+                ctx.set_output_digital_vector("out", outputs, reset_delay);
+            }
+        } else if reset_state_code != 1 && clk_state != prev_clk && clk_state == 1 {
+            let inputs = ctx.input_digital_vector("in");
+            if let Some(next_state) = d_state_next(&table, current_state, &inputs) {
+                current_state = next_state;
+                let outputs = d_state_outputs(&table, current_state).ok_or_else(|| {
+                    CmError::EvaluationError(format!(
+                        "d_state state_file '{state_file}' does not define state {current_state}"
+                    ))
+                })?;
+                ctx.set_output_digital_vector("out", outputs, clk_delay);
+            }
+        }
+
+        ctx.set_int_state(1, current_state);
+        ctx.set_int_state(2, clk_state);
+        ctx.set_int_state(3, reset_state_code);
         Ok(())
     }
 }
