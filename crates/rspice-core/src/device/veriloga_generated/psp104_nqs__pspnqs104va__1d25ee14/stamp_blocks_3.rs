@@ -3892,7 +3892,7 @@ impl Instance {
             s.store_scale(2028, 771, s.v[715]);
             s.store_mul(3256, 2028, 3255);
             s.store_mul_add_rhs(3257, 2028, 1882, 3255);
-            s.store_mul_ad_lhs(3258, A::mul3_scaled_output(s.ad_value(2028), s.ad_value(3255), s.ad_value(1884), -1.0), 1881);
+            s.store_mul_product3_rhs(3258, 1881, s.ad_value(2028), s.ad_value(3255), s.ad_value(1884), -1.0);
             s.store_mul_ad(869, A::add_scaled_product(s.ad_value(296), 1.0, A::add_scaled_product(s.ad_value(297), 1.0, s.ad_value(298), s.ad_value(3256), (-1.0)), s.ad_value(3256), (-1.0)), A::ln(A::div_scaled_inputs2(s.ad_value(3257), 1.0, s.ad_value(3258), 0.5, A::sub_scaled_inputs(s.ad_value(3257), 1.0, s.ad_value(3258), 0.5), 1.0)));
             s.store_add_scaled_product_left_ad(869, 869, 1.0, A::add_scaled_product(s.ad_value(297), 1.0, s.ad_value(298), A::sub_scaled_inputs(s.ad_value(3257), 1.0, s.ad_value(3256), 2.0), 1.0), 3258, 1.0);
             s.store_div_scaled_product_left_ad(869, A::mul3(s.ad_value(726), s.ad_value(846), s.ad_value(1876)), 869, 1.0, 3256, 1.0);

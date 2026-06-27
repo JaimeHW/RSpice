@@ -4729,7 +4729,7 @@ impl Instance {
             s.store_mul(121, 339, 181);
             s.store_div_scaled_inputs(340, s.ad_value(339), 0.5, s.ad_value(181), 1.0);
             s.store_mul_ad_product_lhs(341, A::mul_sub_from_scalar_lhs_scaled_output(p.p137, s.ad_value(123), s.ad_value(336), (2.0 * 1.034943e-10)), s.ad_value(338), 181);
-            s.store_mul_ad_lhs(342, A::mul3_scaled_output(s.ad_value(335), s.ad_value(336), s.ad_value(338), (-2.0)), 181);
+            s.store_mul_product3_rhs(342, 181, s.ad_value(335), s.ad_value(336), s.ad_value(338), (-2.0));
             s.store_sub(335, 173, 119);
             s.store_offset_scaled(336, 180, (s.v[467] * 1.0 / (p.p140)), s.v[465]);
             s.store_add_scaled_inputs(337, 336, 1.0, 106, s.v[466]);

@@ -18964,7 +18964,7 @@ impl Instance {
 
         s.store_add_ad_lhs(120, A::scale_offset(A::powf(s.ad_value(135), 1.0), ((p.p41) * (s.v[124])), s.v[124]), 122);
 
-        s.store_offset_ad(112, A::mul3(A::div_scalar_by_product((p.p22 * (s.v[47] * s.v[11])), A::mul(s.ad_value(137), s.ad_value(78)), A::sub_from_scalar(s.v[12], s.ad_value(111)), 1.0), s.ad_value(27), A::add(s.ad_value(120), s.ad_value(119))), 1.0);
+        s.store_offset_product3(112, A::div_scalar_by_product((p.p22 * (s.v[47] * s.v[11])), A::mul(s.ad_value(137), s.ad_value(78)), A::sub_from_scalar(s.v[12], s.ad_value(111)), 1.0), s.ad_value(27), A::add(s.ad_value(120), s.ad_value(119)), 1.0, 1.0);
 
         s.store_div(128, 128, 112);
 

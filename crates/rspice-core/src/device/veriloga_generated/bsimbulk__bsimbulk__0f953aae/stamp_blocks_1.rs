@@ -70,7 +70,7 @@ impl Instance {
         }
 
         if (s.b[1467] && (!s.b[1468])) {
-            s.store_mul_ad_lhs(18, A::mul3_scaled_output(s.ad_value(559), s.ad_value(13), A::limited_exp_scaled_input(s.ad_value(14), -1.0), s.v[29]), 17);
+            s.store_mul_product3_rhs(18, 17, s.ad_value(559), s.ad_value(13), A::limited_exp_scaled_input(s.ad_value(14), -1.0), s.v[29]);
         }
 
         if s.b[1467] {
@@ -134,7 +134,7 @@ impl Instance {
         }
 
         if (s.b[1467] && (!s.b[1470])) {
-            s.store_mul_ad_lhs(18, A::mul3_scaled_output(s.ad_value(563), s.ad_value(13), A::limited_exp_scaled_input(s.ad_value(14), -1.0), s.v[29]), 17);
+            s.store_mul_product3_rhs(18, 17, s.ad_value(563), s.ad_value(13), A::limited_exp_scaled_input(s.ad_value(14), -1.0), s.v[29]);
         }
 
         if s.b[1467] {
@@ -1084,8 +1084,8 @@ impl Instance {
 
         if s.b[1541] {
             s.store_offset_scaled_ad(723, A::sqrt(A::offset(A::add_scaled_inputs3(A::square(s.ad_value(144)), 4.0, s.ad_value(144), 4.0, s.ad_value(722), 4.0), 1.0)), 0.5, (-0.5));
-            s.store_mul_ad_lhs(727, A::mul3_scaled_output(s.ad_value(718), s.ad_value(726), s.ad_value(108), 2.0), 721);
-            s.store_mul_ad_lhs(728, A::mul3_scaled_output(s.ad_value(90), s.ad_value(725), s.ad_value(108), 2.0), 144);
+            s.store_mul_product3_rhs(727, 721, s.ad_value(718), s.ad_value(726), s.ad_value(108), 2.0);
+            s.store_mul_product3_rhs(728, 144, s.ad_value(90), s.ad_value(725), s.ad_value(108), 2.0);
             s.store_mul_ad_affine_product_rhs(729, 725, s.ad_value(108), A::sub(s.ad_value(723), s.ad_value(144)), 2.0, 0.0);
             s.store_mul_sub_rhs(730, 727, 745, 746);
             s.store_add_scaled_products_indices(731, 729, 746, 1.0, 728, 746, 1.0);
@@ -1620,7 +1620,7 @@ impl Instance {
         if s.b[1562] {
             s.store_sqrt(14, 12);
             s.store_add_ad(15, A::offset(s.ad_value(203), 1.0), A::div(s.ad_value(234), A::add(s.ad_value(96), s.ad_value(14))));
-            s.store_offset_ad(16, A::mul3(s.ad_value(203), s.ad_value(14), s.ad_value(126)), 0.5);
+            s.store_offset_product3(16, s.ad_value(203), s.ad_value(14), s.ad_value(126), 1.0, 0.5);
             s.store_sqrt_add_ad(17, A::square(s.ad_value(16)), A::mul3(s.ad_value(15), A::add(s.ad_value(200), s.ad_value(144)), s.ad_value(218)));
             s.store_div_ad_rhs(90, 15, A::add(s.ad_value(16), s.ad_value(17)));
             s.store_mul_ad_rhs(12, 108, A::add_scaled_inputs_product(s.ad_value(60), 1.0, s.ad_value(91), (-1.0), s.ad_value(200), A::offset(s.ad_value(90), (-1.0)), (-2.0)));
@@ -2165,7 +2165,7 @@ impl Instance {
         if s.b[1588] {
             s.store_sqrt(14, 12);
             s.store_offset_div_ad(691, s.ad_value(687), A::add(s.ad_value(96), s.ad_value(14)), 1.0);
-            s.store_mul_ad_lhs(672, A::mul3(A::mul3_scaled_output(s.ad_value(691), s.ad_value(157), s.ad_value(106), ((2.0 * p.p2) * ((p.p957 * 1.0 / (s.v[30])) * s.v[46]))), s.ad_value(106), A::mul(A::sub(s.ad_value(693), s.ad_value(692)), A::add(A::offset(s.ad_value(693), 1.0), s.ad_value(692)))), 175);
+            s.store_mul_product3_rhs(672, 175, A::mul3_scaled_output(s.ad_value(691), s.ad_value(157), s.ad_value(106), ((2.0 * p.p2) * ((p.p957 * 1.0 / (s.v[30])) * s.v[46]))), s.ad_value(106), A::mul(A::sub(s.ad_value(693), s.ad_value(692)), A::add(A::offset(s.ad_value(693), 1.0), s.ad_value(692))), 1.0);
             s.store_add(188, 672, 188);
             s.store_scalar(696, (p.p785 * p.p1062));
             s.store_scalar(697, (p.p799 * p.p1062));
@@ -5694,7 +5694,7 @@ impl Instance {
         s.v[1310] = if s.b[1310] { 1.0 } else { 0.0 };
 
         if s.b[1310] {
-            s.store_offset_ad(63, A::mul3_scaled_output(s.ad_value(187), s.ad_value(108), A::ln(A::max_with_scalar(A::div(s.ad_value(479), s.ad_value(480)), 1e-38)), -1.0), p.p5);
+            s.store_offset_product3(63, s.ad_value(187), s.ad_value(108), A::ln(A::max_with_scalar(A::div(s.ad_value(479), s.ad_value(480)), 1e-38)), -1.0, p.p5);
         }
 
         if (!s.b[1310]) {
