@@ -7914,6 +7914,20 @@ fn generated_algebraic_current_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
+fn generated_scalar_algebraic_current_rust_compiles_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(tiny_resistor_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile simple resistor with scalar backend");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_emits_terminal_and_internal_node_metadata() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(internal_node_resistor_source())

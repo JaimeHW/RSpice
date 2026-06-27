@@ -102,7 +102,7 @@
   - Default remains current backend until scalar coverage is broad enough.
   - Tests can force scalar backend for supported fixtures.
 
-- [ ] Add generated Rust compile tests for scalar-backed simple models.
+- [x] Add generated Rust compile tests for scalar-backed simple models.
 
 ## Phase 7: Model Migration and Performance Gates
 
