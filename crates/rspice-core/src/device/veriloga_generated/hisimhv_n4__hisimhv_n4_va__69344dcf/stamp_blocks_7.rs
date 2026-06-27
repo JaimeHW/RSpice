@@ -2404,7 +2404,7 @@ impl Instance {
         }
 
         if s.b[1427] {
-            s.store_sqrt_offset_ad(782, A::mul_offset_lhs(s.ad_value(182), (-1.0), A::offset(s.ad_value(182), (-1.0))), ((4.0 * 0.05) * 0.05));
+            s.store_sqrt_offset_square_offset(782, 182, (-1.0), ((4.0 * 0.05) * 0.05));
             s.store_scaled_offset_ad(340, A::div_scaled_offset_numerator(s.ad_value(182), 1.0, (-1.0), s.ad_value(782), 1.0), 1.0, 0.5);
             s.store_scaled_add_ad_lhs(182, A::offset(s.ad_value(182), (-1.0)), 782, 0.5);
         }

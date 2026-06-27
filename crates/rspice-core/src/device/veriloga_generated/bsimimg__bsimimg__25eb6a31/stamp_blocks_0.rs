@@ -825,7 +825,7 @@ impl Instance {
 
         s.v[272] = (p.p298 + 273.15);
 
-        s.store_scaled_sub_ad(271, A::offset(s.ad_value(271), s.v[272]), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(271), (-s.v[272]), A::offset(s.ad_value(271), (-s.v[272]))), ((0.25 * 0.01) * 0.01))), 0.5);
+        s.store_scaled_sub_offset_sqrt_square_offset(271, 271, s.v[272], (-s.v[272]), ((0.25 * 0.01) * 0.01), 0.5);
 
         s.store_div(96, 271, 95);
 
@@ -882,7 +882,7 @@ impl Instance {
 
         s.store_mul_pow_ad_rhs(124, 335, s.ad_value(96), s.ad_value(341));
 
-        s.store_scaled_add_ad(150, A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6)))), A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))), A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))))), ((4.0 * 0.001) * 0.001))), 0.5);
+        s.store_scaled_add_offset_sqrt_square_offset_ad(150, A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))), ((1.0) + ((-1e-6))), ((4.0 * 0.001) * 0.001), 0.5);
 
         s.store_mul_scale_offset_rhs(353, 353, 278, p.p120, 1.0);
 
@@ -3575,7 +3575,7 @@ impl Instance {
 
         s.v[272] = (p.p298 + 273.15);
 
-        s.store_scaled_sub_ad(271, A::offset(s.ad_value(271), s.v[272]), A::sqrt(A::offset(A::mul_offset_lhs(s.ad_value(271), (-s.v[272]), A::offset(s.ad_value(271), (-s.v[272]))), ((0.25 * 0.01) * 0.01))), 0.5);
+        s.store_scaled_sub_offset_sqrt_square_offset(271, 271, s.v[272], (-s.v[272]), ((0.25 * 0.01) * 0.01), 0.5);
 
         s.store_div(96, 271, 95);
 
@@ -3632,7 +3632,7 @@ impl Instance {
 
         s.store_mul_pow_ad_rhs(124, 335, s.ad_value(96), s.ad_value(341));
 
-        s.store_scaled_add_ad(150, A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6)))), A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))), A::offset(A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))))), ((4.0 * 0.001) * 0.001))), 0.5);
+        s.store_scaled_add_offset_sqrt_square_offset_ad(150, A::mul(s.ad_value(355), s.ad_value(97)), ((1.0) + ((-1e-6))), ((1.0) + ((-1e-6))), ((4.0 * 0.001) * 0.001), 0.5);
 
         s.store_mul_scale_offset_rhs(353, 353, 278, p.p120, 1.0);
 

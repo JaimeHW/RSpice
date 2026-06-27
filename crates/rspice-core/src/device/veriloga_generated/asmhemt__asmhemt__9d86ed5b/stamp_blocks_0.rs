@@ -392,9 +392,9 @@ impl Instance {
             s.store_abs_voltage(136, ctx, nodes, Some(0), Some(2));
             s.store_abs_voltage(90, ctx, nodes, Some(1), Some(2));
             s.store_sub_voltage_abs_voltage(337, ctx, nodes, Some(12), None, Some(0), Some(2));
-            s.store_scaled_add_ad_rhs(337, 337, A::sqrt(A::offset(A::mul(s.ad_value(337), s.ad_value(337)), ((0.25 * 1e-30) * 1e-30))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(337, 337, 337, ((0.25 * 1e-30) * 1e-30), 0.5);
             s.store_sub_voltage_abs_voltage(342, ctx, nodes, Some(14), None, Some(1), Some(2));
-            s.store_scaled_add_ad_rhs(342, 342, A::sqrt(A::offset(A::mul(s.ad_value(342), s.ad_value(342)), ((0.25 * 1e-30) * 1e-30))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(342, 342, 342, ((0.25 * 1e-30) * 1e-30), 0.5);
             s.store_scale(136, 337, p.p89);
             s.store_sqrt_square_offset(90, 337, (p.p89 * p.p89));
             s.store_scaled_div(339, 136, 90, (((p.p91 * p.p10)) as f64).abs());

@@ -1727,7 +1727,7 @@ impl Instance {
         }
 
         if (!s.b[729]) {
-            s.store_sqrt_offset_ad(44, A::mul_offset_lhs(s.ad_value(320), (-1.0), A::offset(s.ad_value(320), (-1.0))), ((4.0 * 0.1) * 0.1));
+            s.store_sqrt_offset_square_offset(44, 320, (-1.0), ((4.0 * 0.1) * 0.1));
             s.store_offset_add_scaled_inputs_mixed_ai(320, A::offset(s.ad_value(320), (-1.0)), 0.5, 44, 0.5, (1e-10 * 0.1));
         }
 

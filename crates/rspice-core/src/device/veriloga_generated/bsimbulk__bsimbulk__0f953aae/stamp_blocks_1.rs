@@ -1205,7 +1205,7 @@ impl Instance {
         }
 
         if ((s.b[1556] && (!s.b[1555])) && (!s.b[1557])) {
-            s.store_scaled_add_ad_rhs(24, 24, A::sqrt(A::offset(A::mul(s.ad_value(24), s.ad_value(24)), ((0.25 * 0.1) * 0.1))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(24, 24, 24, ((0.25 * 0.1) * 0.1), 0.5);
         }
 
         if (s.b[1556] && (!s.b[1555])) {
@@ -1378,7 +1378,7 @@ impl Instance {
         }
 
         if (s.b[1562] && (!s.b[1569])) {
-            s.store_scaled_add_ad_rhs(84, 12, A::sqrt(A::offset(A::mul(s.ad_value(12), s.ad_value(12)), ((0.25 * 0.1) * 0.1))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(84, 12, 12, ((0.25 * 0.1) * 0.1), 0.5);
         }
 
         if s.b[1562] {
@@ -1541,7 +1541,7 @@ impl Instance {
         }
 
         if (s.b[1562] && (!s.b[1578])) {
-            s.store_scaled_add_ad_rhs(84, 12, A::sqrt(A::offset(A::mul(s.ad_value(12), s.ad_value(12)), ((0.25 * 0.1) * 0.1))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(84, 12, 12, ((0.25 * 0.1) * 0.1), 0.5);
         }
 
         if s.b[1562] {
@@ -1556,7 +1556,7 @@ impl Instance {
         }
 
         if (s.b[1562] && (!s.b[1579])) {
-            s.store_scaled_add_ad_rhs(85, 13, A::sqrt(A::offset(A::mul(s.ad_value(13), s.ad_value(13)), ((0.25 * 0.1) * 0.1))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(85, 13, 13, ((0.25 * 0.1) * 0.1), 0.5);
         }
 
         if s.b[1562] {
@@ -1650,7 +1650,7 @@ impl Instance {
         }
 
         if (!s.b[1583]) {
-            s.store_scaled_add_ad_rhs(13, 211, A::sqrt(A::offset(A::mul(s.ad_value(211), s.ad_value(211)), ((0.25 * 0.5) * 0.5))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(13, 211, 211, ((0.25 * 0.5) * 0.5), 0.5);
         }
 
         s.b[1584] = ((0.0 == 0.0) && (s.v[212] < ((-2500.0) * 0.5)));
@@ -1661,7 +1661,7 @@ impl Instance {
         }
 
         if (!s.b[1584]) {
-            s.store_scaled_add_ad_rhs(14, 212, A::sqrt(A::offset(A::mul(s.ad_value(212), s.ad_value(212)), ((0.25 * 0.5) * 0.5))), 0.5);
+            s.store_scaled_add_sqrt_square_offset_rhs(14, 212, 212, ((0.25 * 0.5) * 0.5), 0.5);
         }
 
         s.store_sqrt_offset_ad(214, A::mul(s.ad_value(13), s.ad_value(218)), 0.25);

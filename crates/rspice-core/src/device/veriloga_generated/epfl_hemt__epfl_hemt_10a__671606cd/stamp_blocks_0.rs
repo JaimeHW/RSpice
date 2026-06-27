@@ -9473,7 +9473,7 @@ impl Instance {
 
         s.store_mul_ad_rhs(1, 61, A::add_scaled_inputs_product(s.ad_value(14), 1.0, s.ad_value(33), (-1.0), s.ad_value(80), A::offset(s.ad_value(32), (-1.0)), (-2.0)));
 
-        s.store_scaled_add_ad_rhs(29, 1, A::sqrt(A::offset(A::mul(s.ad_value(1), s.ad_value(1)), ((0.25 * 0.1) * 0.1))), 0.5);
+        s.store_scaled_add_sqrt_square_offset_rhs(29, 1, 1, ((0.25 * 0.1) * 0.1), 0.5);
 
         s.store_mul3_affine_lhs(77, 32, 61, 2.0, 0.0, 80);
 

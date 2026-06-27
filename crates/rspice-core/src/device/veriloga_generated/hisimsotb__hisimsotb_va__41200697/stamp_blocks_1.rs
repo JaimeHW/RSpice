@@ -3440,7 +3440,7 @@ impl Instance {
         }
 
         if (!s.b[714]) {
-            s.store_sqrt_offset_ad(639, A::mul_offset_lhs(s.ad_value(267), (-1.0), A::offset(s.ad_value(267), (-1.0))), ((4.0 * 0.1) * 0.1));
+            s.store_sqrt_offset_square_offset(639, 267, (-1.0), ((4.0 * 0.1) * 0.1));
             s.store_scaled_offset_ad(284, A::div_scaled_offset_numerator(s.ad_value(267), 1.0, (-1.0), s.ad_value(639), 1.0), 1.0, 0.5);
             s.store_offset_add_scaled_inputs_mixed_ai(267, A::offset(s.ad_value(267), (-1.0)), 0.5, 639, 0.5, (1e-10 * 0.1));
         }
