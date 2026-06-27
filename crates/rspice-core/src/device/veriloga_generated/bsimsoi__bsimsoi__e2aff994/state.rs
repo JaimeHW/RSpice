@@ -3108,10 +3108,47 @@ pub struct Instance {
     pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
+    pub(crate) scalar_v2: f64,
+    pub(crate) scalar_v3: bool,
+    pub(crate) scalar_v4: f64,
+    pub(crate) scalar_v5: bool,
+    pub(crate) scalar_v7: f64,
+    pub(crate) scalar_v8: f64,
+    pub(crate) scalar_v9: f64,
+    pub(crate) scalar_v10: f64,
+    pub(crate) scalar_v11: f64,
+    pub(crate) scalar_v12: f64,
+    pub(crate) scalar_v13: f64,
+    pub(crate) scalar_v14: f64,
+    pub(crate) scalar_v15: f64,
+    pub(crate) scalar_v16: f64,
+    pub(crate) scalar_v17: f64,
+    pub(crate) scalar_v18: f64,
+    pub(crate) scalar_v19: f64,
+    pub(crate) scalar_v20: f64,
+    pub(crate) scalar_v21: f64,
+    pub(crate) scalar_v22: f64,
+    pub(crate) scalar_v23: f64,
+    pub(crate) scalar_v24: f64,
+    pub(crate) scalar_v25: f64,
+    pub(crate) scalar_v26: f64,
+    pub(crate) scalar_v52: f64,
+    pub(crate) scalar_v53: f64,
+    pub(crate) scalar_v54: f64,
+    pub(crate) scalar_v55: f64,
+    pub(crate) scalar_v56: f64,
+    pub(crate) scalar_v57: f64,
+    pub(crate) scalar_v58: f64,
+    pub(crate) scalar_v59: f64,
+    pub(crate) scalar_v60: f64,
+    pub(crate) scalar_v61: f64,
+    pub(crate) scalar_v62: f64,
+    pub(crate) scalar_v63: f64,
     pub(crate) scalar_v64: f64,
     pub(crate) scalar_v65: bool,
     pub(crate) scalar_v66: bool,
     pub(crate) scalar_v80: f64,
+    pub(crate) scalar_v84: f64,
     pub(crate) scalar_v85: f64,
     pub(crate) scalar_v86: bool,
     pub(crate) scalar_v87: f64,
@@ -3120,10 +3157,21 @@ pub struct Instance {
     pub(crate) scalar_v91: bool,
     pub(crate) scalar_v92: bool,
     pub(crate) scalar_v93: bool,
+    pub(crate) scalar_v99: f64,
+    pub(crate) scalar_v100: f64,
+    pub(crate) scalar_v101: f64,
+    pub(crate) scalar_v102: f64,
     pub(crate) scalar_v106: bool,
     pub(crate) scalar_v116: bool,
+    pub(crate) scalar_v145: f64,
+    pub(crate) scalar_v146: f64,
+    pub(crate) scalar_v147: f64,
+    pub(crate) scalar_v148: f64,
+    pub(crate) scalar_v149: f64,
     pub(crate) scalar_v150: f64,
     pub(crate) scalar_v151: f64,
+    pub(crate) scalar_v152: f64,
+    pub(crate) scalar_v153: f64,
     pub(crate) scalar_v155: f64,
     pub(crate) scalar_v156: f64,
     pub(crate) scratch: Option<Box<GenericScratch<2040, 14, 12>>>,
@@ -3147,10 +3195,47 @@ impl Clone for Instance {
             idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
+            scalar_v2: self.scalar_v2,
+            scalar_v3: self.scalar_v3,
+            scalar_v4: self.scalar_v4,
+            scalar_v5: self.scalar_v5,
+            scalar_v7: self.scalar_v7,
+            scalar_v8: self.scalar_v8,
+            scalar_v9: self.scalar_v9,
+            scalar_v10: self.scalar_v10,
+            scalar_v11: self.scalar_v11,
+            scalar_v12: self.scalar_v12,
+            scalar_v13: self.scalar_v13,
+            scalar_v14: self.scalar_v14,
+            scalar_v15: self.scalar_v15,
+            scalar_v16: self.scalar_v16,
+            scalar_v17: self.scalar_v17,
+            scalar_v18: self.scalar_v18,
+            scalar_v19: self.scalar_v19,
+            scalar_v20: self.scalar_v20,
+            scalar_v21: self.scalar_v21,
+            scalar_v22: self.scalar_v22,
+            scalar_v23: self.scalar_v23,
+            scalar_v24: self.scalar_v24,
+            scalar_v25: self.scalar_v25,
+            scalar_v26: self.scalar_v26,
+            scalar_v52: self.scalar_v52,
+            scalar_v53: self.scalar_v53,
+            scalar_v54: self.scalar_v54,
+            scalar_v55: self.scalar_v55,
+            scalar_v56: self.scalar_v56,
+            scalar_v57: self.scalar_v57,
+            scalar_v58: self.scalar_v58,
+            scalar_v59: self.scalar_v59,
+            scalar_v60: self.scalar_v60,
+            scalar_v61: self.scalar_v61,
+            scalar_v62: self.scalar_v62,
+            scalar_v63: self.scalar_v63,
             scalar_v64: self.scalar_v64,
             scalar_v65: self.scalar_v65,
             scalar_v66: self.scalar_v66,
             scalar_v80: self.scalar_v80,
+            scalar_v84: self.scalar_v84,
             scalar_v85: self.scalar_v85,
             scalar_v86: self.scalar_v86,
             scalar_v87: self.scalar_v87,
@@ -3159,10 +3244,21 @@ impl Clone for Instance {
             scalar_v91: self.scalar_v91,
             scalar_v92: self.scalar_v92,
             scalar_v93: self.scalar_v93,
+            scalar_v99: self.scalar_v99,
+            scalar_v100: self.scalar_v100,
+            scalar_v101: self.scalar_v101,
+            scalar_v102: self.scalar_v102,
             scalar_v106: self.scalar_v106,
             scalar_v116: self.scalar_v116,
+            scalar_v145: self.scalar_v145,
+            scalar_v146: self.scalar_v146,
+            scalar_v147: self.scalar_v147,
+            scalar_v148: self.scalar_v148,
+            scalar_v149: self.scalar_v149,
             scalar_v150: self.scalar_v150,
             scalar_v151: self.scalar_v151,
+            scalar_v152: self.scalar_v152,
+            scalar_v153: self.scalar_v153,
             scalar_v155: self.scalar_v155,
             scalar_v156: self.scalar_v156,
             scratch: None,
@@ -3203,10 +3299,47 @@ impl Instance {
             idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
+            scalar_v2: 0.0,
+            scalar_v3: false,
+            scalar_v4: 0.0,
+            scalar_v5: false,
+            scalar_v7: 0.0,
+            scalar_v8: 0.0,
+            scalar_v9: 0.0,
+            scalar_v10: 0.0,
+            scalar_v11: 0.0,
+            scalar_v12: 0.0,
+            scalar_v13: 0.0,
+            scalar_v14: 0.0,
+            scalar_v15: 0.0,
+            scalar_v16: 0.0,
+            scalar_v17: 0.0,
+            scalar_v18: 0.0,
+            scalar_v19: 0.0,
+            scalar_v20: 0.0,
+            scalar_v21: 0.0,
+            scalar_v22: 0.0,
+            scalar_v23: 0.0,
+            scalar_v24: 0.0,
+            scalar_v25: 0.0,
+            scalar_v26: 0.0,
+            scalar_v52: 0.0,
+            scalar_v53: 0.0,
+            scalar_v54: 0.0,
+            scalar_v55: 0.0,
+            scalar_v56: 0.0,
+            scalar_v57: 0.0,
+            scalar_v58: 0.0,
+            scalar_v59: 0.0,
+            scalar_v60: 0.0,
+            scalar_v61: 0.0,
+            scalar_v62: 0.0,
+            scalar_v63: 0.0,
             scalar_v64: 0.0,
             scalar_v65: false,
             scalar_v66: false,
             scalar_v80: 0.0,
+            scalar_v84: 0.0,
             scalar_v85: 0.0,
             scalar_v86: false,
             scalar_v87: 0.0,
@@ -3215,10 +3348,21 @@ impl Instance {
             scalar_v91: false,
             scalar_v92: false,
             scalar_v93: false,
+            scalar_v99: 0.0,
+            scalar_v100: 0.0,
+            scalar_v101: 0.0,
+            scalar_v102: 0.0,
             scalar_v106: false,
             scalar_v116: false,
+            scalar_v145: 0.0,
+            scalar_v146: 0.0,
+            scalar_v147: 0.0,
+            scalar_v148: 0.0,
+            scalar_v149: 0.0,
             scalar_v150: 0.0,
             scalar_v151: 0.0,
+            scalar_v152: 0.0,
+            scalar_v153: 0.0,
             scalar_v155: 0.0,
             scalar_v156: 0.0,
             scratch: Some(GenericScratch::new_box()),
@@ -3246,10 +3390,47 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
+            scalar_v2,
+            scalar_v3,
+            scalar_v4,
+            scalar_v5,
+            scalar_v7,
+            scalar_v8,
+            scalar_v9,
+            scalar_v10,
+            scalar_v11,
+            scalar_v12,
+            scalar_v13,
+            scalar_v14,
+            scalar_v15,
+            scalar_v16,
+            scalar_v17,
+            scalar_v18,
+            scalar_v19,
+            scalar_v20,
+            scalar_v21,
+            scalar_v22,
+            scalar_v23,
+            scalar_v24,
+            scalar_v25,
+            scalar_v26,
+            scalar_v52,
+            scalar_v53,
+            scalar_v54,
+            scalar_v55,
+            scalar_v56,
+            scalar_v57,
+            scalar_v58,
+            scalar_v59,
+            scalar_v60,
+            scalar_v61,
+            scalar_v62,
+            scalar_v63,
             scalar_v64,
             scalar_v65,
             scalar_v66,
             scalar_v80,
+            scalar_v84,
             scalar_v85,
             scalar_v86,
             scalar_v87,
@@ -3258,10 +3439,21 @@ impl Instance {
             scalar_v91,
             scalar_v92,
             scalar_v93,
+            scalar_v99,
+            scalar_v100,
+            scalar_v101,
+            scalar_v102,
             scalar_v106,
             scalar_v116,
+            scalar_v145,
+            scalar_v146,
+            scalar_v147,
+            scalar_v148,
+            scalar_v149,
             scalar_v150,
             scalar_v151,
+            scalar_v152,
+            scalar_v153,
             scalar_v155,
             scalar_v156,
             scratch: _,
@@ -3281,10 +3473,47 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
+            scalar_v2,
+            scalar_v3,
+            scalar_v4,
+            scalar_v5,
+            scalar_v7,
+            scalar_v8,
+            scalar_v9,
+            scalar_v10,
+            scalar_v11,
+            scalar_v12,
+            scalar_v13,
+            scalar_v14,
+            scalar_v15,
+            scalar_v16,
+            scalar_v17,
+            scalar_v18,
+            scalar_v19,
+            scalar_v20,
+            scalar_v21,
+            scalar_v22,
+            scalar_v23,
+            scalar_v24,
+            scalar_v25,
+            scalar_v26,
+            scalar_v52,
+            scalar_v53,
+            scalar_v54,
+            scalar_v55,
+            scalar_v56,
+            scalar_v57,
+            scalar_v58,
+            scalar_v59,
+            scalar_v60,
+            scalar_v61,
+            scalar_v62,
+            scalar_v63,
             scalar_v64,
             scalar_v65,
             scalar_v66,
             scalar_v80,
+            scalar_v84,
             scalar_v85,
             scalar_v86,
             scalar_v87,
@@ -3293,10 +3522,21 @@ impl Instance {
             scalar_v91,
             scalar_v92,
             scalar_v93,
+            scalar_v99,
+            scalar_v100,
+            scalar_v101,
+            scalar_v102,
             scalar_v106,
             scalar_v116,
+            scalar_v145,
+            scalar_v146,
+            scalar_v147,
+            scalar_v148,
+            scalar_v149,
             scalar_v150,
             scalar_v151,
+            scalar_v152,
+            scalar_v153,
             scalar_v155,
             scalar_v156,
             scratch,
@@ -4782,6 +5022,78 @@ impl Instance {
     #[inline]
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
+        let v2: f64 = p.p30;
+        self.scalar_v2 = v2;
+        let v3: bool = (p.p30 == 1.0);
+        self.scalar_v3 = v3;
+        let v4: f64 = (if v3 { 1.0 } else { 0.0 });
+        self.scalar_v4 = v4;
+        let v5: bool = (!v3);
+        self.scalar_v5 = v5;
+        let v7: f64 = (if v5 { -1.0 } else { v4 });
+        self.scalar_v7 = v7;
+        let v8: f64 = p.p0;
+        self.scalar_v8 = v8;
+        let v9: f64 = p.p49;
+        self.scalar_v9 = v9;
+        let v10: f64 = (p.p0 * p.p49);
+        self.scalar_v10 = v10;
+        let v11: f64 = p.p1;
+        self.scalar_v11 = v11;
+        let v12: f64 = p.p50;
+        self.scalar_v12 = v12;
+        let v13: f64 = (p.p1 * p.p50);
+        self.scalar_v13 = v13;
+        let v14: f64 = p.p51;
+        self.scalar_v14 = v14;
+        let v15: f64 = (v10 + p.p51);
+        self.scalar_v15 = v15;
+        let v16: f64 = p.p2;
+        self.scalar_v16 = v16;
+        let v17: f64 = (v13 / p.p2);
+        self.scalar_v17 = v17;
+        let v18: f64 = p.p53;
+        self.scalar_v18 = v18;
+        let v19: f64 = (v17 + p.p53);
+        self.scalar_v19 = v19;
+        let v20: f64 = p.p58;
+        self.scalar_v20 = v20;
+        let v21: f64 = (-p.p58);
+        self.scalar_v21 = v21;
+        let v22: f64 = f64::powf(v15, v21);
+        self.scalar_v22 = v22;
+        let v23: f64 = p.p59;
+        self.scalar_v23 = v23;
+        let v24: f64 = (-p.p59);
+        self.scalar_v24 = v24;
+        let v25: f64 = f64::powf(v19, v24);
+        self.scalar_v25 = v25;
+        let v26: f64 = (v22 * v25);
+        self.scalar_v26 = v26;
+        let v52: f64 = p.p66;
+        self.scalar_v52 = v52;
+        let v53: f64 = p.p67;
+        self.scalar_v53 = v53;
+        let v54: f64 = (p.p67 * v22);
+        self.scalar_v54 = v54;
+        let v55: f64 = (p.p66 + v54);
+        self.scalar_v55 = v55;
+        let v56: f64 = p.p68;
+        self.scalar_v56 = v56;
+        let v57: f64 = (p.p68 * v25);
+        self.scalar_v57 = v57;
+        let v58: f64 = (v55 + v57);
+        self.scalar_v58 = v58;
+        let v59: f64 = p.p69;
+        self.scalar_v59 = v59;
+        let v60: f64 = (p.p69 * v26);
+        self.scalar_v60 = v60;
+        let v61: f64 = (v58 + v60);
+        self.scalar_v61 = v61;
+        let v62: f64 = (2.0 * v61);
+        self.scalar_v62 = v62;
+        let v63: f64 = (v15 - v62);
+        self.scalar_v63 = v63;
         let v64: f64 = p.p29;
         self.scalar_v64 = v64;
         let v65: bool = (p.p29 == 1.0);
@@ -4790,6 +5102,8 @@ impl Instance {
         self.scalar_v66 = v66;
         let v80: f64 = p.p40;
         self.scalar_v80 = v80;
+        let v84: f64 = (-v7);
+        self.scalar_v84 = v84;
         let v85: f64 = p.p43;
         self.scalar_v85 = v85;
         let v86: bool = (p.p43 != 0.0);
@@ -4806,14 +5120,36 @@ impl Instance {
         self.scalar_v92 = v92;
         let v93: bool = (v89 && v92);
         self.scalar_v93 = v93;
+        let v99: f64 = (v84 * p.p2);
+        self.scalar_v99 = v99;
+        let v100: f64 = (v99 * v63);
+        self.scalar_v100 = v100;
+        let v101: f64 = p.p874;
+        self.scalar_v101 = v101;
+        let v102: f64 = (v100 * p.p874);
+        self.scalar_v102 = v102;
         let v106: bool = (p.p45 == 1.0);
         self.scalar_v106 = v106;
         let v116: bool = (v93 && v106);
         self.scalar_v116 = v116;
+        let v145: f64 = (v102 * -1.0);
+        self.scalar_v145 = v145;
+        let v146: f64 = (if v65 { v102 } else { 0.0 });
+        self.scalar_v146 = v146;
+        let v147: f64 = (if v65 { v145 } else { 0.0 });
+        self.scalar_v147 = v147;
+        let v148: f64 = (if v66 { v102 } else { v146 });
+        self.scalar_v148 = v148;
+        let v149: f64 = (if v66 { v145 } else { v147 });
+        self.scalar_v149 = v149;
         let v150: f64 = (if v65 { 1.0 } else { 0.0 });
         self.scalar_v150 = v150;
         let v151: f64 = (if v66 { 1.0 } else { 0.0 });
         self.scalar_v151 = v151;
+        let v152: f64 = (v84 * v148);
+        self.scalar_v152 = v152;
+        let v153: f64 = (v84 * v149);
+        self.scalar_v153 = v153;
         let v155: f64 = (if v116 { -0.0 } else { 0.0 });
         self.scalar_v155 = v155;
         let v156: f64 = (if v116 { 0.0 } else { 0.0 });

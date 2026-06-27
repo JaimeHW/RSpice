@@ -4693,22 +4693,6 @@ impl Instance {
             &eq24_branch_derivatives,
             multiplicity,
         );
-        let eq25_e650: f64 = (1e-9 * (nv10 - nv13));
-        let eq25_e650_d_n10: f64 = 1e-9;
-        let eq25_e650_d_n13: f64 = (-1e-9);
-        let eq25_e651: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, eq25_e650);
-        let eq25_e651_d_n10: f64 = (eq25_e650_d_n10 * ddt_scale);
-        let eq25_e651_d_n13: f64 = (eq25_e650_d_n13 * ddt_scale);
-        let eq25_value: f64 = eq25_e651;
-        stamper.stamp_current_node2_local(
-            Some(10),
-            Some(13),
-            multiplicity * (eq25_value),
-            10,
-            multiplicity * (eq25_e651_d_n10),
-            13,
-            multiplicity * (eq25_e651_d_n13),
-        );
         let eq26_e653: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, s.v[1776]);
         let eq26_e653_d_n0: f64 = (s.dn[1776][0] * ddt_scale);
         let eq26_e653_d_n1: f64 = (s.dn[1776][1] * ddt_scale);
@@ -4768,22 +4752,6 @@ impl Instance {
             &eq27_node_derivatives,
             &eq27_branch_derivatives,
             multiplicity,
-        );
-        let eq28_e659: f64 = (1e-9 * (nv12 - nv13));
-        let eq28_e659_d_n12: f64 = 1e-9;
-        let eq28_e659_d_n13: f64 = (-1e-9);
-        let eq28_e660: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, eq28_e659);
-        let eq28_e660_d_n12: f64 = (eq28_e659_d_n12 * ddt_scale);
-        let eq28_e660_d_n13: f64 = (eq28_e659_d_n13 * ddt_scale);
-        let eq28_value: f64 = eq28_e660;
-        stamper.stamp_current_node2_local(
-            Some(12),
-            Some(13),
-            multiplicity * (eq28_value),
-            12,
-            multiplicity * (eq28_e660_d_n12),
-            13,
-            multiplicity * (eq28_e660_d_n13),
         );
     }
 }

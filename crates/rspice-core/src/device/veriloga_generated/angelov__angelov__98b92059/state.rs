@@ -300,6 +300,8 @@ pub struct Instance {
     pub(crate) scalar_v62: f64,
     pub(crate) scalar_v67: f64,
     pub(crate) scalar_v68: f64,
+    pub(crate) scalar_v73: f64,
+    pub(crate) scalar_v74: f64,
     pub(crate) scalar_v79: f64,
     pub(crate) scalar_v80: f64,
     pub(crate) scalar_v84: f64,
@@ -366,6 +368,10 @@ pub struct Instance {
     pub(crate) scalar_v419: f64,
     pub(crate) scalar_v420: f64,
     pub(crate) scalar_v431: bool,
+    pub(crate) scalar_v433: f64,
+    pub(crate) scalar_v436: f64,
+    pub(crate) scalar_v440: f64,
+    pub(crate) scalar_v450: f64,
     pub(crate) scalar_v496: bool,
     pub(crate) scalar_v500: f64,
     pub(crate) scalar_v519: f64,
@@ -381,6 +387,9 @@ pub struct Instance {
     pub(crate) scalar_v1433: f64,
     pub(crate) scalar_v1468: f64,
     pub(crate) scalar_v1472: f64,
+    pub(crate) scalar_v1477: f64,
+    pub(crate) scalar_v1478: f64,
+    pub(crate) scalar_v1500: f64,
     pub(crate) scalar_v1501: f64,
     pub(crate) scalar_v1502: f64,
     pub(crate) scalar_v1503: f64,
@@ -443,6 +452,8 @@ impl Clone for Instance {
             scalar_v62: self.scalar_v62,
             scalar_v67: self.scalar_v67,
             scalar_v68: self.scalar_v68,
+            scalar_v73: self.scalar_v73,
+            scalar_v74: self.scalar_v74,
             scalar_v79: self.scalar_v79,
             scalar_v80: self.scalar_v80,
             scalar_v84: self.scalar_v84,
@@ -509,6 +520,10 @@ impl Clone for Instance {
             scalar_v419: self.scalar_v419,
             scalar_v420: self.scalar_v420,
             scalar_v431: self.scalar_v431,
+            scalar_v433: self.scalar_v433,
+            scalar_v436: self.scalar_v436,
+            scalar_v440: self.scalar_v440,
+            scalar_v450: self.scalar_v450,
             scalar_v496: self.scalar_v496,
             scalar_v500: self.scalar_v500,
             scalar_v519: self.scalar_v519,
@@ -524,6 +539,9 @@ impl Clone for Instance {
             scalar_v1433: self.scalar_v1433,
             scalar_v1468: self.scalar_v1468,
             scalar_v1472: self.scalar_v1472,
+            scalar_v1477: self.scalar_v1477,
+            scalar_v1478: self.scalar_v1478,
+            scalar_v1500: self.scalar_v1500,
             scalar_v1501: self.scalar_v1501,
             scalar_v1502: self.scalar_v1502,
             scalar_v1503: self.scalar_v1503,
@@ -603,6 +621,8 @@ impl Instance {
             scalar_v62: 0.0,
             scalar_v67: 0.0,
             scalar_v68: 0.0,
+            scalar_v73: 0.0,
+            scalar_v74: 0.0,
             scalar_v79: 0.0,
             scalar_v80: 0.0,
             scalar_v84: 0.0,
@@ -669,6 +689,10 @@ impl Instance {
             scalar_v419: 0.0,
             scalar_v420: 0.0,
             scalar_v431: false,
+            scalar_v433: 0.0,
+            scalar_v436: 0.0,
+            scalar_v440: 0.0,
+            scalar_v450: 0.0,
             scalar_v496: false,
             scalar_v500: 0.0,
             scalar_v519: 0.0,
@@ -684,6 +708,9 @@ impl Instance {
             scalar_v1433: 0.0,
             scalar_v1468: 0.0,
             scalar_v1472: 0.0,
+            scalar_v1477: 0.0,
+            scalar_v1478: 0.0,
+            scalar_v1500: 0.0,
             scalar_v1501: 0.0,
             scalar_v1502: 0.0,
             scalar_v1503: 0.0,
@@ -750,6 +777,8 @@ impl Instance {
             scalar_v62,
             scalar_v67,
             scalar_v68,
+            scalar_v73,
+            scalar_v74,
             scalar_v79,
             scalar_v80,
             scalar_v84,
@@ -816,6 +845,10 @@ impl Instance {
             scalar_v419,
             scalar_v420,
             scalar_v431,
+            scalar_v433,
+            scalar_v436,
+            scalar_v440,
+            scalar_v450,
             scalar_v496,
             scalar_v500,
             scalar_v519,
@@ -831,6 +864,9 @@ impl Instance {
             scalar_v1433,
             scalar_v1468,
             scalar_v1472,
+            scalar_v1477,
+            scalar_v1478,
+            scalar_v1500,
             scalar_v1501,
             scalar_v1502,
             scalar_v1503,
@@ -889,6 +925,8 @@ impl Instance {
             scalar_v62,
             scalar_v67,
             scalar_v68,
+            scalar_v73,
+            scalar_v74,
             scalar_v79,
             scalar_v80,
             scalar_v84,
@@ -955,6 +993,10 @@ impl Instance {
             scalar_v419,
             scalar_v420,
             scalar_v431,
+            scalar_v433,
+            scalar_v436,
+            scalar_v440,
+            scalar_v450,
             scalar_v496,
             scalar_v500,
             scalar_v519,
@@ -970,6 +1012,9 @@ impl Instance {
             scalar_v1433,
             scalar_v1468,
             scalar_v1472,
+            scalar_v1477,
+            scalar_v1478,
+            scalar_v1500,
             scalar_v1501,
             scalar_v1502,
             scalar_v1503,
@@ -1207,6 +1252,10 @@ impl Instance {
         self.scalar_v67 = v67;
         let v68: f64 = p.p64;
         self.scalar_v68 = v68;
+        let v73: f64 = p.p54;
+        self.scalar_v73 = v73;
+        let v74: f64 = p.p65;
+        self.scalar_v74 = v74;
         let v79: f64 = p.p9;
         self.scalar_v79 = v79;
         let v80: f64 = p.p68;
@@ -1339,6 +1388,14 @@ impl Instance {
         self.scalar_v420 = v420;
         let v431: bool = ((p.p1 != 0.0) && (p.p57 != 0.0));
         self.scalar_v431 = v431;
+        let v433: f64 = p.p51;
+        self.scalar_v433 = v433;
+        let v436: f64 = p.p27;
+        self.scalar_v436 = v436;
+        let v440: f64 = p.p23;
+        self.scalar_v440 = v440;
+        let v450: f64 = p.p56;
+        self.scalar_v450 = v450;
         let v496: bool = (!v431);
         self.scalar_v496 = v496;
         let v500: f64 = (p.p19 * -1.0);
@@ -1369,6 +1426,12 @@ impl Instance {
         self.scalar_v1468 = v1468;
         let v1472: f64 = (p.p38 * v1468);
         self.scalar_v1472 = v1472;
+        let v1477: f64 = (p.p27 * -1.0);
+        self.scalar_v1477 = v1477;
+        let v1478: f64 = (p.p23 * -1.0);
+        self.scalar_v1478 = v1478;
+        let v1500: f64 = (p.p56 * -1.0);
+        self.scalar_v1500 = v1500;
         let v1501: f64 = (-1.0 / p.p55);
         self.scalar_v1501 = v1501;
         let v1502: f64 = (1.0 / p.p55);

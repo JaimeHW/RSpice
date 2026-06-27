@@ -3830,13 +3830,6 @@ impl Instance {
         s.b[3407] = (p.p48 > 0.0);
         s.v[3407] = if s.b[3407] { 1.0 } else { 0.0 };
 
-        s.b[3411] = (p.p53 > 0.0);
-        s.v[3411] = if s.b[3411] { 1.0 } else { 0.0 };
-
-        if (!s.b[3411]) {
-            s.store_scalar(767, 0.0);
-        }
-
         if (p.p28 != 0.0) {
             s.store_scalar(800, 1.0);
             s.store_scalar(801, 1.0);

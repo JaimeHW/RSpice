@@ -1346,9 +1346,7 @@ impl Instance {
         branches: &[usize; Instance::BRANCH_COUNT],
         multiplicity: f64,
     ) {
-        let nv10 = ctx.node_voltage(nodes[10]);
         let nv11 = ctx.node_voltage(nodes[11]);
-        let nv12 = ctx.node_voltage(nodes[12]);
         let nv13 = ctx.node_voltage(nodes[13]);
         let eq23_e642: f64 = (s.v[1774] + s.v[1775]);
         let eq23_e642_d_n0: f64 = (s.dn[1774][0] + s.dn[1775][0]);
@@ -1400,18 +1398,6 @@ impl Instance {
             &eq23_reactive_branch_derivatives,
             multiplicity,
         );
-        let eq25_e650: f64 = (1e-9 * (nv10 - nv13));
-        let eq25_e650_d_n10: f64 = 1e-9;
-        let eq25_e650_d_n13: f64 = (-1e-9);
-        let eq25_e651_q: f64 = eq25_e650;
-        stamper.stamp_current_reactive_node2(
-            Some(nodes[10]),
-            Some(nodes[13]),
-            nodes[10],
-            multiplicity * (eq25_e650_d_n10),
-            nodes[13],
-            multiplicity * (eq25_e650_d_n13),
-        );
         let eq26_e653_q: f64 = s.v[1776];
         let eq26_reactive_node_derivatives: [f64; 14] = [s.dn[1776][0], s.dn[1776][1], s.dn[1776][2], s.dn[1776][3], s.dn[1776][4], s.dn[1776][5], s.dn[1776][6], s.dn[1776][7], s.dn[1776][8], s.dn[1776][9], s.dn[1776][10], s.dn[1776][11], s.dn[1776][12], s.dn[1776][13]];
         let eq26_reactive_branch_derivatives: [f64; 4] = [s.db[1776][0], s.db[1776][1], s.db[1776][2], s.db[1776][3]];
@@ -1423,18 +1409,6 @@ impl Instance {
             branches,
             &eq26_reactive_branch_derivatives,
             multiplicity,
-        );
-        let eq28_e659: f64 = (1e-9 * (nv12 - nv13));
-        let eq28_e659_d_n12: f64 = 1e-9;
-        let eq28_e659_d_n13: f64 = (-1e-9);
-        let eq28_e660_q: f64 = eq28_e659;
-        stamper.stamp_current_reactive_node2(
-            Some(nodes[12]),
-            Some(nodes[13]),
-            nodes[12],
-            multiplicity * (eq28_e659_d_n12),
-            nodes[13],
-            multiplicity * (eq28_e659_d_n13),
         );
         let eq29_e662: f64 = (s.v[182]).sqrt();
         let eq29_e662_d_n0: f64 = (s.dn[182][0] / (2.0 * eq29_e662));
@@ -1743,16 +1717,6 @@ impl Instance {
             &eq32_reactive_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_reactive_equations_block_1(
-        stamper: &mut GeneratedReactiveStamper<'_>,
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        branches: &[usize; Instance::BRANCH_COUNT],
-        multiplicity: f64,
-    ) {
         let eq33_e693_q: f64 = s.v[371];
         let eq33_e695_q: f64 = s.v[373];
         let eq33_e696: f64 = (s.v[371] + s.v[373]);
@@ -1881,6 +1845,20 @@ impl Instance {
             &eq33_reactive_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_reactive_equations_block_1(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedReactiveStamper<'_>,
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        branches: &[usize; Instance::BRANCH_COUNT],
+        multiplicity: f64,
+    ) {
+        let nv10 = ctx.node_voltage(nodes[10]);
+        let nv11 = ctx.node_voltage(nodes[11]);
+        let nv13 = ctx.node_voltage(nodes[13]);
         let eq34_e703_q: f64 = s.v[376];
         let eq34_e705_q: f64 = s.v[382];
         let eq34_e706: f64 = (s.v[376] + s.v[382]);
@@ -2020,22 +1998,6 @@ impl Instance {
             &eq35_reactive_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_reactive_equations_block_2(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedReactiveStamper<'_>,
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-        branches: &[usize; Instance::BRANCH_COUNT],
-        multiplicity: f64,
-    ) {
-        let nv5 = ctx.node_voltage(nodes[5]);
-        let nv10 = ctx.node_voltage(nodes[10]);
-        let nv11 = ctx.node_voltage(nodes[11]);
-        let nv12 = ctx.node_voltage(nodes[12]);
-        let nv13 = ctx.node_voltage(nodes[13]);
         let eq36_e714: f64 = (-s.v[1773]);
         let eq36_e714_d_n0: f64 = (-s.dn[1773][0]);
         let eq36_e714_d_n1: f64 = (-s.dn[1773][1]);
@@ -2358,6 +2320,20 @@ impl Instance {
             &eq36_reactive_branch_derivatives,
             multiplicity,
         );
+    }
+
+    pub(super) fn stamp_reactive_equations_block_2(
+        ctx: &GeneratedEvalContext<'_>,
+        stamper: &mut GeneratedReactiveStamper<'_>,
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+        branches: &[usize; Instance::BRANCH_COUNT],
+        multiplicity: f64,
+    ) {
+        let nv5 = ctx.node_voltage(nodes[5]);
+        let nv12 = ctx.node_voltage(nodes[12]);
+        let nv13 = ctx.node_voltage(nodes[13]);
         let eq37_e741: f64 = (-s.v[1773]);
         let eq37_e741_d_n0: f64 = (-s.dn[1773][0]);
         let eq37_e741_d_n1: f64 = (-s.dn[1773][1]);
@@ -2547,17 +2523,6 @@ impl Instance {
             &eq41_reactive_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_reactive_equations_block_3(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedReactiveStamper<'_>,
-        s: &mut ReactiveScratch,
-        nodes: &[usize; Instance::NODE_COUNT],
-        branches: &[usize; Instance::BRANCH_COUNT],
-        multiplicity: f64,
-    ) {
-        let nv5 = ctx.node_voltage(nodes[5]);
         let eq42_e765: f64 = (-s.v[1801]);
         let eq42_e765_d_n0: f64 = (-s.dn[1801][0]);
         let eq42_e765_d_n1: f64 = (-s.dn[1801][1]);

@@ -102,6 +102,9 @@ impl Instance {
         let nv7 = ctx.node_voltage(nodes[7]);
         let nv8 = ctx.node_voltage(nodes[8]);
         let nv9 = ctx.node_voltage(nodes[9]);
+        let nv10 = ctx.node_voltage(nodes[10]);
+        let nv12 = ctx.node_voltage(nodes[12]);
+        let nv13 = ctx.node_voltage(nodes[13]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
         let timestep = (*self).timestep;
@@ -111,6 +114,7 @@ impl Instance {
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let v2: f64 = 0.0;
+        let v22: f64 = 1e-9;
         let v139: f64 = nv9;
         let v140: f64 = nv6;
         let v141: f64 = nv7;
@@ -133,6 +137,14 @@ impl Instance {
         let v168: f64 = (v167 - v143);
         let v169: f64 = (self.scalar_v166 * v168);
         let v170: f64 = (if self.scalar_v134 { v169 } else { v2 });
+        let v172: f64 = nv10;
+        let v173: f64 = nv13;
+        let v174: f64 = (v172 - v173);
+        let v175: f64 = (v22 * v174);
+        let v176: f64 = nv12;
+        let v177: f64 = (v176 - v173);
+        let v178: f64 = (v22 * v177);
+        let v192: f64 = -1e-9;
 
         stamper.stamp_current_const_local(
             Some(6),
@@ -203,6 +215,30 @@ impl Instance {
             multiplicity * (d170_dn3),
             8,
             multiplicity * (d170_dn8),
+        );
+        let d175_dn10: f64 = v22;
+        let d175_dn13: f64 = v192;
+        let v175_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, v175);
+        stamper.stamp_current_node2_local(
+            Some(10),
+            Some(13),
+            multiplicity * (v175_ddt),
+            10,
+            multiplicity * (((d175_dn10) * ddt_scale)),
+            13,
+            multiplicity * (((d175_dn13) * ddt_scale)),
+        );
+        let d178_dn12: f64 = v22;
+        let d178_dn13: f64 = v192;
+        let v178_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, v178);
+        stamper.stamp_current_node2_local(
+            Some(12),
+            Some(13),
+            multiplicity * (v178_ddt),
+            12,
+            multiplicity * (((d178_dn12) * ddt_scale)),
+            13,
+            multiplicity * (((d178_dn13) * ddt_scale)),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
@@ -333,8 +369,41 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv10 = ctx.node_voltage(nodes[10]);
+        let nv12 = ctx.node_voltage(nodes[12]);
+        let nv13 = ctx.node_voltage(nodes[13]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
+        let v22: f64 = 1e-9;
+        let v172: f64 = nv10;
+        let v173: f64 = nv13;
+        let v174: f64 = (v172 - v173);
+        let v175: f64 = (v22 * v174);
+        let v176: f64 = nv12;
+        let v177: f64 = (v176 - v173);
+        let v178: f64 = (v22 * v177);
+        let v192: f64 = -1e-9;
+
+        let d175_dn10: f64 = v22;
+        let d175_dn13: f64 = v192;
+        stamper.stamp_current_reactive_node2(
+            Some(nodes[10]),
+            Some(nodes[13]),
+            nodes[10],
+            multiplicity * (d175_dn10),
+            nodes[13],
+            multiplicity * (d175_dn13),
+        );
+        let d178_dn12: f64 = v22;
+        let d178_dn13: f64 = v192;
+        stamper.stamp_current_reactive_node2(
+            Some(nodes[12]),
+            Some(nodes[13]),
+            nodes[12],
+            multiplicity * (d178_dn12),
+            nodes[13],
+            multiplicity * (d178_dn13),
+        );
         let s = match &mut self.reactive_scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
@@ -373,8 +442,7 @@ impl Instance {
         Self::stamp_reactive_block_30(s, p);
 
         Self::stamp_reactive_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_1(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_3(ctx, stamper, s, nodes, branches, multiplicity);
     }
 }

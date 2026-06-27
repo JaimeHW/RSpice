@@ -100,6 +100,8 @@ impl Instance {
         let branches = &(*self).branches;
         let nv6 = ctx.node_voltage(nodes[6]);
         let nv7 = ctx.node_voltage(nodes[7]);
+        let nv9 = ctx.node_voltage(nodes[9]);
+        let nv10 = ctx.node_voltage(nodes[10]);
         let nv11 = ctx.node_voltage(nodes[11]);
         let nv12 = ctx.node_voltage(nodes[12]);
         let nv13 = ctx.node_voltage(nodes[13]);
@@ -112,15 +114,22 @@ impl Instance {
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let v0: f64 = 0.0;
+        let v94: f64 = nv10;
         let v95: f64 = nv11;
         let v96: f64 = nv6;
         let v97: f64 = nv7;
+        let v98: f64 = nv9;
+        let v103: f64 = (v98 - v94);
+        let v104: f64 = (self.scalar_v102 * v103);
+        let v105: f64 = (if self.scalar_v65 { v104 } else { v0 });
+        let v111: f64 = (if self.scalar_v66 { v104 } else { v105 });
         let v119: f64 = nv13;
         let v120: f64 = (if self.scalar_v65 { v119 } else { v0 });
         let v121: f64 = nv12;
         let v122: f64 = (if self.scalar_v65 { v121 } else { v0 });
         let v123: f64 = (if self.scalar_v66 { v119 } else { v0 });
         let v124: f64 = (if self.scalar_v66 { v121 } else { v0 });
+        let v125: f64 = (self.scalar_v84 * v111);
         let v139: f64 = (v95 - v97);
         let v140: f64 = (v139 * v0);
         let v141: f64 = (if self.scalar_v116 { v140 } else { v0 });
@@ -181,6 +190,18 @@ impl Instance {
             multiplicity * (d144_dn6),
             11,
             multiplicity * (d144_dn11),
+        );
+        let d125_dn9: f64 = self.scalar_v152;
+        let d125_dn10: f64 = self.scalar_v153;
+        let v125_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 14, v125);
+        stamper.stamp_current_node2_local(
+            Some(9),
+            Some(10),
+            multiplicity * (v125_ddt),
+            9,
+            multiplicity * (((d125_dn9) * ddt_scale)),
+            10,
+            multiplicity * (((d125_dn10) * ddt_scale)),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
@@ -312,18 +333,39 @@ impl Instance {
         Self::stamp_transient_equations_block_2(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_3(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_4(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_5(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_5(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_6(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_7(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_8(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_8(stamper, s, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv9 = ctx.node_voltage(nodes[9]);
+        let nv10 = ctx.node_voltage(nodes[10]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
+        let v0: f64 = 0.0;
+        let v94: f64 = nv10;
+        let v98: f64 = nv9;
+        let v103: f64 = (v98 - v94);
+        let v104: f64 = (self.scalar_v102 * v103);
+        let v105: f64 = (if self.scalar_v65 { v104 } else { v0 });
+        let v111: f64 = (if self.scalar_v66 { v104 } else { v105 });
+        let v125: f64 = (self.scalar_v84 * v111);
+
+        let d125_dn9: f64 = self.scalar_v152;
+        let d125_dn10: f64 = self.scalar_v153;
+        stamper.stamp_current_reactive_node2(
+            Some(nodes[9]),
+            Some(nodes[10]),
+            nodes[9],
+            multiplicity * (d125_dn9),
+            nodes[10],
+            multiplicity * (d125_dn10),
+        );
         let s = match &mut self.reactive_scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),

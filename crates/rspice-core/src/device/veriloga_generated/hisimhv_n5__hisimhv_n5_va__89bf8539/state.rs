@@ -1978,6 +1978,8 @@ pub struct Instance {
     pub(crate) scalar_v35: f64,
     pub(crate) scalar_v36: f64,
     pub(crate) scalar_v37: f64,
+    pub(crate) scalar_v39: f64,
+    pub(crate) scalar_v40: f64,
     pub(crate) scalar_v42: f64,
     pub(crate) scalar_v43: f64,
     pub(crate) scalar_v44: f64,
@@ -2099,6 +2101,7 @@ pub struct Instance {
     pub(crate) scalar_v295: f64,
     pub(crate) scalar_v296: f64,
     pub(crate) scalar_v297: f64,
+    pub(crate) scalar_v298: f64,
     pub(crate) scalar_v299: f64,
     pub(crate) scalar_v300: f64,
     pub(crate) scalar_v301: f64,
@@ -2119,6 +2122,7 @@ pub struct Instance {
     pub(crate) scalar_v376: bool,
     pub(crate) scalar_v378: bool,
     pub(crate) scalar_v379: bool,
+    pub(crate) scalar_v380: f64,
     pub(crate) scalar_v416: f64,
     pub(crate) scalar_v417: f64,
     pub(crate) scalar_v418: f64,
@@ -2169,6 +2173,8 @@ impl Clone for Instance {
             scalar_v35: self.scalar_v35,
             scalar_v36: self.scalar_v36,
             scalar_v37: self.scalar_v37,
+            scalar_v39: self.scalar_v39,
+            scalar_v40: self.scalar_v40,
             scalar_v42: self.scalar_v42,
             scalar_v43: self.scalar_v43,
             scalar_v44: self.scalar_v44,
@@ -2290,6 +2296,7 @@ impl Clone for Instance {
             scalar_v295: self.scalar_v295,
             scalar_v296: self.scalar_v296,
             scalar_v297: self.scalar_v297,
+            scalar_v298: self.scalar_v298,
             scalar_v299: self.scalar_v299,
             scalar_v300: self.scalar_v300,
             scalar_v301: self.scalar_v301,
@@ -2310,6 +2317,7 @@ impl Clone for Instance {
             scalar_v376: self.scalar_v376,
             scalar_v378: self.scalar_v378,
             scalar_v379: self.scalar_v379,
+            scalar_v380: self.scalar_v380,
             scalar_v416: self.scalar_v416,
             scalar_v417: self.scalar_v417,
             scalar_v418: self.scalar_v418,
@@ -2377,6 +2385,8 @@ impl Instance {
             scalar_v35: 0.0,
             scalar_v36: 0.0,
             scalar_v37: 0.0,
+            scalar_v39: 0.0,
+            scalar_v40: 0.0,
             scalar_v42: 0.0,
             scalar_v43: 0.0,
             scalar_v44: 0.0,
@@ -2498,6 +2508,7 @@ impl Instance {
             scalar_v295: 0.0,
             scalar_v296: 0.0,
             scalar_v297: 0.0,
+            scalar_v298: 0.0,
             scalar_v299: 0.0,
             scalar_v300: 0.0,
             scalar_v301: 0.0,
@@ -2518,6 +2529,7 @@ impl Instance {
             scalar_v376: false,
             scalar_v378: false,
             scalar_v379: false,
+            scalar_v380: 0.0,
             scalar_v416: 0.0,
             scalar_v417: 0.0,
             scalar_v418: 0.0,
@@ -2572,6 +2584,8 @@ impl Instance {
             scalar_v35,
             scalar_v36,
             scalar_v37,
+            scalar_v39,
+            scalar_v40,
             scalar_v42,
             scalar_v43,
             scalar_v44,
@@ -2693,6 +2707,7 @@ impl Instance {
             scalar_v295,
             scalar_v296,
             scalar_v297,
+            scalar_v298,
             scalar_v299,
             scalar_v300,
             scalar_v301,
@@ -2713,6 +2728,7 @@ impl Instance {
             scalar_v376,
             scalar_v378,
             scalar_v379,
+            scalar_v380,
             scalar_v416,
             scalar_v417,
             scalar_v418,
@@ -2759,6 +2775,8 @@ impl Instance {
             scalar_v35,
             scalar_v36,
             scalar_v37,
+            scalar_v39,
+            scalar_v40,
             scalar_v42,
             scalar_v43,
             scalar_v44,
@@ -2880,6 +2898,7 @@ impl Instance {
             scalar_v295,
             scalar_v296,
             scalar_v297,
+            scalar_v298,
             scalar_v299,
             scalar_v300,
             scalar_v301,
@@ -2900,6 +2919,7 @@ impl Instance {
             scalar_v376,
             scalar_v378,
             scalar_v379,
+            scalar_v380,
             scalar_v416,
             scalar_v417,
             scalar_v418,
@@ -3891,6 +3911,10 @@ impl Instance {
         self.scalar_v36 = v36;
         let v37: f64 = (p.p123 / v36);
         self.scalar_v37 = v37;
+        let v39: f64 = p.p293;
+        self.scalar_v39 = v39;
+        let v40: f64 = (p.p293 * 100.0);
+        self.scalar_v40 = v40;
         let v42: f64 = (p.p274 + 273.15);
         self.scalar_v42 = v42;
         let v43: f64 = p.p0;
@@ -4133,6 +4157,8 @@ impl Instance {
         self.scalar_v296 = v296;
         let v297: f64 = (v293 * v296);
         self.scalar_v297 = v297;
+        let v298: f64 = (v40 * v210);
+        self.scalar_v298 = v298;
         let v299: f64 = f64::powf(p.p7, p.p327);
         self.scalar_v299 = v299;
         let v300: f64 = (1.0 / v299);
@@ -4173,6 +4199,8 @@ impl Instance {
         self.scalar_v378 = v378;
         let v379: bool = (v230 && v378);
         self.scalar_v379 = v379;
+        let v380: f64 = (if v376 { 0.0 } else { v298 });
+        self.scalar_v380 = v380;
         let v416: f64 = (v254 * -1.0);
         self.scalar_v416 = v416;
         let v417: f64 = (if v379 { v254 } else { 0.0 });

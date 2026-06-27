@@ -3963,10 +3963,6 @@ impl Instance {
             s.copy_ad(802, 746);
         }
 
-        if (!s.b[3411]) {
-            s.store_scalar(767, 0.0);
-        }
-
         if (p.p28 != 0.0) {
             s.store_scalar(800, 1.0);
             s.store_scalar(801, 1.0);
@@ -5256,8 +5252,6 @@ impl Instance {
 
         s.v[572] = (p.p273 / 10000.0);
 
-        s.v[566] = (p.p293 * 100.0);
-
         s.v[567] = (p.p409 / 10000.0);
 
         s.v[568] = (p.p412 / 100.0);
@@ -5508,15 +5502,15 @@ impl Instance {
             s.store_scaled_offset_ad(966, A::div_from_scalar(p.p347, s.ad_value(337)), 1.0, p.p346);
         }
 
+        s.b[1186] = (s.v[966] < 1.0);
+        s.v[1186] = if s.b[1186] { 1.0 } else { 0.0 };
+
     }
 
     pub(super) fn stamp_reactive_block_3(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        s.b[1186] = (s.v[966] < 1.0);
-        s.v[1186] = if s.b[1186] { 1.0 } else { 0.0 };
-
         if (s.b[1183] && s.b[1186]) {
             s.store_scalar(966, 1.0);
         }
@@ -5938,6 +5932,7 @@ impl Instance {
 
         if s.b[1266] {
             s.store_add_scaled_inputs4(587, s.ad_value(585), 2.0, s.ad_value(585), (-(s.v[582] * 1.0 / (p.p140))), s.ad_value(622), (-(-(s.v[582] * 1.0 / (p.p140)))), s.ad_value(622), -1.0);
+            s.store_ln_div(638, 587, 622);
         }
 
     }
@@ -5948,10 +5943,6 @@ impl Instance {
         p: &Parameters,
     ) {
         let ctx_temp = ctx.temperature();
-        if s.b[1266] {
-            s.store_ln_div(638, 587, 622);
-        }
-
         if (!s.b[1266]) {
             s.store_scalar(638, 0.0);
         }
@@ -6187,8 +6178,6 @@ impl Instance {
 
         s.v[766] = (((s.v[541] / (s.v[365] * s.v[632])) * (1.0 + (p.p317 / ((s.v[576]) as f64).powf(p.p318)))) * (1.0 + (p.p315 / ((s.v[580]) as f64).powf(p.p316))));
 
-        s.v[767] = (s.v[566] * (s.v[365] * s.v[632]));
-
         s.v[766] = (s.v[766] * (1.0 / ((p.p7) as f64).powf(p.p327)));
 
         s.v[675] = ((((1.0 / ((p.p7) as f64).powf(p.p327)) / (s.v[365] * s.v[632])) * (1.0 + (p.p317 / ((s.v[576]) as f64).powf(p.p318)))) * (1.0 + (p.p315 / ((s.v[580]) as f64).powf(p.p316))));
@@ -6234,6 +6223,8 @@ impl Instance {
             s.store_mul_ln_ad_rhs(960, 155, A::div_scaled_product_by_product(s.ad_value(964), s.ad_value(622), 1.0, s.ad_value(394), s.ad_value(394), 1.0));
             s.store_exp_scaled_input(335, 590, p.p380);
             s.store_div(977, 335, 971);
+            s.store_sub_ad(334, A::add_scaled_product(A::scale_offset(s.ad_value(676), 0.4, 1.8), 1.0, s.ad_value(676), s.ad_value(676), 0.1), A::scale_offset(s.ad_value(676), (-p.p379), p.p379));
+            s.store_div(973, 973, 334);
         }
 
     }

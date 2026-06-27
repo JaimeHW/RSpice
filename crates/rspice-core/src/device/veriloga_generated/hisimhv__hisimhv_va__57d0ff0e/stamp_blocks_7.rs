@@ -9,11 +9,6 @@ impl Instance {
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        if (s.b[1289] && s.b[1290]) {
-            s.store_sub_ad(334, A::add_scaled_product(A::scale_offset(s.ad_value(676), 0.4, 1.8), 1.0, s.ad_value(676), s.ad_value(676), 0.1), A::scale_offset(s.ad_value(676), (-p.p379), p.p379));
-            s.store_div(973, 973, 334);
-        }
-
         s.b[1292] = (s.v[973] < 1000.0);
         s.v[1292] = if s.b[1292] { 1.0 } else { 0.0 };
 
@@ -331,6 +326,8 @@ impl Instance {
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
             s.store_div_from_scalar(342, (-p.p98), 336);
             s.store_offset_scaled(337, 342, (p.p63 * 1000000.0), ((1.0) + (p.p98)));
+            s.store_offset_add_scaled_product(781, s.ad_value(338), (-1.0), s.ad_value(337), s.ad_value(338), 1.0, (-0.01));
+            s.store_scale(782, 338, (4.0 * 0.01));
         }
 
     }
@@ -339,11 +336,6 @@ impl Instance {
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
-            s.store_offset_add_scaled_product(781, s.ad_value(338), (-1.0), s.ad_value(337), s.ad_value(338), 1.0, (-0.01));
-            s.store_scale(782, 338, (4.0 * 0.01));
-        }
-
         if ((s.b[1289] && s.b[1313]) && s.b[1318]) {
             if (s.v[782] > 0.0) {
             } else {
@@ -617,6 +609,8 @@ impl Instance {
             s.store_scale(874, 830, p.p13);
             s.store_scalar(875, 0.0);
             s.store_scalar(876, 0.0);
+            s.store_scale(877, 836, p.p15);
+            s.store_scale(878, 837, p.p15);
         }
 
     }
@@ -628,11 +622,6 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
         let ctx_temp = ctx.temperature();
-        if ((s.b[1289] && s.b[1329]) && (!s.b[1330])) {
-            s.store_scale(877, 836, p.p15);
-            s.store_scale(878, 837, p.p15);
-        }
-
         if (s.b[1289] && (!s.b[1329])) {
             s.store_scale(873, 828, p.p13);
             s.store_scale(874, 830, p.p13);
@@ -948,6 +937,8 @@ impl Instance {
             s.copy_ad(388, 387);
             s.store_add(387, 387, 732);
             s.store_offset(389, 388, (-s.v[764]));
+            s.store_offset_square(390, 388, (-(s.v[764] * s.v[764])));
+            s.store_offset(391, 387, (-s.v[764]));
         }
 
     }
@@ -957,8 +948,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if s.b[1352] {
-            s.store_offset_square(390, 388, (-(s.v[764] * s.v[764])));
-            s.store_offset(391, 387, (-s.v[764]));
             s.store_offset_square(392, 387, (-(s.v[764] * s.v[764])));
             s.store_scale(676, 387, 1.0 / (s.v[764]));
             s.store_ln(590, 676);

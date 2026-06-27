@@ -201,6 +201,7 @@ impl Instance {
         let v410: f64 = (if self.scalar_v338 { v409 } else { v1 });
         let v411: f64 = (v341 * v38);
         let v412: f64 = (if self.scalar_v376 { v411 } else { v1 });
+        let v413: f64 = (self.scalar_v380 * v341);
         let v428: f64 = (if self.scalar_v338 { v377 } else { v1 });
 
         let d390_dn15: f64 = v0;
@@ -270,6 +271,15 @@ impl Instance {
             multiplicity * (v412),
             5,
             multiplicity * (d412_dn5),
+        );
+        let d413_dn5: f64 = self.scalar_v380;
+        let v413_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 17, v413);
+        stamper.stamp_current_node1_local(
+            Some(5),
+            None,
+            multiplicity * (v413_ddt),
+            5,
+            multiplicity * (((d413_dn5) * ddt_scale)),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),
@@ -476,8 +486,19 @@ impl Instance {
         let p = Box::as_ref(&self.params);
         let nodes = &(*self).nodes;
         let branches = &(*self).branches;
+        let nv5 = ctx.node_voltage(nodes[5]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
+        let v341: f64 = nv5;
+        let v413: f64 = (self.scalar_v380 * v341);
+
+        let d413_dn5: f64 = self.scalar_v380;
+        stamper.stamp_current_reactive_node1(
+            Some(nodes[5]),
+            None,
+            nodes[5],
+            multiplicity * (d413_dn5),
+        );
         let s = match &mut self.reactive_scratch {
             Some(buf) => buf.as_mut(),
             slot @ None => slot.insert(ReactiveScratch::new_box()).as_mut(),
@@ -584,6 +605,6 @@ impl Instance {
         Self::stamp_reactive_equations_block_0(stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_1(stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_3(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_3(ctx, stamper, s, p, nodes, multiplicity);
     }
 }
