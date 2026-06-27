@@ -9302,6 +9302,37 @@ fn rust_backend_uses_dense_stamp_calls_for_wide_derivative_equations() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_wide_dense_current_equations() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(dense_derivative_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile wide dense current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_current_dense_local("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("let v"), "{stamp}");
+    assert!(
+        !stamp.contains("let eq0_"),
+        "wide scalar currents should not fall back to legacy equation temporaries:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(wide_static_zero_derivative_source())
@@ -9337,6 +9368,37 @@ fn rust_backend_uses_indexed_dense_stamp_for_wide_static_zero_derivatives() {
         "wide derivative equations should not materialize full node derivative arrays:\n{stamp}"
     );
 
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_auto_scalarizes_wide_indexed_current_equations() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(wide_static_zero_derivative_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile wide indexed current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_current_indexed_dense_local("),
+        "{stamp}"
+    );
+    assert!(stamp.contains("let v"), "{stamp}");
+    assert!(
+        !stamp.contains("let eq0_"),
+        "wide indexed scalar currents should not fall back to legacy equation temporaries:\n{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 

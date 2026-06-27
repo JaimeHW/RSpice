@@ -410,17 +410,83 @@ fn emit_current_stamp(
             out.push_str("        );\n");
         }
         _ => {
-            return Err(unsupported(
-                artifact,
-                format!(
-                    "scalar current equation {} with {} node derivative lanes",
-                    equation.id,
-                    derivatives.len()
-                ),
-            ));
+            emit_wide_current_stamp(artifact, root, &derivatives, &pos, &neg, &root_expr, out);
         }
     }
     Ok(())
+}
+
+fn emit_wide_current_stamp(
+    artifact: &CanonicalIrArtifact,
+    root: ValueId,
+    derivatives: &[(u32, ValueId)],
+    pos: &str,
+    neg: &str,
+    root_expr: &str,
+    out: &mut String,
+) {
+    if derivatives.len() == artifact.mir.nodes.len() {
+        let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
+        for (node, _) in derivatives {
+            node_derivatives[*node as usize] = derivative_name(root, *node);
+        }
+        out.push_str(&format!(
+            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            node_derivatives.len(),
+            node_derivatives.join(", ")
+        ));
+        out.push_str("        stamper.stamp_current_dense_local(\n");
+        out.push_str(&format!("            {pos},\n"));
+        out.push_str(&format!("            {neg},\n"));
+        out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+        out.push_str(&format!(
+            "            &{}_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            &[],\n");
+        out.push_str("            multiplicity,\n");
+        out.push_str("        );\n");
+    } else {
+        let node_indices = derivatives
+            .iter()
+            .map(|(node, _)| node.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let node_derivatives = derivatives
+            .iter()
+            .map(|(node, _)| derivative_name(root, *node))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
+            value_name(root),
+            derivatives.len(),
+            node_indices
+        ));
+        out.push_str(&format!(
+            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            derivatives.len(),
+            node_derivatives
+        ));
+        out.push_str("        stamper.stamp_current_indexed_dense_local(\n");
+        out.push_str(&format!("            {pos},\n"));
+        out.push_str(&format!("            {neg},\n"));
+        out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
+        out.push_str(&format!(
+            "            &{}_node_derivative_indices,\n",
+            value_name(root)
+        ));
+        out.push_str(&format!(
+            "            &{}_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            &[],\n");
+        out.push_str("            &[],\n");
+        out.push_str("            multiplicity,\n");
+        out.push_str("        );\n");
+    }
 }
 
 fn current_root_expr(value_type: OptValueType, root_name: &str) -> String {
@@ -619,16 +685,6 @@ fn validate_scalar_current_equation(
         .values
         .get(usize::from(root))
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
-    if root_value.derivatives.len() > 3 {
-        return Err(unsupported(
-            artifact,
-            format!(
-                "scalar current equation {} with {} node derivative lanes",
-                equation.id,
-                root_value.derivatives.len()
-            ),
-        ));
-    }
     for derivative in &root_value.derivatives {
         if derivative.lane.kind != DerivativeLaneKind::Node {
             return Err(unsupported(
@@ -795,7 +851,10 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
 fn supported_scalar_value_type(value_type: CanonicalValueType) -> bool {
     matches!(
         value_type,
-        CanonicalValueType::Real | CanonicalValueType::Integer | CanonicalValueType::Boolean
+        CanonicalValueType::Real
+            | CanonicalValueType::Integer
+            | CanonicalValueType::Boolean
+            | CanonicalValueType::NatureAccess
     )
 }
 
