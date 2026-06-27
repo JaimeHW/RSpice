@@ -2329,6 +2329,50 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_exp_mul_scaled_lhs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_exp_mul_scaled_lhs(",
+            "fn store_exp_mul_scaled_lhs_indices",
+            "fn store_exp_mul_scaled_lhs_mixed_ai",
+            "fn store_exp_mul_scaled_lhs_mixed_ia",
+        ] {
+            assert!(support.contains(helper), "{helper}\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(80, AdValue::exp(AdValue::mul_scaled_lhs(scratch.ad_value(2), params.scale, scratch.ad_value(3))));
+    scratch.store_ad_value(81, AdValue::exp(AdValue::mul_scaled_lhs(AdValue::sub(scratch.ad_value(4), scratch.ad_value(5)), params.scale, scratch.ad_value(6))));
+    scratch.store_ad_value(82, AdValue::exp(AdValue::mul_scaled_lhs(scratch.ad_value(7), params.scale, AdValue::powf(scratch.ad_value(8), params.power))));
+    scratch.store_ad_value(83, AdValue::exp(AdValue::mul_scaled_lhs(AdValue::sqrt(scratch.ad_value(9)), params.scale, AdValue::neg(scratch.ad_value(10)))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_exp_mul_scaled_lhs_indices(80, 2, p.scale, 3);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_exp_mul_scaled_lhs_mixed_ai(81, A::sub(s.ad_value(4), s.ad_value(5)), p.scale, 6);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_exp_mul_scaled_lhs_mixed_ia(82, 7, p.scale, A::powf(s.ad_value(8), p.power));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_exp_mul_scaled_lhs(83, A::sqrt(s.ad_value(9)), p.scale, A::neg(s.ad_value(10)));"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::mul_scaled_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_exp_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn generates_direct_unary_helpers_for_intrinsic_store_paths() {
         let support = generate_scratch_operation_helpers();
 
@@ -7037,6 +7081,22 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_exp_mul_scaled_lhs_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], scale: f64, right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
+        "        let scaled_left_value = left_value * scale;",
+        "        let output = (scaled_left_value * right_value).exp();",
+        "        let left_derivative_scale = output * scale * right_value;",
+        "        let right_derivative_scale = output * scaled_left_value;",
+        "        self.values[index] = output;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_exp_mul_scaled_lhs(&mut self, index: usize, left: AdValue, scale: f64, right: AdValue) {",
+        "        self.store_exp_mul_scaled_lhs_components(index, left.value, left.node_derivatives, left.branch_derivatives, scale, right.value, right.node_derivatives, right.branch_derivatives);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_ln_ad(&mut self, index: usize, value: AdValue) {",
         "        self.values[index] = value.value.ln();",
         "        let derivative_scale = 1.0 / value.value;",
@@ -10677,6 +10737,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
             &generate_index_or_mixed_div_scaled_product_add_scaled_denominator_helper(&mask),
         );
     }
+    for mask in index_or_mixed_masks(2) {
+        out.push_str(&generate_index_or_mixed_exp_mul_scaled_lhs_helper(&mask));
+    }
     for mask in index_or_mixed_masks(5) {
         out.push_str(&generate_index_or_mixed_add_scaled_offset_product_lhs_product_helper(&mask));
     }
@@ -11058,6 +11121,25 @@ fn generate_index_or_mixed_div_scaled_product_add_scaled_denominator_helper(mask
 "#,
         denominator_left_ty = mixed_helper_type(mask, 0),
         denominator_right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_exp_mul_scaled_lhs_helper(mask: &str) -> String {
+    let operands = ["left", "right"];
+    let helper = index_or_mixed_helper_name("store_exp_mul_scaled_lhs", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let left = mixed_helper_component_args(mask, 0, "left");
+    let right = mixed_helper_component_args(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, scale: f64, right: {right_ty}) {{
+{locals}        self.store_exp_mul_scaled_lhs_components(index, {left}, scale, {right});
+    }}
+"#,
+        left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
     )
 }
 
@@ -14884,6 +14966,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         return Some(line);
     }
     if let Some(line) = compact_scaled_input_unary_store_helper_call(target_index, value) {
+        return Some(line);
+    }
+    if let Some(line) = compact_exp_mul_scaled_lhs_store_helper_call(target_index, value) {
         return Some(line);
     }
     if let Some(line) = compact_offset_input_unary_store_helper_call(target_index, value) {
@@ -19216,6 +19301,41 @@ fn compact_scaled_input_unary_store_helper_call(
     }
 
     None
+}
+
+fn compact_exp_mul_scaled_lhs_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "exp")?;
+    if args.len() != 1 {
+        return None;
+    }
+    let product_args = compact_ad_call_args(args[0], "mul_scaled_lhs")?;
+    if product_args.len() != 3 {
+        return None;
+    }
+
+    let left_index = compact_scratch_ad_value_index(product_args[0]);
+    let right_index = compact_scratch_ad_value_index(product_args[2]);
+    if left_index.is_none() && !compact_non_atomic_ad_value(product_args[0]) {
+        return None;
+    }
+    if right_index.is_none() && !compact_non_atomic_ad_value(product_args[2]) {
+        return None;
+    }
+
+    let helper = compact_index_or_mixed_product_store_helper_name(
+        "store_exp_mul_scaled_lhs",
+        &[left_index, right_index],
+    )
+    .unwrap_or_else(|| "store_exp_mul_scaled_lhs".to_string());
+    Some(format!(
+        "scratch.{helper}({target_index}, {}, {}, {});",
+        compact_mixed_index_product_arg(left_index, product_args[0]),
+        product_args[1],
+        compact_mixed_index_product_arg(right_index, product_args[2])
+    ))
 }
 
 fn compact_offset_input_unary_store_helper_call(
