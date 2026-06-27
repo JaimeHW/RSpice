@@ -95,6 +95,11 @@ fn assert_opt_validation_message(opt: &OptModel, expected_substring: &str) {
 }
 
 fn set_newton_ops(opt: &mut OptModel, ops: Vec<OptOp>) {
+    opt.schedules
+        .retain(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration);
+    for (index, schedule) in opt.schedules.iter_mut().enumerate() {
+        schedule.id = ScheduleId::from(index);
+    }
     let newton = opt
         .schedules
         .iter_mut()
@@ -1357,6 +1362,17 @@ fn opt_reference_evaluator_evaluates_scalar_value_graph() {
             derivatives: Vec::new(),
         },
     ];
+    set_newton_ops(
+        &mut opt,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(4),
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0),
+            },
+        ],
+    );
 
     let snapshot = opt
         .evaluate(&OptEvalInputs {
@@ -1498,6 +1514,17 @@ fn opt_reference_evaluator_evaluates_diode_like_expression() {
             derivatives: Vec::new(),
         },
     ];
+    set_newton_ops(
+        &mut opt,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(7),
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0),
+            },
+        ],
+    );
 
     let snapshot = opt
         .evaluate(&OptEvalInputs {
@@ -1564,6 +1591,17 @@ fn opt_reference_evaluator_evaluates_conditional_select() {
             derivatives: Vec::new(),
         },
     ];
+    set_newton_ops(
+        &mut opt,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(5),
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0),
+            },
+        ],
+    );
 
     let snapshot = opt
         .evaluate(&OptEvalInputs {
@@ -1655,6 +1693,43 @@ fn opt_lowering_adds_instance_static_schedule_before_newton_for_parameters() {
     assert_eq!(
         opt.schedules[1].invalidation,
         InvalidationClass::NewtonIteration
+    );
+}
+
+#[test]
+fn opt_lowering_schedules_parameter_dependent_derivatives_as_instance_static() {
+    let (_, _, _, opt) = lower_tiny_resistor_parts();
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("tiny resistor should have a scalar root: {newton:?}");
+    };
+    let positive_derivative = opt.values[usize::from(*root)]
+        .derivatives
+        .iter()
+        .find(|derivative| derivative.lane == DerivativeLane::node(NodeId::new(0)))
+        .expect("positive terminal derivative")
+        .value;
+    let instance_static = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::InstanceStatic)
+        .expect("InstanceStatic schedule");
+
+    assert!(
+        instance_static.ops.contains(&OptOp::ComputeValue {
+            value: positive_derivative
+        }),
+        "expected derivative {positive_derivative} in InstanceStatic schedule: {instance_static:?}"
+    );
+    assert!(
+        !newton.ops.contains(&OptOp::ComputeValue {
+            value: positive_derivative
+        }),
+        "parameter-only derivative should not be scheduled in Newton: {newton:?}"
     );
 }
 

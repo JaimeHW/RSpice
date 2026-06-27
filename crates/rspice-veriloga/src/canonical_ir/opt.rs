@@ -191,12 +191,13 @@ impl OptModel {
         builder.add_sparse_derivatives();
         let values = builder.finish(&mut equation_values);
 
+        let instance_static_ops = collect_instance_static_ops(&values);
         let mut schedules = Vec::new();
-        if !mir.parameters.is_empty() {
+        if !instance_static_ops.is_empty() {
             schedules.push(OptSchedule {
                 id: ScheduleId::from(schedules.len()),
                 invalidation: InvalidationClass::InstanceStatic,
-                ops: Vec::new(),
+                ops: instance_static_ops,
             });
         }
 
@@ -1475,6 +1476,102 @@ fn validate_dense_value_ids(diagnostics: &mut Vec<IrDiagnostic>, values: &[OptVa
                 ),
             ));
         }
+    }
+}
+
+fn collect_instance_static_ops(values: &[OptValue]) -> Vec<OptOp> {
+    let mut invalidation_memo = vec![None; values.len()];
+    let mut parameter_memo = vec![None; values.len()];
+    values
+        .iter()
+        .filter(|value| {
+            value_invalidation(values, value.id, &mut invalidation_memo)
+                == InvalidationClass::InstanceStatic
+                && value_depends_on_parameter(values, value.id, &mut parameter_memo)
+        })
+        .map(|value| OptOp::ComputeValue { value: value.id })
+        .collect()
+}
+
+fn value_invalidation(
+    values: &[OptValue],
+    value: ValueId,
+    memo: &mut [Option<InvalidationClass>],
+) -> InvalidationClass {
+    let index = usize::from(value);
+    if let Some(invalidation) = memo[index] {
+        return invalidation;
+    }
+
+    let invalidation = match values[index].kind {
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. } => InvalidationClass::InstanceStatic,
+        OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::EquationValue { .. } => InvalidationClass::NewtonIteration,
+        OptValueKind::Unary { input, .. } => value_invalidation(values, input, memo),
+        OptValueKind::Binary { left, right, .. } => max_invalidation(
+            value_invalidation(values, left, memo),
+            value_invalidation(values, right, memo),
+        ),
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => max_invalidation(
+            value_invalidation(values, condition, memo),
+            max_invalidation(
+                value_invalidation(values, then_value, memo),
+                value_invalidation(values, else_value, memo),
+            ),
+        ),
+    };
+    memo[index] = Some(invalidation);
+    invalidation
+}
+
+fn value_depends_on_parameter(
+    values: &[OptValue],
+    value: ValueId,
+    memo: &mut [Option<bool>],
+) -> bool {
+    let index = usize::from(value);
+    if let Some(depends) = memo[index] {
+        return depends;
+    }
+
+    let depends = match values[index].kind {
+        OptValueKind::Parameter { .. } => true,
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::EquationValue { .. } => false,
+        OptValueKind::Unary { input, .. } => value_depends_on_parameter(values, input, memo),
+        OptValueKind::Binary { left, right, .. } => {
+            value_depends_on_parameter(values, left, memo)
+                || value_depends_on_parameter(values, right, memo)
+        }
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            value_depends_on_parameter(values, condition, memo)
+                || value_depends_on_parameter(values, then_value, memo)
+                || value_depends_on_parameter(values, else_value, memo)
+        }
+    };
+    memo[index] = Some(depends);
+    depends
+}
+
+fn max_invalidation(left: InvalidationClass, right: InvalidationClass) -> InvalidationClass {
+    if invalidation_rank(left) >= invalidation_rank(right) {
+        left
+    } else {
+        right
     }
 }
 
