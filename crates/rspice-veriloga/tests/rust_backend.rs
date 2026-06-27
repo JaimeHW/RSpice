@@ -9024,6 +9024,38 @@ fn rust_backend_omits_large_signal_work_for_noise_only_contributions() {
 }
 
 #[test]
+fn rust_backend_keeps_guard_only_assignments_value_only() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(guard_only_voltage_probe_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile guard-only voltage probe");
+    let stamp = generated
+        .files
+        .iter()
+        .filter(|file| {
+            file.relative_path == "stamp.rs" || file.relative_path.starts_with("stamp_blocks_")
+        })
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        stamp.contains("s.v[0] = (nv0 - nv1);"),
+        "the guard probe should keep only its scalar voltage value:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_voltage(0,"),
+        "guard-only voltage probes should not materialize AD derivatives:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn generated_noise_term_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(noisy_current_source())
@@ -16517,6 +16549,22 @@ module noise_only_assignment_chain(p, n);
         thermal = 4.0 * 1.380649e-23 * (300.15 + V(p, n)) / rs;
         shaped = thermal * (1.0 + abs(V(p, n)));
         I(p, n) <+ white_noise(shaped, "thermal");
+    end
+endmodule
+"#
+}
+
+fn guard_only_voltage_probe_source() -> &'static str {
+    r#"
+module guard_only_voltage_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    real probe;
+    real selected;
+    analog begin
+        probe = V(p, n);
+        selected = (probe > 0.0) ? V(p, n) : 0.0;
+        I(p, n) <+ selected;
     end
 endmodule
 "#

@@ -3568,23 +3568,29 @@ fn collect_transient_liveness_excluding(
             &mut values,
             &mut HashSet::new(),
         )?;
-        collect_large_signal_expression_identifiers(
+        collect_large_signal_value_required_derivative_identifiers(
             artifact,
             equation.expression.id,
+            &mut values,
+            &mut derivatives,
+            &mut HashSet::new(),
+        )?;
+        collect_large_signal_expression_derivative_identifiers(
+            artifact,
+            equation.expression.id,
+            &mut values,
             &mut derivatives,
             &mut HashSet::new(),
         )?;
     }
 
     loop {
-        let value_changed =
-            collect_live_statement_dependencies(artifact, &artifact.hir.statements, &mut values)?;
-        let derivative_changed = collect_live_statement_dependencies(
+        if !collect_transient_live_statement_dependencies(
             artifact,
             &artifact.hir.statements,
+            &mut values,
             &mut derivatives,
-        )?;
-        if !value_changed && !derivative_changed {
+        )? {
             break;
         }
     }
@@ -3721,6 +3727,109 @@ fn collect_dynamic_statement_targets(
         }
     }
     Ok(())
+}
+
+fn collect_transient_live_statement_dependencies(
+    artifact: &CanonicalIrArtifact,
+    statements: &[HirStatement],
+    live_values: &mut HashSet<String>,
+    live_derivatives: &mut HashSet<String>,
+) -> Result<bool, RustBackendError> {
+    let before = live_values.len() + live_derivatives.len();
+    for statement in statements.iter().rev() {
+        match statement {
+            HirStatement::Assignment(assignment) => {
+                let value_live = live_values.contains(assignment.target_name.as_str());
+                let derivative_live = live_derivatives.contains(assignment.target_name.as_str());
+                if value_live || derivative_live {
+                    collect_large_signal_expression_identifiers(
+                        artifact,
+                        assignment.expr.id,
+                        live_values,
+                        &mut HashSet::new(),
+                    )?;
+                    collect_large_signal_value_required_derivative_identifiers(
+                        artifact,
+                        assignment.expr.id,
+                        live_values,
+                        live_derivatives,
+                        &mut HashSet::new(),
+                    )?;
+                    if let Some(index) = &assignment.index {
+                        collect_expression_identifiers(
+                            artifact,
+                            index.id,
+                            live_values,
+                            &mut HashSet::new(),
+                        )?;
+                    }
+                }
+                if derivative_live {
+                    collect_large_signal_expression_derivative_identifiers(
+                        artifact,
+                        assignment.expr.id,
+                        live_values,
+                        live_derivatives,
+                        &mut HashSet::new(),
+                    )?;
+                }
+            }
+            HirStatement::Loop(loop_statement) => {
+                collect_transient_live_statement_dependencies(
+                    artifact,
+                    &loop_statement.body,
+                    live_values,
+                    live_derivatives,
+                )?;
+                if loop_contains_transient_live_assignment(
+                    loop_statement,
+                    live_values,
+                    live_derivatives,
+                ) {
+                    collect_expression_identifiers(
+                        artifact,
+                        loop_statement.condition.id,
+                        live_values,
+                        &mut HashSet::new(),
+                    )?;
+                    collect_large_signal_value_required_derivative_identifiers(
+                        artifact,
+                        loop_statement.condition.id,
+                        live_values,
+                        live_derivatives,
+                        &mut HashSet::new(),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(live_values.len() + live_derivatives.len() != before)
+}
+
+fn loop_contains_transient_live_assignment(
+    loop_statement: &crate::canonical_ir::HirLoop,
+    live_values: &HashSet<String>,
+    live_derivatives: &HashSet<String>,
+) -> bool {
+    loop_statement.body.iter().any(|statement| {
+        statement_contains_transient_live_assignment(statement, live_values, live_derivatives)
+    })
+}
+
+fn statement_contains_transient_live_assignment(
+    statement: &HirStatement,
+    live_values: &HashSet<String>,
+    live_derivatives: &HashSet<String>,
+) -> bool {
+    match statement {
+        HirStatement::Assignment(assignment) => {
+            live_values.contains(assignment.target_name.as_str())
+                || live_derivatives.contains(assignment.target_name.as_str())
+        }
+        HirStatement::Loop(loop_statement) => {
+            loop_contains_transient_live_assignment(loop_statement, live_values, live_derivatives)
+        }
+    }
 }
 
 fn collect_live_statement_dependencies(
@@ -3956,6 +4065,270 @@ fn collect_large_signal_expression_identifiers(
         }
     }
     Ok(())
+}
+
+fn collect_large_signal_value_required_derivative_identifiers(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    values: &mut HashSet<String>,
+    derivatives: &mut HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<(), RustBackendError> {
+    if !visited.insert(id) {
+        return Ok(());
+    }
+    if expression_large_signal_is_zero(artifact, id, &mut HashSet::new())? {
+        return Ok(());
+    }
+
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    match &expression.kind {
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Ddx { expr, .. },
+        } => {
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *expr,
+                values,
+                derivatives,
+                &mut HashSet::new(),
+            )?;
+        }
+        HirExprKind::Call { name, args } | HirExprKind::SystemFunction { name, args }
+            if is_ddx_name(name.as_str()) =>
+        {
+            if let Some(expr) = args.first() {
+                collect_large_signal_expression_derivative_identifiers(
+                    artifact,
+                    *expr,
+                    values,
+                    derivatives,
+                    &mut HashSet::new(),
+                )?;
+            }
+        }
+        other => {
+            for child in expression_children(other) {
+                collect_large_signal_value_required_derivative_identifiers(
+                    artifact,
+                    child,
+                    values,
+                    derivatives,
+                    visited,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_large_signal_expression_derivative_identifiers(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    values: &mut HashSet<String>,
+    derivatives: &mut HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<(), RustBackendError> {
+    if !visited.insert(id) {
+        return Ok(());
+    }
+    if expression_large_signal_is_zero(artifact, id, &mut HashSet::new())? {
+        return Ok(());
+    }
+
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    match &expression.kind {
+        HirExprKind::Identifier { name } => {
+            values.insert(name.to_string());
+            derivatives.insert(name.to_string());
+        }
+        HirExprKind::Number { .. }
+        | HirExprKind::StringLiteral { .. }
+        | HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. }
+        | HirExprKind::NoiseSource { .. } => {}
+        HirExprKind::Call { name, .. } | HirExprKind::SystemFunction { name, .. }
+            if is_noise_name(name.as_str())
+                || is_analysis_name(name.as_str())
+                || is_value_only_system_function_name(name.as_str()) => {}
+        HirExprKind::Call { name, args } | HirExprKind::SystemFunction { name, args }
+            if is_ddx_name(name.as_str()) =>
+        {
+            if let Some(expr) = args.first() {
+                collect_large_signal_value_required_derivative_identifiers(
+                    artifact,
+                    *expr,
+                    values,
+                    derivatives,
+                    &mut HashSet::new(),
+                )?;
+            }
+        }
+        HirExprKind::Call { args, .. } | HirExprKind::SystemFunction { args, .. } => {
+            for arg in args {
+                collect_large_signal_expression_derivative_identifiers(
+                    artifact,
+                    *arg,
+                    values,
+                    derivatives,
+                    visited,
+                )?;
+            }
+        }
+        HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Pos" | "Neg") => {
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *operand,
+                values,
+                derivatives,
+                visited,
+            )?;
+        }
+        HirExprKind::Unary { op, .. } if matches!(op.as_str(), "Not" | "BitNot") => {}
+        HirExprKind::Binary { op, left, right }
+            if matches!(op.as_str(), "Add" | "Sub" | "Mul" | "Div" | "Mod" | "Pow") =>
+        {
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *left,
+                values,
+                derivatives,
+                visited,
+            )?;
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *right,
+                values,
+                derivatives,
+                visited,
+            )?;
+        }
+        HirExprKind::Binary { op, .. }
+            if comparison_operator(op.as_str()).is_some()
+                || matches!(op.as_str(), "And" | "Or" | "BitAnd" | "BitOr") => {}
+        HirExprKind::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *then_expr,
+                values,
+                derivatives,
+                visited,
+            )?;
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *else_expr,
+                values,
+                derivatives,
+                visited,
+            )?;
+        }
+        HirExprKind::AnalogOperator { op } => {
+            collect_large_signal_analog_operator_derivative_identifiers(
+                artifact,
+                op,
+                values,
+                derivatives,
+                visited,
+            )?;
+        }
+        HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => {
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *expr,
+                values,
+                derivatives,
+                visited,
+            )?;
+        }
+        HirExprKind::ArrayAccess { index, .. } => {
+            collect_expression_identifiers(artifact, *index, values, &mut HashSet::new())?;
+        }
+        HirExprKind::ArrayLiteral { elements } => {
+            for element in elements {
+                collect_large_signal_expression_derivative_identifiers(
+                    artifact,
+                    *element,
+                    values,
+                    derivatives,
+                    visited,
+                )?;
+            }
+        }
+        other => {
+            for child in expression_children(other) {
+                collect_large_signal_expression_derivative_identifiers(
+                    artifact,
+                    child,
+                    values,
+                    derivatives,
+                    visited,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_large_signal_analog_operator_derivative_identifiers(
+    artifact: &CanonicalIrArtifact,
+    op: &HirAnalogOperator,
+    values: &mut HashSet<String>,
+    derivatives: &mut HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<(), RustBackendError> {
+    match op {
+        HirAnalogOperator::Ddt { expr, .. }
+        | HirAnalogOperator::Idt { expr, .. }
+        | HirAnalogOperator::IdtMod { expr, .. }
+        | HirAnalogOperator::Limexp { expr }
+        | HirAnalogOperator::Absdelay { expr, .. }
+        | HirAnalogOperator::Transition { expr, .. }
+        | HirAnalogOperator::Slew { expr, .. }
+        | HirAnalogOperator::LastCrossing { expr, .. } => {
+            collect_large_signal_expression_derivative_identifiers(
+                artifact,
+                *expr,
+                values,
+                derivatives,
+                visited,
+            )?;
+        }
+        HirAnalogOperator::Ddx { .. } => {}
+    }
+    Ok(())
+}
+
+fn is_value_only_system_function_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "$param_given" | "$port_connected" | "$simparam"
+    )
 }
 
 fn expression_large_signal_is_zero(
@@ -14718,6 +15091,20 @@ fn emit_assignment_statement(
     if !reactive && !transient_liveness.is_value_live(assignment.target_name.as_str()) {
         return Ok(());
     }
+    let target = artifact
+        .hir
+        .variables
+        .get(usize::from(assignment.target))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!(
+                    "assignment target {} is outside HIR variable arena",
+                    assignment.target
+                ),
+            )
+        })?;
     if reactive
         && !expr_depends_on_ddt_or_dynamic(
             artifact,
@@ -14741,6 +15128,30 @@ fn emit_assignment_statement(
 
     let derivatives_live =
         reactive || transient_liveness.is_derivative_live(assignment.target_name.as_str());
+    if !reactive
+        && (target.value_type == CanonicalValueType::Boolean
+            || assignment_rhs_has_boolean_condition(
+                artifact,
+                assignment,
+                parameter_fields,
+                variables,
+                ddt_slots,
+                branch_current_unknowns,
+                prefix,
+            )?)
+    {
+        return emit_compact_assignment_statement(
+            artifact,
+            assignment,
+            parameter_fields,
+            variables,
+            out,
+            ddt_slots,
+            branch_current_unknowns,
+            indent,
+            prefix,
+        );
+    }
     if !reactive && derivatives_live {
         return emit_compact_assignment_statement(
             artifact,
@@ -14797,20 +15208,6 @@ fn emit_assignment_statement(
         out.push('\n');
     }
 
-    let target = artifact
-        .hir
-        .variables
-        .get(usize::from(assignment.target))
-        .ok_or_else(|| {
-            RustBackendError::internal(
-                artifact.metadata.source_package.as_str(),
-                artifact.mir.module_name.as_str(),
-                format!(
-                    "assignment target {} is outside HIR variable arena",
-                    assignment.target
-                ),
-            )
-        })?;
     let target_index = usize::from(target.id);
     let target_local = format!("scratch.values[{target_index}]");
     out.push_str(&format!("{indent}{target_local} = {};\n", lowered.value));
@@ -15040,6 +15437,30 @@ fn emit_compact_assignment_statement(
         scratch_backed_variable(artifact, target_index, branch_axis_count, false),
     );
     Ok(())
+}
+
+fn assignment_rhs_has_boolean_condition(
+    artifact: &CanonicalIrArtifact,
+    assignment: &crate::canonical_ir::HirAssignment,
+    parameter_fields: &HashMap<String, String>,
+    variables: &HashMap<String, LoweredVariable>,
+    ddt_slots: &DdtSlots,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+    prefix: &str,
+) -> Result<bool, RustBackendError> {
+    let emitter = CompactAdEmitter {
+        artifact,
+        prefix,
+        parameter_fields,
+        variables,
+        ddt_slots,
+        branch_current_unknowns,
+        emitted: HashMap::new(),
+        lines: Vec::new(),
+    };
+    Ok(emitter
+        .boolean_expr_condition(assignment.expr.id)?
+        .is_some())
 }
 
 #[allow(clippy::too_many_arguments)]
