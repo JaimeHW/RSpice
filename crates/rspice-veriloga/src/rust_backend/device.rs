@@ -462,6 +462,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_div_ln_lhs_helper_calls(source);
     source = compact_add_sub_ln_lhs_helper_calls(source);
     source = compact_mul_div_from_scalar_lhs_helper_calls(source);
+    source = compact_sqrt_mul_sub_operand_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
         ("scratch.reactive_node_derivatives", "scratch.rdn"),
@@ -1386,6 +1387,75 @@ fn compact_mul_div_from_scalar_lhs_helper_call_replacement(
         div_args[1],
         args[2].trim(),
     )?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_sqrt_mul_sub_operand_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_sqrt_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_sqrt_mul_sub_operand_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_sqrt_mul_sub_operand_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_sqrt_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = if let Some((sub_left, sub_right)) = compact_binary_scratch_ad_indices(left, "sub") {
+        let right = compact_scratch_ad_value_index(right)?;
+        format!("scratch.store_sqrt_mul_sub_lhs({target_index}, {sub_left}, {sub_right}, {right});")
+    } else if let Some((sub_left, sub_right)) = compact_binary_scratch_ad_indices(right, "sub") {
+        let left = compact_scratch_ad_value_index(left)?;
+        format!("scratch.store_sqrt_mul_sub_rhs({target_index}, {left}, {sub_left}, {sub_right});")
+    } else {
+        return None;
+    };
+
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -3630,6 +3700,36 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_sqrt_mul_sub_operand_helpers_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in ["fn store_sqrt_mul_sub_lhs", "fn store_sqrt_mul_sub_rhs"] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_sqrt_mul_ad(80, AdValue::sub(scratch.ad_value(2), scratch.ad_value(3)), scratch.ad_value(4));
+    scratch.store_sqrt_mul_ad(81, scratch.ad_value(5), AdValue::sub(scratch.ad_value(6), scratch.ad_value(7)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_sqrt_mul_sub_lhs(80, 2, 3, 4);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sqrt_mul_sub_rhs(81, 5, 6, 7);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::sub(s.ad_value(2)"), "{compact}");
+        assert!(!compact.contains("A::sub(s.ad_value(6)"), "{compact}");
+        assert!(!compact.contains("s.store_sqrt_mul_ad(80"), "{compact}");
+        assert!(!compact.contains("s.store_sqrt_mul_ad(81"), "{compact}");
     }
 
     #[test]
@@ -9821,6 +9921,44 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = root;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] * right.value + left.value * right.node_derivatives[axis]) * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] * right.value + left.value * right.branch_derivatives[axis]) * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt_mul_sub_lhs(&mut self, index: usize, sub_left: usize, sub_right: usize, right: usize) {",
+        "        let sub_left_value = self.values[sub_left];",
+        "        let sub_right_value = self.values[sub_right];",
+        "        let right_value = self.values[right];",
+        "        let sub_left_node_derivatives = self.node_derivatives[sub_left];",
+        "        let sub_right_node_derivatives = self.node_derivatives[sub_right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let sub_left_branch_derivatives = self.branch_derivatives[sub_left];",
+        "        let sub_right_branch_derivatives = self.branch_derivatives[sub_right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let left_value = sub_left_value - sub_right_value;",
+        "        let root = (left_value * right_value).sqrt();",
+        "        let derivative_scale = 1.0 / (2.0 * root);",
+        "        self.values[index] = root;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((sub_left_node_derivatives[axis] - sub_right_node_derivatives[axis]) * right_value + left_value * right_node_derivatives[axis]) * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((sub_left_branch_derivatives[axis] - sub_right_branch_derivatives[axis]) * right_value + left_value * right_branch_derivatives[axis]) * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt_mul_sub_rhs(&mut self, index: usize, left: usize, sub_left: usize, sub_right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let sub_left_value = self.values[sub_left];",
+        "        let sub_right_value = self.values[sub_right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let sub_left_node_derivatives = self.node_derivatives[sub_left];",
+        "        let sub_right_node_derivatives = self.node_derivatives[sub_right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let sub_left_branch_derivatives = self.branch_derivatives[sub_left];",
+        "        let sub_right_branch_derivatives = self.branch_derivatives[sub_right];",
+        "        let right_value = sub_left_value - sub_right_value;",
+        "        let root = (left_value * right_value).sqrt();",
+        "        let derivative_scale = 1.0 / (2.0 * root);",
+        "        self.values[index] = root;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * right_value + left_value * (sub_left_node_derivatives[axis] - sub_right_node_derivatives[axis])) * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * right_value + left_value * (sub_left_branch_derivatives[axis] - sub_right_branch_derivatives[axis])) * derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -19354,6 +19492,17 @@ fn compact_scratch_ad_value_index(value: &str) -> Option<usize> {
         .strip_suffix(')')?
         .parse()
         .ok()
+}
+
+fn compact_binary_scratch_ad_indices(value: &str, name: &str) -> Option<(usize, usize)> {
+    let args = compact_ad_call_args(value, name)?;
+    if args.len() != 2 {
+        return None;
+    }
+    Some((
+        compact_scratch_ad_value_index(args[0])?,
+        compact_scratch_ad_value_index(args[1])?,
+    ))
 }
 
 fn compact_ad_store_rvalue(value: &str) -> bool {
