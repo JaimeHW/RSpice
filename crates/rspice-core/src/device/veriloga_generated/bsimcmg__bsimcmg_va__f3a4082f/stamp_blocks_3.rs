@@ -1532,7 +1532,7 @@ impl Instance {
         }
 
         if (((!s.b[1494]) && s.b[1496]) && (!s.b[1497])) {
-            s.store_div_from_scalar_offset_ad(171, 1.0, A::mul(s.ad_value(788), s.ad_value(126)), 1.0);
+            s.store_div_from_scalar_offset_product(171, 1.0, 788, 126, 1.0);
             s.store_mul3_lhs(491, 169, 170, 171);
             s.store_mul_sub_from_scalar_ad_rhs(490, 491, 1.0, A::div(s.ad_value(784), s.ad_value(153)));
             s.store_sub(489, 126, 490);

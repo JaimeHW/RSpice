@@ -5634,7 +5634,7 @@ impl Instance {
                 s.store_scaled_add_offset_sqrt_square_offset_ad(16, A::mul(s.ad_value(520), s.ad_value(61)), 1.0, 1.0, ((4.0 * 0.001) * 0.001), 0.5);
             } else {
                 if ((1.0 + (s.v[520] * s.v[61])) < ((-10000.0) * 0.001)) {
-                    s.store_div_from_scalar_offset_ad(16, ((-0.001) * 0.001), A::mul(s.ad_value(520), s.ad_value(61)), 1.0);
+                    s.store_div_from_scalar_offset_product(16, ((-0.001) * 0.001), 520, 61, 1.0);
                 } else {
                     s.store_scalar(16, 0.0);
                 }

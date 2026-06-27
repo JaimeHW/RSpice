@@ -2094,6 +2094,38 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_div_from_scalar_offset_product(&mut self, index: usize, scalar: f64, left: usize, right: usize, offset: f64) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let denominator = left_value * right_value + offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_value + left_value * right_dn[axis]) * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_value + left_value * right_db[axis]) * denominator_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_square(&mut self, index: usize, scalar: f64, source: usize, offset: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let denominator = source_value * source_value + offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        let derivative_scale = 2.0 * source_value * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_components(&mut self, index: usize, scalar: f64, inner_scalar: f64, value_raw: f64, value_dn: [f64; NODE_COUNT], value_db: [f64; BRANCH_COUNT], right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], offset: f64) {
         let left_value = inner_scalar - value_raw;
         let denominator = left_value * right_raw + offset;
@@ -14497,6 +14529,38 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = quotient;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_product(&mut self, index: usize, scalar: f64, left: usize, right: usize, offset: f64) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        let denominator = left_value * right_value + offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_value + left_value * right_dn[axis]) * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_value + left_value * right_db[axis]) * denominator_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_offset_square(&mut self, index: usize, scalar: f64, source: usize, offset: f64) {
+        let source_value = self.v[source];
+        let source_dn = self.dn[source];
+        let source_db = self.db[source];
+        let denominator = source_value * source_value + offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        let derivative_scale = 2.0 * source_value * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = source_dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = source_db[axis] * derivative_scale; }
     }
 
     #[inline]
