@@ -1,11 +1,130 @@
 use super::*;
 
 impl TestRunner {
+    pub(in crate::testing::ngspice_runner) fn load_digital_eprint_reference(
+        &self,
+        cir_path: &Path,
+    ) -> Result<Option<DigitalReferenceTable>, String> {
+        if self.suppresses_historical_reference_output_for(cir_path) {
+            return Ok(None);
+        }
+        let Some(reference_output) = self.load_reference_output(cir_path)? else {
+            return Ok(None);
+        };
+        Ok(Self::parse_digital_eprint_table(&reference_output.content))
+    }
+
+    pub(in crate::testing::ngspice_runner) fn parse_digital_eprint_table(
+        content: &str,
+    ) -> Option<DigitalReferenceTable> {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum State {
+            Searching,
+            Columns,
+            Rows,
+        }
+
+        let mut state = State::Searching;
+        let mut columns = Vec::new();
+        let mut rows = Vec::new();
+
+        for raw_line in content.lines() {
+            let trimmed = raw_line
+                .trim_matches(|c: char| c.is_whitespace() || c == '\u{000c}')
+                .trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            match state {
+                State::Searching => {
+                    if lower == "time or step" {
+                        state = State::Columns;
+                        columns.clear();
+                        rows.clear();
+                    }
+                }
+                State::Columns => {
+                    if trimmed.is_empty() {
+                        if !columns.is_empty() {
+                            state = State::Rows;
+                        }
+                        continue;
+                    }
+                    if lower.starts_with("****") {
+                        state = State::Searching;
+                        columns.clear();
+                        rows.clear();
+                        continue;
+                    }
+                    columns.push(trimmed.to_string());
+                }
+                State::Rows => {
+                    if trimmed.is_empty() {
+                        if !rows.is_empty() {
+                            break;
+                        }
+                        continue;
+                    }
+                    if lower.starts_with("****") {
+                        break;
+                    }
+
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() != columns.len() + 1 {
+                        if !rows.is_empty() {
+                            break;
+                        }
+                        continue;
+                    }
+                    let Ok(time) = parts[0].parse::<f64>() else {
+                        if !rows.is_empty() {
+                            break;
+                        }
+                        continue;
+                    };
+                    if !parts[1..]
+                        .iter()
+                        .all(|token| Self::is_digital_eprint_token(token))
+                    {
+                        if !rows.is_empty() {
+                            break;
+                        }
+                        continue;
+                    }
+                    rows.push(DigitalReferenceRow {
+                        time,
+                        values: parts[1..]
+                            .iter()
+                            .map(|token| (*token).to_string())
+                            .collect(),
+                    });
+                }
+            }
+        }
+
+        (!columns.is_empty() && !rows.is_empty()).then_some(DigitalReferenceTable { columns, rows })
+    }
+
+    fn is_digital_eprint_token(token: &str) -> bool {
+        let mut chars = token.chars();
+        let Some(level) = chars.next() else {
+            return false;
+        };
+        let Some(strength) = chars.next() else {
+            return false;
+        };
+        chars.next().is_none()
+            && matches!(level, '0' | '1' | 'U' | 'u' | 'X' | 'x')
+            && matches!(strength, 's' | 'S' | 'r' | 'R' | 'z' | 'Z' | 'u' | 'U')
+    }
+
     pub(in crate::testing::ngspice_runner) fn load_reference_table_for_axis(
         &self,
         cir_path: &Path,
         axis_candidates: &[&str],
     ) -> Result<Option<ReferenceTable>, String> {
+        if self.suppresses_historical_reference_output_for(cir_path) {
+            return Ok(None);
+        }
         let Some(reference_output) = self.load_reference_output(cir_path)? else {
             return Ok(None);
         };
@@ -292,5 +411,44 @@ impl TestRunner {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_ngspice_digital_eprint_table() {
+        let table = TestRunner::parse_digital_eprint_table(
+            "\
+Circuit: digital
+
+**** Results Data ****
+
+Time or Step
+a1
+a2
+
+
+0.000000000e+00     0s    Uu
+1.000000000e-09     1s    Uz
+
+**** Messages ****
+",
+        )
+        .expect("digital eprint table parses");
+
+        assert_eq!(table.columns, vec!["a1".to_string(), "a2".to_string()]);
+        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table.rows[0].time, 0.0);
+        assert_eq!(
+            table.rows[0].values,
+            vec!["0s".to_string(), "Uu".to_string()]
+        );
+        assert_eq!(
+            table.rows[1].values,
+            vec!["1s".to_string(), "Uz".to_string()]
+        );
     }
 }

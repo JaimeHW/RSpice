@@ -23,6 +23,9 @@ impl TestRunner {
         cir_path: &Path,
         axis_candidates: &[&str],
     ) -> Result<bool, String> {
+        if self.suppresses_historical_reference_output_for(cir_path) {
+            return Ok(false);
+        }
         Ok(self
             .load_reference_table_for_axis(cir_path, axis_candidates)?
             .is_some())
@@ -79,7 +82,15 @@ impl TestRunner {
     }
 
     pub fn has_valid_reference_output(&self, cir_path: &Path) -> bool {
+        if self.suppresses_historical_reference_output_for(cir_path) {
+            return false;
+        }
         self.load_dc_op_reference(cir_path).ok().flatten().is_some()
+            || self
+                .load_digital_eprint_reference(cir_path)
+                .ok()
+                .flatten()
+                .is_some()
             || self
                 .load_reference_table_for_axis(cir_path, &["time"])
                 .ok()
@@ -156,7 +167,8 @@ impl TestRunner {
                 self.has_reference_table_for_axis(cir_path, &["v-sweep"])?
             }
             AnalysisSpec::Transient { .. } => {
-                self.has_reference_table_for_axis(cir_path, &["time"])?
+                self.load_digital_eprint_reference(cir_path)?.is_some()
+                    || self.has_reference_table_for_axis(cir_path, &["time"])?
             }
             AnalysisSpec::Ac { .. } | AnalysisSpec::Noise { .. } => {
                 self.has_reference_table_for_axis(cir_path, &["frequency"])?

@@ -18,6 +18,13 @@ impl TestRunner {
             return Ok(Some(table));
         }
         if self.load_reference_output(cir_path)?.is_some() {
+            if axis_candidates
+                .iter()
+                .any(|axis| Self::normalize_variable_name(axis) == "time")
+                && self.load_digital_eprint_reference(cir_path)?.is_some()
+            {
+                return Ok(None);
+            }
             if self
                 .validation_contract_for(cir_path)
                 .is_some_and(ValidationContract::allows_missing_comparable_reference)
@@ -119,8 +126,16 @@ impl TestRunner {
         netlist: &Netlist,
         result: &crate::engine::TransientResult,
     ) -> Result<Vec<ValueMismatch>, String> {
+        let mut mismatches = Vec::new();
+        if let Some(reference) = self.load_digital_eprint_reference(cir_path)? {
+            mismatches.extend(self.compare_digital_eprint_reference(&reference, result));
+            if mismatches.len() >= self.config.max_mismatches {
+                return Ok(mismatches);
+            }
+        }
+
         let Some(reference) = self.reference_table_or_absence(cir_path, &["time"])? else {
-            return Ok(Vec::new());
+            return Ok(mismatches);
         };
 
         let x_sim = result.time.clone();
@@ -130,7 +145,7 @@ impl TestRunner {
             node_to_idx.insert(name.to_ascii_lowercase(), idx + 1);
         }
 
-        Ok(self.compare_reference_dataset(&reference, &x_sim, |var| {
+        mismatches.extend(self.compare_reference_dataset(&reference, &x_sim, |var| {
             Self::resolve_reference_series(var, &|expr| {
                 if let Some((n1, n2)) = Self::parse_voltage_probe(expr) {
                     let idx1 = Self::resolve_node_index(&node_to_idx, &n1)?;
@@ -159,7 +174,51 @@ impl TestRunner {
 
                 Self::resolve_transient_device_series(netlist, &node_to_idx, result, expr)
             })
-        }))
+        }));
+        Ok(mismatches)
+    }
+
+    fn compare_digital_eprint_reference(
+        &self,
+        reference: &DigitalReferenceTable,
+        result: &crate::engine::TransientResult,
+    ) -> Vec<ValueMismatch> {
+        const TIME_EPSILON: f64 = 1.0e-15;
+        let mut mismatches = Vec::new();
+
+        for row in &reference.rows {
+            for (column, expected) in reference.columns.iter().zip(row.values.iter()) {
+                let actual = result
+                    .digital_trace_named(column)
+                    .and_then(|trace| {
+                        trace
+                            .iter()
+                            .take_while(|point| point.time <= row.time + TIME_EPSILON)
+                            .last()
+                    })
+                    .map(|point| point.value.to_ngspice_token());
+
+                if actual.as_deref() == Some(expected.as_str()) {
+                    continue;
+                }
+
+                mismatches.push(ValueMismatch {
+                    x_value: row.time,
+                    node: format!(
+                        "{column} digital token expected {expected}, actual {}",
+                        actual.as_deref().unwrap_or("<missing>")
+                    ),
+                    expected: f64::NAN,
+                    actual: f64::NAN,
+                    relative_error: f64::INFINITY,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return mismatches;
+                }
+            }
+        }
+
+        mismatches
     }
 
     pub(in crate::testing::ngspice_runner) fn compare_ac_reference(
@@ -827,6 +886,28 @@ mod tests {
         let table = runner
             .reference_table_or_absence(&cir_path, &["time"])
             .expect("smoke may remain execution-only");
+
+        assert!(table.is_none());
+
+        fs::remove_dir_all(root).expect("remove temporary test directory");
+    }
+
+    #[test]
+    fn reference_unsolvable_contract_ignores_historical_tables() {
+        let (root, cir_path) = synthetic_manifest_fixture("reference_unsolvable");
+        fs::write(
+            root.join("fixture.out"),
+            "Circuit: fixture\n\
+             Index   frequency   v(out)\n\
+             0       1.0e3       1.0\n",
+        )
+        .expect("write historical reference table");
+        let mut runner = TestRunner::new(&root, TestRunnerConfig::default());
+        runner.live_reference_config = Ok(None);
+
+        let table = runner
+            .reference_table_or_absence(&cir_path, &["frequency"])
+            .expect("reference-unsolvable decks are execution coverage");
 
         assert!(table.is_none());
 

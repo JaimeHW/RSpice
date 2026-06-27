@@ -187,6 +187,18 @@ struct ReferenceTable {
 }
 
 #[derive(Debug, Clone, Default)]
+struct DigitalReferenceRow {
+    time: f64,
+    values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DigitalReferenceTable {
+    columns: Vec<String>,
+    rows: Vec<DigitalReferenceRow>,
+}
+
+#[derive(Debug, Clone, Default)]
 struct OpReference {
     node_voltages: HashMap<String, f64>,
     branch_currents: HashMap<String, f64>,
@@ -255,6 +267,11 @@ enum ValidationContract {
     /// must name the gap explicitly; if the detector stops matching, the
     /// contract is stale and the deck must be re-adjudicated.
     ExpectedUnsupported,
+    /// The deck requires a generated Verilog-A builtin that is intentionally
+    /// absent from the default feature set. Default builds must report a
+    /// named unsupported generated-builtin feature; `veriloga-builtins`
+    /// builds exercise the deck normally.
+    ExpectedUnsupportedWithoutGeneratedBuiltins,
     /// The deck is adjudicated genuinely un-simulatable (e.g., a certified
     /// right-half-plane instability that the reference simulator also
     /// fails): some analysis must terminate with a clean refusal
@@ -268,6 +285,12 @@ enum ValidationContract {
     /// physically sane voltages) whose certified RHP pole ladder then
     /// makes the transient the refusing analysis.
     ExpectedUnsolvable,
+    /// The current reference simulator cannot produce a comparable oracle for
+    /// the source deck. Historical upstream `.out` data is retained for
+    /// provenance, but it is not a numeric oracle; RSpice must still parse,
+    /// build, and either complete the requested analyses or terminate with a
+    /// clean refusal diagnostic.
+    ReferenceUnsolvable,
     /// Transient comparison replays the reference's recorded time grid as
     /// the accepted-step sequence: physics parity judged on equal grids,
     /// the standard for waveforms whose pointwise free-run values encode
@@ -290,7 +313,11 @@ impl ValidationContract {
             "smoke" => Some(Self::Smoke),
             "scripted_control" => Some(Self::ScriptedControl),
             "expected_unsupported" => Some(Self::ExpectedUnsupported),
+            "expected_unsupported_without_veriloga_builtins" => {
+                Some(Self::ExpectedUnsupportedWithoutGeneratedBuiltins)
+            }
             "expected_unsolvable" => Some(Self::ExpectedUnsolvable),
+            "reference_unsolvable" => Some(Self::ReferenceUnsolvable),
             "locked_grid" => Some(Self::LockedGrid),
             "measures" => Some(Self::Measures),
             _ => None,
@@ -298,7 +325,28 @@ impl ValidationContract {
     }
 
     fn allows_missing_comparable_reference(self) -> bool {
-        matches!(self, Self::Smoke | Self::ScriptedControl)
+        matches!(
+            self,
+            Self::Smoke | Self::ScriptedControl | Self::ReferenceUnsolvable
+        )
+    }
+
+    fn suppresses_historical_reference_output(self) -> bool {
+        matches!(self, Self::ReferenceUnsolvable)
+    }
+
+    fn accepts_clean_refusal(self) -> bool {
+        matches!(self, Self::ExpectedUnsolvable | Self::ReferenceUnsolvable)
+    }
+
+    fn expects_unsupported_in_this_build(self) -> bool {
+        match self {
+            Self::ExpectedUnsupported => true,
+            Self::ExpectedUnsupportedWithoutGeneratedBuiltins => {
+                !cfg!(feature = "veriloga-builtins")
+            }
+            _ => false,
+        }
     }
 }
 

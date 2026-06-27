@@ -336,9 +336,16 @@ impl TestRunner {
                     && let Some(model) = Self::unsupported_xspice_digital_event_model(&trimmed)
                 {
                     return Some(format!(
-                        "XSPICE digital event models such as '{}' require the digital event kernel, which is not implemented yet",
+                        "XSPICE digital event model '{}' is not implemented yet",
                         model
                     ));
+                }
+                #[cfg(not(feature = "veriloga-builtins"))]
+                if token == ".model"
+                    && let Some(reason) =
+                        Self::unsupported_generated_builtin_model_without_builtins(&trimmed)
+                {
+                    return Some(reason);
                 }
                 for (pattern, reason) in directive_patterns {
                     if token == pattern {
@@ -360,6 +367,78 @@ impl TestRunner {
             }
         }
 
+        None
+    }
+
+    #[cfg(not(feature = "veriloga-builtins"))]
+    fn unsupported_generated_builtin_model_without_builtins(line: &str) -> Option<String> {
+        let mut parts = line.split_whitespace();
+        if !parts.next()?.eq_ignore_ascii_case(".model") {
+            return None;
+        }
+        let _model_name = parts.next()?;
+        let model_type = parts
+            .next()?
+            .trim_matches(|ch| ch == '"' || ch == '\'' || ch == '(' || ch == ')')
+            .to_ascii_lowercase();
+
+        if matches!(
+            model_type.as_str(),
+            "vbic" | "vbic13" | "vbic13_4t" | "vbic1p3" | "vbic_4t_et_cf"
+        ) || (matches!(model_type.as_str(), "npn" | "pnp" | "lpnp")
+            && Self::model_level(line).is_some_and(Self::is_vbic_generated_level_without_builtins))
+        {
+            return Some(
+                "VBIC generated Verilog-A builtin models require the veriloga-builtins feature; \
+                 the default regression build intentionally fails closed instead of falling back \
+                 to native Gummel-Poon BJT"
+                    .to_string(),
+            );
+        }
+
+        None
+    }
+
+    #[cfg(not(feature = "veriloga-builtins"))]
+    fn is_vbic_generated_level_without_builtins(level: f64) -> bool {
+        if !level.is_finite() {
+            return false;
+        }
+        let rounded = level.round();
+        (level - rounded).abs() <= 1e-9 && matches!(rounded as i64, 4 | 9 | 11 | 12 | 13)
+    }
+
+    #[cfg(not(feature = "veriloga-builtins"))]
+    fn model_level(line: &str) -> Option<f64> {
+        let lower = line.to_ascii_lowercase();
+        let mut search_from = 0;
+        while let Some(pos) = lower[search_from..].find("level") {
+            let start = search_from + pos;
+            let before = lower[..start].chars().next_back();
+            let after_keyword = start + "level".len();
+            let after = lower[after_keyword..].chars().next();
+            let before_is_boundary =
+                before.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
+            let after_is_boundary = after.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
+            if before_is_boundary && after_is_boundary {
+                let mut chars = lower[after_keyword..].chars().peekable();
+                while chars.peek().is_some_and(|ch| ch.is_ascii_whitespace()) {
+                    chars.next();
+                }
+                if chars.next() == Some('=') {
+                    while chars.peek().is_some_and(|ch| ch.is_ascii_whitespace()) {
+                        chars.next();
+                    }
+                    let value: String = chars
+                        .take_while(|ch| {
+                            ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E')
+                        })
+                        .collect();
+                    return value.parse::<f64>().ok();
+                }
+            }
+            search_from = after_keyword;
+        }
         None
     }
 
@@ -394,9 +473,6 @@ impl TestRunner {
             .trim_matches(|ch| ch == '"' || ch == '\'' || ch == '(' || ch == ')')
             .to_ascii_lowercase();
         match normalized.as_str() {
-            "d_source" => Some("d_source"),
-            "d_state" => Some("d_state"),
-            "d_ram" => Some("d_ram"),
             "d_rom" => Some("d_rom"),
             _ => None,
         }
@@ -422,23 +498,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unsupported_detection_rejects_event_driven_xspice_digital_file_models() {
+    fn unsupported_detection_rejects_unimplemented_xspice_digital_rom_model() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let deck = "\
-digital file model
-a_source [a1 a2] d_source1
-a_counter [up] clk reset [o1 o2] d_state1
-.model d_source1 d_source (input_file=\"stimulus.txt\")
-.model d_state1 d_state (state_file=\"states.txt\")
+digital rom model
+a_rom [a1 a2] sel [o1 o2] d_rom1
+.model d_rom1 d_rom (input_file=\"rom.txt\")
 .end
 ";
 
         let reason = runner
             .check_unsupported(deck)
-            .expect("event-driven XSPICE digital file models are not supported yet");
+            .expect("unimplemented XSPICE d_rom must fail closed");
 
         assert!(
-            reason.contains("XSPICE digital event models"),
+            reason.contains("d_rom"),
+            "unexpected unsupported reason: {reason}"
+        );
+    }
+
+    #[cfg(not(feature = "veriloga-builtins"))]
+    #[test]
+    fn unsupported_detection_rejects_vbic_levels_without_generated_builtins() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let deck = "\
+vbic level deck
+.model n1 npn level = 4
+.model p1 pnp level=13
+.end
+";
+
+        let reason = runner
+            .check_unsupported(deck)
+            .expect("VBIC LEVEL decks require generated builtins in this build");
+
+        assert!(
+            reason.contains("VBIC generated Verilog-A builtin models"),
             "unexpected unsupported reason: {reason}"
         );
     }
