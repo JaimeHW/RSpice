@@ -105,35 +105,35 @@ impl Instance {
         let ddt_state_initialized = self.ddt_state_initialized.as_mut();
         let ddt_active = timestep.abs() > Instance::DDT_EPSILON;
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
-        let v2: f64 = nv7;
-        let v3: f64 = nv8;
-        let v4: f64 = nv9;
-        let v5: f64 = (v2 - v4);
-        let v8: f64 = (v3 - v4);
-        let v9: f64 = (self.scalar_v7 * v8);
-        let v10: f64 = (self.scalar_v7 * v5);
+        let v1: f64 = nv7;
+        let v2: f64 = nv8;
+        let v3: f64 = nv9;
+        let v4: f64 = (v1 - v3);
+        let v7: f64 = (v2 - v3);
+        let v8: f64 = (self.scalar_v6 * v7);
+        let v9: f64 = (v4 * self.scalar_v6);
 
-        let d9_dn8: f64 = self.scalar_v7;
-        let d9_dn9: f64 = self.scalar_v11;
+        let d8_dn8: f64 = self.scalar_v6;
+        let d8_dn9: f64 = self.scalar_v10;
         stamper.stamp_current_node2_local(
             Some(8),
             Some(9),
-            multiplicity * (v9),
+            multiplicity * (v8),
             8,
-            multiplicity * (d9_dn8),
+            multiplicity * (d8_dn8),
             9,
-            multiplicity * (d9_dn9),
+            multiplicity * (d8_dn9),
         );
-        let d10_dn7: f64 = self.scalar_v7;
-        let d10_dn9: f64 = self.scalar_v11;
+        let d9_dn7: f64 = self.scalar_v6;
+        let d9_dn9: f64 = self.scalar_v10;
         stamper.stamp_current_node2_local(
             Some(7),
             Some(9),
-            multiplicity * (v10),
+            multiplicity * (v9),
             7,
-            multiplicity * (d10_dn7),
+            multiplicity * (d9_dn7),
             9,
-            multiplicity * (d10_dn9),
+            multiplicity * (d9_dn9),
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),

@@ -131,10 +131,10 @@ impl Instance {
         let v124: f64 = (if self.scalar_v66 { v121 } else { v0 });
         let v125: f64 = (self.scalar_v84 * v111);
         let v139: f64 = (v95 - v97);
-        let v140: f64 = (v139 * v0);
+        let v140: f64 = (v0 * v139);
         let v141: f64 = (if self.scalar_v116 { v140 } else { v0 });
         let v142: f64 = (v95 - v96);
-        let v143: f64 = (v142 * v0);
+        let v143: f64 = (v0 * v142);
         let v144: f64 = (if self.scalar_v116 { v143 } else { v0 });
 
         stamper.stamp_potential_branch_local(

@@ -117,10 +117,10 @@ impl Instance {
         let v72: f64 = (v1 * v8);
         let v73: f64 = (v7 - v9);
         let v74: f64 = (v1 * v73);
-        let v85: f64 = -0.0;
+        let v83: f64 = -0.0;
 
-        let d56_dn5: f64 = self.scalar_v82;
-        let d56_dn6: f64 = self.scalar_v83;
+        let d56_dn5: f64 = self.scalar_v81;
+        let d56_dn6: f64 = self.scalar_v5;
         let d56_dn9: f64 = v0;
         stamper.stamp_current_node3_local(
             Some(9),
@@ -141,7 +141,7 @@ impl Instance {
             9,
             multiplicity * (d58_dn9),
         );
-        let d60_dn8: f64 = self.scalar_v84;
+        let d60_dn8: f64 = self.scalar_v82;
         stamper.stamp_current_node1_local(
             Some(8),
             None,
@@ -200,7 +200,7 @@ impl Instance {
             self.scalar_v70,
         );
         let d71_dn5: f64 = v1;
-        let d71_dn6: f64 = v85;
+        let d71_dn6: f64 = v83;
         stamper.stamp_current_node2_local(
             Some(5),
             Some(6),
@@ -210,7 +210,7 @@ impl Instance {
             6,
             multiplicity * (d71_dn6),
         );
-        let d72_dn4: f64 = v85;
+        let d72_dn4: f64 = v83;
         let d72_dn5: f64 = v1;
         stamper.stamp_current_node2_local(
             Some(5),
@@ -222,7 +222,7 @@ impl Instance {
             multiplicity * (d72_dn5),
         );
         let d74_dn4: f64 = v1;
-        let d74_dn6: f64 = v85;
+        let d74_dn6: f64 = v83;
         stamper.stamp_current_node2_local(
             Some(4),
             Some(6),

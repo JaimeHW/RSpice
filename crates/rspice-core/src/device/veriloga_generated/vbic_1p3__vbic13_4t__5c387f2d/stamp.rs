@@ -110,8 +110,8 @@ impl Instance {
         let v8: f64 = (v7 - v6);
         let v10: f64 = (v3 * self.scalar_v9);
         let v12: f64 = (v5 * self.scalar_v11);
-        let v14: f64 = (self.scalar_v13 * v6);
-        let v15: f64 = (self.scalar_v13 * v7);
+        let v14: f64 = (v6 * self.scalar_v13);
+        let v15: f64 = (v7 * self.scalar_v13);
         let v16: f64 = 0.3333333333333333;
         let v17: f64 = (v15 * v16);
         let v18: f64 = -1.0;
@@ -202,8 +202,8 @@ impl Instance {
         let v7: f64 = nv13;
         let v10: f64 = (v3 * self.scalar_v9);
         let v12: f64 = (v5 * self.scalar_v11);
-        let v14: f64 = (self.scalar_v13 * v6);
-        let v15: f64 = (self.scalar_v13 * v7);
+        let v14: f64 = (v6 * self.scalar_v13);
+        let v15: f64 = (v7 * self.scalar_v13);
         let v16: f64 = 0.3333333333333333;
         let v17: f64 = (v15 * v16);
 

@@ -1954,9 +1954,9 @@ pub struct Instance {
     pub(crate) idt_state_initialized: Box<[bool; 0]>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
+    pub(crate) scalar_v5: f64,
     pub(crate) scalar_v6: f64,
-    pub(crate) scalar_v7: f64,
-    pub(crate) scalar_v11: f64,
+    pub(crate) scalar_v10: f64,
     pub(crate) scratch: Option<Box<GenericScratch<2913, 12, 7>>>,
     pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<2913, 12, 7>>>,
 }
@@ -1978,9 +1978,9 @@ impl Clone for Instance {
             idt_state_initialized: self.idt_state_initialized.clone(),
             time: self.time,
             timestep: self.timestep,
+            scalar_v5: self.scalar_v5,
             scalar_v6: self.scalar_v6,
-            scalar_v7: self.scalar_v7,
-            scalar_v11: self.scalar_v11,
+            scalar_v10: self.scalar_v10,
             scratch: None,
             reactive_scratch: None,
         }
@@ -2019,9 +2019,9 @@ impl Instance {
             idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
             time: 0.0,
             timestep: 0.0,
+            scalar_v5: 0.0,
             scalar_v6: 0.0,
-            scalar_v7: 0.0,
-            scalar_v11: 0.0,
+            scalar_v10: 0.0,
             scratch: Some(GenericScratch::new_box()),
             reactive_scratch: Some(GenericReactiveScratch::new_box()),
         };
@@ -2047,9 +2047,9 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
+            scalar_v5,
             scalar_v6,
-            scalar_v7,
-            scalar_v11,
+            scalar_v10,
             scratch: _,
             reactive_scratch: _,
         } = snapshot;
@@ -2067,9 +2067,9 @@ impl Instance {
             idt_state_initialized,
             time,
             timestep,
+            scalar_v5,
             scalar_v6,
-            scalar_v7,
-            scalar_v11,
+            scalar_v10,
             scratch,
             reactive_scratch,
         };
@@ -3079,11 +3079,11 @@ impl Instance {
     #[inline]
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
-        let v6: f64 = p.p32;
+        let v5: f64 = p.p32;
+        self.scalar_v5 = v5;
+        let v6: f64 = (0.0 * p.p32);
         self.scalar_v6 = v6;
-        let v7: f64 = (p.p32 * 0.0);
-        self.scalar_v7 = v7;
-        let v11: f64 = (v7 * -1.0);
-        self.scalar_v11 = v11;
+        let v10: f64 = (-v6);
+        self.scalar_v10 = v10;
     }
 }

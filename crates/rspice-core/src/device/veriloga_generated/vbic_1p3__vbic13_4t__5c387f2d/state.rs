@@ -724,9 +724,9 @@ impl Instance {
         self.scalar_v11 = v11;
         let v13: f64 = p.p82;
         self.scalar_v13 = v13;
-        let v19: f64 = (-1.0 * p.p35);
+        let v19: f64 = (-p.p35);
         self.scalar_v19 = v19;
-        let v20: f64 = (-1.0 * p.p40);
+        let v20: f64 = (-p.p40);
         self.scalar_v20 = v20;
         let v21: f64 = (p.p82 * 0.3333333333333333);
         self.scalar_v21 = v21;

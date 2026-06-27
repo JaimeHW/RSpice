@@ -106,14 +106,14 @@ impl Instance {
         let ddt_scale = if ddt_active { 1.0 / timestep } else { 0.0 };
         let v0: f64 = 0.0;
         let v1: f64 = 1.0;
-        let v30: f64 = nv14;
-        let v32: f64 = nv0;
-        let v38: f64 = nv16;
-        let v39: f64 = nv15;
-        let v47: f64 = (v30 - v32);
-        let v48: f64 = (v47 * self.scalar_v31);
-        let v49: f64 = (v48 * self.scalar_v25);
-        let v50: f64 = (if self.scalar_v35 { v49 } else { v0 });
+        let v29: f64 = nv14;
+        let v31: f64 = nv0;
+        let v37: f64 = nv16;
+        let v38: f64 = nv15;
+        let v46: f64 = (v29 - v31);
+        let v47: f64 = (self.scalar_v30 * v46);
+        let v48: f64 = (self.scalar_v24 * v47);
+        let v49: f64 = (if self.scalar_v34 { v48 } else { v0 });
 
         stamper.stamp_potential_branch_local(
             Some(4),
@@ -123,23 +123,23 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             0,
-            self.scalar_v37,
+            self.scalar_v36,
         );
-        let d38_dn16: f64 = v1;
+        let d37_dn16: f64 = v1;
         stamper.stamp_current_node1_local(
             Some(16),
             None,
-            multiplicity * (v38),
+            multiplicity * (v37),
             16,
-            multiplicity * (d38_dn16),
+            multiplicity * (d37_dn16),
         );
-        let d39_dn15: f64 = v1;
+        let d38_dn15: f64 = v1;
         stamper.stamp_current_node1_local(
             Some(15),
             None,
-            multiplicity * (v39),
+            multiplicity * (v38),
             15,
-            multiplicity * (d39_dn15),
+            multiplicity * (d38_dn15),
         );
         stamper.stamp_potential_branch_local(
             Some(1),
@@ -149,7 +149,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             7,
-            self.scalar_v40,
+            self.scalar_v39,
         );
         stamper.stamp_potential_branch_local(
             Some(10),
@@ -159,7 +159,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             8,
-            self.scalar_v42,
+            self.scalar_v41,
         );
         stamper.stamp_potential_branch_local(
             Some(4),
@@ -169,7 +169,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             9,
-            self.scalar_v44,
+            self.scalar_v43,
         );
         stamper.stamp_potential_branch_local(
             Some(3),
@@ -179,7 +179,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             10,
-            self.scalar_v46,
+            self.scalar_v45,
         );
         stamper.stamp_potential_branch_local(
             Some(3),
@@ -189,7 +189,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             11,
-            self.scalar_v46,
+            self.scalar_v45,
         );
         stamper.stamp_potential_branch_local(
             Some(3),
@@ -199,18 +199,18 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             12,
-            self.scalar_v46,
+            self.scalar_v45,
         );
-        let d50_dn0: f64 = self.scalar_v56;
-        let d50_dn14: f64 = self.scalar_v57;
+        let d49_dn0: f64 = self.scalar_v55;
+        let d49_dn14: f64 = self.scalar_v56;
         stamper.stamp_current_node2_local(
             Some(14),
             Some(0),
-            multiplicity * (v50),
+            multiplicity * (v49),
             0,
-            multiplicity * (d50_dn0),
+            multiplicity * (d49_dn0),
             14,
-            multiplicity * (d50_dn14),
+            multiplicity * (d49_dn14),
         );
         stamper.stamp_potential_branch_local(
             Some(0),
@@ -220,7 +220,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             13,
-            self.scalar_v52,
+            self.scalar_v51,
         );
         let s = match &mut self.scratch {
             Some(buf) => buf.as_mut(),

@@ -615,80 +615,84 @@ pub struct Instance {
     pub(crate) scalar_v1729: f64,
     pub(crate) scalar_v1730: f64,
     pub(crate) scalar_v1760: f64,
+    pub(crate) scalar_v1811: f64,
     pub(crate) scalar_v1812: f64,
-    pub(crate) scalar_v1813: f64,
-    pub(crate) scalar_v1880: f64,
-    pub(crate) scalar_v1881: f64,
-    pub(crate) scalar_v1888: f64,
-    pub(crate) scalar_v1889: f64,
-    pub(crate) scalar_v1970: f64,
-    pub(crate) scalar_v1971: f64,
-    pub(crate) scalar_v2058: f64,
-    pub(crate) scalar_v2059: f64,
-    pub(crate) scalar_v2060: f64,
+    pub(crate) scalar_v1876: f64,
+    pub(crate) scalar_v1877: f64,
+    pub(crate) scalar_v1884: f64,
+    pub(crate) scalar_v1885: f64,
+    pub(crate) scalar_v1966: f64,
+    pub(crate) scalar_v1967: f64,
+    pub(crate) scalar_v2050: f64,
+    pub(crate) scalar_v2051: f64,
+    pub(crate) scalar_v2052: f64,
+    pub(crate) scalar_v2053: f64,
     pub(crate) scalar_v2061: f64,
-    pub(crate) scalar_v2069: f64,
-    pub(crate) scalar_v2070: f64,
-    pub(crate) scalar_v2071: f64,
-    pub(crate) scalar_v2072: f64,
-    pub(crate) scalar_v2109: f64,
-    pub(crate) scalar_v2113: f64,
-    pub(crate) scalar_v2352: f64,
-    pub(crate) scalar_v2440: f64,
-    pub(crate) scalar_v2441: f64,
-    pub(crate) scalar_v2442: f64,
-    pub(crate) scalar_v2443: f64,
-    pub(crate) scalar_v2546: f64,
-    pub(crate) scalar_v2547: f64,
-    pub(crate) scalar_v2548: f64,
-    pub(crate) scalar_v2549: f64,
-    pub(crate) scalar_v2558: f64,
-    pub(crate) scalar_v2559: f64,
-    pub(crate) scalar_v2560: f64,
-    pub(crate) scalar_v2561: f64,
-    pub(crate) scalar_v2952: f64,
-    pub(crate) scalar_v2953: f64,
-    pub(crate) scalar_v2954: f64,
-    pub(crate) scalar_v2955: f64,
-    pub(crate) scalar_v3079: f64,
-    pub(crate) scalar_v3080: f64,
-    pub(crate) scalar_v3081: f64,
-    pub(crate) scalar_v3082: f64,
-    pub(crate) scalar_v3083: f64,
-    pub(crate) scalar_v3084: f64,
-    pub(crate) scalar_v3094: f64,
-    pub(crate) scalar_v3095: f64,
-    pub(crate) scalar_v3096: f64,
-    pub(crate) scalar_v3097: f64,
-    pub(crate) scalar_v3098: f64,
-    pub(crate) scalar_v3099: f64,
-    pub(crate) scalar_v3153: f64,
-    pub(crate) scalar_v3221: f64,
-    pub(crate) scalar_v3222: f64,
-    pub(crate) scalar_v3223: f64,
-    pub(crate) scalar_v3224: f64,
-    pub(crate) scalar_v3225: f64,
-    pub(crate) scalar_v3226: f64,
-    pub(crate) scalar_v3462: f64,
-    pub(crate) scalar_v3478: f64,
-    pub(crate) scalar_v3567: f64,
-    pub(crate) scalar_v3740: f64,
-    pub(crate) scalar_v3769: f64,
-    pub(crate) scalar_v4169: f64,
-    pub(crate) scalar_v4180: f64,
-    pub(crate) scalar_v4302: f64,
-    pub(crate) scalar_v4303: f64,
-    pub(crate) scalar_v4659: f64,
-    pub(crate) scalar_v4682: f64,
-    pub(crate) scalar_v4781: f64,
-    pub(crate) scalar_v4782: f64,
-    pub(crate) scalar_v4783: f64,
-    pub(crate) scalar_v4922: f64,
-    pub(crate) scalar_v4925: f64,
-    pub(crate) scalar_v4926: f64,
-    pub(crate) scalar_v5109: f64,
-    pub(crate) scalar_v5110: f64,
-    pub(crate) scalar_v5111: f64,
+    pub(crate) scalar_v2062: f64,
+    pub(crate) scalar_v2063: f64,
+    pub(crate) scalar_v2064: f64,
+    pub(crate) scalar_v2101: f64,
+    pub(crate) scalar_v2105: f64,
+    pub(crate) scalar_v2336: f64,
+    pub(crate) scalar_v2423: f64,
+    pub(crate) scalar_v2424: f64,
+    pub(crate) scalar_v2425: f64,
+    pub(crate) scalar_v2426: f64,
+    pub(crate) scalar_v2524: f64,
+    pub(crate) scalar_v2525: f64,
+    pub(crate) scalar_v2526: f64,
+    pub(crate) scalar_v2527: f64,
+    pub(crate) scalar_v2536: f64,
+    pub(crate) scalar_v2537: f64,
+    pub(crate) scalar_v2538: f64,
+    pub(crate) scalar_v2539: f64,
+    pub(crate) scalar_v2918: f64,
+    pub(crate) scalar_v2919: f64,
+    pub(crate) scalar_v2920: f64,
+    pub(crate) scalar_v2921: f64,
+    pub(crate) scalar_v3039: f64,
+    pub(crate) scalar_v3040: f64,
+    pub(crate) scalar_v3041: f64,
+    pub(crate) scalar_v3042: f64,
+    pub(crate) scalar_v3043: f64,
+    pub(crate) scalar_v3044: f64,
+    pub(crate) scalar_v3054: f64,
+    pub(crate) scalar_v3055: f64,
+    pub(crate) scalar_v3056: f64,
+    pub(crate) scalar_v3057: f64,
+    pub(crate) scalar_v3058: f64,
+    pub(crate) scalar_v3059: f64,
+    pub(crate) scalar_v3113: f64,
+    pub(crate) scalar_v3180: f64,
+    pub(crate) scalar_v3181: f64,
+    pub(crate) scalar_v3182: f64,
+    pub(crate) scalar_v3183: f64,
+    pub(crate) scalar_v3184: f64,
+    pub(crate) scalar_v3185: f64,
+    pub(crate) scalar_v3409: f64,
+    pub(crate) scalar_v3425: f64,
+    pub(crate) scalar_v3514: f64,
+    pub(crate) scalar_v3687: f64,
+    pub(crate) scalar_v3716: f64,
+    pub(crate) scalar_v4116: f64,
+    pub(crate) scalar_v4127: f64,
+    pub(crate) scalar_v4247: f64,
+    pub(crate) scalar_v4248: f64,
+    pub(crate) scalar_v4599: f64,
+    pub(crate) scalar_v4622: f64,
+    pub(crate) scalar_v4721: f64,
+    pub(crate) scalar_v4722: f64,
+    pub(crate) scalar_v4723: f64,
+    pub(crate) scalar_v4859: f64,
+    pub(crate) scalar_v4862: f64,
+    pub(crate) scalar_v4863: f64,
+    pub(crate) scalar_v5046: f64,
+    pub(crate) scalar_v5047: f64,
+    pub(crate) scalar_v5048: f64,
+    pub(crate) scalar_v5: f64,
+    pub(crate) scalar_temperature_static_valid: bool,
+    pub(crate) scalar_temperature_static_temperature: f64,
+    pub(crate) scalar_temperature_static_thermal_voltage: f64,
     pub(crate) scratch: Option<Box<GenericScratch<171, 12, 0>>>,
     pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<171, 12, 0>>>,
 }
@@ -1006,80 +1010,84 @@ impl Clone for Instance {
             scalar_v1729: self.scalar_v1729,
             scalar_v1730: self.scalar_v1730,
             scalar_v1760: self.scalar_v1760,
+            scalar_v1811: self.scalar_v1811,
             scalar_v1812: self.scalar_v1812,
-            scalar_v1813: self.scalar_v1813,
-            scalar_v1880: self.scalar_v1880,
-            scalar_v1881: self.scalar_v1881,
-            scalar_v1888: self.scalar_v1888,
-            scalar_v1889: self.scalar_v1889,
-            scalar_v1970: self.scalar_v1970,
-            scalar_v1971: self.scalar_v1971,
-            scalar_v2058: self.scalar_v2058,
-            scalar_v2059: self.scalar_v2059,
-            scalar_v2060: self.scalar_v2060,
+            scalar_v1876: self.scalar_v1876,
+            scalar_v1877: self.scalar_v1877,
+            scalar_v1884: self.scalar_v1884,
+            scalar_v1885: self.scalar_v1885,
+            scalar_v1966: self.scalar_v1966,
+            scalar_v1967: self.scalar_v1967,
+            scalar_v2050: self.scalar_v2050,
+            scalar_v2051: self.scalar_v2051,
+            scalar_v2052: self.scalar_v2052,
+            scalar_v2053: self.scalar_v2053,
             scalar_v2061: self.scalar_v2061,
-            scalar_v2069: self.scalar_v2069,
-            scalar_v2070: self.scalar_v2070,
-            scalar_v2071: self.scalar_v2071,
-            scalar_v2072: self.scalar_v2072,
-            scalar_v2109: self.scalar_v2109,
-            scalar_v2113: self.scalar_v2113,
-            scalar_v2352: self.scalar_v2352,
-            scalar_v2440: self.scalar_v2440,
-            scalar_v2441: self.scalar_v2441,
-            scalar_v2442: self.scalar_v2442,
-            scalar_v2443: self.scalar_v2443,
-            scalar_v2546: self.scalar_v2546,
-            scalar_v2547: self.scalar_v2547,
-            scalar_v2548: self.scalar_v2548,
-            scalar_v2549: self.scalar_v2549,
-            scalar_v2558: self.scalar_v2558,
-            scalar_v2559: self.scalar_v2559,
-            scalar_v2560: self.scalar_v2560,
-            scalar_v2561: self.scalar_v2561,
-            scalar_v2952: self.scalar_v2952,
-            scalar_v2953: self.scalar_v2953,
-            scalar_v2954: self.scalar_v2954,
-            scalar_v2955: self.scalar_v2955,
-            scalar_v3079: self.scalar_v3079,
-            scalar_v3080: self.scalar_v3080,
-            scalar_v3081: self.scalar_v3081,
-            scalar_v3082: self.scalar_v3082,
-            scalar_v3083: self.scalar_v3083,
-            scalar_v3084: self.scalar_v3084,
-            scalar_v3094: self.scalar_v3094,
-            scalar_v3095: self.scalar_v3095,
-            scalar_v3096: self.scalar_v3096,
-            scalar_v3097: self.scalar_v3097,
-            scalar_v3098: self.scalar_v3098,
-            scalar_v3099: self.scalar_v3099,
-            scalar_v3153: self.scalar_v3153,
-            scalar_v3221: self.scalar_v3221,
-            scalar_v3222: self.scalar_v3222,
-            scalar_v3223: self.scalar_v3223,
-            scalar_v3224: self.scalar_v3224,
-            scalar_v3225: self.scalar_v3225,
-            scalar_v3226: self.scalar_v3226,
-            scalar_v3462: self.scalar_v3462,
-            scalar_v3478: self.scalar_v3478,
-            scalar_v3567: self.scalar_v3567,
-            scalar_v3740: self.scalar_v3740,
-            scalar_v3769: self.scalar_v3769,
-            scalar_v4169: self.scalar_v4169,
-            scalar_v4180: self.scalar_v4180,
-            scalar_v4302: self.scalar_v4302,
-            scalar_v4303: self.scalar_v4303,
-            scalar_v4659: self.scalar_v4659,
-            scalar_v4682: self.scalar_v4682,
-            scalar_v4781: self.scalar_v4781,
-            scalar_v4782: self.scalar_v4782,
-            scalar_v4783: self.scalar_v4783,
-            scalar_v4922: self.scalar_v4922,
-            scalar_v4925: self.scalar_v4925,
-            scalar_v4926: self.scalar_v4926,
-            scalar_v5109: self.scalar_v5109,
-            scalar_v5110: self.scalar_v5110,
-            scalar_v5111: self.scalar_v5111,
+            scalar_v2062: self.scalar_v2062,
+            scalar_v2063: self.scalar_v2063,
+            scalar_v2064: self.scalar_v2064,
+            scalar_v2101: self.scalar_v2101,
+            scalar_v2105: self.scalar_v2105,
+            scalar_v2336: self.scalar_v2336,
+            scalar_v2423: self.scalar_v2423,
+            scalar_v2424: self.scalar_v2424,
+            scalar_v2425: self.scalar_v2425,
+            scalar_v2426: self.scalar_v2426,
+            scalar_v2524: self.scalar_v2524,
+            scalar_v2525: self.scalar_v2525,
+            scalar_v2526: self.scalar_v2526,
+            scalar_v2527: self.scalar_v2527,
+            scalar_v2536: self.scalar_v2536,
+            scalar_v2537: self.scalar_v2537,
+            scalar_v2538: self.scalar_v2538,
+            scalar_v2539: self.scalar_v2539,
+            scalar_v2918: self.scalar_v2918,
+            scalar_v2919: self.scalar_v2919,
+            scalar_v2920: self.scalar_v2920,
+            scalar_v2921: self.scalar_v2921,
+            scalar_v3039: self.scalar_v3039,
+            scalar_v3040: self.scalar_v3040,
+            scalar_v3041: self.scalar_v3041,
+            scalar_v3042: self.scalar_v3042,
+            scalar_v3043: self.scalar_v3043,
+            scalar_v3044: self.scalar_v3044,
+            scalar_v3054: self.scalar_v3054,
+            scalar_v3055: self.scalar_v3055,
+            scalar_v3056: self.scalar_v3056,
+            scalar_v3057: self.scalar_v3057,
+            scalar_v3058: self.scalar_v3058,
+            scalar_v3059: self.scalar_v3059,
+            scalar_v3113: self.scalar_v3113,
+            scalar_v3180: self.scalar_v3180,
+            scalar_v3181: self.scalar_v3181,
+            scalar_v3182: self.scalar_v3182,
+            scalar_v3183: self.scalar_v3183,
+            scalar_v3184: self.scalar_v3184,
+            scalar_v3185: self.scalar_v3185,
+            scalar_v3409: self.scalar_v3409,
+            scalar_v3425: self.scalar_v3425,
+            scalar_v3514: self.scalar_v3514,
+            scalar_v3687: self.scalar_v3687,
+            scalar_v3716: self.scalar_v3716,
+            scalar_v4116: self.scalar_v4116,
+            scalar_v4127: self.scalar_v4127,
+            scalar_v4247: self.scalar_v4247,
+            scalar_v4248: self.scalar_v4248,
+            scalar_v4599: self.scalar_v4599,
+            scalar_v4622: self.scalar_v4622,
+            scalar_v4721: self.scalar_v4721,
+            scalar_v4722: self.scalar_v4722,
+            scalar_v4723: self.scalar_v4723,
+            scalar_v4859: self.scalar_v4859,
+            scalar_v4862: self.scalar_v4862,
+            scalar_v4863: self.scalar_v4863,
+            scalar_v5046: self.scalar_v5046,
+            scalar_v5047: self.scalar_v5047,
+            scalar_v5048: self.scalar_v5048,
+            scalar_v5: self.scalar_v5,
+            scalar_temperature_static_valid: self.scalar_temperature_static_valid,
+            scalar_temperature_static_temperature: self.scalar_temperature_static_temperature,
+            scalar_temperature_static_thermal_voltage: self.scalar_temperature_static_thermal_voltage,
             scratch: None,
             reactive_scratch: None,
         }
@@ -1414,80 +1422,84 @@ impl Instance {
             scalar_v1729: 0.0,
             scalar_v1730: 0.0,
             scalar_v1760: 0.0,
+            scalar_v1811: 0.0,
             scalar_v1812: 0.0,
-            scalar_v1813: 0.0,
-            scalar_v1880: 0.0,
-            scalar_v1881: 0.0,
-            scalar_v1888: 0.0,
-            scalar_v1889: 0.0,
-            scalar_v1970: 0.0,
-            scalar_v1971: 0.0,
-            scalar_v2058: 0.0,
-            scalar_v2059: 0.0,
-            scalar_v2060: 0.0,
+            scalar_v1876: 0.0,
+            scalar_v1877: 0.0,
+            scalar_v1884: 0.0,
+            scalar_v1885: 0.0,
+            scalar_v1966: 0.0,
+            scalar_v1967: 0.0,
+            scalar_v2050: 0.0,
+            scalar_v2051: 0.0,
+            scalar_v2052: 0.0,
+            scalar_v2053: 0.0,
             scalar_v2061: 0.0,
-            scalar_v2069: 0.0,
-            scalar_v2070: 0.0,
-            scalar_v2071: 0.0,
-            scalar_v2072: 0.0,
-            scalar_v2109: 0.0,
-            scalar_v2113: 0.0,
-            scalar_v2352: 0.0,
-            scalar_v2440: 0.0,
-            scalar_v2441: 0.0,
-            scalar_v2442: 0.0,
-            scalar_v2443: 0.0,
-            scalar_v2546: 0.0,
-            scalar_v2547: 0.0,
-            scalar_v2548: 0.0,
-            scalar_v2549: 0.0,
-            scalar_v2558: 0.0,
-            scalar_v2559: 0.0,
-            scalar_v2560: 0.0,
-            scalar_v2561: 0.0,
-            scalar_v2952: 0.0,
-            scalar_v2953: 0.0,
-            scalar_v2954: 0.0,
-            scalar_v2955: 0.0,
-            scalar_v3079: 0.0,
-            scalar_v3080: 0.0,
-            scalar_v3081: 0.0,
-            scalar_v3082: 0.0,
-            scalar_v3083: 0.0,
-            scalar_v3084: 0.0,
-            scalar_v3094: 0.0,
-            scalar_v3095: 0.0,
-            scalar_v3096: 0.0,
-            scalar_v3097: 0.0,
-            scalar_v3098: 0.0,
-            scalar_v3099: 0.0,
-            scalar_v3153: 0.0,
-            scalar_v3221: 0.0,
-            scalar_v3222: 0.0,
-            scalar_v3223: 0.0,
-            scalar_v3224: 0.0,
-            scalar_v3225: 0.0,
-            scalar_v3226: 0.0,
-            scalar_v3462: 0.0,
-            scalar_v3478: 0.0,
-            scalar_v3567: 0.0,
-            scalar_v3740: 0.0,
-            scalar_v3769: 0.0,
-            scalar_v4169: 0.0,
-            scalar_v4180: 0.0,
-            scalar_v4302: 0.0,
-            scalar_v4303: 0.0,
-            scalar_v4659: 0.0,
-            scalar_v4682: 0.0,
-            scalar_v4781: 0.0,
-            scalar_v4782: 0.0,
-            scalar_v4783: 0.0,
-            scalar_v4922: 0.0,
-            scalar_v4925: 0.0,
-            scalar_v4926: 0.0,
-            scalar_v5109: 0.0,
-            scalar_v5110: 0.0,
-            scalar_v5111: 0.0,
+            scalar_v2062: 0.0,
+            scalar_v2063: 0.0,
+            scalar_v2064: 0.0,
+            scalar_v2101: 0.0,
+            scalar_v2105: 0.0,
+            scalar_v2336: 0.0,
+            scalar_v2423: 0.0,
+            scalar_v2424: 0.0,
+            scalar_v2425: 0.0,
+            scalar_v2426: 0.0,
+            scalar_v2524: 0.0,
+            scalar_v2525: 0.0,
+            scalar_v2526: 0.0,
+            scalar_v2527: 0.0,
+            scalar_v2536: 0.0,
+            scalar_v2537: 0.0,
+            scalar_v2538: 0.0,
+            scalar_v2539: 0.0,
+            scalar_v2918: 0.0,
+            scalar_v2919: 0.0,
+            scalar_v2920: 0.0,
+            scalar_v2921: 0.0,
+            scalar_v3039: 0.0,
+            scalar_v3040: 0.0,
+            scalar_v3041: 0.0,
+            scalar_v3042: 0.0,
+            scalar_v3043: 0.0,
+            scalar_v3044: 0.0,
+            scalar_v3054: 0.0,
+            scalar_v3055: 0.0,
+            scalar_v3056: 0.0,
+            scalar_v3057: 0.0,
+            scalar_v3058: 0.0,
+            scalar_v3059: 0.0,
+            scalar_v3113: 0.0,
+            scalar_v3180: 0.0,
+            scalar_v3181: 0.0,
+            scalar_v3182: 0.0,
+            scalar_v3183: 0.0,
+            scalar_v3184: 0.0,
+            scalar_v3185: 0.0,
+            scalar_v3409: 0.0,
+            scalar_v3425: 0.0,
+            scalar_v3514: 0.0,
+            scalar_v3687: 0.0,
+            scalar_v3716: 0.0,
+            scalar_v4116: 0.0,
+            scalar_v4127: 0.0,
+            scalar_v4247: 0.0,
+            scalar_v4248: 0.0,
+            scalar_v4599: 0.0,
+            scalar_v4622: 0.0,
+            scalar_v4721: 0.0,
+            scalar_v4722: 0.0,
+            scalar_v4723: 0.0,
+            scalar_v4859: 0.0,
+            scalar_v4862: 0.0,
+            scalar_v4863: 0.0,
+            scalar_v5046: 0.0,
+            scalar_v5047: 0.0,
+            scalar_v5048: 0.0,
+            scalar_v5: 0.0,
+            scalar_temperature_static_valid: false,
+            scalar_temperature_static_temperature: 0.0,
+            scalar_temperature_static_thermal_voltage: 0.0,
             scratch: Some(GenericScratch::new_box()),
             reactive_scratch: Some(GenericReactiveScratch::new_box()),
         };
@@ -1809,80 +1821,84 @@ impl Instance {
             scalar_v1729,
             scalar_v1730,
             scalar_v1760,
+            scalar_v1811,
             scalar_v1812,
-            scalar_v1813,
-            scalar_v1880,
-            scalar_v1881,
-            scalar_v1888,
-            scalar_v1889,
-            scalar_v1970,
-            scalar_v1971,
-            scalar_v2058,
-            scalar_v2059,
-            scalar_v2060,
+            scalar_v1876,
+            scalar_v1877,
+            scalar_v1884,
+            scalar_v1885,
+            scalar_v1966,
+            scalar_v1967,
+            scalar_v2050,
+            scalar_v2051,
+            scalar_v2052,
+            scalar_v2053,
             scalar_v2061,
-            scalar_v2069,
-            scalar_v2070,
-            scalar_v2071,
-            scalar_v2072,
-            scalar_v2109,
-            scalar_v2113,
-            scalar_v2352,
-            scalar_v2440,
-            scalar_v2441,
-            scalar_v2442,
-            scalar_v2443,
-            scalar_v2546,
-            scalar_v2547,
-            scalar_v2548,
-            scalar_v2549,
-            scalar_v2558,
-            scalar_v2559,
-            scalar_v2560,
-            scalar_v2561,
-            scalar_v2952,
-            scalar_v2953,
-            scalar_v2954,
-            scalar_v2955,
-            scalar_v3079,
-            scalar_v3080,
-            scalar_v3081,
-            scalar_v3082,
-            scalar_v3083,
-            scalar_v3084,
-            scalar_v3094,
-            scalar_v3095,
-            scalar_v3096,
-            scalar_v3097,
-            scalar_v3098,
-            scalar_v3099,
-            scalar_v3153,
-            scalar_v3221,
-            scalar_v3222,
-            scalar_v3223,
-            scalar_v3224,
-            scalar_v3225,
-            scalar_v3226,
-            scalar_v3462,
-            scalar_v3478,
-            scalar_v3567,
-            scalar_v3740,
-            scalar_v3769,
-            scalar_v4169,
-            scalar_v4180,
-            scalar_v4302,
-            scalar_v4303,
-            scalar_v4659,
-            scalar_v4682,
-            scalar_v4781,
-            scalar_v4782,
-            scalar_v4783,
-            scalar_v4922,
-            scalar_v4925,
-            scalar_v4926,
-            scalar_v5109,
-            scalar_v5110,
-            scalar_v5111,
+            scalar_v2062,
+            scalar_v2063,
+            scalar_v2064,
+            scalar_v2101,
+            scalar_v2105,
+            scalar_v2336,
+            scalar_v2423,
+            scalar_v2424,
+            scalar_v2425,
+            scalar_v2426,
+            scalar_v2524,
+            scalar_v2525,
+            scalar_v2526,
+            scalar_v2527,
+            scalar_v2536,
+            scalar_v2537,
+            scalar_v2538,
+            scalar_v2539,
+            scalar_v2918,
+            scalar_v2919,
+            scalar_v2920,
+            scalar_v2921,
+            scalar_v3039,
+            scalar_v3040,
+            scalar_v3041,
+            scalar_v3042,
+            scalar_v3043,
+            scalar_v3044,
+            scalar_v3054,
+            scalar_v3055,
+            scalar_v3056,
+            scalar_v3057,
+            scalar_v3058,
+            scalar_v3059,
+            scalar_v3113,
+            scalar_v3180,
+            scalar_v3181,
+            scalar_v3182,
+            scalar_v3183,
+            scalar_v3184,
+            scalar_v3185,
+            scalar_v3409,
+            scalar_v3425,
+            scalar_v3514,
+            scalar_v3687,
+            scalar_v3716,
+            scalar_v4116,
+            scalar_v4127,
+            scalar_v4247,
+            scalar_v4248,
+            scalar_v4599,
+            scalar_v4622,
+            scalar_v4721,
+            scalar_v4722,
+            scalar_v4723,
+            scalar_v4859,
+            scalar_v4862,
+            scalar_v4863,
+            scalar_v5046,
+            scalar_v5047,
+            scalar_v5048,
+            scalar_v5,
+            scalar_temperature_static_valid,
+            scalar_temperature_static_temperature,
+            scalar_temperature_static_thermal_voltage,
             scratch: _,
             reactive_scratch: _,
         } = snapshot;
@@ -2196,80 +2212,84 @@ impl Instance {
             scalar_v1729,
             scalar_v1730,
             scalar_v1760,
+            scalar_v1811,
             scalar_v1812,
-            scalar_v1813,
-            scalar_v1880,
-            scalar_v1881,
-            scalar_v1888,
-            scalar_v1889,
-            scalar_v1970,
-            scalar_v1971,
-            scalar_v2058,
-            scalar_v2059,
-            scalar_v2060,
+            scalar_v1876,
+            scalar_v1877,
+            scalar_v1884,
+            scalar_v1885,
+            scalar_v1966,
+            scalar_v1967,
+            scalar_v2050,
+            scalar_v2051,
+            scalar_v2052,
+            scalar_v2053,
             scalar_v2061,
-            scalar_v2069,
-            scalar_v2070,
-            scalar_v2071,
-            scalar_v2072,
-            scalar_v2109,
-            scalar_v2113,
-            scalar_v2352,
-            scalar_v2440,
-            scalar_v2441,
-            scalar_v2442,
-            scalar_v2443,
-            scalar_v2546,
-            scalar_v2547,
-            scalar_v2548,
-            scalar_v2549,
-            scalar_v2558,
-            scalar_v2559,
-            scalar_v2560,
-            scalar_v2561,
-            scalar_v2952,
-            scalar_v2953,
-            scalar_v2954,
-            scalar_v2955,
-            scalar_v3079,
-            scalar_v3080,
-            scalar_v3081,
-            scalar_v3082,
-            scalar_v3083,
-            scalar_v3084,
-            scalar_v3094,
-            scalar_v3095,
-            scalar_v3096,
-            scalar_v3097,
-            scalar_v3098,
-            scalar_v3099,
-            scalar_v3153,
-            scalar_v3221,
-            scalar_v3222,
-            scalar_v3223,
-            scalar_v3224,
-            scalar_v3225,
-            scalar_v3226,
-            scalar_v3462,
-            scalar_v3478,
-            scalar_v3567,
-            scalar_v3740,
-            scalar_v3769,
-            scalar_v4169,
-            scalar_v4180,
-            scalar_v4302,
-            scalar_v4303,
-            scalar_v4659,
-            scalar_v4682,
-            scalar_v4781,
-            scalar_v4782,
-            scalar_v4783,
-            scalar_v4922,
-            scalar_v4925,
-            scalar_v4926,
-            scalar_v5109,
-            scalar_v5110,
-            scalar_v5111,
+            scalar_v2062,
+            scalar_v2063,
+            scalar_v2064,
+            scalar_v2101,
+            scalar_v2105,
+            scalar_v2336,
+            scalar_v2423,
+            scalar_v2424,
+            scalar_v2425,
+            scalar_v2426,
+            scalar_v2524,
+            scalar_v2525,
+            scalar_v2526,
+            scalar_v2527,
+            scalar_v2536,
+            scalar_v2537,
+            scalar_v2538,
+            scalar_v2539,
+            scalar_v2918,
+            scalar_v2919,
+            scalar_v2920,
+            scalar_v2921,
+            scalar_v3039,
+            scalar_v3040,
+            scalar_v3041,
+            scalar_v3042,
+            scalar_v3043,
+            scalar_v3044,
+            scalar_v3054,
+            scalar_v3055,
+            scalar_v3056,
+            scalar_v3057,
+            scalar_v3058,
+            scalar_v3059,
+            scalar_v3113,
+            scalar_v3180,
+            scalar_v3181,
+            scalar_v3182,
+            scalar_v3183,
+            scalar_v3184,
+            scalar_v3185,
+            scalar_v3409,
+            scalar_v3425,
+            scalar_v3514,
+            scalar_v3687,
+            scalar_v3716,
+            scalar_v4116,
+            scalar_v4127,
+            scalar_v4247,
+            scalar_v4248,
+            scalar_v4599,
+            scalar_v4622,
+            scalar_v4721,
+            scalar_v4722,
+            scalar_v4723,
+            scalar_v4859,
+            scalar_v4862,
+            scalar_v4863,
+            scalar_v5046,
+            scalar_v5047,
+            scalar_v5048,
+            scalar_v5,
+            scalar_temperature_static_valid,
+            scalar_temperature_static_temperature,
+            scalar_temperature_static_thermal_voltage,
             scratch,
             reactive_scratch,
         };
@@ -2283,124 +2303,124 @@ impl Instance {
 
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
         match name.to_ascii_lowercase().as_str() {
-            "tnom" => { validate_finite_parameter("TNOM", value)?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); Ok(()) }
-            "tref" => { validate_finite_parameter("TNOM", value)?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); Ok(()) }
-            "rcx" => { validate_parameter("RCX", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p1 = value; self.mark_param_given(1); self.recompute_instance_static(); Ok(()) }
-            "rci" => { validate_parameter("RCI", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); self.recompute_instance_static(); Ok(()) }
-            "vo" => { validate_parameter("VO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); Ok(()) }
-            "v0" => { validate_parameter("VO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); Ok(()) }
-            "gamm" => { validate_parameter("GAMM", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); Ok(()) }
-            "gamma" => { validate_parameter("GAMM", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); Ok(()) }
-            "hrcf" => { validate_parameter("HRCF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p5 = value; self.mark_param_given(5); self.recompute_instance_static(); Ok(()) }
-            "rbx" => { validate_parameter("RBX", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p6 = value; self.mark_param_given(6); self.recompute_instance_static(); Ok(()) }
-            "rbi" => { validate_parameter("RBI", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p7 = value; self.mark_param_given(7); self.recompute_instance_static(); Ok(()) }
-            "re" => { validate_parameter("RE", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p8 = value; self.mark_param_given(8); self.recompute_instance_static(); Ok(()) }
-            "rs" => { validate_parameter("RS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p9 = value; self.mark_param_given(9); self.recompute_instance_static(); Ok(()) }
-            "rbp" => { validate_parameter("RBP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p10 = value; self.mark_param_given(10); self.recompute_instance_static(); Ok(()) }
-            "is" => { validate_parameter("IS", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p11 = value; self.mark_param_given(11); self.recompute_instance_static(); Ok(()) }
-            "nf" => { validate_parameter("NF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p12 = value; self.mark_param_given(12); self.recompute_instance_static(); Ok(()) }
-            "nr" => { validate_parameter("NR", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p13 = value; self.mark_param_given(13); self.recompute_instance_static(); Ok(()) }
-            "fc" => { validate_parameter("FC", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), true, &[])?; self.params.p14 = value; self.mark_param_given(14); self.recompute_instance_static(); Ok(()) }
-            "cbeo" => { validate_parameter("CBEO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); Ok(()) }
-            "cbe0" => { validate_parameter("CBEO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); Ok(()) }
-            "cje" => { validate_parameter("CJE", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p16 = value; self.mark_param_given(16); self.recompute_instance_static(); Ok(()) }
-            "pe" => { validate_parameter("PE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p17 = value; self.mark_param_given(17); self.recompute_instance_static(); Ok(()) }
-            "me" => { validate_parameter("ME", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p18 = value; self.mark_param_given(18); self.recompute_instance_static(); Ok(()) }
-            "aje" => { validate_finite_parameter("AJE", value)?; self.params.p19 = value; self.mark_param_given(19); self.recompute_instance_static(); Ok(()) }
-            "cbco" => { validate_parameter("CBCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); Ok(()) }
-            "cbc0" => { validate_parameter("CBCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); Ok(()) }
-            "cjc" => { validate_parameter("CJC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p21 = value; self.mark_param_given(21); self.recompute_instance_static(); Ok(()) }
-            "qco" => { validate_parameter("QCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); Ok(()) }
-            "qc0" => { validate_parameter("QCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); Ok(()) }
-            "cjep" => { validate_parameter("CJEP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p23 = value; self.mark_param_given(23); self.recompute_instance_static(); Ok(()) }
-            "pc" => { validate_parameter("PC", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p24 = value; self.mark_param_given(24); self.recompute_instance_static(); Ok(()) }
-            "mc" => { validate_parameter("MC", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p25 = value; self.mark_param_given(25); self.recompute_instance_static(); Ok(()) }
-            "ajc" => { validate_finite_parameter("AJC", value)?; self.params.p26 = value; self.mark_param_given(26); self.recompute_instance_static(); Ok(()) }
-            "cjcp" => { validate_parameter("CJCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p27 = value; self.mark_param_given(27); self.recompute_instance_static(); Ok(()) }
-            "ps" => { validate_parameter("PS", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p28 = value; self.mark_param_given(28); self.recompute_instance_static(); Ok(()) }
-            "ms" => { validate_parameter("MS", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p29 = value; self.mark_param_given(29); self.recompute_instance_static(); Ok(()) }
-            "ajs" => { validate_finite_parameter("AJS", value)?; self.params.p30 = value; self.mark_param_given(30); self.recompute_instance_static(); Ok(()) }
-            "ibei" => { validate_parameter("IBEI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p31 = value; self.mark_param_given(31); self.recompute_instance_static(); Ok(()) }
-            "wbe" => { validate_parameter("WBE", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p32 = value; self.mark_param_given(32); self.recompute_instance_static(); Ok(()) }
-            "nei" => { validate_parameter("NEI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p33 = value; self.mark_param_given(33); self.recompute_instance_static(); Ok(()) }
-            "iben" => { validate_parameter("IBEN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p34 = value; self.mark_param_given(34); self.recompute_instance_static(); Ok(()) }
-            "nen" => { validate_parameter("NEN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p35 = value; self.mark_param_given(35); self.recompute_instance_static(); Ok(()) }
-            "ibci" => { validate_parameter("IBCI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p36 = value; self.mark_param_given(36); self.recompute_instance_static(); Ok(()) }
-            "nci" => { validate_parameter("NCI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p37 = value; self.mark_param_given(37); self.recompute_instance_static(); Ok(()) }
-            "ibcn" => { validate_parameter("IBCN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p38 = value; self.mark_param_given(38); self.recompute_instance_static(); Ok(()) }
-            "ncn" => { validate_parameter("NCN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p39 = value; self.mark_param_given(39); self.recompute_instance_static(); Ok(()) }
-            "avc1" => { validate_parameter("AVC1", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p40 = value; self.mark_param_given(40); self.recompute_instance_static(); Ok(()) }
-            "avc2" => { validate_parameter("AVC2", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p41 = value; self.mark_param_given(41); self.recompute_instance_static(); Ok(()) }
-            "isp" => { validate_parameter("ISP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p42 = value; self.mark_param_given(42); self.recompute_instance_static(); Ok(()) }
-            "wsp" => { validate_parameter("WSP", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p43 = value; self.mark_param_given(43); self.recompute_instance_static(); Ok(()) }
-            "nfp" => { validate_parameter("NFP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p44 = value; self.mark_param_given(44); self.recompute_instance_static(); Ok(()) }
-            "ibeip" => { validate_parameter("IBEIP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p45 = value; self.mark_param_given(45); self.recompute_instance_static(); Ok(()) }
-            "ibenp" => { validate_parameter("IBENP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p46 = value; self.mark_param_given(46); self.recompute_instance_static(); Ok(()) }
-            "ibcip" => { validate_parameter("IBCIP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p47 = value; self.mark_param_given(47); self.recompute_instance_static(); Ok(()) }
-            "ncip" => { validate_parameter("NCIP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p48 = value; self.mark_param_given(48); self.recompute_instance_static(); Ok(()) }
-            "ibcnp" => { validate_parameter("IBCNP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p49 = value; self.mark_param_given(49); self.recompute_instance_static(); Ok(()) }
-            "ncnp" => { validate_parameter("NCNP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p50 = value; self.mark_param_given(50); self.recompute_instance_static(); Ok(()) }
-            "vef" => { validate_parameter("VEF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p51 = value; self.mark_param_given(51); self.recompute_instance_static(); Ok(()) }
-            "ver" => { validate_parameter("VER", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p52 = value; self.mark_param_given(52); self.recompute_instance_static(); Ok(()) }
-            "ikf" => { validate_parameter("IKF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p53 = value; self.mark_param_given(53); self.recompute_instance_static(); Ok(()) }
-            "ikr" => { validate_parameter("IKR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p54 = value; self.mark_param_given(54); self.recompute_instance_static(); Ok(()) }
-            "ikp" => { validate_parameter("IKP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p55 = value; self.mark_param_given(55); self.recompute_instance_static(); Ok(()) }
-            "tf" => { validate_parameter("TF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p56 = value; self.mark_param_given(56); self.recompute_instance_static(); Ok(()) }
-            "qtf" => { validate_parameter("QTF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p57 = value; self.mark_param_given(57); self.recompute_instance_static(); Ok(()) }
-            "xtf" => { validate_parameter("XTF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p58 = value; self.mark_param_given(58); self.recompute_instance_static(); Ok(()) }
-            "vtf" => { validate_parameter("VTF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p59 = value; self.mark_param_given(59); self.recompute_instance_static(); Ok(()) }
-            "itf" => { validate_parameter("ITF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p60 = value; self.mark_param_given(60); self.recompute_instance_static(); Ok(()) }
-            "tr" => { validate_parameter("TR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p61 = value; self.mark_param_given(61); self.recompute_instance_static(); Ok(()) }
-            "td" => { validate_parameter("TD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p62 = value; self.mark_param_given(62); self.recompute_instance_static(); Ok(()) }
-            "kfn" => { validate_parameter("KFN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p63 = value; self.mark_param_given(63); self.recompute_instance_static(); Ok(()) }
-            "afn" => { validate_parameter("AFN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p64 = value; self.mark_param_given(64); self.recompute_instance_static(); Ok(()) }
-            "bfn" => { validate_parameter("BFN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p65 = value; self.mark_param_given(65); self.recompute_instance_static(); Ok(()) }
-            "xre" => { validate_finite_parameter("XRE", value)?; self.params.p66 = value; self.mark_param_given(66); self.recompute_instance_static(); Ok(()) }
-            "xrbi" => { validate_finite_parameter("XRBI", value)?; self.params.p67 = value; self.mark_param_given(67); self.recompute_instance_static(); Ok(()) }
-            "xrci" => { validate_finite_parameter("XRCI", value)?; self.params.p68 = value; self.mark_param_given(68); self.recompute_instance_static(); Ok(()) }
-            "xrs" => { validate_finite_parameter("XRS", value)?; self.params.p69 = value; self.mark_param_given(69); self.recompute_instance_static(); Ok(()) }
-            "xvo" => { validate_finite_parameter("XVO", value)?; self.params.p70 = value; self.mark_param_given(70); self.recompute_instance_static(); Ok(()) }
-            "xv0" => { validate_finite_parameter("XVO", value)?; self.params.p70 = value; self.mark_param_given(70); self.recompute_instance_static(); Ok(()) }
-            "ea" => { validate_finite_parameter("EA", value)?; self.params.p71 = value; self.mark_param_given(71); self.recompute_instance_static(); Ok(()) }
-            "eaie" => { validate_finite_parameter("EAIE", value)?; self.params.p72 = value; self.mark_param_given(72); self.recompute_instance_static(); Ok(()) }
-            "eaic" => { validate_finite_parameter("EAIC", value)?; self.params.p73 = value; self.mark_param_given(73); self.recompute_instance_static(); Ok(()) }
-            "eais" => { validate_finite_parameter("EAIS", value)?; self.params.p74 = value; self.mark_param_given(74); self.recompute_instance_static(); Ok(()) }
-            "eane" => { validate_finite_parameter("EANE", value)?; self.params.p75 = value; self.mark_param_given(75); self.recompute_instance_static(); Ok(()) }
-            "eanc" => { validate_finite_parameter("EANC", value)?; self.params.p76 = value; self.mark_param_given(76); self.recompute_instance_static(); Ok(()) }
-            "eans" => { validate_finite_parameter("EANS", value)?; self.params.p77 = value; self.mark_param_given(77); self.recompute_instance_static(); Ok(()) }
-            "xis" => { validate_finite_parameter("XIS", value)?; self.params.p78 = value; self.mark_param_given(78); self.recompute_instance_static(); Ok(()) }
-            "xii" => { validate_finite_parameter("XII", value)?; self.params.p79 = value; self.mark_param_given(79); self.recompute_instance_static(); Ok(()) }
-            "xin" => { validate_finite_parameter("XIN", value)?; self.params.p80 = value; self.mark_param_given(80); self.recompute_instance_static(); Ok(()) }
-            "tnf" => { validate_finite_parameter("TNF", value)?; self.params.p81 = value; self.mark_param_given(81); self.recompute_instance_static(); Ok(()) }
-            "tavc" => { validate_finite_parameter("TAVC", value)?; self.params.p82 = value; self.mark_param_given(82); self.recompute_instance_static(); Ok(()) }
-            "rth" => { validate_parameter("RTH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p83 = value; self.mark_param_given(83); self.recompute_instance_static(); Ok(()) }
-            "cth" => { validate_parameter("CTH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p84 = value; self.mark_param_given(84); self.recompute_instance_static(); Ok(()) }
-            "vrt" => { validate_parameter("VRT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p85 = value; self.mark_param_given(85); self.recompute_instance_static(); Ok(()) }
-            "art" => { validate_parameter("ART", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p86 = value; self.mark_param_given(86); self.recompute_instance_static(); Ok(()) }
-            "ccso" => { validate_parameter("CCSO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p87 = value; self.mark_param_given(87); self.recompute_instance_static(); Ok(()) }
-            "ccs0" => { validate_parameter("CCSO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p87 = value; self.mark_param_given(87); self.recompute_instance_static(); Ok(()) }
-            "qbm" => { validate_finite_parameter("QBM", value)?; self.params.p88 = value; self.mark_param_given(88); self.recompute_instance_static(); Ok(()) }
-            "nkf" => { validate_parameter("NKF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p89 = value; self.mark_param_given(89); self.recompute_instance_static(); Ok(()) }
-            "xikf" => { validate_finite_parameter("XIKF", value)?; self.params.p90 = value; self.mark_param_given(90); self.recompute_instance_static(); Ok(()) }
-            "xrcx" => { validate_finite_parameter("XRCX", value)?; self.params.p91 = value; self.mark_param_given(91); self.recompute_instance_static(); Ok(()) }
-            "xrbx" => { validate_finite_parameter("XRBX", value)?; self.params.p92 = value; self.mark_param_given(92); self.recompute_instance_static(); Ok(()) }
-            "xrbp" => { validate_finite_parameter("XRBP", value)?; self.params.p93 = value; self.mark_param_given(93); self.recompute_instance_static(); Ok(()) }
-            "isrr" => { validate_parameter("ISRR", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p94 = value; self.mark_param_given(94); self.recompute_instance_static(); Ok(()) }
-            "xisr" => { validate_finite_parameter("XISR", value)?; self.params.p95 = value; self.mark_param_given(95); self.recompute_instance_static(); Ok(()) }
-            "dear" => { validate_finite_parameter("DEAR", value)?; self.params.p96 = value; self.mark_param_given(96); self.recompute_instance_static(); Ok(()) }
-            "eap" => { validate_finite_parameter("EAP", value)?; self.params.p97 = value; self.mark_param_given(97); self.recompute_instance_static(); Ok(()) }
-            "vbbe" => { validate_finite_parameter("VBBE", value)?; self.params.p98 = value; self.mark_param_given(98); self.recompute_instance_static(); Ok(()) }
-            "nbbe" => { validate_parameter("NBBE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p99 = value; self.mark_param_given(99); self.recompute_instance_static(); Ok(()) }
-            "ibbe" => { validate_finite_parameter("IBBE", value)?; self.params.p100 = value; self.mark_param_given(100); self.recompute_instance_static(); Ok(()) }
-            "tvbbe1" => { validate_finite_parameter("TVBBE1", value)?; self.params.p101 = value; self.mark_param_given(101); self.recompute_instance_static(); Ok(()) }
-            "tvbbe2" => { validate_finite_parameter("TVBBE2", value)?; self.params.p102 = value; self.mark_param_given(102); self.recompute_instance_static(); Ok(()) }
-            "tnbbe" => { validate_finite_parameter("TNBBE", value)?; self.params.p103 = value; self.mark_param_given(103); self.recompute_instance_static(); Ok(()) }
-            "ebbe" => { validate_finite_parameter("EBBE", value)?; self.params.p104 = value; self.mark_param_given(104); self.recompute_instance_static(); Ok(()) }
-            "dtemp" => { validate_finite_parameter("DTEMP", value)?; self.params.p105 = value; self.mark_param_given(105); self.recompute_instance_static(); Ok(()) }
-            "dtmp" => { validate_finite_parameter("DTEMP", value)?; self.params.p105 = value; self.mark_param_given(105); self.recompute_instance_static(); Ok(()) }
-            "vers" => { validate_finite_parameter("VERS", value)?; self.params.p106 = value; self.mark_param_given(106); self.recompute_instance_static(); Ok(()) }
-            "version" => { validate_finite_parameter("VERS", value)?; self.params.p106 = value; self.mark_param_given(106); self.recompute_instance_static(); Ok(()) }
-            "vrev" => { validate_finite_parameter("VREV", value)?; self.params.p107 = value; self.mark_param_given(107); self.recompute_instance_static(); Ok(()) }
+            "tnom" => { validate_finite_parameter("TNOM", value)?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tref" => { validate_finite_parameter("TNOM", value)?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "rcx" => { validate_parameter("RCX", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p1 = value; self.mark_param_given(1); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "rci" => { validate_parameter("RCI", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "vo" => { validate_parameter("VO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "v0" => { validate_parameter("VO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "gamm" => { validate_parameter("GAMM", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "gamma" => { validate_parameter("GAMM", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "hrcf" => { validate_parameter("HRCF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p5 = value; self.mark_param_given(5); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "rbx" => { validate_parameter("RBX", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p6 = value; self.mark_param_given(6); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "rbi" => { validate_parameter("RBI", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p7 = value; self.mark_param_given(7); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "re" => { validate_parameter("RE", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p8 = value; self.mark_param_given(8); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "rs" => { validate_parameter("RS", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p9 = value; self.mark_param_given(9); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "rbp" => { validate_parameter("RBP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p10 = value; self.mark_param_given(10); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "is" => { validate_parameter("IS", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p11 = value; self.mark_param_given(11); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nf" => { validate_parameter("NF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p12 = value; self.mark_param_given(12); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nr" => { validate_parameter("NR", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p13 = value; self.mark_param_given(13); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "fc" => { validate_parameter("FC", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), true, &[])?; self.params.p14 = value; self.mark_param_given(14); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cbeo" => { validate_parameter("CBEO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cbe0" => { validate_parameter("CBEO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cje" => { validate_parameter("CJE", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p16 = value; self.mark_param_given(16); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "pe" => { validate_parameter("PE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p17 = value; self.mark_param_given(17); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "me" => { validate_parameter("ME", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p18 = value; self.mark_param_given(18); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "aje" => { validate_finite_parameter("AJE", value)?; self.params.p19 = value; self.mark_param_given(19); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cbco" => { validate_parameter("CBCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cbc0" => { validate_parameter("CBCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cjc" => { validate_parameter("CJC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p21 = value; self.mark_param_given(21); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "qco" => { validate_parameter("QCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "qc0" => { validate_parameter("QCO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cjep" => { validate_parameter("CJEP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p23 = value; self.mark_param_given(23); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "pc" => { validate_parameter("PC", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p24 = value; self.mark_param_given(24); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "mc" => { validate_parameter("MC", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p25 = value; self.mark_param_given(25); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ajc" => { validate_finite_parameter("AJC", value)?; self.params.p26 = value; self.mark_param_given(26); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cjcp" => { validate_parameter("CJCP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p27 = value; self.mark_param_given(27); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ps" => { validate_parameter("PS", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p28 = value; self.mark_param_given(28); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ms" => { validate_parameter("MS", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p29 = value; self.mark_param_given(29); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ajs" => { validate_finite_parameter("AJS", value)?; self.params.p30 = value; self.mark_param_given(30); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibei" => { validate_parameter("IBEI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p31 = value; self.mark_param_given(31); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "wbe" => { validate_parameter("WBE", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p32 = value; self.mark_param_given(32); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nei" => { validate_parameter("NEI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p33 = value; self.mark_param_given(33); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "iben" => { validate_parameter("IBEN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p34 = value; self.mark_param_given(34); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nen" => { validate_parameter("NEN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p35 = value; self.mark_param_given(35); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibci" => { validate_parameter("IBCI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p36 = value; self.mark_param_given(36); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nci" => { validate_parameter("NCI", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p37 = value; self.mark_param_given(37); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibcn" => { validate_parameter("IBCN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p38 = value; self.mark_param_given(38); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ncn" => { validate_parameter("NCN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p39 = value; self.mark_param_given(39); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "avc1" => { validate_parameter("AVC1", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p40 = value; self.mark_param_given(40); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "avc2" => { validate_parameter("AVC2", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p41 = value; self.mark_param_given(41); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "isp" => { validate_parameter("ISP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p42 = value; self.mark_param_given(42); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "wsp" => { validate_parameter("WSP", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p43 = value; self.mark_param_given(43); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nfp" => { validate_parameter("NFP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p44 = value; self.mark_param_given(44); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibeip" => { validate_parameter("IBEIP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p45 = value; self.mark_param_given(45); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibenp" => { validate_parameter("IBENP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p46 = value; self.mark_param_given(46); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibcip" => { validate_parameter("IBCIP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p47 = value; self.mark_param_given(47); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ncip" => { validate_parameter("NCIP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p48 = value; self.mark_param_given(48); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibcnp" => { validate_parameter("IBCNP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p49 = value; self.mark_param_given(49); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ncnp" => { validate_parameter("NCNP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p50 = value; self.mark_param_given(50); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "vef" => { validate_parameter("VEF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p51 = value; self.mark_param_given(51); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ver" => { validate_parameter("VER", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p52 = value; self.mark_param_given(52); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ikf" => { validate_parameter("IKF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p53 = value; self.mark_param_given(53); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ikr" => { validate_parameter("IKR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p54 = value; self.mark_param_given(54); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ikp" => { validate_parameter("IKP", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p55 = value; self.mark_param_given(55); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tf" => { validate_parameter("TF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p56 = value; self.mark_param_given(56); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "qtf" => { validate_parameter("QTF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p57 = value; self.mark_param_given(57); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xtf" => { validate_parameter("XTF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p58 = value; self.mark_param_given(58); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "vtf" => { validate_parameter("VTF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p59 = value; self.mark_param_given(59); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "itf" => { validate_parameter("ITF", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p60 = value; self.mark_param_given(60); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tr" => { validate_parameter("TR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p61 = value; self.mark_param_given(61); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "td" => { validate_parameter("TD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p62 = value; self.mark_param_given(62); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "kfn" => { validate_parameter("KFN", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p63 = value; self.mark_param_given(63); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "afn" => { validate_parameter("AFN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p64 = value; self.mark_param_given(64); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "bfn" => { validate_parameter("BFN", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p65 = value; self.mark_param_given(65); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xre" => { validate_finite_parameter("XRE", value)?; self.params.p66 = value; self.mark_param_given(66); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xrbi" => { validate_finite_parameter("XRBI", value)?; self.params.p67 = value; self.mark_param_given(67); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xrci" => { validate_finite_parameter("XRCI", value)?; self.params.p68 = value; self.mark_param_given(68); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xrs" => { validate_finite_parameter("XRS", value)?; self.params.p69 = value; self.mark_param_given(69); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xvo" => { validate_finite_parameter("XVO", value)?; self.params.p70 = value; self.mark_param_given(70); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xv0" => { validate_finite_parameter("XVO", value)?; self.params.p70 = value; self.mark_param_given(70); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ea" => { validate_finite_parameter("EA", value)?; self.params.p71 = value; self.mark_param_given(71); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "eaie" => { validate_finite_parameter("EAIE", value)?; self.params.p72 = value; self.mark_param_given(72); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "eaic" => { validate_finite_parameter("EAIC", value)?; self.params.p73 = value; self.mark_param_given(73); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "eais" => { validate_finite_parameter("EAIS", value)?; self.params.p74 = value; self.mark_param_given(74); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "eane" => { validate_finite_parameter("EANE", value)?; self.params.p75 = value; self.mark_param_given(75); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "eanc" => { validate_finite_parameter("EANC", value)?; self.params.p76 = value; self.mark_param_given(76); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "eans" => { validate_finite_parameter("EANS", value)?; self.params.p77 = value; self.mark_param_given(77); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xis" => { validate_finite_parameter("XIS", value)?; self.params.p78 = value; self.mark_param_given(78); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xii" => { validate_finite_parameter("XII", value)?; self.params.p79 = value; self.mark_param_given(79); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xin" => { validate_finite_parameter("XIN", value)?; self.params.p80 = value; self.mark_param_given(80); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tnf" => { validate_finite_parameter("TNF", value)?; self.params.p81 = value; self.mark_param_given(81); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tavc" => { validate_finite_parameter("TAVC", value)?; self.params.p82 = value; self.mark_param_given(82); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "rth" => { validate_parameter("RTH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p83 = value; self.mark_param_given(83); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "cth" => { validate_parameter("CTH", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p84 = value; self.mark_param_given(84); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "vrt" => { validate_parameter("VRT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p85 = value; self.mark_param_given(85); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "art" => { validate_parameter("ART", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p86 = value; self.mark_param_given(86); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ccso" => { validate_parameter("CCSO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p87 = value; self.mark_param_given(87); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ccs0" => { validate_parameter("CCSO", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p87 = value; self.mark_param_given(87); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "qbm" => { validate_finite_parameter("QBM", value)?; self.params.p88 = value; self.mark_param_given(88); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nkf" => { validate_parameter("NKF", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p89 = value; self.mark_param_given(89); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xikf" => { validate_finite_parameter("XIKF", value)?; self.params.p90 = value; self.mark_param_given(90); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xrcx" => { validate_finite_parameter("XRCX", value)?; self.params.p91 = value; self.mark_param_given(91); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xrbx" => { validate_finite_parameter("XRBX", value)?; self.params.p92 = value; self.mark_param_given(92); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xrbp" => { validate_finite_parameter("XRBP", value)?; self.params.p93 = value; self.mark_param_given(93); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "isrr" => { validate_parameter("ISRR", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p94 = value; self.mark_param_given(94); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "xisr" => { validate_finite_parameter("XISR", value)?; self.params.p95 = value; self.mark_param_given(95); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "dear" => { validate_finite_parameter("DEAR", value)?; self.params.p96 = value; self.mark_param_given(96); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "eap" => { validate_finite_parameter("EAP", value)?; self.params.p97 = value; self.mark_param_given(97); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "vbbe" => { validate_finite_parameter("VBBE", value)?; self.params.p98 = value; self.mark_param_given(98); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "nbbe" => { validate_parameter("NBBE", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p99 = value; self.mark_param_given(99); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ibbe" => { validate_finite_parameter("IBBE", value)?; self.params.p100 = value; self.mark_param_given(100); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tvbbe1" => { validate_finite_parameter("TVBBE1", value)?; self.params.p101 = value; self.mark_param_given(101); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tvbbe2" => { validate_finite_parameter("TVBBE2", value)?; self.params.p102 = value; self.mark_param_given(102); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "tnbbe" => { validate_finite_parameter("TNBBE", value)?; self.params.p103 = value; self.mark_param_given(103); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "ebbe" => { validate_finite_parameter("EBBE", value)?; self.params.p104 = value; self.mark_param_given(104); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "dtemp" => { validate_finite_parameter("DTEMP", value)?; self.params.p105 = value; self.mark_param_given(105); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "dtmp" => { validate_finite_parameter("DTEMP", value)?; self.params.p105 = value; self.mark_param_given(105); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "vers" => { validate_finite_parameter("VERS", value)?; self.params.p106 = value; self.mark_param_given(106); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "version" => { validate_finite_parameter("VERS", value)?; self.params.p106 = value; self.mark_param_given(106); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
+            "vrev" => { validate_finite_parameter("VREV", value)?; self.params.p107 = value; self.mark_param_given(107); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
             _ => Err(format!("unknown parameter '{}' for generated Verilog-A model 'vbic_4T_et_cf'", name)),
         }
     }
@@ -2630,7 +2650,7 @@ impl Instance {
         self.scalar_v186 = v186;
         let v187: f64 = (0.5 * p.p17);
         self.scalar_v187 = v187;
-        let v192: f64 = (-0.5 * p.p17);
+        let v192: f64 = (p.p17 * -0.5);
         self.scalar_v192 = v192;
         let v221: f64 = p.p24;
         self.scalar_v221 = v221;
@@ -2746,7 +2766,7 @@ impl Instance {
         self.scalar_v390 = v390;
         let v392: f64 = (4.0 * p.p19);
         self.scalar_v392 = v392;
-        let v393: f64 = (v392 * p.p19);
+        let v393: f64 = (p.p19 * v392);
         self.scalar_v393 = v393;
         let v421: f64 = (-p.p18);
         self.scalar_v421 = v421;
@@ -2778,15 +2798,15 @@ impl Instance {
         self.scalar_v549 = v549;
         let v550: bool = (!v492);
         self.scalar_v550 = v550;
-        let v551: bool = (v550 && v549);
+        let v551: bool = (v549 && v550);
         self.scalar_v551 = v551;
         let v559: f64 = (4.0 * p.p26);
         self.scalar_v559 = v559;
-        let v560: f64 = (v559 * p.p26);
+        let v560: f64 = (p.p26 * v559);
         self.scalar_v560 = v560;
         let v565: f64 = (4.0 * p.p86);
         self.scalar_v565 = v565;
-        let v566: f64 = (v565 * p.p86);
+        let v566: f64 = (p.p86 * v565);
         self.scalar_v566 = v566;
         let v616: f64 = (-p.p25);
         self.scalar_v616 = v616;
@@ -2818,7 +2838,7 @@ impl Instance {
         self.scalar_v860 = v860;
         let v862: f64 = (4.0 * p.p30);
         self.scalar_v862 = v862;
-        let v863: f64 = (v862 * p.p30);
+        let v863: f64 = (p.p30 * v862);
         self.scalar_v863 = v863;
         let v891: f64 = (-p.p29);
         self.scalar_v891 = v891;
@@ -2846,7 +2866,7 @@ impl Instance {
         self.scalar_v985 = v985;
         let v989: f64 = p.p32;
         self.scalar_v989 = v989;
-        let v990: bool = (p.p32 == 1.0);
+        let v990: bool = (1.0 == p.p32);
         self.scalar_v990 = v990;
         let v1001: bool = (p.p98 > 0.0);
         self.scalar_v1001 = v1001;
@@ -2860,23 +2880,23 @@ impl Instance {
         self.scalar_v1019 = v1019;
         let v1021: f64 = (if v990 { 0.0 } else { 0.0 });
         self.scalar_v1021 = v1021;
-        let v1022: bool = (p.p32 == 0.0);
+        let v1022: bool = (0.0 == p.p32);
         self.scalar_v1022 = v1022;
         let v1023: bool = (!v990);
         self.scalar_v1023 = v1023;
-        let v1024: bool = (v1023 && v1022);
+        let v1024: bool = (v1022 && v1023);
         self.scalar_v1024 = v1024;
-        let v1034: bool = (v1024 && v1001);
+        let v1034: bool = (v1001 && v1024);
         self.scalar_v1034 = v1034;
-        let v1049: bool = (v1024 && v1018);
+        let v1049: bool = (v1018 && v1024);
         self.scalar_v1049 = v1049;
         let v1051: bool = (!v1022);
         self.scalar_v1051 = v1051;
         let v1052: bool = (v1023 && v1051);
         self.scalar_v1052 = v1052;
-        let v1059: bool = (v1052 && v1001);
+        let v1059: bool = (v1001 && v1052);
         self.scalar_v1059 = v1059;
-        let v1073: bool = (v1052 && v1018);
+        let v1073: bool = (v1018 && v1052);
         self.scalar_v1073 = v1073;
         let v1085: f64 = (1.0 - p.p32);
         self.scalar_v1085 = v1085;
@@ -3062,153 +3082,178 @@ impl Instance {
         self.scalar_v1730 = v1730;
         let v1760: f64 = (v368 - 1.0);
         self.scalar_v1760 = v1760;
-        let v1812: f64 = (if v390 { 1.0 } else { 0.0 });
+        let v1811: f64 = (if v390 { 1.0 } else { 0.0 });
+        self.scalar_v1811 = v1811;
+        let v1812: f64 = (if v390 { -1.0 } else { 0.0 });
         self.scalar_v1812 = v1812;
-        let v1813: f64 = (if v390 { -1.0 } else { 0.0 });
-        self.scalar_v1813 = v1813;
-        let v1880: f64 = (if v354 { 0.0 } else { v1723 });
-        self.scalar_v1880 = v1880;
-        let v1881: f64 = (if v354 { -1.0 } else { v1724 });
-        self.scalar_v1881 = v1881;
-        let v1888: f64 = (v371 * v1880);
-        self.scalar_v1888 = v1888;
-        let v1889: f64 = (v371 * v1881);
-        self.scalar_v1889 = v1889;
-        let v1970: f64 = (if v390 { 0.0 } else { v1812 });
-        self.scalar_v1970 = v1970;
-        let v1971: f64 = (if v390 { -1.0 } else { v1813 });
-        self.scalar_v1971 = v1971;
-        let v2058: f64 = (if v492 { -1.0 } else { 0.0 });
-        self.scalar_v2058 = v2058;
-        let v2059: f64 = (if v492 { 0.0 } else { v1723 });
-        self.scalar_v2059 = v2059;
-        let v2060: f64 = (if v492 { 1.0 } else { v1880 });
-        self.scalar_v2060 = v2060;
-        let v2061: f64 = (if v492 { 0.0 } else { v1881 });
+        let v1876: f64 = (if v354 { 0.0 } else { v1723 });
+        self.scalar_v1876 = v1876;
+        let v1877: f64 = (if v354 { -1.0 } else { v1724 });
+        self.scalar_v1877 = v1877;
+        let v1884: f64 = (v371 * v1876);
+        self.scalar_v1884 = v1884;
+        let v1885: f64 = (v371 * v1877);
+        self.scalar_v1885 = v1885;
+        let v1966: f64 = (if v390 { 0.0 } else { v1811 });
+        self.scalar_v1966 = v1966;
+        let v1967: f64 = (if v390 { -1.0 } else { v1812 });
+        self.scalar_v1967 = v1967;
+        let v2050: f64 = (if v492 { -1.0 } else { 0.0 });
+        self.scalar_v2050 = v2050;
+        let v2051: f64 = (if v492 { 0.0 } else { v1723 });
+        self.scalar_v2051 = v2051;
+        let v2052: f64 = (if v492 { 1.0 } else { v1876 });
+        self.scalar_v2052 = v2052;
+        let v2053: f64 = (if v492 { 0.0 } else { v1877 });
+        self.scalar_v2053 = v2053;
+        let v2061: f64 = (v507 * v2050);
         self.scalar_v2061 = v2061;
-        let v2069: f64 = (v507 * v2058);
-        self.scalar_v2069 = v2069;
-        let v2070: f64 = (v507 * v2059);
-        self.scalar_v2070 = v2070;
-        let v2071: f64 = (v507 * v2060);
-        self.scalar_v2071 = v2071;
-        let v2072: f64 = (v507 * v2061);
-        self.scalar_v2072 = v2072;
-        let v2109: f64 = (v504 - 1.0);
-        self.scalar_v2109 = v2109;
-        let v2113: f64 = (v504 * -1.0);
-        self.scalar_v2113 = v2113;
-        let v2352: f64 = (v616 - 1.0);
-        self.scalar_v2352 = v2352;
-        let v2440: f64 = (if v636 { -1.0 } else { 0.0 });
-        self.scalar_v2440 = v2440;
-        let v2441: f64 = (if v636 { 0.0 } else { v1812 });
-        self.scalar_v2441 = v2441;
-        let v2442: f64 = (if v636 { 1.0 } else { v1970 });
-        self.scalar_v2442 = v2442;
-        let v2443: f64 = (if v636 { 0.0 } else { v1971 });
-        self.scalar_v2443 = v2443;
-        let v2546: f64 = (if v492 { 0.0 } else { v2058 });
-        self.scalar_v2546 = v2546;
-        let v2547: f64 = (if v492 { 1.0 } else { v2059 });
-        self.scalar_v2547 = v2547;
-        let v2548: f64 = (if v492 { 0.0 } else { v2060 });
-        self.scalar_v2548 = v2548;
-        let v2549: f64 = (if v492 { 0.0 } else { v2061 });
-        self.scalar_v2549 = v2549;
-        let v2558: f64 = (v507 * v2546);
-        self.scalar_v2558 = v2558;
-        let v2559: f64 = (v507 * v2547);
-        self.scalar_v2559 = v2559;
-        let v2560: f64 = (v507 * v2548);
-        self.scalar_v2560 = v2560;
-        let v2561: f64 = (v507 * v2549);
-        self.scalar_v2561 = v2561;
-        let v2952: f64 = (if v636 { 0.0 } else { v2440 });
-        self.scalar_v2952 = v2952;
-        let v2953: f64 = (if v636 { 1.0 } else { v2441 });
-        self.scalar_v2953 = v2953;
-        let v2954: f64 = (if v636 { 0.0 } else { v2442 });
-        self.scalar_v2954 = v2954;
-        let v2955: f64 = (if v636 { 0.0 } else { v2443 });
-        self.scalar_v2955 = v2955;
-        let v3079: f64 = (if v823 { 0.0 } else { v2546 });
-        self.scalar_v3079 = v3079;
-        let v3080: f64 = (if v823 { 0.0 } else { v2547 });
-        self.scalar_v3080 = v3080;
-        let v3081: f64 = (if v823 { 0.0 } else { v2548 });
-        self.scalar_v3081 = v3081;
-        let v3082: f64 = (if v823 { 0.0 } else { v2549 });
-        self.scalar_v3082 = v3082;
-        let v3083: f64 = (if v823 { -1.0 } else { v2058 });
-        self.scalar_v3083 = v3083;
-        let v3084: f64 = (if v823 { 1.0 } else { 0.0 });
-        self.scalar_v3084 = v3084;
-        let v3094: f64 = (v840 * v3079);
-        self.scalar_v3094 = v3094;
-        let v3095: f64 = (v840 * v3080);
-        self.scalar_v3095 = v3095;
-        let v3096: f64 = (v840 * v3081);
-        self.scalar_v3096 = v3096;
-        let v3097: f64 = (v840 * v3082);
-        self.scalar_v3097 = v3097;
-        let v3098: f64 = (v840 * v3083);
-        self.scalar_v3098 = v3098;
-        let v3099: f64 = (v840 * v3084);
-        self.scalar_v3099 = v3099;
-        let v3153: f64 = (v837 - 1.0);
-        self.scalar_v3153 = v3153;
-        let v3221: f64 = (if v860 { 0.0 } else { v2952 });
-        self.scalar_v3221 = v3221;
-        let v3222: f64 = (if v860 { 0.0 } else { v2953 });
-        self.scalar_v3222 = v3222;
-        let v3223: f64 = (if v860 { 0.0 } else { v2954 });
-        self.scalar_v3223 = v3223;
-        let v3224: f64 = (if v860 { 0.0 } else { v2955 });
-        self.scalar_v3224 = v3224;
-        let v3225: f64 = (if v860 { -1.0 } else { v2440 });
-        self.scalar_v3225 = v3225;
-        let v3226: f64 = (if v860 { 1.0 } else { 0.0 });
-        self.scalar_v3226 = v3226;
-        let v3462: f64 = (v932 - 1.0);
-        self.scalar_v3462 = v3462;
-        let v3478: f64 = (p.p89 - 1.0);
-        self.scalar_v3478 = v3478;
-        let v3567: f64 = (p.p44 * 8.617342301212761e-5);
-        self.scalar_v3567 = v3567;
-        let v3740: f64 = (p.p33 * 8.617342301212761e-5);
-        self.scalar_v3740 = v3740;
-        let v3769: f64 = (p.p35 * 8.617342301212761e-5);
-        self.scalar_v3769 = v3769;
-        let v4169: f64 = (p.p37 * 8.617342301212761e-5);
-        self.scalar_v4169 = v4169;
-        let v4180: f64 = (p.p39 * 8.617342301212761e-5);
-        self.scalar_v4180 = v4180;
-        let v4302: f64 = (-v1536);
-        self.scalar_v4302 = v4302;
-        let v4303: f64 = (v1140 - 1.0);
-        self.scalar_v4303 = v4303;
-        let v4659: f64 = (p.p48 * 8.617342301212761e-5);
-        self.scalar_v4659 = v4659;
-        let v4682: f64 = (p.p50 * 8.617342301212761e-5);
-        self.scalar_v4682 = v4682;
-        let v4781: f64 = (-1.0 * v333);
-        self.scalar_v4781 = v4781;
-        let v4782: f64 = (v4781 / 1.44);
-        self.scalar_v4782 = v4782;
-        let v4783: f64 = (v333 / 1.44);
-        self.scalar_v4783 = v4783;
-        let v4922: f64 = (p.p87 * -1.0);
-        self.scalar_v4922 = v4922;
-        let v4925: f64 = (-1.0 * p.p15);
-        self.scalar_v4925 = v4925;
-        let v4926: f64 = (-1.0 * p.p20);
-        self.scalar_v4926 = v4926;
-        let v5109: f64 = (1.0 / p.p83);
-        self.scalar_v5109 = v5109;
-        let v5110: f64 = (if v1339 { v5109 } else { 0.0 });
-        self.scalar_v5110 = v5110;
-        let v5111: f64 = (if v1342 { 0.0 } else { v5110 });
-        self.scalar_v5111 = v5111;
+        let v2062: f64 = (v507 * v2051);
+        self.scalar_v2062 = v2062;
+        let v2063: f64 = (v507 * v2052);
+        self.scalar_v2063 = v2063;
+        let v2064: f64 = (v507 * v2053);
+        self.scalar_v2064 = v2064;
+        let v2101: f64 = (v504 - 1.0);
+        self.scalar_v2101 = v2101;
+        let v2105: f64 = (-v504);
+        self.scalar_v2105 = v2105;
+        let v2336: f64 = (v616 - 1.0);
+        self.scalar_v2336 = v2336;
+        let v2423: f64 = (if v636 { -1.0 } else { 0.0 });
+        self.scalar_v2423 = v2423;
+        let v2424: f64 = (if v636 { 0.0 } else { v1811 });
+        self.scalar_v2424 = v2424;
+        let v2425: f64 = (if v636 { 1.0 } else { v1966 });
+        self.scalar_v2425 = v2425;
+        let v2426: f64 = (if v636 { 0.0 } else { v1967 });
+        self.scalar_v2426 = v2426;
+        let v2524: f64 = (if v492 { 0.0 } else { v2050 });
+        self.scalar_v2524 = v2524;
+        let v2525: f64 = (if v492 { 1.0 } else { v2051 });
+        self.scalar_v2525 = v2525;
+        let v2526: f64 = (if v492 { 0.0 } else { v2052 });
+        self.scalar_v2526 = v2526;
+        let v2527: f64 = (if v492 { 0.0 } else { v2053 });
+        self.scalar_v2527 = v2527;
+        let v2536: f64 = (v507 * v2524);
+        self.scalar_v2536 = v2536;
+        let v2537: f64 = (v507 * v2525);
+        self.scalar_v2537 = v2537;
+        let v2538: f64 = (v507 * v2526);
+        self.scalar_v2538 = v2538;
+        let v2539: f64 = (v507 * v2527);
+        self.scalar_v2539 = v2539;
+        let v2918: f64 = (if v636 { 0.0 } else { v2423 });
+        self.scalar_v2918 = v2918;
+        let v2919: f64 = (if v636 { 1.0 } else { v2424 });
+        self.scalar_v2919 = v2919;
+        let v2920: f64 = (if v636 { 0.0 } else { v2425 });
+        self.scalar_v2920 = v2920;
+        let v2921: f64 = (if v636 { 0.0 } else { v2426 });
+        self.scalar_v2921 = v2921;
+        let v3039: f64 = (if v823 { 0.0 } else { v2524 });
+        self.scalar_v3039 = v3039;
+        let v3040: f64 = (if v823 { 0.0 } else { v2525 });
+        self.scalar_v3040 = v3040;
+        let v3041: f64 = (if v823 { 0.0 } else { v2526 });
+        self.scalar_v3041 = v3041;
+        let v3042: f64 = (if v823 { 0.0 } else { v2527 });
+        self.scalar_v3042 = v3042;
+        let v3043: f64 = (if v823 { -1.0 } else { v2050 });
+        self.scalar_v3043 = v3043;
+        let v3044: f64 = (if v823 { 1.0 } else { 0.0 });
+        self.scalar_v3044 = v3044;
+        let v3054: f64 = (v840 * v3039);
+        self.scalar_v3054 = v3054;
+        let v3055: f64 = (v840 * v3040);
+        self.scalar_v3055 = v3055;
+        let v3056: f64 = (v840 * v3041);
+        self.scalar_v3056 = v3056;
+        let v3057: f64 = (v840 * v3042);
+        self.scalar_v3057 = v3057;
+        let v3058: f64 = (v840 * v3043);
+        self.scalar_v3058 = v3058;
+        let v3059: f64 = (v840 * v3044);
+        self.scalar_v3059 = v3059;
+        let v3113: f64 = (v837 - 1.0);
+        self.scalar_v3113 = v3113;
+        let v3180: f64 = (if v860 { 0.0 } else { v2918 });
+        self.scalar_v3180 = v3180;
+        let v3181: f64 = (if v860 { 0.0 } else { v2919 });
+        self.scalar_v3181 = v3181;
+        let v3182: f64 = (if v860 { 0.0 } else { v2920 });
+        self.scalar_v3182 = v3182;
+        let v3183: f64 = (if v860 { 0.0 } else { v2921 });
+        self.scalar_v3183 = v3183;
+        let v3184: f64 = (if v860 { -1.0 } else { v2423 });
+        self.scalar_v3184 = v3184;
+        let v3185: f64 = (if v860 { 1.0 } else { 0.0 });
+        self.scalar_v3185 = v3185;
+        let v3409: f64 = (v932 - 1.0);
+        self.scalar_v3409 = v3409;
+        let v3425: f64 = (p.p89 - 1.0);
+        self.scalar_v3425 = v3425;
+        let v3514: f64 = (p.p44 * 8.617342301212761e-5);
+        self.scalar_v3514 = v3514;
+        let v3687: f64 = (p.p33 * 8.617342301212761e-5);
+        self.scalar_v3687 = v3687;
+        let v3716: f64 = (p.p35 * 8.617342301212761e-5);
+        self.scalar_v3716 = v3716;
+        let v4116: f64 = (p.p37 * 8.617342301212761e-5);
+        self.scalar_v4116 = v4116;
+        let v4127: f64 = (p.p39 * 8.617342301212761e-5);
+        self.scalar_v4127 = v4127;
+        let v4247: f64 = (-v1536);
+        self.scalar_v4247 = v4247;
+        let v4248: f64 = (v1140 - 1.0);
+        self.scalar_v4248 = v4248;
+        let v4599: f64 = (p.p48 * 8.617342301212761e-5);
+        self.scalar_v4599 = v4599;
+        let v4622: f64 = (p.p50 * 8.617342301212761e-5);
+        self.scalar_v4622 = v4622;
+        let v4721: f64 = (-v333);
+        self.scalar_v4721 = v4721;
+        let v4722: f64 = (v4721 / 1.44);
+        self.scalar_v4722 = v4722;
+        let v4723: f64 = (v333 / 1.44);
+        self.scalar_v4723 = v4723;
+        let v4859: f64 = (-p.p87);
+        self.scalar_v4859 = v4859;
+        let v4862: f64 = (-p.p15);
+        self.scalar_v4862 = v4862;
+        let v4863: f64 = (-p.p20);
+        self.scalar_v4863 = v4863;
+        let v5046: f64 = (1.0 / p.p83);
+        self.scalar_v5046 = v5046;
+        let v5047: f64 = (if v1339 { v5046 } else { 0.0 });
+        self.scalar_v5047 = v5047;
+        let v5048: f64 = (if v1342 { 0.0 } else { v5047 });
+        self.scalar_v5048 = v5048;
+    }
+
+    #[inline]
+    fn invalidate_temperature_static(&mut self) {
+        self.scalar_temperature_static_valid = false;
+    }
+
+    #[inline]
+    pub(super) fn ensure_temperature_static(&mut self, temperature: f64, thermal_voltage: f64) {
+        if !self.scalar_temperature_static_valid
+            || self.scalar_temperature_static_temperature.to_bits() != temperature.to_bits()
+            || self.scalar_temperature_static_thermal_voltage.to_bits() != thermal_voltage.to_bits()
+        {
+            self.recompute_temperature_static(temperature, thermal_voltage);
+        }
+    }
+
+    #[inline]
+    fn recompute_temperature_static(&mut self, temperature: f64, thermal_voltage: f64) {
+        let p = &(*self.params);
+        let v5: f64 = (temperature + self.scalar_v4);
+        self.scalar_v5 = v5;
+        self.scalar_temperature_static_temperature = temperature;
+        self.scalar_temperature_static_thermal_voltage = thermal_voltage;
+        self.scalar_temperature_static_valid = true;
     }
 }

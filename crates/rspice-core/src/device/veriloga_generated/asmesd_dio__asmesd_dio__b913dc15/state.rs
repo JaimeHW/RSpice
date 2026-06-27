@@ -708,13 +708,13 @@ impl Instance {
         self.scalar_v10 = v10;
         let v11: f64 = p.p32;
         self.scalar_v11 = v11;
-        let v12: bool = (p.p32 == 1.0);
+        let v12: bool = (1.0 == p.p32);
         self.scalar_v12 = v12;
         let v13: bool = (!v12);
         self.scalar_v13 = v13;
         let v14: f64 = p.p30;
         self.scalar_v14 = v14;
-        let v15: bool = (p.p30 == 1.0);
+        let v15: bool = (1.0 == p.p30);
         self.scalar_v15 = v15;
         let v16: f64 = p.p33;
         self.scalar_v16 = v16;
@@ -724,7 +724,7 @@ impl Instance {
         self.scalar_v18 = v18;
         let v20: bool = (p.p30 == 2.0);
         self.scalar_v20 = v20;
-        let v21: bool = (v20 && v17);
+        let v21: bool = (v17 && v20);
         self.scalar_v21 = v21;
         let v22: f64 = p.p35;
         self.scalar_v22 = v22;
@@ -774,7 +774,7 @@ impl Instance {
         self.scalar_v47 = v47;
         let v48: bool = (v46 && v47);
         self.scalar_v48 = v48;
-        let v49: bool = (v48 && v26);
+        let v49: bool = (v26 && v48);
         self.scalar_v49 = v49;
         let v50: f64 = (if v49 { 0.0 } else { 0.0 });
         self.scalar_v50 = v50;
