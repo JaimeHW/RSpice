@@ -1,8 +1,21 @@
 use super::*;
+use crate::Value;
 
 //=============================================================================
 // Basic Gates
 //=============================================================================
+
+const INITIAL_GATE_STATE: i64 = i64::MIN;
+
+fn gate_delay(ctx: &CmContext, new_state: i64, prev_state: i64, rise: Value, fall: Value) -> Value {
+    if ctx.time == 0.0 || prev_state == INITIAL_GATE_STATE {
+        0.0
+    } else if new_state == 1 {
+        rise
+    } else {
+        fall
+    }
+}
 
 macro_rules! define_gate {
     ($name:ident, $spice_name:expr, $desc:expr, $op:expr) => {
@@ -41,6 +54,7 @@ macro_rules! define_gate {
 
             fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
                 ctx.allocate_int_states(1);
+                ctx.set_int_state(0, INITIAL_GATE_STATE);
                 Ok(())
             }
 
@@ -61,7 +75,7 @@ macro_rules! define_gate {
 
                 if new_state != prev {
                     let val = DigitalValue::new(result, DigitalStrength::Strong);
-                    let delay = if new_state == 1 { rise } else { fall };
+                    let delay = gate_delay(ctx, new_state, prev, rise, fall);
                     ctx.set_output_digital("out", val, delay);
                 }
                 ctx.set_int_state(0, new_state);
@@ -129,6 +143,7 @@ impl CodeModel for DigitalNand {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
+        ctx.set_int_state(0, INITIAL_GATE_STATE);
         Ok(())
     }
 
@@ -149,7 +164,7 @@ impl CodeModel for DigitalNand {
 
         if new_state != prev {
             let val = DigitalValue::new(result, DigitalStrength::Strong);
-            let delay = if new_state == 1 { rise } else { fall };
+            let delay = gate_delay(ctx, new_state, prev, rise, fall);
             ctx.set_output_digital("out", val, delay);
         }
         ctx.set_int_state(0, new_state);
@@ -176,6 +191,7 @@ impl CodeModel for DigitalNor {
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
+        ctx.set_int_state(0, INITIAL_GATE_STATE);
         Ok(())
     }
 
@@ -196,7 +212,7 @@ impl CodeModel for DigitalNor {
             ctx.set_output_digital(
                 "out",
                 DigitalValue::new(result, DigitalStrength::Strong),
-                if new_state == 1 { rise } else { fall },
+                gate_delay(ctx, new_state, prev, rise, fall),
             );
         }
         ctx.set_int_state(0, new_state);
@@ -223,6 +239,7 @@ impl CodeModel for DigitalXnor {
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
+        ctx.set_int_state(0, INITIAL_GATE_STATE);
         Ok(())
     }
 
@@ -243,7 +260,7 @@ impl CodeModel for DigitalXnor {
             ctx.set_output_digital(
                 "out",
                 DigitalValue::new(result, DigitalStrength::Strong),
-                if new_state == 1 { rise } else { fall },
+                gate_delay(ctx, new_state, prev, rise, fall),
             );
         }
         ctx.set_int_state(0, new_state);
@@ -279,6 +296,7 @@ impl CodeModel for DigitalInverter {
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
+        ctx.set_int_state(0, INITIAL_GATE_STATE);
         Ok(())
     }
 
@@ -299,7 +317,7 @@ impl CodeModel for DigitalInverter {
             ctx.set_output_digital(
                 "out",
                 DigitalValue::new(result, DigitalStrength::Strong),
-                if new_state == 1 { rise } else { fall },
+                gate_delay(ctx, new_state, prev, rise, fall),
             );
         }
         ctx.set_int_state(0, new_state);
@@ -326,6 +344,7 @@ impl CodeModel for DigitalBuffer {
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
+        ctx.set_int_state(0, INITIAL_GATE_STATE);
         Ok(())
     }
 
@@ -346,7 +365,7 @@ impl CodeModel for DigitalBuffer {
             ctx.set_output_digital(
                 "out",
                 DigitalValue::new(result, DigitalStrength::Strong),
-                if new_state == 1 { rise } else { fall },
+                gate_delay(ctx, new_state, prev, rise, fall),
             );
         }
         ctx.set_int_state(0, new_state);
