@@ -4367,6 +4367,22 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sqrt_add_scaled_square_input(&mut self, index: usize, square_source: usize, square_scale: f64, input: usize, input_scale: f64) {
+        let square_value = self.v[square_source];
+        let input_value = self.v[input];
+        let value = (square_value * square_value * square_scale + input_value * input_scale).sqrt();
+        let square_derivative_scale = square_value * square_scale / value;
+        let input_derivative_scale = input_scale / (2.0 * value);
+        let square_dn = self.dn[square_source];
+        let input_dn = self.dn[input];
+        let square_db = self.db[square_source];
+        let input_db = self.db[input];
+        self.v[index] = value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + input_dn[axis] * input_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + input_db[axis] * input_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_sqrt_square_sum(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
@@ -14317,6 +14333,22 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_scale + add_dn[axis] * add_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_scale + add_db[axis] * add_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_add_scaled_square_input(&mut self, index: usize, square_source: usize, square_scale: f64, input: usize, input_scale: f64) {
+        let square_value = self.v[square_source];
+        let input_value = self.v[input];
+        let value = (square_value * square_value * square_scale + input_value * input_scale).sqrt();
+        let square_derivative_scale = square_value * square_scale / value;
+        let input_derivative_scale = input_scale / (2.0 * value);
+        let square_dn = self.dn[square_source];
+        let input_dn = self.dn[input];
+        let square_db = self.db[square_source];
+        let input_db = self.db[input];
+        self.v[index] = value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + input_dn[axis] * input_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + input_db[axis] * input_derivative_scale; }
     }
 
     #[inline]

@@ -4666,7 +4666,7 @@ impl Instance {
 
         s.store_offset_sub_scaled_inputs(335, s.ad_value(123), s.v[334], s.ad_value(364), s.v[338], (-0.001));
 
-        s.store_sqrt_ad(336, A::add_scaled_inputs(A::square(s.ad_value(335)), 1.0, s.ad_value(123), ((4.0 * s.v[334]) * 0.001)));
+        s.store_sqrt_add_scaled_square_input(336, 335, 1.0, 123, ((4.0 * s.v[334]) * 0.001));
 
         s.store_add_scaled_inputs3(337, s.ad_value(123), s.v[334], s.ad_value(335), (-0.5), s.ad_value(336), (-0.5));
 

@@ -283,7 +283,7 @@ impl Instance {
         if (((!s.b[1620]) && (!s.b[1878])) && (!s.b[1882])) {
             s.store_offset_div_scaled_inputs2(167, s.ad_value(498), 1.0, s.ad_value(499), 1.0, s.ad_value(580), 1.0, 1.0);
             s.store_add(168, 583, 584);
-            s.store_sqrt_ad(170, A::add_scaled_inputs(A::square(s.ad_value(167)), 1.0, s.ad_value(168), 4.0));
+            s.store_sqrt_add_scaled_square_input(170, 167, 1.0, 168, 4.0);
             s.store_scaled_add(169, 167, 170, 0.5);
             s.store_mul(167, 603, 604);
         }

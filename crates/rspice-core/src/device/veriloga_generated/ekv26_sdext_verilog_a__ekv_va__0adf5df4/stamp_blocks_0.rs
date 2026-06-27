@@ -186,7 +186,7 @@ impl Instance {
 
         s.store_add_ad_lhs(143, A::add_scaled_inputs4(s.ad_value(145), 1.0, s.ad_value(57), (-1.0), s.ad_value(183), -1.0, s.ad_value(61), 1.0), 153);
 
-        s.store_sqrt_ad(144, A::add_scaled_inputs(A::square(s.ad_value(143)), 1.0, s.ad_value(30), 2.0));
+        s.store_sqrt_add_scaled_square_input(144, 143, 1.0, 30, 2.0);
 
         s.store_scaled_add(3, 143, 144, 0.5);
 
@@ -1007,7 +1007,7 @@ impl Instance {
 
         s.store_add_ad_lhs(143, A::add_scaled_inputs4(s.ad_value(145), 1.0, s.ad_value(57), (-1.0), s.ad_value(183), -1.0, s.ad_value(61), 1.0), 153);
 
-        s.store_sqrt_ad(144, A::add_scaled_inputs(A::square(s.ad_value(143)), 1.0, s.ad_value(30), 2.0));
+        s.store_sqrt_add_scaled_square_input(144, 143, 1.0, 30, 2.0);
 
         s.store_scaled_add(3, 143, 144, 0.5);
 
