@@ -3309,8 +3309,13 @@ fn stamp() {
         for helper in [
             "fn store_add_offset_lhs(",
             "fn store_add_offset_ad_lhs(",
+            "fn store_add_offset_lhs_ad_rhs(",
+            "fn store_add_offset_rhs_ad_lhs(",
             "fn store_sub_offset_lhs(",
+            "fn store_sub_offset_rhs(",
             "fn store_sub_offset_ad_lhs(",
+            "fn store_sub_offset_lhs_ad_rhs(",
+            "fn store_sub_offset_rhs_ad_lhs(",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
@@ -3321,6 +3326,12 @@ fn stamp() {
     scratch.store_ad_value(161, AdValue::sub(AdValue::offset(scratch.ad_value(4), params.bias), scratch.ad_value(5)));
     scratch.store_ad_value(162, AdValue::add(AdValue::offset(AdValue::ln(scratch.ad_value(6)), params.bias), scratch.ad_value(7)));
     scratch.store_ad_value(163, AdValue::sub(AdValue::offset(AdValue::sqrt(scratch.ad_value(8)), params.bias), scratch.ad_value(9)));
+    scratch.store_ad_value(164, AdValue::add(AdValue::offset(scratch.ad_value(10), params.bias), AdValue::ln_scaled_input(scratch.ad_value(11), -1.0)));
+    scratch.store_ad_value(165, AdValue::sub(AdValue::offset(scratch.ad_value(12), params.bias), AdValue::exp_scaled_input(scratch.ad_value(13), -1.0)));
+    scratch.store_ad_value(166, AdValue::add(AdValue::ln_scaled_input(scratch.ad_value(14), -1.0), AdValue::offset(scratch.ad_value(15), params.bias)));
+    scratch.store_ad_value(167, AdValue::sub(AdValue::ln_scaled_input(scratch.ad_value(16), -1.0), AdValue::offset(scratch.ad_value(17), params.bias)));
+    scratch.store_ad_value(168, AdValue::add(scratch.ad_value(18), AdValue::offset(scratch.ad_value(19), params.bias)));
+    scratch.store_ad_value(169, AdValue::sub(scratch.ad_value(20), AdValue::offset(scratch.ad_value(21), params.bias)));
 }
 "#;
 
@@ -3340,6 +3351,30 @@ fn stamp() {
         );
         assert!(
             compact.contains("s.store_sub_offset_ad_lhs(163, A::sqrt(s.ad_value(8)), p.bias, 9);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_offset_lhs_ad_rhs(164, 10, p.bias, A::ln_scaled_input(s.ad_value(11), -1.0));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_offset_lhs_ad_rhs(165, 12, p.bias, A::exp_scaled_input(s.ad_value(13), -1.0));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_offset_rhs_ad_lhs(166, A::ln_scaled_input(s.ad_value(14), -1.0), 15, p.bias);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_offset_rhs_ad_lhs(167, A::ln_scaled_input(s.ad_value(16), -1.0), 17, p.bias);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_offset_lhs(168, 19, p.bias, 18);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_offset_rhs(169, 20, 21, p.bias);"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_add_ad_lhs("), "{compact}");
@@ -9057,6 +9092,20 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_offset_lhs_ad_rhs_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset: f64, right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
+        "        self.values[index] = left_value + offset + right_value * right_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset_rhs_ad_lhs_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset: f64, right_scale: f64) {",
+        "        self.values[index] = left_value + (right_value + offset) * right_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
         "        self.store_offset_lhs_mixed_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right, 1.0);",
         "    }",
@@ -9067,13 +9116,38 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_add_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, offset: f64, right: AdValue) {",
+        "        self.store_offset_lhs_ad_rhs_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right.value, right.node_derivatives, right.branch_derivatives, 1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_offset_rhs_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, offset: f64) {",
+        "        self.store_offset_rhs_ad_lhs_components(index, left.value, left.node_derivatives, left.branch_derivatives, self.values[right], self.node_derivatives[right], self.branch_derivatives[right], offset, 1.0);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sub_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
         "        self.store_offset_lhs_mixed_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right, -1.0);",
         "    }",
         "",
         "    #[inline]",
+        "    fn store_sub_offset_rhs(&mut self, index: usize, left: usize, right: usize, offset: f64) {",
+        "        self.store_offset_rhs_ad_lhs_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], self.values[right], self.node_derivatives[right], self.branch_derivatives[right], offset, -1.0);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sub_offset_ad_lhs(&mut self, index: usize, left: AdValue, offset: f64, right: usize) {",
         "        self.store_offset_lhs_mixed_components(index, left.value, left.node_derivatives, left.branch_derivatives, offset, right, -1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, offset: f64, right: AdValue) {",
+        "        self.store_offset_lhs_ad_rhs_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right.value, right.node_derivatives, right.branch_derivatives, -1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_offset_rhs_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, offset: f64) {",
+        "        self.store_offset_rhs_ad_lhs_components(index, left.value, left.node_derivatives, left.branch_derivatives, self.values[right], self.node_derivatives[right], self.branch_derivatives[right], offset, -1.0);",
         "    }",
         "",
         "    #[inline]",
@@ -19330,6 +19404,12 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
         if args.len() != 2 {
             return None;
         }
+        if matches!(name, "add" | "sub")
+            && let Some(line) =
+                compact_offset_mixed_add_sub_store_helper_line(target_index, name, args[0], args[1])
+        {
+            return Some(line);
+        }
         let left = compact_scratch_ad_value_index(args[0]);
         let right = compact_scratch_ad_value_index(args[1]);
         return match (left, right) {
@@ -19355,55 +19435,99 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
                     args[1]
                 ))
             }
-            (None, Some(right)) => {
-                if matches!(name, "add" | "sub")
-                    && let Some(line) = compact_offset_lhs_mixed_add_sub_store_helper_line(
-                        target_index,
-                        name,
-                        args[0],
-                        right,
-                    )
-                {
-                    return Some(line);
-                }
-                Some(format!(
-                    "scratch.{lhs_helper}({target_index}, {}, {right});",
-                    args[0]
-                ))
-            }
+            (None, Some(right)) => Some(format!(
+                "scratch.{lhs_helper}({target_index}, {}, {right});",
+                args[0]
+            )),
         };
     }
     None
+}
+
+fn compact_offset_mixed_add_sub_store_helper_line(
+    target_index: usize,
+    op: &str,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    if let Some(line) =
+        compact_offset_lhs_mixed_add_sub_store_helper_line(target_index, op, left, right)
+    {
+        return Some(line);
+    }
+
+    compact_offset_rhs_mixed_add_sub_store_helper_line(target_index, op, left, right)
 }
 
 fn compact_offset_lhs_mixed_add_sub_store_helper_line(
     target_index: usize,
     op: &str,
     left: &str,
-    right: usize,
+    right: &str,
 ) -> Option<String> {
-    let args = compact_ad_call_args(left, "offset")?;
-    if args.len() != 2 {
-        return None;
-    }
-    let offset_source = args[0];
-    let offset = args[1];
+    let (offset_source, offset) = compact_offset_source_and_offset(left)?;
+    let right_index = compact_scratch_ad_value_index(right);
     let helper = match op {
         "add" => "store_add_offset",
         "sub" => "store_sub_offset",
         _ => return None,
     };
-    if let Some(left) = compact_scratch_ad_value_index(offset_source) {
-        return Some(format!(
+    match (compact_scratch_ad_value_index(offset_source), right_index) {
+        (Some(left), Some(right)) => Some(format!(
             "scratch.{helper}_lhs({target_index}, {left}, {offset}, {right});"
-        ));
-    }
-    if compact_non_atomic_ad_value(offset_source) {
-        return Some(format!(
+        )),
+        (Some(left), None) if compact_dynamic_ad_value(right) => Some(format!(
+            "scratch.{helper}_lhs_ad_rhs({target_index}, {left}, {offset}, {right});"
+        )),
+        (None, Some(right)) if compact_non_atomic_ad_value(offset_source) => Some(format!(
             "scratch.{helper}_ad_lhs({target_index}, {offset_source}, {offset}, {right});"
-        ));
+        )),
+        _ => None,
     }
-    None
+}
+
+fn compact_offset_rhs_mixed_add_sub_store_helper_line(
+    target_index: usize,
+    op: &str,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    let (offset_source, offset) = compact_offset_source_and_offset(right)?;
+    let left_index = compact_scratch_ad_value_index(left);
+    let right_index = compact_scratch_ad_value_index(offset_source);
+    match op {
+        "add" => match (left_index, right_index) {
+            (Some(left), Some(right)) => Some(format!(
+                "scratch.store_add_offset_lhs({target_index}, {right}, {offset}, {left});"
+            )),
+            (Some(left), None) if compact_non_atomic_ad_value(offset_source) => Some(format!(
+                "scratch.store_add_offset_ad_lhs({target_index}, {offset_source}, {offset}, {left});"
+            )),
+            (None, Some(right)) if compact_dynamic_ad_value(left) => Some(format!(
+                "scratch.store_add_offset_rhs_ad_lhs({target_index}, {left}, {right}, {offset});"
+            )),
+            _ => None,
+        },
+        "sub" => match (left_index, right_index) {
+            (Some(left), Some(right)) => Some(format!(
+                "scratch.store_sub_offset_rhs({target_index}, {left}, {right}, {offset});"
+            )),
+            (None, Some(right)) if compact_dynamic_ad_value(left) => Some(format!(
+                "scratch.store_sub_offset_rhs_ad_lhs({target_index}, {left}, {right}, {offset});"
+            )),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn compact_offset_source_and_offset(value: &str) -> Option<(&str, &str)> {
+    let args = compact_ad_call_args(value, "offset")?;
+    if args.len() == 2 {
+        Some((args[0], args[1]))
+    } else {
+        None
+    }
 }
 
 fn compact_div_add_scaled_inputs_rhs_store_helper_line(
