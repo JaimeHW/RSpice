@@ -114,7 +114,6 @@ impl CodeModelRegistry {
 
         // Memory
         self.register(Arc::new(super::models::DigitalRam));
-        self.register(Arc::new(super::models::DigitalRom));
     }
 
     /// Get models by category
@@ -156,3 +155,19 @@ impl std::fmt::Debug for CodeModelRegistry {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtins_do_not_register_unimplemented_digital_rom_stub() {
+        let registry = CodeModelRegistry::with_builtins();
+
+        assert!(registry.contains("d_ram"));
+        assert!(
+            !registry.contains("d_rom"),
+            "d_rom must fail closed until a real code model is implemented"
+        );
+    }
+}

@@ -16,6 +16,6 @@ pub use gates::{
     DigitalAnd, DigitalBuffer, DigitalInverter, DigitalNand, DigitalNor, DigitalOr,
     DigitalPulldown, DigitalPullup, DigitalTristate, DigitalXnor, DigitalXor,
 };
-pub use memory::{DigitalRam, DigitalRom};
+pub use memory::DigitalRam;
 pub use sequential::{DFlipFlop, DLatch, JkFlipFlop, SrFlipFlop, SrLatch, TFlipFlop};
 pub use sources::{DigitalSource, DigitalStateMachine};

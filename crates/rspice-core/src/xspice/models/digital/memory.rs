@@ -346,36 +346,3 @@ impl CodeModel for DigitalRam {
         Ok(())
     }
 }
-
-/// ROM model
-#[derive(Debug, Default)]
-pub struct DigitalRom;
-
-impl CodeModel for DigitalRom {
-    fn name(&self) -> &str {
-        "d_rom"
-    }
-    fn description(&self) -> &str {
-        "Read-only memory"
-    }
-    fn ports(&self) -> &[PortSpec] {
-        use std::sync::OnceLock;
-        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
-        PORTS.get_or_init(|| {
-            vec![
-                PortSpec::vector_input("address", PortType::Digital),
-                PortSpec::input("select", PortType::Digital),
-                PortSpec::vector_output("data_out", PortType::Digital),
-            ]
-        })
-    }
-    fn parameters(&self) -> &[ParamSpec] {
-        DigitalRam.parameters()
-    }
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
-    }
-    fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
-    }
-}

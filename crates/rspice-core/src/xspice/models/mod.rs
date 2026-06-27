@@ -38,7 +38,6 @@
 //! - **d_srlatch** - SR latch
 //! - **d_state** - State machine
 //! - **d_ram** - Random access memory
-//! - **d_rom** - Read-only memory
 
 // Analog behavioral blocks
 mod analog;
@@ -59,7 +58,6 @@ pub use bridges::{AdcBridge, DacBridge};
 
 pub use digital::{
     DFlipFlop, DLatch, DigitalAnd, DigitalBuffer, DigitalInverter, DigitalNand, DigitalNor,
-    DigitalOr, DigitalPulldown, DigitalPullup, DigitalRam, DigitalRom, DigitalSource,
-    DigitalStateMachine, DigitalTristate, DigitalXnor, DigitalXor, JkFlipFlop, SrFlipFlop, SrLatch,
-    TFlipFlop,
+    DigitalOr, DigitalPulldown, DigitalPullup, DigitalRam, DigitalSource, DigitalStateMachine,
+    DigitalTristate, DigitalXnor, DigitalXor, JkFlipFlop, SrFlipFlop, SrLatch, TFlipFlop,
 };
