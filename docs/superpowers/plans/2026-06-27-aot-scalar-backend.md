@@ -47,7 +47,7 @@
 
 ## Phase 3: MIR/HIR to Scalar Graph Lowering
 
-- [ ] Build scalar graph lowering for a conservative expression subset.
+- [x] Build scalar graph lowering for a conservative expression subset.
   - Numbers, real parameters, identifiers, branch potentials, unary `+`/`-`, binary `+`, `-`, `*`, `/`, comparisons, ternary conditional, selected math calls.
   - Emit unsupported constructs as explicit fallback markers.
 

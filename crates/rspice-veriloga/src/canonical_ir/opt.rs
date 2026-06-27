@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{
-    BranchId, BranchUnknownId, CompilerPhase, EquationId, IrDiagnostic, IrValidationResult,
-    MirModel, NodeId, ParamId, ScheduleId, ValueId,
+    BranchId, BranchUnknownId, CompilerPhase, EquationId, ExprId, HirAnalogOperator, HirExprKind,
+    IrDiagnostic, IrValidationResult, MirModel, NodeId, ParamId, ScheduleId, ValueId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -156,6 +156,14 @@ impl OptModel {
     pub fn from_mir(mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         mir.validate()?;
 
+        let mut builder = ScalarGraphBuilder::new(mir);
+        let equation_values: Vec<_> = mir
+            .equations
+            .iter()
+            .map(|equation| builder.lower_expression(equation.expression.id))
+            .collect();
+        let values = builder.finish();
+
         let mut schedules = Vec::new();
         if !mir.parameters.is_empty() {
             schedules.push(OptSchedule {
@@ -165,13 +173,15 @@ impl OptModel {
             });
         }
 
-        let newton_ops = mir
-            .equations
-            .iter()
-            .map(|equation| OptOp::EvaluateEquation {
+        let mut newton_ops = Vec::new();
+        for (equation, value) in mir.equations.iter().zip(equation_values) {
+            if let Some(value) = value {
+                newton_ops.push(OptOp::ComputeValue { value });
+            }
+            newton_ops.push(OptOp::EvaluateEquation {
                 equation: equation.id,
-            })
-            .collect();
+            });
+        }
         schedules.push(OptSchedule {
             id: ScheduleId::from(schedules.len()),
             invalidation: InvalidationClass::NewtonIteration,
@@ -189,7 +199,7 @@ impl OptModel {
                 .expect("MIR branch unknown count exceeds u32::MAX"),
             equation_count: u32::try_from(mir.equations.len())
                 .expect("MIR equation count exceeds u32::MAX"),
-            values: Vec::new(),
+            values,
             schedules,
         };
 
@@ -221,6 +231,255 @@ impl OptModel {
         } else {
             Err(diagnostics)
         }
+    }
+}
+
+struct ScalarGraphBuilder<'a> {
+    mir: &'a MirModel,
+    values: Vec<OptValue>,
+    expression_values: HashMap<ExprId, Option<ValueId>>,
+}
+
+impl<'a> ScalarGraphBuilder<'a> {
+    fn new(mir: &'a MirModel) -> Self {
+        Self {
+            mir,
+            values: Vec::new(),
+            expression_values: HashMap::new(),
+        }
+    }
+
+    fn finish(self) -> Vec<OptValue> {
+        self.values
+    }
+
+    fn lower_expression(&mut self, expr: ExprId) -> Option<ValueId> {
+        if let Some(value) = self.expression_values.get(&expr) {
+            return *value;
+        }
+
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let lowered = match &expression.kind {
+            HirExprKind::Number { value, .. } => {
+                Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(*value)))
+            }
+            HirExprKind::Identifier { name } => self.lower_identifier(name),
+            HirExprKind::BranchAccess { access, pos, neg } => {
+                self.lower_branch_access(access, pos, neg.as_deref())
+            }
+            HirExprKind::Binary { op, left, right } => self.lower_binary(op, *left, *right),
+            HirExprKind::Unary { op, operand } => self.lower_unary(op, *operand),
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => self.lower_conditional(*condition, *then_expr, *else_expr),
+            HirExprKind::Call { name, args } => self.lower_call(name, args),
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Limexp { expr },
+            } => self.lower_intrinsic_unary(OptUnaryOp::Exp, *expr),
+            _ => None,
+        };
+
+        self.expression_values.insert(expr, lowered);
+        lowered
+    }
+
+    fn push_value(&mut self, value_type: OptValueType, kind: OptValueKind) -> ValueId {
+        let id = ValueId::from(self.values.len());
+        self.values.push(OptValue {
+            id,
+            value_type,
+            kind,
+            derivatives: Vec::new(),
+        });
+        id
+    }
+
+    fn lower_identifier(&mut self, name: &SmolStr) -> Option<ValueId> {
+        let parameter = self
+            .mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == *name)
+            .map(|parameter| parameter.id)?;
+
+        Some(self.push_value(OptValueType::Real, OptValueKind::Parameter { parameter }))
+    }
+
+    fn lower_branch_access(
+        &mut self,
+        access: &SmolStr,
+        pos: &SmolStr,
+        neg: Option<&str>,
+    ) -> Option<ValueId> {
+        if access.as_str() != "V" {
+            return None;
+        }
+
+        let pos = self.resolve_endpoint(pos)?;
+        let neg = match neg {
+            Some(neg) => self.resolve_endpoint(neg)?,
+            None => None,
+        };
+
+        Some(self.lower_voltage(pos, neg))
+    }
+
+    fn lower_voltage(&mut self, pos: Option<NodeId>, neg: Option<NodeId>) -> ValueId {
+        match (pos, neg) {
+            (None, None) => self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0)),
+            (Some(pos), None) => self.push_node_potential(pos),
+            (None, Some(neg)) => {
+                let zero = self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0));
+                let neg = self.push_node_potential(neg);
+                self.push_value(
+                    OptValueType::Real,
+                    OptValueKind::Binary {
+                        op: OptBinaryOp::Sub,
+                        left: zero,
+                        right: neg,
+                    },
+                )
+            }
+            (Some(pos), Some(neg)) => {
+                let pos = self.push_node_potential(pos);
+                let neg = self.push_node_potential(neg);
+                self.push_value(
+                    OptValueType::Real,
+                    OptValueKind::Binary {
+                        op: OptBinaryOp::Sub,
+                        left: pos,
+                        right: neg,
+                    },
+                )
+            }
+        }
+    }
+
+    fn push_node_potential(&mut self, node: NodeId) -> ValueId {
+        self.push_value(OptValueType::Real, OptValueKind::NodePotential { node })
+    }
+
+    fn resolve_endpoint(&self, name: &str) -> Option<Option<NodeId>> {
+        if name == "0"
+            || self
+                .mir
+                .ground_nodes
+                .iter()
+                .any(|ground| ground.as_str() == name)
+        {
+            return Some(None);
+        }
+
+        self.mir
+            .nodes
+            .iter()
+            .find(|node| node.name.as_str() == name)
+            .map(|node| Some(node.id))
+    }
+
+    fn lower_binary(&mut self, op: &SmolStr, left: ExprId, right: ExprId) -> Option<ValueId> {
+        let op = binary_op(op)?;
+        let left = self.lower_expression(left)?;
+        let right = self.lower_expression(right)?;
+        let value_type = match op {
+            OptBinaryOp::Eq
+            | OptBinaryOp::Ne
+            | OptBinaryOp::Lt
+            | OptBinaryOp::Le
+            | OptBinaryOp::Gt
+            | OptBinaryOp::Ge
+            | OptBinaryOp::And
+            | OptBinaryOp::Or => OptValueType::Boolean,
+            OptBinaryOp::Add
+            | OptBinaryOp::Sub
+            | OptBinaryOp::Mul
+            | OptBinaryOp::Div
+            | OptBinaryOp::Pow => OptValueType::Real,
+        };
+
+        Some(self.push_value(value_type, OptValueKind::Binary { op, left, right }))
+    }
+
+    fn lower_unary(&mut self, op: &SmolStr, operand: ExprId) -> Option<ValueId> {
+        let op = unary_op(op)?;
+        self.lower_intrinsic_unary(op, operand)
+    }
+
+    fn lower_intrinsic_unary(&mut self, op: OptUnaryOp, input: ExprId) -> Option<ValueId> {
+        let input = self.lower_expression(input)?;
+        let value_type = if op == OptUnaryOp::Not {
+            OptValueType::Boolean
+        } else {
+            OptValueType::Real
+        };
+
+        Some(self.push_value(value_type, OptValueKind::Unary { op, input }))
+    }
+
+    fn lower_conditional(
+        &mut self,
+        condition: ExprId,
+        then_expr: ExprId,
+        else_expr: ExprId,
+    ) -> Option<ValueId> {
+        let condition = self.lower_expression(condition)?;
+        let then_value = self.lower_expression(then_expr)?;
+        let else_value = self.lower_expression(else_expr)?;
+        let value_type = self.values[usize::from(then_value)].value_type;
+
+        Some(self.push_value(
+            value_type,
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            },
+        ))
+    }
+
+    fn lower_call(&mut self, name: &SmolStr, args: &[ExprId]) -> Option<ValueId> {
+        if args.len() != 1 {
+            return None;
+        }
+
+        let op = match name.as_str() {
+            "exp" => OptUnaryOp::Exp,
+            "ln" | "log" => OptUnaryOp::Ln,
+            "sqrt" => OptUnaryOp::Sqrt,
+            "abs" => OptUnaryOp::Abs,
+            _ => return None,
+        };
+        self.lower_intrinsic_unary(op, args[0])
+    }
+}
+
+fn binary_op(op: &str) -> Option<OptBinaryOp> {
+    match op {
+        "Add" => Some(OptBinaryOp::Add),
+        "Sub" => Some(OptBinaryOp::Sub),
+        "Mul" => Some(OptBinaryOp::Mul),
+        "Div" => Some(OptBinaryOp::Div),
+        "Pow" => Some(OptBinaryOp::Pow),
+        "Eq" => Some(OptBinaryOp::Eq),
+        "Ne" => Some(OptBinaryOp::Ne),
+        "Lt" => Some(OptBinaryOp::Lt),
+        "Le" => Some(OptBinaryOp::Le),
+        "Gt" => Some(OptBinaryOp::Gt),
+        "Ge" => Some(OptBinaryOp::Ge),
+        "And" => Some(OptBinaryOp::And),
+        "Or" => Some(OptBinaryOp::Or),
+        _ => None,
+    }
+}
+
+fn unary_op(op: &str) -> Option<OptUnaryOp> {
+    match op {
+        "Pos" => Some(OptUnaryOp::Pos),
+        "Neg" => Some(OptUnaryOp::Neg),
+        "Not" => Some(OptUnaryOp::Not),
+        _ => None,
     }
 }
 

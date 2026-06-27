@@ -213,26 +213,18 @@ fn evaluate_binary(
     values: &[OptEvalValue],
 ) -> Result<OptEvalValue, OptEvalError> {
     let result = (|| match op {
-        OptBinaryOp::Add => {
-            Ok(OptEvalValue::Real(
-                real_value(values, left)? + real_value(values, right)?,
-            ))
-        }
-        OptBinaryOp::Sub => {
-            Ok(OptEvalValue::Real(
-                real_value(values, left)? - real_value(values, right)?,
-            ))
-        }
-        OptBinaryOp::Mul => {
-            Ok(OptEvalValue::Real(
-                real_value(values, left)? * real_value(values, right)?,
-            ))
-        }
-        OptBinaryOp::Div => {
-            Ok(OptEvalValue::Real(
-                real_value(values, left)? / real_value(values, right)?,
-            ))
-        }
+        OptBinaryOp::Add => Ok(OptEvalValue::Real(
+            real_value(values, left)? + real_value(values, right)?,
+        )),
+        OptBinaryOp::Sub => Ok(OptEvalValue::Real(
+            real_value(values, left)? - real_value(values, right)?,
+        )),
+        OptBinaryOp::Mul => Ok(OptEvalValue::Real(
+            real_value(values, left)? * real_value(values, right)?,
+        )),
+        OptBinaryOp::Div => Ok(OptEvalValue::Real(
+            real_value(values, left)? / real_value(values, right)?,
+        )),
         OptBinaryOp::Pow => Ok(OptEvalValue::Real(
             real_value(values, left)?.powf(real_value(values, right)?),
         )),
@@ -242,26 +234,18 @@ fn evaluate_binary(
         OptBinaryOp::Ne => Ok(OptEvalValue::Boolean(
             value_at(values, left) != value_at(values, right),
         )),
-        OptBinaryOp::Lt => {
-            Ok(OptEvalValue::Boolean(
-                real_value(values, left)? < real_value(values, right)?,
-            ))
-        }
-        OptBinaryOp::Le => {
-            Ok(OptEvalValue::Boolean(
-                real_value(values, left)? <= real_value(values, right)?,
-            ))
-        }
-        OptBinaryOp::Gt => {
-            Ok(OptEvalValue::Boolean(
-                real_value(values, left)? > real_value(values, right)?,
-            ))
-        }
-        OptBinaryOp::Ge => {
-            Ok(OptEvalValue::Boolean(
-                real_value(values, left)? >= real_value(values, right)?,
-            ))
-        }
+        OptBinaryOp::Lt => Ok(OptEvalValue::Boolean(
+            real_value(values, left)? < real_value(values, right)?,
+        )),
+        OptBinaryOp::Le => Ok(OptEvalValue::Boolean(
+            real_value(values, left)? <= real_value(values, right)?,
+        )),
+        OptBinaryOp::Gt => Ok(OptEvalValue::Boolean(
+            real_value(values, left)? > real_value(values, right)?,
+        )),
+        OptBinaryOp::Ge => Ok(OptEvalValue::Boolean(
+            real_value(values, left)? >= real_value(values, right)?,
+        )),
         OptBinaryOp::And => Ok(OptEvalValue::Boolean(
             boolean_value(values, left)? && boolean_value(values, right)?,
         )),

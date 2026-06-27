@@ -94,6 +94,15 @@ fn assert_opt_validation_message(opt: &OptModel, expected_substring: &str) {
     );
 }
 
+fn set_newton_ops(opt: &mut OptModel, ops: Vec<OptOp>) {
+    let newton = opt
+        .schedules
+        .iter_mut()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    newton.ops = ops;
+}
+
 fn lower_tiny_resistor_mir() -> MirModel {
     let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
@@ -631,14 +640,81 @@ fn opt_lowering_builds_newton_schedule_from_mir_equations() {
         .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
         .expect("NewtonIteration schedule");
 
-    assert_eq!(newton.ops.len(), 1);
     assert_eq!(
-        newton.ops[0],
-        OptOp::EvaluateEquation {
+        newton.ops.last(),
+        Some(&OptOp::EvaluateEquation {
             equation: EquationId::new(0)
-        }
+        })
     );
     assert!(opt.validate().is_ok());
+}
+
+#[test]
+fn opt_lowering_builds_scalar_graph_for_tiny_resistor_expression() {
+    let mir = lower_tiny_resistor_mir();
+    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
+
+    assert_eq!(opt.values.len(), 5);
+    assert_eq!(
+        opt.values[0].kind,
+        OptValueKind::NodePotential {
+            node: NodeId::new(0)
+        }
+    );
+    assert_eq!(
+        opt.values[1].kind,
+        OptValueKind::NodePotential {
+            node: NodeId::new(1)
+        }
+    );
+    assert_eq!(
+        opt.values[2].kind,
+        OptValueKind::Binary {
+            op: OptBinaryOp::Sub,
+            left: ValueId::new(0),
+            right: ValueId::new(1),
+        }
+    );
+    assert_eq!(
+        opt.values[3].kind,
+        OptValueKind::Parameter {
+            parameter: ParamId::new(0)
+        }
+    );
+    assert_eq!(
+        opt.values[4].kind,
+        OptValueKind::Binary {
+            op: OptBinaryOp::Div,
+            left: ValueId::new(2),
+            right: ValueId::new(3),
+        }
+    );
+
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    assert_eq!(
+        newton.ops,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(4)
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0)
+            }
+        ]
+    );
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![1000.0],
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate lowered graph");
+    assert_eq!(snapshot.real(ValueId::new(4)), Some(0.003));
 }
 
 #[test]
@@ -722,11 +798,16 @@ fn opt_validation_accepts_scalar_value_graph() {
         },
     ];
 
-    opt.schedules[1].ops.insert(
-        0,
-        OptOp::ComputeValue {
-            value: ValueId::new(3),
-        },
+    set_newton_ops(
+        &mut opt,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(3),
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0),
+            },
+        ],
     );
 
     assert!(opt.validate().is_ok());
@@ -967,6 +1048,17 @@ fn opt_reference_evaluator_exposes_sparse_derivative_values() {
             }],
         },
     ];
+    set_newton_ops(
+        &mut opt,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(1),
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0),
+            },
+        ],
+    );
 
     let snapshot = opt
         .evaluate(&OptEvalInputs {
@@ -1253,8 +1345,14 @@ fn opt_lowering_preserves_multi_equation_order_in_newton_schedule() {
     assert_eq!(
         newton.ops,
         vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(2)
+            },
             OptOp::EvaluateEquation {
                 equation: EquationId::new(0)
+            },
+            OptOp::ComputeValue {
+                value: ValueId::new(5)
             },
             OptOp::EvaluateEquation {
                 equation: EquationId::new(1)
@@ -1392,7 +1490,18 @@ fn artifact_validation_rejects_newton_schedule_mismatch() {
         .iter_mut()
         .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
         .expect("NewtonIteration schedule");
-    newton.ops.swap(0, 1);
+    let equation_op_positions: Vec<_> = newton
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(index, op)| match op {
+            OptOp::EvaluateEquation { .. } => Some(index),
+            OptOp::ComputeValue { .. } => None,
+        })
+        .collect();
+    newton
+        .ops
+        .swap(equation_op_positions[0], equation_op_positions[1]);
 
     let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
         .expect_err("Newton schedule mismatch must fail");
@@ -1448,11 +1557,16 @@ fn artifact_validation_accepts_scalar_opt_values_and_compute_ops() {
             derivatives: Vec::new(),
         },
     ];
-    opt.schedules[1].ops.insert(
-        0,
-        OptOp::ComputeValue {
-            value: ValueId::new(2),
-        },
+    set_newton_ops(
+        &mut opt,
+        vec![
+            OptOp::ComputeValue {
+                value: ValueId::new(2),
+            },
+            OptOp::EvaluateEquation {
+                equation: EquationId::new(0),
+            },
+        ],
     );
     assert!(opt.validate().is_ok());
 
