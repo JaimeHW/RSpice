@@ -24721,6 +24721,10 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     #[inline]
     pub(crate) fn sqrt_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.sqrt(); Self::unary_intrinsic(arg, value, scale / (2.0 * value)) }
     #[inline]
+    pub(crate) fn sqrt_square_offset(mut arg: Self, offset: f64) -> Self { let raw = arg.value; let value = (raw * raw + offset).sqrt(); arg.value = value; let derivative_scale = raw / value; for derivative in &mut arg.dn { *derivative *= derivative_scale; } for derivative in &mut arg.db { *derivative *= derivative_scale; } arg }
+    #[inline]
+    pub(crate) fn sqrt_offset_square_offset(mut arg: Self, square_offset: f64, sqrt_offset: f64) -> Self { let raw = arg.value + square_offset; let value = (raw * raw + sqrt_offset).sqrt(); arg.value = value; let derivative_scale = raw / value; for derivative in &mut arg.dn { *derivative *= derivative_scale; } for derivative in &mut arg.db { *derivative *= derivative_scale; } arg }
+    #[inline]
     pub(crate) fn exp(arg: Self) -> Self { let value = arg.value.exp(); Self::unary_intrinsic(arg, value, value) }
     #[inline]
     pub(crate) fn exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) }

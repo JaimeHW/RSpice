@@ -4701,7 +4701,7 @@ impl Instance {
             s.store_square(847, 824);
             s.store_mul_neg_lhs(848, 824, 847);
             s.store_offset_add_ad(849, s.ad_value(1152), A::abs(s.ad_value(848)), 1e-9);
-            s.store_offset_add_scaled_inputs(850, A::div(s.ad_value(848), s.ad_value(849)), 0.5, A::sqrt(A::offset(A::mul(A::div(s.ad_value(848), s.ad_value(849)), A::div(s.ad_value(848), s.ad_value(849))), ((4.0 * 1e-6) * 1e-6))), 0.5, (-1e-6));
+            s.store_offset_add_scaled_inputs(850, A::div(s.ad_value(848), s.ad_value(849)), 0.5, A::sqrt_square_offset(A::div(s.ad_value(848), s.ad_value(849)), ((4.0 * 1e-6) * 1e-6)), 0.5, (-1e-6));
             s.store_mul(906, 906, 850);
         }
 
@@ -4730,7 +4730,7 @@ impl Instance {
             s.store_square(847, 900);
             s.store_mul_neg_lhs(848, 900, 847);
             s.store_offset_add_ad(849, s.ad_value(1145), A::abs(s.ad_value(848)), 1e-9);
-            s.store_offset_add_scaled_inputs(850, A::div(s.ad_value(848), s.ad_value(849)), 0.5, A::sqrt(A::offset(A::mul(A::div(s.ad_value(848), s.ad_value(849)), A::div(s.ad_value(848), s.ad_value(849))), ((4.0 * 1e-6) * 1e-6))), 0.5, (-1e-6));
+            s.store_offset_add_scaled_inputs(850, A::div(s.ad_value(848), s.ad_value(849)), 0.5, A::sqrt_square_offset(A::div(s.ad_value(848), s.ad_value(849)), ((4.0 * 1e-6) * 1e-6)), 0.5, (-1e-6));
             s.store_mul(905, 905, 850);
         }
 
@@ -6089,7 +6089,7 @@ impl Instance {
             s.store_offset_mul(843, 183, 1026, 1.0);
             s.store_mul_neg_lhs(844, 184, 818);
             s.store_add_scaled_inputs_product_mixed_aiia(845, A::div_from_scalar(1.0, s.ad_value(843)), 1.0, 844, 1.0, 185, A::sub(s.ad_value(897), s.ad_value(941)), 1.0);
-            s.store_add_ad_rhs(846, 845, A::sqrt(A::offset(A::square(s.ad_value(845)), 0.01)));
+            s.store_add_ad_rhs(846, 845, A::sqrt_square_offset(s.ad_value(845), 0.01));
             s.store_scale(847, 1096, 0.5);
             s.store_add_scaled_inputs3_mixed_aii(1100, A::add_scaled_product(s.ad_value(1098), 1.0, s.ad_value(846), s.ad_value(847), 1.0), 1.0, 60, 1.0, 1101, 1.0);
         }

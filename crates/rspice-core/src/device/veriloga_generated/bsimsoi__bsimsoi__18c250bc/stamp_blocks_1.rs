@@ -15,7 +15,7 @@ impl Instance {
             s.store_offset_mul(843, 183, 1027, 1.0);
             s.store_mul_neg_lhs(844, 184, 817);
             s.store_add_scaled_inputs_product_mixed_aiia(845, A::div_from_scalar(1.0, s.ad_value(843)), 1.0, 844, 1.0, 185, A::sub(s.ad_value(897), s.ad_value(941)), 1.0);
-            s.store_add_ad_rhs(846, 845, A::sqrt(A::offset(A::square(s.ad_value(845)), 0.01)));
+            s.store_add_ad_rhs(846, 845, A::sqrt_square_offset(s.ad_value(845), 0.01));
             s.store_scale(847, 1095, 0.5);
             s.store_add_scaled_inputs3_mixed_aii(1099, A::add_scaled_product(s.ad_value(1097), 1.0, s.ad_value(846), s.ad_value(847), 1.0), 1.0, 61, 1.0, 1102, 1.0);
         }

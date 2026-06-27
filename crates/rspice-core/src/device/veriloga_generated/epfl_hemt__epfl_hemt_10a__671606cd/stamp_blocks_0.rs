@@ -9519,7 +9519,7 @@ impl Instance {
 
         s.store_sub_div_rhs_indices(88, 81, 101, 103);
 
-        s.store_add_scaled_inputs3_offset_mixed_iia(89, 88, 0.5, 20, ((-1.0) * 0.5), A::sqrt(A::offset(A::mul_offset_lhs(A::sub(s.ad_value(88), s.ad_value(20)), (-3.0), A::offset(A::sub(s.ad_value(88), s.ad_value(20)), (-3.0))), ((0.25 * 4.0) * 4.0))), 0.5, (3.0 * 0.5));
+        s.store_add_scaled_inputs3_offset_mixed_iia(89, 88, 0.5, 20, ((-1.0) * 0.5), A::sqrt_offset_square_offset(A::sub(s.ad_value(88), s.ad_value(20)), (-3.0), ((0.25 * 4.0) * 4.0)), 0.5, (3.0 * 0.5));
 
         s.store_div_scaled_offset_numerator(104, s.ad_value(87), ((4.0) * ((p.p16 / p.p17))), ((p.p17) * ((p.p16 / p.p17))), A::offset(s.ad_value(80), 1.0), 1.0);
 

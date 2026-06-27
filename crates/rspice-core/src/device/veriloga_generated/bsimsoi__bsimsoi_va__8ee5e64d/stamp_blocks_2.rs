@@ -856,7 +856,7 @@ impl Instance {
             s.store_square(1183, 1160);
             s.store_mul_neg_lhs(1184, 1160, 1183);
             s.store_offset_add_ad(1185, s.ad_value(1485), A::abs(s.ad_value(1184)), 1e-9);
-            s.store_offset_add_scaled_inputs(1186, A::div(s.ad_value(1184), s.ad_value(1185)), 0.5, A::sqrt(A::offset(A::mul(A::div(s.ad_value(1184), s.ad_value(1185)), A::div(s.ad_value(1184), s.ad_value(1185))), ((4.0 * 1e-6) * 1e-6))), 0.5, (-1e-6));
+            s.store_offset_add_scaled_inputs(1186, A::div(s.ad_value(1184), s.ad_value(1185)), 0.5, A::sqrt_square_offset(A::div(s.ad_value(1184), s.ad_value(1185)), ((4.0 * 1e-6) * 1e-6)), 0.5, (-1e-6));
         }
 
         s.b[1618] = (s.v[68] == 0.0);
@@ -879,7 +879,7 @@ impl Instance {
             s.store_square(1183, 1235);
             s.store_mul_neg_lhs(1184, 1235, 1183);
             s.store_offset_add_ad(1185, s.ad_value(1478), A::abs(s.ad_value(1184)), 1e-9);
-            s.store_offset_add_scaled_inputs(1186, A::div(s.ad_value(1184), s.ad_value(1185)), 0.5, A::sqrt(A::offset(A::mul(A::div(s.ad_value(1184), s.ad_value(1185)), A::div(s.ad_value(1184), s.ad_value(1185))), ((4.0 * 1e-6) * 1e-6))), 0.5, (-1e-6));
+            s.store_offset_add_scaled_inputs(1186, A::div(s.ad_value(1184), s.ad_value(1185)), 0.5, A::sqrt_square_offset(A::div(s.ad_value(1184), s.ad_value(1185)), ((4.0 * 1e-6) * 1e-6)), 0.5, (-1e-6));
         }
 
         s.b[1620] = (s.v[68] == 0.0);
@@ -2005,7 +2005,7 @@ impl Instance {
             s.store_offset_mul(1179, 553, 1360, 1.0);
             s.store_mul_neg_lhs(1180, 554, 1154);
             s.store_add_ad_lhs(1181, A::div_from_scalar(1.0, s.ad_value(1179)), 1180);
-            s.store_add_ad_rhs(1182, 1181, A::sqrt(A::offset(A::square(s.ad_value(1181)), 0.01)));
+            s.store_add_ad_rhs(1182, 1181, A::sqrt_square_offset(s.ad_value(1181), 0.01));
             s.store_scale(1183, 1430, 0.5);
             s.store_sub(1179, 1156, 736);
             s.store_sqrt_square_offset(1180, 1179, 0.0001);
@@ -2013,7 +2013,7 @@ impl Instance {
             s.store_offset_mul(1179, 553, 1361, 1.0);
             s.store_mul_neg_lhs(1180, 554, 1153);
             s.store_add_ad_lhs(1181, A::div_from_scalar(1.0, s.ad_value(1179)), 1180);
-            s.store_add_ad_rhs(1182, 1181, A::sqrt(A::offset(A::square(s.ad_value(1181)), 0.01)));
+            s.store_add_ad_rhs(1182, 1181, A::sqrt_square_offset(s.ad_value(1181), 0.01));
             s.store_scale(1183, 1429, 0.5);
         }
 

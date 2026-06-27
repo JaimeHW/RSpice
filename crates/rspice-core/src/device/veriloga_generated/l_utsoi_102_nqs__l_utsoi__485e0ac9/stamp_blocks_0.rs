@@ -1866,7 +1866,7 @@ impl Instance {
 
         s.store_mul(339, 336, 227);
 
-        s.store_mul_offset_ad_lhs(340, A::sqrt(A::offset(A::square(s.ad_value(336)), 0.01)), (-0.1), 227);
+        s.store_mul_offset_ad_lhs(340, A::sqrt_square_offset(s.ad_value(336), 0.01), (-0.1), 227);
 
         s.store_scaled_sub(341, 339, 340, 0.5);
 
@@ -2057,7 +2057,7 @@ impl Instance {
             s.store_sub_from_scalar(865, 1.0, 842);
             s.store_add_scaled_inputs_product_right_ad(866, 845, 1.0, 261, 0.5, 260, A::sqrt(A::add_scaled_inputs3(s.ad_value(845), 1.0, s.ad_value(261), 0.25, s.ad_value(865), -1.0)), (-1.0));
             s.store_offset(867, 266, 3.0);
-            s.store_sub_ad(849, A::add_scaled_inputs3(s.ad_value(866), 0.5, s.ad_value(867), 0.5, A::sqrt(A::offset(A::mul(A::sub(s.ad_value(866), s.ad_value(867)), A::sub(s.ad_value(866), s.ad_value(867))), 5.0)), (-0.5)), A::sub_scaled_inputs(s.ad_value(867), 0.5, A::sqrt(A::offset(A::square(s.ad_value(867)), 5.0)), 0.5));
+            s.store_sub_ad(849, A::add_scaled_inputs3(s.ad_value(866), 0.5, s.ad_value(867), 0.5, A::sqrt_square_offset(A::sub(s.ad_value(866), s.ad_value(867)), 5.0), (-0.5)), A::sub_scaled_inputs(s.ad_value(867), 0.5, A::sqrt_square_offset(s.ad_value(867), 5.0), 0.5));
             s.store_sub(842, 845, 849);
             s.store_exp_neg_input(843, 849);
             s.store_div_from_scalar_offset_ad(844, 1.0, A::square(s.ad_value(849)), 2.0);
@@ -2203,10 +2203,10 @@ impl Instance {
 
         s.store_add_ad_lhs(908, A::add_scaled_product(s.ad_value(902), 1.0, A::add_scaled_inputs3(s.ad_value(889), 1.0, s.ad_value(902), (-1.0), s.ad_value(906), 1.0), s.ad_value(904), 1.0), 341);
 
-        let assign11230_ad_e10630: A = A::add_scaled_inputs3(A::add_scaled_product(s.ad_value(908), 1.0, s.ad_value(25), A::sub(s.ad_value(907), s.ad_value(908)), 1.0), 1.0, s.ad_value(225), 1.0, A::sqrt(A::offset(A::mul(A::sub(A::add_scaled_product(s.ad_value(908), 1.0, s.ad_value(25), A::sub(s.ad_value(907), s.ad_value(908)), 1.0), s.ad_value(225)), A::sub(A::add_scaled_product(s.ad_value(908), 1.0, s.ad_value(25), A::sub(s.ad_value(907), s.ad_value(908)), 1.0), s.ad_value(225))), 0.01)), -1.0);
+        let assign11230_ad_e10630: A = A::add_scaled_inputs3(A::add_scaled_product(s.ad_value(908), 1.0, s.ad_value(25), A::sub(s.ad_value(907), s.ad_value(908)), 1.0), 1.0, s.ad_value(225), 1.0, A::sqrt_square_offset(A::sub(A::add_scaled_product(s.ad_value(908), 1.0, s.ad_value(25), A::sub(s.ad_value(907), s.ad_value(908)), 1.0), s.ad_value(225)), 0.01), -1.0);
         s.store_scale_ad(909, assign11230_ad_e10630, 0.5);
 
-        let assign11240_ad_e10664: A = A::add_scaled_inputs3(A::add_scaled_product(s.ad_value(907), 1.0, s.ad_value(26), A::sub(s.ad_value(908), s.ad_value(907)), 1.0), 1.0, s.ad_value(225), 1.0, A::sqrt(A::offset(A::mul(A::sub(A::add_scaled_product(s.ad_value(907), 1.0, s.ad_value(26), A::sub(s.ad_value(908), s.ad_value(907)), 1.0), s.ad_value(225)), A::sub(A::add_scaled_product(s.ad_value(907), 1.0, s.ad_value(26), A::sub(s.ad_value(908), s.ad_value(907)), 1.0), s.ad_value(225))), 0.01)), -1.0);
+        let assign11240_ad_e10664: A = A::add_scaled_inputs3(A::add_scaled_product(s.ad_value(907), 1.0, s.ad_value(26), A::sub(s.ad_value(908), s.ad_value(907)), 1.0), 1.0, s.ad_value(225), 1.0, A::sqrt_square_offset(A::sub(A::add_scaled_product(s.ad_value(907), 1.0, s.ad_value(26), A::sub(s.ad_value(908), s.ad_value(907)), 1.0), s.ad_value(225)), 0.01), -1.0);
         s.store_scale_ad(910, assign11240_ad_e10664, 0.5);
 
         s.store_div(911, 894, 903);
