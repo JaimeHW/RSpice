@@ -1,3 +1,4 @@
+mod compact;
 mod device;
 mod discover;
 mod error;
