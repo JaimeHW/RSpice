@@ -127,7 +127,7 @@ impl Instance {
             s.store_mul3_affine_lhs(418, 3113, 386, (0.5 * 9662367879.197212), 0.0, 386);
             s.store_sqrt_ad(334, A::mul_scaled_lhs(s.ad_value(154), 2.0, s.ad_value(418)));
             s.store_scaled_add_ad(335, A::limited_exp(s.ad_value(334)), A::limited_exp_scaled_input(s.ad_value(334), -1.0), 0.5);
-            s.store_div_ad_lhs(419, A::ln(s.ad_value(335)), 418);
+            s.store_div_ln_lhs(419, 335, 418);
         }
 
         let (assign94340_e144561,) = {
@@ -158,7 +158,7 @@ impl Instance {
                 s.store_exp(335, 333);
                 s.store_exp_mul_scaled_lhs_indices(334, 419, -1.0, 418);
                 s.store_sub(336, 335, 334);
-                s.store_div_ad_lhs(416, A::ln(A::offset(s.ad_value(336), 1.0)), 419);
+                s.store_div_ln_offset_lhs(416, 336, 1.0, 419);
                 s.store_div_scaled_value_offset_denominator(417, s.ad_value(335), 1.0, s.ad_value(336), 1.0, 1.0);
             }
             if ((((s.b[3109] && s.b[3110]) && (!s.b[3137])) && s.b[3176]) && (!s.b[3181])) {
@@ -389,7 +389,7 @@ impl Instance {
             s.store_mul3_affine_lhs(418, 3113, 386, (0.5 * 9662367879.197212), 0.0, 386);
             s.store_sqrt_ad(334, A::mul_scaled_lhs(s.ad_value(154), 2.0, s.ad_value(418)));
             s.store_scaled_add_ad(335, A::limited_exp(s.ad_value(334)), A::limited_exp_scaled_input(s.ad_value(334), -1.0), 0.5);
-            s.store_div_ad_lhs(419, A::ln(s.ad_value(335)), 418);
+            s.store_div_ln_lhs(419, 335, 418);
         }
 
         let (assign94730_e146423,) = {
@@ -420,7 +420,7 @@ impl Instance {
                 s.store_exp(335, 333);
                 s.store_exp_mul_scaled_lhs_indices(334, 419, -1.0, 418);
                 s.store_sub(336, 335, 334);
-                s.store_div_ad_lhs(416, A::ln(A::offset(s.ad_value(336), 1.0)), 419);
+                s.store_div_ln_offset_lhs(416, 336, 1.0, 419);
                 s.store_div_scaled_value_offset_denominator(417, s.ad_value(335), 1.0, s.ad_value(336), 1.0, 1.0);
             }
             if (((s.b[3109] && s.b[3110]) && s.b[3194]) && (!s.b[3199])) {

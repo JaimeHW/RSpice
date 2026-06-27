@@ -3177,7 +3177,7 @@ impl Instance {
             s.store_mul3_affine_lhs(2024, 1903, 1832, (0.5 * 9662367879.197212), 0.0, 1832);
             s.store_scaled_sqrt_ad(334, A::mul_scaled_lhs(s.ad_value(154), 2.0, s.ad_value(2024)), p.p394);
             s.store_scaled_add_ad(335, A::exp(s.ad_value(334)), A::exp_scaled_input(s.ad_value(334), -1.0), 0.5);
-            s.store_div_ad_lhs(2025, A::ln(s.ad_value(335)), 2024);
+            s.store_div_ln_lhs(2025, 335, 2024);
             s.store_mul(332, 2025, 983);
             s.store_exp_mul_scaled_lhs_indices(334, 2025, -1.0, 2024);
         }
@@ -3199,7 +3199,7 @@ impl Instance {
         s.v[2047] = if s.b[2047] { 1.0 } else { 0.0 };
 
         if (((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && (!s.b[2028])) && s.b[2047]) {
-            s.store_div_ad_lhs(2023, A::ln(A::offset(s.ad_value(336), 1.0)), 2025);
+            s.store_div_ln_offset_lhs(2023, 336, 1.0, 2025);
         }
 
         if (((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && (!s.b[2028])) && (!s.b[2047])) {

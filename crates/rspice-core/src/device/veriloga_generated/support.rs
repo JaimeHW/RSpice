@@ -4506,6 +4506,42 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_div_ln_lhs(&mut self, index: usize, left: usize, right: usize) {
+        let left_raw = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_raw = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_value = left_raw.ln();
+        let reciprocal = 1.0 / right_raw;
+        let quotient = left_value * reciprocal;
+        let left_scale = reciprocal / left_raw;
+        let right_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale + right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_ln_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {
+        let left_raw = self.v[left] + offset;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_raw = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_value = left_raw.ln();
+        let reciprocal = 1.0 / right_raw;
+        let quotient = left_value * reciprocal;
+        let left_scale = reciprocal / left_raw;
+        let right_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale + right_db[axis] * right_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_div_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
         let right_value = self.v[right];
         let right_dn = self.dn[right];
@@ -16600,6 +16636,42 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_div_add_scaled_inputs_rhs_ad(&mut self, index: usize, left: usize, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_left_scale: f64, denominator_right: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right_scale: f64) {
         self.store_div_add_scaled_inputs_rhs_components(index, left, denominator_left.value, denominator_left.dn, denominator_left.db, denominator_left_scale, denominator_right.value, denominator_right.dn, denominator_right.db, denominator_right_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_div_ln_lhs(&mut self, index: usize, left: usize, right: usize) {
+        let left_raw = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_raw = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_value = left_raw.ln();
+        let reciprocal = 1.0 / right_raw;
+        let quotient = left_value * reciprocal;
+        let left_scale = reciprocal / left_raw;
+        let right_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale + right_db[axis] * right_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_ln_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {
+        let left_raw = self.v[left] + offset;
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_raw = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        let left_value = left_raw.ln();
+        let reciprocal = 1.0 / right_raw;
+        let quotient = left_value * reciprocal;
+        let left_scale = reciprocal / left_raw;
+        let right_scale = -quotient * reciprocal;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_scale + right_dn[axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_scale + right_db[axis] * right_scale; }
     }
 
     #[inline]

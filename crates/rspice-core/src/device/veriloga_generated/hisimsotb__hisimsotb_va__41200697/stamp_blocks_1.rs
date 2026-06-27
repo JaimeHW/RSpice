@@ -4059,7 +4059,7 @@ impl Instance {
             s.store_div_scalar_by_product(279, 1.0, s.ad_value(142), s.ad_value(381), 1.0);
             s.store_mul_ad_product_rhs(280, 279, A::sub(s.ad_value(76), s.ad_value(327)), A::sub(s.ad_value(76), s.ad_value(327)));
             s.store_add_ad_rhs(281, 120, A::div_from_scalar(2.0, A::sub(s.ad_value(76), s.ad_value(327))));
-            s.store_div_ad_lhs(320, A::ln(s.ad_value(280)), 281);
+            s.store_div_ln_lhs(320, 280, 281);
         }
 
         s.b[745] = ((s.v[319] > (s.v[320] - 0.15)) && (0.15 >= 0.0));
