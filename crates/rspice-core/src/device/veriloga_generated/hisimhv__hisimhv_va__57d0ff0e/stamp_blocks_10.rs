@@ -2915,7 +2915,7 @@ impl Instance {
         if (s.b[2603] && s.b[2604]) {
             s.store_div_from_scalar_offset_input(341, s.v[562], 334, s.v[562]);
             s.store_scalar(340, s.v[516]);
-            s.store_div_ad_rhs(343, 340, A::add(s.ad_value(340), s.ad_value(1439)));
+            s.store_div_add_scaled_inputs_rhs_indices(343, 340, 340, 1.0, 1439, 1.0);
             s.store_div_from_scalar_offset_input(338, 1.0, 195, 1e-25);
             s.store_scaled_mul(335, 193, 338, (-s.v[514]));
             s.store_scaled_mul(337, 338, 338, s.v[514]);

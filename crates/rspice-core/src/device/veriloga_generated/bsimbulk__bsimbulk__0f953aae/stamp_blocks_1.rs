@@ -1529,7 +1529,7 @@ impl Instance {
             s.store_add_ad(15, A::offset(s.ad_value(203), 1.0), A::div(s.ad_value(234), A::add(s.ad_value(96), s.ad_value(14))));
             s.store_offset_product3(16, s.ad_value(203), s.ad_value(14), s.ad_value(126), 1.0, 0.5);
             s.store_sqrt_add_ad(17, A::square(s.ad_value(16)), A::mul3(s.ad_value(15), A::add(s.ad_value(200), s.ad_value(144)), s.ad_value(218)));
-            s.store_div_ad_rhs(90, 15, A::add(s.ad_value(16), s.ad_value(17)));
+            s.store_div_add_scaled_inputs_rhs_indices(90, 15, 16, 1.0, 17, 1.0);
             s.store_mul_ad_rhs(12, 108, A::add_scaled_inputs_product(s.ad_value(60), 1.0, s.ad_value(91), (-1.0), s.ad_value(200), A::offset(s.ad_value(90), (-1.0)), (-2.0)));
         }
 

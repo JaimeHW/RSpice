@@ -2826,7 +2826,7 @@ impl Instance {
             s.store_scale(1347, 1362, s.v[1361]);
             s.store_div_from_scalar_offset_input(1354, p.p219, 1347, p.p219);
             s.store_scalar(1353, p.p218);
-            s.store_div_ad_rhs(1355, 1353, A::add(s.ad_value(1353), s.ad_value(173)));
+            s.store_div_add_scaled_inputs_rhs_indices(1355, 1353, 1353, 1.0, 173, 1.0);
             s.store_div_from_scalar_offset_input(1351, 1.0, 1357, 1e-50);
             s.store_scaled_mul(1348, 303, 1351, (-p.p214));
         }

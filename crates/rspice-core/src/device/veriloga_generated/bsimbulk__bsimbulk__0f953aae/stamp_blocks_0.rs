@@ -5626,7 +5626,7 @@ impl Instance {
         s.v[1388] = if s.b[1388] { 1.0 } else { 0.0 };
 
         if s.b[1388] {
-            s.store_div_ad_rhs(15, 174, A::add(s.ad_value(140), s.ad_value(174)));
+            s.store_div_add_scaled_inputs_rhs_indices(15, 174, 140, 1.0, 174, 1.0);
         }
 
         if s.b[1388] {
@@ -5864,7 +5864,7 @@ impl Instance {
 
         s.store_sub(13, 200, 144);
 
-        s.store_div_ad_rhs(14, 13, A::add(s.ad_value(12), s.ad_value(610)));
+        s.store_div_add_scaled_inputs_rhs_indices(14, 13, 12, 1.0, 610, 1.0);
 
         s.store_mul3_lhs(15, 609, 14, 14);
 

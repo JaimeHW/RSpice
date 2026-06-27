@@ -3979,7 +3979,7 @@ impl Instance {
         s.v[1857] = if s.b[1857] { 1.0 } else { 0.0 };
 
         if ((!s.b[1620]) && s.b[1857]) {
-            s.store_div_ad_rhs(170, 362, A::add(s.ad_value(316), s.ad_value(362)));
+            s.store_div_add_scaled_inputs_rhs_indices(170, 362, 316, 1.0, 362, 1.0);
             s.store_scaled_add_ad(171, A::offset(A::mul(s.ad_value(764), s.ad_value(218)), 1.0), A::sqrt(A::offset(A::mul_offset_lhs(A::mul(s.ad_value(764), s.ad_value(218)), 1.0, A::offset(A::mul(s.ad_value(764), s.ad_value(218)), 1.0)), ((4.0 * 0.001) * 0.001))), 0.5);
             s.store_div_from_scalar(172, 1.0, 171);
             s.store_mul_product3_rhs(361, 172, A::div(s.ad_value(362), s.ad_value(359)), s.ad_value(170), s.ad_value(360), 1.0);

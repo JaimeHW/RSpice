@@ -11,7 +11,7 @@ impl Instance {
     ) {
         if (s.b[1620] && (!s.b[1634])) {
             s.store_sub(168, 306, 73);
-            s.store_div_ad_rhs(169, 168, A::add(s.ad_value(167), s.ad_value(833)));
+            s.store_div_add_scaled_inputs_rhs_indices(169, 168, 167, 1.0, 833, 1.0);
             s.store_mul3_lhs(170, 832, 169, 169);
             s.store_offset(834, 170, 1.0);
             s.store_div_ad_rhs(176, 858, A::add_scaled_products(A::max_from_scalar(0.0, A::add(s.ad_value(861), A::mul3(s.ad_value(864), s.ad_value(168), s.ad_value(168)))), s.ad_value(167), 1.0, s.ad_value(267), s.ad_value(637), 2.0));
