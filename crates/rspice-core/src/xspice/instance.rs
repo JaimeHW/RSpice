@@ -215,6 +215,15 @@ impl XspiceInstance {
         // Override with instance parameters
         for (name, value) in params {
             if let Some(spec) = param_specs.get(&canonical_param_key(name)) {
+                if matches!(
+                    spec.param_type,
+                    ParamType::RealVector | ParamType::IntegerVector
+                ) {
+                    return Err(CmError::InvalidParameter {
+                        name: spec.name.clone(),
+                        message: "expected vector parameter, got scalar parameter".to_string(),
+                    });
+                }
                 validate_numeric_param(spec, *value)?;
             }
             context.set_param(name, *value);
@@ -1049,6 +1058,26 @@ mod tests {
             instance.integer_vector_param("bits").unwrap(),
             &[1, 1, 0, 1]
         );
+    }
+
+    #[test]
+    fn instance_rejects_scalar_override_for_known_vector_parameter() {
+        let model = model_with_params(vec![ParamSpec::real_vector("points", vec![1.0, 2.0])]);
+        let err = XspiceInstance::new(
+            "Avec",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[("points".to_string(), 3.0)],
+            &[],
+            &[],
+            &[],
+        )
+        .expect_err("known vector parameter must not accept scalar override");
+
+        assert!(matches!(
+            err,
+            CmError::InvalidParameter { ref name, .. } if name.eq_ignore_ascii_case("points")
+        ));
     }
 
     fn assert_evaluation_error(result: CmResult<()>, expected: &str) {

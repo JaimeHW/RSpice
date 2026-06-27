@@ -25,6 +25,30 @@ fn merge_numeric_params(base: &[(String, f64)], overrides: &[(String, f64)]) -> 
     merged
 }
 
+fn reject_scalar_params_for_vector_specs(
+    code_model: &dyn crate::xspice::CodeModel,
+    params: &[(String, f64)],
+) -> Result<(), SimulationError> {
+    for (name, _value) in params {
+        if let Some(spec) = code_model
+            .parameters()
+            .iter()
+            .find(|spec| spec.name.eq_ignore_ascii_case(name))
+            && matches!(
+                spec.param_type,
+                crate::xspice::ParamType::RealVector | crate::xspice::ParamType::IntegerVector
+            )
+        {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE model '{}' vector parameter '{}' was given a scalar value",
+                code_model.name(),
+                name
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn resolve_vector_params(
     code_model: &dyn crate::xspice::CodeModel,
     vectors: &[(String, Vec<f64>)],
@@ -79,6 +103,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     instance_params: &[(String, f64)],
 ) -> Result<ResolvedXspiceModel, SimulationError> {
     if let Some(code_model) = registry.get(model_name) {
+        reject_scalar_params_for_vector_specs(code_model.as_ref(), instance_params)?;
         return Ok(ResolvedXspiceModel {
             code_model,
             numeric_params: instance_params.to_vec(),
@@ -98,6 +123,9 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
             model_name, model_def.name, model_def.model_type
         ))
     })?;
+
+    reject_scalar_params_for_vector_specs(code_model.as_ref(), &model_def.params)?;
+    reject_scalar_params_for_vector_specs(code_model.as_ref(), instance_params)?;
 
     let (real_vector_params, mut integer_vector_params) =
         resolve_vector_params(code_model.as_ref(), &model_def.real_vector_params)?;
@@ -239,6 +267,33 @@ mod tests {
         let lowered = message.to_ascii_lowercase();
         assert!(
             lowered.contains("bits") && message.contains("0.5"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_resolver_rejects_scalar_model_param_for_known_vector_param() {
+        let netlist = Netlist::parse(
+            "xspice scalar where vector expected\n\
+             .model vp vector_probe (points=3)\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        let mut registry = crate::xspice::CodeModelRegistry::new();
+        registry.register(Arc::new(ParamOnlyModel::new(
+            "vector_probe",
+            vec![ParamSpec::real_vector("points", vec![0.0])],
+        )));
+
+        let err = match resolve_xspice_model_instance(&netlist, &registry, "vp", &[]) {
+            Ok(_) => panic!("scalar value for known vector parameter must be rejected"),
+            Err(err) => err,
+        };
+
+        let message = err.to_string();
+        let lowered = message.to_ascii_lowercase();
+        assert!(
+            lowered.contains("points") && lowered.contains("scalar"),
             "unexpected error: {message}"
         );
     }
