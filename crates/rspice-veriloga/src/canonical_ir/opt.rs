@@ -206,14 +206,19 @@ impl OptModel {
         builder.add_sparse_derivatives();
         let values = builder.finish(&mut equation_values);
 
-        let instance_static_ops = collect_instance_static_ops(&values);
         let mut schedules = Vec::new();
-        if !instance_static_ops.is_empty() {
-            schedules.push(OptSchedule {
-                id: ScheduleId::from(schedules.len()),
-                invalidation: InvalidationClass::InstanceStatic,
-                ops: instance_static_ops,
-            });
+        for invalidation in [
+            InvalidationClass::InstanceStatic,
+            InvalidationClass::TemperatureStatic,
+        ] {
+            let ops = collect_static_ops(&values, invalidation);
+            if !ops.is_empty() {
+                schedules.push(OptSchedule {
+                    id: ScheduleId::from(schedules.len()),
+                    invalidation,
+                    ops,
+                });
+            }
         }
 
         let mut newton_ops = Vec::new();
@@ -877,10 +882,7 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn push_value(&mut self, value_type: OptValueType, kind: OptValueKind) -> ValueId {
-        let (value_type, kind) = self.fold_constant_value(value_type, kind);
-        if let Some(value) = self.simplified_existing_value(&kind) {
-            return value;
-        }
+        let (value_type, kind) = self.simplify_value(value_type, kind);
 
         let key = OptValueKey::from_kind(&kind);
         if let Some(value) = self.value_keys.get(&key) {
@@ -896,6 +898,33 @@ impl<'a> ScalarGraphBuilder<'a> {
         });
         self.value_keys.insert(key, id);
         id
+    }
+
+    fn simplify_value(
+        &self,
+        mut value_type: OptValueType,
+        mut kind: OptValueKind,
+    ) -> (OptValueType, OptValueKind) {
+        loop {
+            let folded = self.fold_constant_value(value_type, kind);
+            value_type = folded.0;
+            kind = self.normalize_value_kind(folded.1);
+
+            if let Some(existing) = self.simplified_existing_value(&kind) {
+                return (
+                    self.values[usize::from(existing)].value_type,
+                    self.values[usize::from(existing)].kind.clone(),
+                );
+            }
+
+            if let Some(next) = self.simplified_replacement_kind(&kind) {
+                value_type = next.0;
+                kind = next.1;
+                continue;
+            }
+
+            return (value_type, kind);
+        }
     }
 
     fn fold_constant_value(
@@ -1026,12 +1055,68 @@ impl<'a> ScalarGraphBuilder<'a> {
         None
     }
 
+    fn normalize_value_kind(&self, kind: OptValueKind) -> OptValueKind {
+        match kind {
+            OptValueKind::Binary { op, left, right }
+                if Self::commutative_binary_op(op) && usize::from(right) < usize::from(left) =>
+            {
+                OptValueKind::Binary {
+                    op,
+                    left: right,
+                    right: left,
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn commutative_binary_op(op: OptBinaryOp) -> bool {
+        matches!(
+            op,
+            OptBinaryOp::Add
+                | OptBinaryOp::Mul
+                | OptBinaryOp::Eq
+                | OptBinaryOp::Ne
+                | OptBinaryOp::And
+                | OptBinaryOp::Or
+        )
+    }
+
     fn simplified_existing_value(&self, kind: &OptValueKind) -> Option<ValueId> {
         match kind {
             OptValueKind::Unary {
                 op: OptUnaryOp::Pos,
                 input,
             } => Some(*input),
+            OptValueKind::Unary {
+                op: OptUnaryOp::Neg,
+                input,
+            } => match self
+                .values
+                .get(usize::from(*input))
+                .map(|value| &value.kind)
+            {
+                Some(OptValueKind::Unary {
+                    op: OptUnaryOp::Neg,
+                    input,
+                }) => Some(*input),
+                _ => None,
+            },
+            OptValueKind::Binary {
+                op: OptBinaryOp::Add,
+                left,
+                right,
+            } if self.is_real_constant(*left, 0.0) => Some(*right),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Add,
+                left,
+                right,
+            } if self.is_real_constant(*right, 0.0) => Some(*left),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Sub,
+                left,
+                right,
+            } if self.is_real_constant(*right, 0.0) => Some(*left),
             OptValueKind::Binary {
                 op: OptBinaryOp::Mul,
                 left,
@@ -1047,6 +1132,48 @@ impl<'a> ScalarGraphBuilder<'a> {
                 left,
                 right,
             } if self.is_real_constant(*right, 1.0) => Some(*left),
+            _ => None,
+        }
+    }
+
+    fn simplified_replacement_kind(
+        &self,
+        kind: &OptValueKind,
+    ) -> Option<(OptValueType, OptValueKind)> {
+        match kind {
+            OptValueKind::Binary {
+                op: OptBinaryOp::Mul,
+                left,
+                right,
+            } if self.is_real_constant(*left, -1.0) => Some((
+                OptValueType::Real,
+                OptValueKind::Unary {
+                    op: OptUnaryOp::Neg,
+                    input: *right,
+                },
+            )),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Mul,
+                left,
+                right,
+            } if self.is_real_constant(*right, -1.0) => Some((
+                OptValueType::Real,
+                OptValueKind::Unary {
+                    op: OptUnaryOp::Neg,
+                    input: *left,
+                },
+            )),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Div,
+                left,
+                right,
+            } if self.is_real_constant(*right, -1.0) => Some((
+                OptValueType::Real,
+                OptValueKind::Unary {
+                    op: OptUnaryOp::Neg,
+                    input: *left,
+                },
+            )),
             _ => None,
         }
     }
@@ -2265,15 +2392,28 @@ fn validate_dense_value_ids(diagnostics: &mut Vec<IrDiagnostic>, values: &[OptVa
     }
 }
 
-fn collect_instance_static_ops(values: &[OptValue]) -> Vec<OptOp> {
+fn collect_static_ops(values: &[OptValue], target: InvalidationClass) -> Vec<OptOp> {
     let mut invalidation_memo = vec![None; values.len()];
     let mut parameter_memo = vec![None; values.len()];
+    let mut temperature_memo = vec![None; values.len()];
     values
         .iter()
         .filter(|value| {
-            value_invalidation(values, value.id, &mut invalidation_memo)
-                == InvalidationClass::InstanceStatic
-                && value_depends_on_parameter(values, value.id, &mut parameter_memo)
+            if value_invalidation(values, value.id, &mut invalidation_memo) != target {
+                return false;
+            }
+            match target {
+                InvalidationClass::InstanceStatic => {
+                    value_depends_on_parameter(values, value.id, &mut parameter_memo)
+                }
+                InvalidationClass::TemperatureStatic => {
+                    !matches!(
+                        value.kind,
+                        OptValueKind::Temperature | OptValueKind::ThermalVoltage
+                    ) && value_depends_on_temperature(values, value.id, &mut temperature_memo)
+                }
+                _ => false,
+            }
         })
         .map(|value| OptOp::ComputeValue { value: value.id })
         .collect()
@@ -2356,6 +2496,46 @@ fn value_depends_on_parameter(
             value_depends_on_parameter(values, condition, memo)
                 || value_depends_on_parameter(values, then_value, memo)
                 || value_depends_on_parameter(values, else_value, memo)
+        }
+    };
+    memo[index] = Some(depends);
+    depends
+}
+
+fn value_depends_on_temperature(
+    values: &[OptValue],
+    value: ValueId,
+    memo: &mut [Option<bool>],
+) -> bool {
+    let index = usize::from(value);
+    if let Some(depends) = memo[index] {
+        return depends;
+    }
+
+    let depends = match values[index].kind {
+        OptValueKind::Temperature | OptValueKind::ThermalVoltage => true,
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::EquationValue { .. } => false,
+        OptValueKind::Unary { input, .. } => value_depends_on_temperature(values, input, memo),
+        OptValueKind::Binary { left, right, .. } => {
+            value_depends_on_temperature(values, left, memo)
+                || value_depends_on_temperature(values, right, memo)
+        }
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            value_depends_on_temperature(values, condition, memo)
+                || value_depends_on_temperature(values, then_value, memo)
+                || value_depends_on_temperature(values, else_value, memo)
         }
     };
     memo[index] = Some(depends);

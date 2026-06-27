@@ -835,6 +835,60 @@ fn scalar_rust_backend_caches_parameter_static_values_outside_stamp() {
 }
 
 #[test]
+fn scalar_rust_backend_caches_temperature_static_values_outside_stamp() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(temperature_static_gain_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile temperature-static gain with scalar backend");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        state.contains("pub(crate) scalar_temperature_static_valid: bool,"),
+        "{state}"
+    );
+    assert!(
+        state.contains(
+            "fn ensure_temperature_static(&mut self, temperature: f64, thermal_voltage: f64)"
+        ),
+        "{state}"
+    );
+    assert!(
+        state.contains(
+            "fn recompute_temperature_static(&mut self, temperature: f64, thermal_voltage: f64)"
+        ),
+        "{state}"
+    );
+    assert!(state.contains("300.15"), "{state}");
+    assert!(
+        stamp.contains("self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("self.scalar_v"), "{stamp}");
+    assert!(!stamp.contains("300.15"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_selects_scalar_for_supported_algebraic_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(tiny_resistor_source())
@@ -1438,6 +1492,38 @@ fn rust_backend_auto_scalarizes_static_equations_inside_dynamic_models() {
 }
 
 #[test]
+fn rust_backend_auto_refreshes_temperature_static_cache_before_compact_borrows() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(temperature_static_runtime_loop_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile temperature-static RC hybrid");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let ensure_index = stamp
+        .find("self.ensure_temperature_static(scalar_temperature_static_temperature, scalar_temperature_static_thermal_voltage);")
+        .expect("temperature cache refresh");
+    let params_index = stamp
+        .find("let p = Box::as_ref")
+        .expect("compact params borrow");
+
+    assert!(
+        ensure_index < params_index,
+        "temperature cache refresh must precede compact preamble borrows:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_static_system_function_assignment_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(static_system_function_chain_source())
@@ -1462,7 +1548,10 @@ fn rust_backend_auto_scalarizes_static_system_function_assignment_chains() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(stamp.contains("ctx.temperature()"), "{stamp}");
+    assert!(
+        stamp.contains("scalar_temperature_static_temperature = (ctx).temperature();"),
+        "{stamp}"
+    );
     assert!(joined.contains("param_given[0]"), "{joined}");
     assert!(stamp.contains("multiplicity"), "{stamp}");
     assert!(
@@ -12433,6 +12522,51 @@ module tiny_res(p, n);
     electrical p, n;
     parameter real r = 1000.0 from (0:inf);
     analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#
+}
+
+fn temperature_static_gain_source() -> &'static str {
+    r#"
+module temperature_static_gain(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real alpha = 1.0e-3;
+    parameter real tnom = 300.15;
+    real tc;
+    analog begin
+        tc = 1.0 + alpha * ($temperature - tnom);
+        I(p, n) <+ V(p, n) / tc;
+    end
+endmodule
+"#
+}
+
+fn temperature_static_runtime_loop_source() -> &'static str {
+    r#"
+module temperature_static_runtime_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    parameter real c = 1e-12 from [0:inf);
+    parameter real limit = 3.0 from [0:inf);
+    parameter real alpha = 1.0e-3;
+    parameter real tnom = 300.15;
+    real tc;
+    real loop;
+    real acc;
+    analog begin
+        tc = 1.0 + alpha * ($temperature - tnom);
+        I(p, n) <+ V(p, n) / (r * tc);
+        I(p, n) <+ ddt(c * tc * V(p, n));
+        loop = 0.0;
+        acc = 0.0;
+        while (loop < limit) begin
+            acc = acc + V(p, n);
+            loop = loop + 1.0;
+        end
+        I(p, n) <+ acc;
+    end
 endmodule
 "#
 }

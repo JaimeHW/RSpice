@@ -245,6 +245,22 @@ endmodule
 "#
 }
 
+fn temperature_static_gain_source() -> &'static str {
+    r#"
+module temperature_static_gain(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real alpha = 1.0e-3;
+    parameter real tnom = 300.15;
+    real tc;
+    analog begin
+        tc = 1.0 + alpha * ($temperature - tnom);
+        I(p, n) <+ V(p, n) / tc;
+    end
+endmodule
+"#
+}
+
 fn chunked_dynamic_assignment_source(count: usize) -> String {
     assert!(count > 0);
     let mut source = String::from(
@@ -298,6 +314,29 @@ module mul_one(p, n);
     inout p, n;
     electrical p, n;
     analog I(p, n) <+ V(p, n) * 1.0;
+endmodule
+"#
+}
+
+fn algebraic_identity_source() -> &'static str {
+    r#"
+module algebraic_identity(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ (((V(p, n) + 0.0) - 0.0) * -1.0) / -1.0;
+endmodule
+"#
+}
+
+fn commutative_reuse_source() -> &'static str {
+    r#"
+module commutative_reuse(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) + 2.0;
+        I(p, n) <+ 2.0 + V(p, n);
+    end
 endmodule
 "#
 }
@@ -1025,6 +1064,54 @@ fn opt_lowering_keeps_ddt_operand_roots_in_dynamic_models() {
 }
 
 #[test]
+fn opt_lowering_schedules_temperature_dependent_derivatives_as_temperature_static() {
+    let (_, _, _, opt) =
+        lower_fixture_parts(temperature_static_gain_source(), "temperature_static_gain");
+    let temperature_static = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::TemperatureStatic)
+        .expect("TemperatureStatic schedule");
+    let temperature_values: std::collections::HashSet<_> = temperature_static
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            OptOp::ComputeValue { value } => Some(*value),
+            OptOp::EvaluateEquation { .. } => None,
+        })
+        .collect();
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("temperature-static gain current should have a scalar root: {newton:?}");
+    };
+    let root_value = &opt.values[usize::from(*root)];
+
+    assert_eq!(root_value.derivatives.len(), 2, "{root_value:?}");
+    for derivative in &root_value.derivatives {
+        assert!(
+            temperature_values.contains(&derivative.value),
+            "derivative {:?} should be computed in TemperatureStatic schedule {:?}",
+            derivative,
+            temperature_static
+        );
+    }
+    assert!(
+        newton.ops.iter().all(|op| match op {
+            OptOp::ComputeValue { value } => root_value
+                .derivatives
+                .iter()
+                .all(|derivative| derivative.value != *value),
+            OptOp::EvaluateEquation { .. } => true,
+        }),
+        "Newton schedule should not compute temperature-static derivatives: {newton:?}"
+    );
+}
+
+#[test]
 fn opt_lowering_keeps_large_assignment_chain_roots_in_dynamic_models() {
     let source = chunked_dynamic_assignment_source(320);
     let analyzed =
@@ -1167,6 +1254,70 @@ fn opt_lowering_strength_reduces_multiply_by_one() {
             )
         }),
         "multiply by one should not remain in scalar OptIR: {:?}",
+        opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_simplifies_scalar_algebraic_identities() {
+    let (_, _, _, opt) = lower_fixture_parts(algebraic_identity_source(), "algebraic_identity");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("identity expression should have a scalar root: {newton:?}");
+    };
+
+    assert_eq!(
+        *root,
+        ValueId::new(2),
+        "identity chain should simplify to the existing branch potential: {:?}",
+        opt.values
+    );
+    assert!(
+        opt.values.iter().all(|value| {
+            if value.id == *root {
+                return true;
+            }
+            !matches!(
+                value.kind,
+                OptValueKind::Binary {
+                    op: OptBinaryOp::Add | OptBinaryOp::Sub | OptBinaryOp::Mul | OptBinaryOp::Div,
+                    ..
+                } | OptValueKind::Unary {
+                    op: OptUnaryOp::Neg,
+                    ..
+                }
+            )
+        }),
+        "scalar algebraic identities should not remain in OptIR: {:?}",
+        opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_reuses_commutative_scalar_binary_values() {
+    let (_, _, _, opt) = lower_fixture_parts(commutative_reuse_source(), "commutative_reuse");
+
+    let add_count = opt
+        .values
+        .iter()
+        .filter(|value| {
+            matches!(
+                value.kind,
+                OptValueKind::Binary {
+                    op: OptBinaryOp::Add,
+                    ..
+                }
+            )
+        })
+        .count();
+
+    assert_eq!(
+        add_count, 1,
+        "operand-order equivalent additions should CSE to one OptIR value: {:?}",
         opt.values
     );
 }

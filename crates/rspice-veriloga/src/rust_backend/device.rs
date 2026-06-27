@@ -6377,6 +6377,21 @@ fn emit_stamp_common_bindings(
     }
 }
 
+fn emit_temperature_static_refresh(
+    out: &mut String,
+    scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+) {
+    if scalar_hybrid_plan.is_some_and(|plan| plan.static_cache.has_temperature_values()) {
+        out.push_str("        let scalar_temperature_static_temperature = (ctx).temperature();\n");
+        out.push_str(
+            "        let scalar_temperature_static_thermal_voltage = (ctx).thermal_voltage();\n",
+        );
+        out.push_str(
+            "        self.ensure_temperature_static(scalar_temperature_static_temperature, scalar_temperature_static_thermal_voltage);\n",
+        );
+    }
+}
+
 fn generate_stamp_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
@@ -6485,6 +6500,7 @@ fn generate_stamp_file(
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
+    emit_temperature_static_refresh(&mut out, scalar_hybrid_plan);
     emit_stamp_common_bindings(&mut out, common_usage, transient_operator_usage.has_any());
     emit_stamp_body(
         artifact,
@@ -6506,6 +6522,7 @@ fn generate_stamp_file(
         "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
     );
     if ddt_slots.len() > 0 {
+        emit_temperature_static_refresh(&mut out, scalar_hybrid_plan);
         emit_stamp_common_bindings(&mut out, common_usage, false);
         emit_stamp_body(
             artifact,

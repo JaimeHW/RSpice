@@ -14,25 +14,26 @@ use super::{RustTranspileOptions, device};
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 
 pub(super) struct ScalarStaticCache {
-    values: Vec<ValueId>,
+    instance_values: Vec<ValueId>,
+    temperature_values: Vec<ValueId>,
     set: HashSet<ValueId>,
 }
 
 impl ScalarStaticCache {
     fn from_artifact(artifact: &CanonicalIrArtifact) -> Self {
-        let values: Vec<_> = artifact
-            .opt
-            .schedules
+        let instance_values = scheduled_values(artifact, InvalidationClass::InstanceStatic, None);
+        let temperature_values =
+            scheduled_values(artifact, InvalidationClass::TemperatureStatic, None);
+        let set = instance_values
             .iter()
-            .filter(|schedule| schedule.invalidation == InvalidationClass::InstanceStatic)
-            .flat_map(|schedule| schedule.ops.iter())
-            .filter_map(|op| match op {
-                OptOp::ComputeValue { value } => Some(*value),
-                OptOp::EvaluateEquation { .. } => None,
-            })
+            .chain(temperature_values.iter())
+            .copied()
             .collect();
-        let set = values.iter().copied().collect();
-        Self { values, set }
+        Self {
+            instance_values,
+            temperature_values,
+            set,
+        }
     }
 
     pub(super) fn from_roots(
@@ -40,23 +41,25 @@ impl ScalarStaticCache {
         roots: &HashMap<EquationId, ValueId>,
     ) -> Result<Self, RustBackendError> {
         let empty_cache = Self {
-            values: Vec::new(),
+            instance_values: Vec::new(),
+            temperature_values: Vec::new(),
             set: HashSet::new(),
         };
         let live = collect_stamp_live_values(artifact, roots, &empty_cache)?;
-        let values: Vec<_> = artifact
-            .opt
-            .schedules
+        let instance_values =
+            scheduled_values(artifact, InvalidationClass::InstanceStatic, Some(&live));
+        let temperature_values =
+            scheduled_values(artifact, InvalidationClass::TemperatureStatic, Some(&live));
+        let set = instance_values
             .iter()
-            .filter(|schedule| schedule.invalidation == InvalidationClass::InstanceStatic)
-            .flat_map(|schedule| schedule.ops.iter())
-            .filter_map(|op| match op {
-                OptOp::ComputeValue { value } if live.contains(value) => Some(*value),
-                OptOp::ComputeValue { .. } | OptOp::EvaluateEquation { .. } => None,
-            })
+            .chain(temperature_values.iter())
+            .copied()
             .collect();
-        let set = values.iter().copied().collect();
-        Ok(Self { values, set })
+        Ok(Self {
+            instance_values,
+            temperature_values,
+            set,
+        })
     }
 
     fn contains(&self, value: ValueId) -> bool {
@@ -64,8 +67,32 @@ impl ScalarStaticCache {
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.values.is_empty()
+        self.instance_values.is_empty() && self.temperature_values.is_empty()
     }
+
+    pub(super) fn has_temperature_values(&self) -> bool {
+        !self.temperature_values.is_empty()
+    }
+}
+
+fn scheduled_values(
+    artifact: &CanonicalIrArtifact,
+    invalidation: InvalidationClass,
+    live: Option<&HashSet<ValueId>>,
+) -> Vec<ValueId> {
+    artifact
+        .opt
+        .schedules
+        .iter()
+        .filter(|schedule| schedule.invalidation == invalidation)
+        .flat_map(|schedule| schedule.ops.iter())
+        .filter_map(|op| match op {
+            OptOp::ComputeValue { value } if live.map_or(true, |live| live.contains(value)) => {
+                Some(*value)
+            }
+            OptOp::ComputeValue { .. } | OptOp::EvaluateEquation { .. } => None,
+        })
+        .collect()
 }
 
 struct ValueEmitContext<'a> {
@@ -73,6 +100,8 @@ struct ValueEmitContext<'a> {
     use_cached_fields: bool,
     inline_uncached_constants: bool,
     limexp_max_expr: String,
+    temperature_expr: String,
+    thermal_voltage_expr: String,
 }
 
 struct ScalarDerivatives {
@@ -196,6 +225,11 @@ fn generate_stamp_file(
     if stamp_needs_branches {
         out.push_str("        let branches = self.branches;\n");
     }
+    if static_cache.has_temperature_values() {
+        out.push_str(
+            "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
+        );
+    }
     if stamp_needs_params {
         out.push_str("        let p = &(*self.params);\n");
     }
@@ -217,6 +251,8 @@ fn generate_stamp_file(
         use_cached_fields: true,
         inline_uncached_constants: false,
         limexp_max_expr: "LIMEXP_MAX".to_string(),
+        temperature_expr: "ctx.temperature()".to_string(),
+        thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
     };
     for value in &artifact.opt.values {
         if !stamp_live.contains(&value.id) {
@@ -249,6 +285,11 @@ fn generate_stamp_file(
             "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
         );
         out.push_str("        let nodes = self.nodes;\n");
+        if static_cache.has_temperature_values() {
+            out.push_str(
+                "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
+            );
+        }
         out.push_str("        let p = &(*self.params);\n");
         out.push_str("        let multiplicity = self.multiplicity;\n");
         for value in &artifact.opt.values {
@@ -322,27 +363,29 @@ pub(super) fn scalar_state_extensions(
         params_visibility: "pub(crate)",
         ..device::StateFileExtensions::default()
     };
-    let recompute_context = ValueEmitContext {
+    let instance_context = ValueEmitContext {
         cached_values: &static_cache.set,
         use_cached_fields: false,
         inline_uncached_constants: true,
         limexp_max_expr: format_f64(LIMEXP_MAX),
+        temperature_expr: "temperature".to_string(),
+        thermal_voltage_expr: "thermal_voltage".to_string(),
     };
-    let mut recompute = String::new();
-    recompute.push_str("\n    #[inline]\n");
-    recompute.push_str("    fn recompute_instance_static(&mut self) {\n");
-    recompute.push_str("        let p = &(*self.params);\n");
-    if static_cache.values.iter().any(|value_id| {
-        artifact
-            .opt
-            .values
-            .get(usize::from(*value_id))
-            .is_some_and(|value| matches!(value.kind, OptValueKind::ParamGiven { .. }))
-    }) {
-        recompute.push_str("        let param_given = self.param_given.as_ref();\n");
-    }
+    let temperature_context = ValueEmitContext {
+        cached_values: &static_cache.set,
+        use_cached_fields: true,
+        inline_uncached_constants: true,
+        limexp_max_expr: format_f64(LIMEXP_MAX),
+        temperature_expr: "temperature".to_string(),
+        thermal_voltage_expr: "thermal_voltage".to_string(),
+    };
+    let mut methods = String::new();
 
-    for value_id in &static_cache.values {
+    for value_id in static_cache
+        .instance_values
+        .iter()
+        .chain(static_cache.temperature_values.iter())
+    {
         let value = artifact
             .opt
             .values
@@ -350,36 +393,142 @@ pub(super) fn scalar_state_extensions(
             .ok_or_else(|| {
                 unsupported(artifact, format!("missing static scalar value {value_id}"))
             })?;
-        let field = cache_field_name(*value_id);
-        let ty = rust_type(value.value_type);
-        let default = default_value(value.value_type);
-        extensions
-            .instance_fields
-            .push_str(&format!("    pub(crate) {field}: {ty},\n"));
-        extensions
-            .clone_fields
-            .push_str(&format!("            {field}: self.{field},\n"));
-        extensions
-            .new_initializers
-            .push_str(&format!("            {field}: {default},\n"));
-        extensions
-            .restore_destructure_fields
-            .push_str(&format!("            {field},\n"));
-        extensions
-            .restore_initializers
-            .push_str(&format!("            {field},\n"));
-
-        let local = value_name(*value_id);
-        let expr = emit_value_expr(artifact, parameter_fields, value, &recompute_context)?;
-        recompute.push_str(&format!("        let {local}: {ty} = {expr};\n"));
-        recompute.push_str(&format!("        self.{field} = {local};\n"));
+        push_cached_value_state_fields(&mut extensions, *value_id, value.value_type);
     }
 
-    recompute.push_str("    }\n");
-    extensions.after_new = "        instance.recompute_instance_static();\n".to_string();
-    extensions.set_parameter_hook = "self.recompute_instance_static(); ".to_string();
-    extensions.impl_methods = recompute;
+    if !static_cache.instance_values.is_empty() {
+        methods.push_str("\n    #[inline]\n");
+        methods.push_str("    fn recompute_instance_static(&mut self) {\n");
+        methods.push_str("        let p = &(*self.params);\n");
+        if cached_values_need_param_given(artifact, &static_cache.instance_values) {
+            methods.push_str("        let param_given = self.param_given.as_ref();\n");
+        }
+        for value_id in &static_cache.instance_values {
+            let value = artifact
+                .opt
+                .values
+                .get(usize::from(*value_id))
+                .ok_or_else(|| {
+                    unsupported(artifact, format!("missing static scalar value {value_id}"))
+                })?;
+            let local = value_name(*value_id);
+            let ty = rust_type(value.value_type);
+            let expr = emit_value_expr(artifact, parameter_fields, value, &instance_context)?;
+            methods.push_str(&format!("        let {local}: {ty} = {expr};\n"));
+            methods.push_str(&format!(
+                "        self.{} = {local};\n",
+                cache_field_name(*value_id)
+            ));
+        }
+        methods.push_str("    }\n");
+        extensions
+            .after_new
+            .push_str("        instance.recompute_instance_static();\n");
+        extensions
+            .set_parameter_hook
+            .push_str("self.recompute_instance_static(); ");
+    }
+
+    if static_cache.has_temperature_values() {
+        push_temperature_cache_state_fields(&mut extensions);
+        extensions
+            .set_parameter_hook
+            .push_str("self.invalidate_temperature_static(); ");
+        methods.push_str(
+            "\n    #[inline]\n    fn invalidate_temperature_static(&mut self) {\n        self.scalar_temperature_static_valid = false;\n    }\n",
+        );
+        methods.push_str(
+            "\n    #[inline]\n    pub(super) fn ensure_temperature_static(&mut self, temperature: f64, thermal_voltage: f64) {\n        if !self.scalar_temperature_static_valid\n            || self.scalar_temperature_static_temperature.to_bits() != temperature.to_bits()\n            || self.scalar_temperature_static_thermal_voltage.to_bits() != thermal_voltage.to_bits()\n        {\n            self.recompute_temperature_static(temperature, thermal_voltage);\n        }\n    }\n",
+        );
+        methods.push_str(
+            "\n    #[inline]\n    fn recompute_temperature_static(&mut self, temperature: f64, thermal_voltage: f64) {\n        let p = &(*self.params);\n",
+        );
+        if cached_values_need_param_given(artifact, &static_cache.temperature_values) {
+            methods.push_str("        let param_given = self.param_given.as_ref();\n");
+        }
+        for value_id in &static_cache.temperature_values {
+            let value = artifact
+                .opt
+                .values
+                .get(usize::from(*value_id))
+                .ok_or_else(|| {
+                    unsupported(
+                        artifact,
+                        format!("missing temperature-static scalar value {value_id}"),
+                    )
+                })?;
+            let local = value_name(*value_id);
+            let ty = rust_type(value.value_type);
+            let expr = emit_value_expr(artifact, parameter_fields, value, &temperature_context)?;
+            methods.push_str(&format!("        let {local}: {ty} = {expr};\n"));
+            methods.push_str(&format!(
+                "        self.{} = {local};\n",
+                cache_field_name(*value_id)
+            ));
+        }
+        methods.push_str("        self.scalar_temperature_static_temperature = temperature;\n");
+        methods.push_str(
+            "        self.scalar_temperature_static_thermal_voltage = thermal_voltage;\n",
+        );
+        methods.push_str("        self.scalar_temperature_static_valid = true;\n");
+        methods.push_str("    }\n");
+    }
+
+    extensions.impl_methods = methods;
     Ok(extensions)
+}
+
+fn cached_values_need_param_given(artifact: &CanonicalIrArtifact, values: &[ValueId]) -> bool {
+    values.iter().any(|value_id| {
+        artifact
+            .opt
+            .values
+            .get(usize::from(*value_id))
+            .is_some_and(|value| matches!(value.kind, OptValueKind::ParamGiven { .. }))
+    })
+}
+
+fn push_cached_value_state_fields(
+    extensions: &mut device::StateFileExtensions,
+    value_id: ValueId,
+    value_type: OptValueType,
+) {
+    let field = cache_field_name(value_id);
+    let ty = rust_type(value_type);
+    let default = default_value(value_type);
+    extensions
+        .instance_fields
+        .push_str(&format!("    pub(crate) {field}: {ty},\n"));
+    extensions
+        .clone_fields
+        .push_str(&format!("            {field}: self.{field},\n"));
+    extensions
+        .new_initializers
+        .push_str(&format!("            {field}: {default},\n"));
+    extensions
+        .restore_destructure_fields
+        .push_str(&format!("            {field},\n"));
+    extensions
+        .restore_initializers
+        .push_str(&format!("            {field},\n"));
+}
+
+fn push_temperature_cache_state_fields(extensions: &mut device::StateFileExtensions) {
+    extensions.instance_fields.push_str(
+        "    pub(crate) scalar_temperature_static_valid: bool,\n    pub(crate) scalar_temperature_static_temperature: f64,\n    pub(crate) scalar_temperature_static_thermal_voltage: f64,\n",
+    );
+    extensions.clone_fields.push_str(
+        "            scalar_temperature_static_valid: self.scalar_temperature_static_valid,\n            scalar_temperature_static_temperature: self.scalar_temperature_static_temperature,\n            scalar_temperature_static_thermal_voltage: self.scalar_temperature_static_thermal_voltage,\n",
+    );
+    extensions.new_initializers.push_str(
+        "            scalar_temperature_static_valid: false,\n            scalar_temperature_static_temperature: 0.0,\n            scalar_temperature_static_thermal_voltage: 0.0,\n",
+    );
+    extensions.restore_destructure_fields.push_str(
+        "            scalar_temperature_static_valid,\n            scalar_temperature_static_temperature,\n            scalar_temperature_static_thermal_voltage,\n",
+    );
+    extensions.restore_initializers.push_str(
+        "            scalar_temperature_static_valid,\n            scalar_temperature_static_temperature,\n            scalar_temperature_static_thermal_voltage,\n",
+    );
 }
 
 pub(super) fn scalarizable_current_equation_roots(
@@ -466,6 +615,8 @@ pub(super) fn emit_static_current_values(
         use_cached_fields: true,
         inline_uncached_constants: false,
         limexp_max_expr: "LIMEXP_MAX".to_string(),
+        temperature_expr: "ctx.temperature()".to_string(),
+        thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
     };
     for value in &artifact.opt.values {
         if !stamp_live.contains(&value.id) {
@@ -1371,8 +1522,8 @@ fn emit_value_expr(
             let index = usize::from(*parameter);
             format!("if param_given[{index}] {{ 1.0 }} else {{ 0.0 }}")
         }
-        OptValueKind::Temperature => "ctx.temperature()".to_string(),
-        OptValueKind::ThermalVoltage => "ctx.thermal_voltage()".to_string(),
+        OptValueKind::Temperature => context.temperature_expr.clone(),
+        OptValueKind::ThermalVoltage => context.thermal_voltage_expr.clone(),
         OptValueKind::Multiplicity => "multiplicity".to_string(),
         OptValueKind::Time => "self.time".to_string(),
         OptValueKind::NodePotential { node } => {
@@ -1474,8 +1625,8 @@ fn value_ref(
                     usize::from(parameter)
                 ));
             }
-            OptValueKind::Temperature => return Ok("ctx.temperature()".to_string()),
-            OptValueKind::ThermalVoltage => return Ok("ctx.thermal_voltage()".to_string()),
+            OptValueKind::Temperature => return Ok(context.temperature_expr.clone()),
+            OptValueKind::ThermalVoltage => return Ok(context.thermal_voltage_expr.clone()),
             OptValueKind::Multiplicity => return Ok("multiplicity".to_string()),
             OptValueKind::Time => return Ok("self.time".to_string()),
             _ => {}
@@ -1705,7 +1856,8 @@ fn validate_scalar_value_graph(
 ) -> Result<(), RustBackendError> {
     let roots = HashMap::from([(equation.id, root)]);
     let empty_cache = ScalarStaticCache {
-        values: Vec::new(),
+        instance_values: Vec::new(),
+        temperature_values: Vec::new(),
         set: HashSet::new(),
     };
     let live = collect_stamp_live_values(artifact, &roots, &empty_cache)?;
