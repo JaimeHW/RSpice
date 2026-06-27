@@ -207,6 +207,27 @@ endmodule
 "#
 }
 
+fn integer_parameter_loop_accumulator_source() -> &'static str {
+    r#"
+module integer_parameter_loop_accum(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real acc;
+    analog begin
+        i = 0;
+        acc = 0.0;
+        while (i < nf) begin
+            acc = acc + V(p, n);
+            i = i + 1;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#
+}
+
 fn mixed_dynamic_assignment_source() -> &'static str {
     r#"
 module mixed_dynamic_assignment(p, n);
@@ -901,6 +922,47 @@ fn opt_lowering_resolves_straight_line_scalar_assignment() {
             .iter()
             .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
         "assignment-fed scalar graph should not fall back to legacy equation values: {:?}",
+        opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_scalarizes_nonnegative_integer_parameter_counted_accumulator_loop() {
+    let (_, _, _, opt) = lower_fixture_parts(
+        integer_parameter_loop_accumulator_source(),
+        "integer_parameter_loop_accum",
+    );
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("integer parameter counted loop should have a scalar root: {newton:?}");
+    };
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: vec![4.0],
+            node_potentials: vec![5.0, 2.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate integer counted loop scalar graph");
+
+    assert_eq!(snapshot.real(*root), Some(12.0));
+    assert_eq!(
+        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(0))),
+        Some(4.0)
+    );
+    assert_eq!(
+        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(1))),
+        Some(-4.0)
+    );
+    assert!(
+        opt.values
+            .iter()
+            .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
+        "integer counted loop should not fall back to legacy equation values: {:?}",
         opt.values
     );
 }

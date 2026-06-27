@@ -493,6 +493,10 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_loop_statement(&mut self, loop_statement: &HirLoop) {
+        if self.lower_counted_accumulator_loop(loop_statement) {
+            return;
+        }
+
         let mut iterations = 0;
         loop {
             self.expression_values.clear();
@@ -519,6 +523,287 @@ impl<'a> ScalarGraphBuilder<'a> {
             iterations += 1;
             self.expression_values.clear();
             self.lower_statements(&loop_statement.body);
+        }
+    }
+
+    fn lower_counted_accumulator_loop(&mut self, loop_statement: &HirLoop) -> bool {
+        let original_values = self.values.clone();
+        let original_value_keys = self.value_keys.clone();
+        let original_expression_values = self.expression_values.clone();
+        let original_variable_values = self.variable_values.clone();
+
+        let matched = self.try_lower_counted_accumulator_loop(loop_statement);
+        if matched {
+            self.expression_values.clear();
+            true
+        } else {
+            self.values = original_values;
+            self.value_keys = original_value_keys;
+            self.expression_values = original_expression_values;
+            self.variable_values = original_variable_values;
+            false
+        }
+    }
+
+    fn try_lower_counted_accumulator_loop(&mut self, loop_statement: &HirLoop) -> bool {
+        self.expression_values.clear();
+        let Some((counter, bound)) = self.counted_loop_condition(loop_statement.condition.id)
+        else {
+            return false;
+        };
+        if self.variable_value_type(counter) != Some(CanonicalValueType::Integer) {
+            return false;
+        }
+        let Some(counter_start) = self.current_variable_value(counter) else {
+            return false;
+        };
+        if !self.is_real_constant(counter_start, 0.0) {
+            return false;
+        }
+
+        let Some(assigned_variables) = self.loop_assignment_targets(&loop_statement.body) else {
+            return false;
+        };
+        let mut saw_counter_increment = false;
+        let mut saw_accumulator = false;
+
+        for statement in &loop_statement.body {
+            let HirStatement::Assignment(assignment) = statement else {
+                return false;
+            };
+            if self.is_counter_increment_assignment(assignment, counter) {
+                saw_counter_increment = true;
+                continue;
+            }
+
+            let Some(term_expr) =
+                self.accumulator_update_term(assignment, counter, &assigned_variables)
+            else {
+                return false;
+            };
+            if self.expr_references_any_variable(term_expr, &assigned_variables) {
+                return false;
+            }
+            let Some(previous) = self.current_variable_value(assignment.target) else {
+                return false;
+            };
+            self.expression_values.clear();
+            let Some(term) = self.lower_expression(term_expr) else {
+                return false;
+            };
+            let scaled_term = self.push_binary_value(OptBinaryOp::Mul, bound, term);
+            let next = self.push_binary_value(OptBinaryOp::Add, previous, scaled_term);
+            self.variable_values.insert(assignment.target, Some(next));
+            saw_accumulator = true;
+        }
+
+        if !(saw_counter_increment && saw_accumulator) {
+            return false;
+        }
+
+        self.variable_values.insert(counter, Some(bound));
+        true
+    }
+
+    fn counted_loop_condition(&mut self, condition: ExprId) -> Option<(VariableId, ValueId)> {
+        let expression = self.mir.expressions.get(usize::from(condition))?;
+        let HirExprKind::Binary { op, left, right } = &expression.kind else {
+            return None;
+        };
+        if op.as_str() != "Lt" {
+            return None;
+        }
+
+        let counter = self.variable_identifier(*left)?;
+        let bound = self.nonnegative_integer_loop_bound(*right)?;
+        Some((counter, bound))
+    }
+
+    fn nonnegative_integer_loop_bound(&mut self, expr: ExprId) -> Option<ValueId> {
+        if let Some(parameter) = self.parameter_identifier(expr) {
+            let slot = self.mir.parameters.get(usize::from(parameter))?;
+            if slot.value_type == CanonicalValueType::Integer
+                && slot
+                    .range
+                    .as_ref()
+                    .and_then(|range| range.min)
+                    .is_some_and(|min| min >= 0.0)
+            {
+                return self.lower_expression(expr);
+            }
+            return None;
+        }
+
+        let value = self.number_constant_expr(expr)?;
+        if value >= 0.0 && value.fract() == 0.0 {
+            return self.lower_expression(expr);
+        }
+        None
+    }
+
+    fn loop_assignment_targets(&self, statements: &[HirStatement]) -> Option<HashSet<VariableId>> {
+        let mut targets = HashSet::new();
+        for statement in statements {
+            let HirStatement::Assignment(assignment) = statement else {
+                return None;
+            };
+            if assignment.index.is_some() {
+                return None;
+            }
+            targets.insert(assignment.target);
+        }
+        Some(targets)
+    }
+
+    fn is_counter_increment_assignment(
+        &self,
+        assignment: &HirAssignment,
+        counter: VariableId,
+    ) -> bool {
+        if assignment.target != counter || assignment.index.is_some() {
+            return false;
+        }
+        let Some((left, right)) = self.add_operands(assignment.expr.id) else {
+            return false;
+        };
+        (self.variable_identifier(left) == Some(counter)
+            && self.number_constant_expr(right) == Some(1.0))
+            || (self.variable_identifier(right) == Some(counter)
+                && self.number_constant_expr(left) == Some(1.0))
+    }
+
+    fn accumulator_update_term(
+        &self,
+        assignment: &HirAssignment,
+        counter: VariableId,
+        assigned_variables: &HashSet<VariableId>,
+    ) -> Option<ExprId> {
+        if assignment.target == counter
+            || assignment.index.is_some()
+            || !supported_assignment_value_type(assignment.expr_type)
+        {
+            return None;
+        }
+        if !assigned_variables.contains(&assignment.target) {
+            return None;
+        }
+        let (left, right) = self.add_operands(assignment.expr.id)?;
+        if self.variable_identifier(left) == Some(assignment.target) {
+            return Some(right);
+        }
+        if self.variable_identifier(right) == Some(assignment.target) {
+            return Some(left);
+        }
+        None
+    }
+
+    fn add_operands(&self, expr: ExprId) -> Option<(ExprId, ExprId)> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Binary { op, left, right } = &expression.kind else {
+            return None;
+        };
+        (op.as_str() == "Add").then_some((*left, *right))
+    }
+
+    fn current_variable_value(&mut self, variable: VariableId) -> Option<ValueId> {
+        match self.variable_values.get(&variable).copied() {
+            Some(value) => value,
+            None => self.default_variable_value(self.variable_value_type(variable)?),
+        }
+    }
+
+    fn variable_value_type(&self, variable: VariableId) -> Option<CanonicalValueType> {
+        self.hir?
+            .variables
+            .get(usize::from(variable))
+            .map(|variable| variable.value_type)
+    }
+
+    fn variable_identifier(&self, expr: ExprId) -> Option<VariableId> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Identifier { name } = &expression.kind else {
+            return None;
+        };
+        self.hir?
+            .variables
+            .iter()
+            .find(|variable| variable.name == *name)
+            .map(|variable| variable.id)
+    }
+
+    fn parameter_identifier(&self, expr: ExprId) -> Option<ParamId> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Identifier { name } = &expression.kind else {
+            return None;
+        };
+        self.mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == *name)
+            .map(|parameter| parameter.id)
+    }
+
+    fn number_constant_expr(&self, expr: ExprId) -> Option<f64> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Number { value, .. } = expression.kind else {
+            return None;
+        };
+        Some(value)
+    }
+
+    fn expr_references_any_variable(&self, expr: ExprId, variables: &HashSet<VariableId>) -> bool {
+        let mut visited = HashSet::new();
+        self.expr_references_any_variable_inner(expr, variables, &mut visited)
+    }
+
+    fn expr_references_any_variable_inner(
+        &self,
+        expr: ExprId,
+        variables: &HashSet<VariableId>,
+        visited: &mut HashSet<ExprId>,
+    ) -> bool {
+        if !visited.insert(expr) {
+            return false;
+        }
+        let Some(expression) = self.mir.expressions.get(usize::from(expr)) else {
+            return true;
+        };
+        match &expression.kind {
+            HirExprKind::Identifier { .. } => self
+                .variable_identifier(expr)
+                .is_some_and(|variable| variables.contains(&variable)),
+            HirExprKind::Binary { left, right, .. } => {
+                self.expr_references_any_variable_inner(*left, variables, visited)
+                    || self.expr_references_any_variable_inner(*right, variables, visited)
+            }
+            HirExprKind::Unary { operand, .. } => {
+                self.expr_references_any_variable_inner(*operand, variables, visited)
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.expr_references_any_variable_inner(*condition, variables, visited)
+                    || self.expr_references_any_variable_inner(*then_expr, variables, visited)
+                    || self.expr_references_any_variable_inner(*else_expr, variables, visited)
+            }
+            HirExprKind::Call { args, .. } | HirExprKind::SystemFunction { args, .. } => args
+                .iter()
+                .any(|arg| self.expr_references_any_variable_inner(*arg, variables, visited)),
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Limexp { expr },
+            } => self.expr_references_any_variable_inner(*expr, variables, visited),
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => false,
+            HirExprKind::ArrayAccess { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::AnalogOperator { .. }
+            | HirExprKind::Laplace { .. }
+            | HirExprKind::Zi { .. }
+            | HirExprKind::NoiseSource { .. } => true,
         }
     }
 

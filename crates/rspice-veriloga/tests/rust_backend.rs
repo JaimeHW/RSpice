@@ -1020,6 +1020,36 @@ fn rust_backend_auto_scalarizes_constant_bounded_scalar_loops() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_integer_parameter_counted_scalar_loops() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(integer_parameter_loop_accumulator_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile integer parameter counted loop through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("while"), "{stamp}");
+    assert!(!stamp.contains("loop_guard"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_falls_back_for_runtime_bounded_scalar_loops() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(runtime_bounded_loop_accumulator_source())
@@ -16781,6 +16811,27 @@ module runtime_loop_accum(p, n);
         while (loop < limit) begin
             acc = acc + V(p, n);
             loop = loop + 1.0;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#
+}
+
+fn integer_parameter_loop_accumulator_source() -> &'static str {
+    r#"
+module integer_parameter_loop_accum(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real acc;
+    analog begin
+        i = 0;
+        acc = 0.0;
+        while (i < nf) begin
+            acc = acc + V(p, n);
+            i = i + 1;
         end
         I(p, n) <+ acc;
     end
