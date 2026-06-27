@@ -3733,6 +3733,50 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_powf_affine_inputs_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_powf_scaled_input",
+            "fn store_powf_offset_input",
+            "fn store_powf_scale_offset_input",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(90, AdValue::powf(AdValue::scale(scratch.ad_value(2), params.scale), params.exponent));
+    scratch.store_ad_value(91, AdValue::powf(AdValue::offset(scratch.ad_value(3), params.offset), params.exponent));
+    scratch.store_ad_value(92, AdValue::powf(AdValue::scale_offset(scratch.ad_value(4), params.scale, params.offset), params.exponent));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_powf_scaled_input(90, 2, p.scale, p.exponent);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_powf_offset_input(91, 3, p.offset, p.exponent);"),
+            "{compact}"
+        );
+        assert!(
+            compact
+                .contains("s.store_powf_scale_offset_input(92, 4, p.scale, p.offset, p.exponent);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_powf_ad("), "{compact}");
+        assert!(!compact.contains("A::scale(s.ad_value("), "{compact}");
+        assert!(!compact.contains("A::offset(s.ad_value("), "{compact}");
+        assert!(
+            !compact.contains("A::scale_offset(s.ad_value("),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sqrt_shifted_square_offset_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -14189,6 +14233,30 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_powf_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: f64) {",
+        "        let base = self.values[source] * input_scale;",
+        "        let value = base.powf(exponent);",
+        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, input_scale, 0.0);",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_powf_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: f64) {",
+        "        let base = self.values[source] + offset;",
+        "        let value = base.powf(exponent);",
+        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, 1.0, 0.0);",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_powf_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: f64) {",
+        "        let base = self.values[source] * input_scale + offset;",
+        "        let value = base.powf(exponent);",
+        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, input_scale, 0.0);",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_unary_scaled(&mut self, index: usize, source: usize, value: f64, derivative_scale: f64) {",
         "        let node_derivatives = self.node_derivatives[source];",
         "        let branch_derivatives = self.branch_derivatives[source];",
@@ -21597,12 +21665,58 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         if args.len() != 2 {
             return None;
         }
+        if let Some(line) =
+            compact_powf_affine_input_store_helper_line(target_index, args[0], args[1])
+        {
+            return Some(line);
+        }
         if !compact_non_atomic_ad_value(args[0]) {
             return None;
         }
         return Some(format!(
             "scratch.store_powf_ad({target_index}, {}, {});",
             args[0], args[1]
+        ));
+    }
+
+    None
+}
+
+fn compact_powf_affine_input_store_helper_line(
+    target_index: usize,
+    base: &str,
+    exponent: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(base, "scale") {
+        if args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(args[0])?;
+        return Some(format!(
+            "scratch.store_powf_scaled_input({target_index}, {source}, {}, {exponent});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(base, "offset") {
+        if args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(args[0])?;
+        return Some(format!(
+            "scratch.store_powf_offset_input({target_index}, {source}, {}, {exponent});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(base, "scale_offset") {
+        if args.len() != 3 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(args[0])?;
+        return Some(format!(
+            "scratch.store_powf_scale_offset_input({target_index}, {source}, {}, {}, {exponent});",
+            args[1], args[2]
         ));
     }
 
