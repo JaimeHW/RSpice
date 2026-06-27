@@ -220,6 +220,32 @@ impl CircuitData {
         self.xspice_evaluation_error.take()
     }
 
+    /// Snapshot committed XSPICE digital node values with stable netlist names.
+    pub(crate) fn xspice_digital_snapshot(&self) -> Vec<(String, crate::xspice::DigitalValue)> {
+        let mut node_names: Vec<(NodeId, String)> = self
+            .node_map
+            .iter()
+            .filter_map(|(name, &id)| (id > 0).then_some((id, name.clone())))
+            .collect();
+        node_names.sort_by_key(|(id, _)| *id);
+        node_names.dedup_by_key(|(id, _)| *id);
+
+        node_names
+            .into_iter()
+            .filter_map(|(node_id, name)| {
+                self.xspice_digital_values
+                    .get(&node_id)
+                    .copied()
+                    .map(|value| (name, value))
+            })
+            .collect()
+    }
+
+    /// Time of the next pending XSPICE digital event, if any.
+    pub(crate) fn next_xspice_event_time(&self) -> Option<Value> {
+        self.xspice_event_queue.next_event_time()
+    }
+
     /// Evaluate and stamp XSPICE for a transient solver trial without committing
     /// code-model state. The matrix/RHS receive the trial contributions, while
     /// digital queues, event timestamps, and model contexts are restored before
@@ -416,8 +442,19 @@ impl CircuitData {
 
     /// Prepare build-time generated Verilog-A devices for a transient timepoint.
     #[cfg(feature = "veriloga-builtins")]
-    pub fn prepare_generated_veriloga_timepoint(&mut self, time: Value, dt: Value) {
-        self.generated_veriloga_devices.set_timepoint(time, dt);
+    pub fn prepare_generated_veriloga_timepoint(
+        &mut self,
+        time: Value,
+        dt: Value,
+        coefficients: &crate::analysis::CompanionCoefficients,
+    ) {
+        let ddt_coefficients =
+            crate::device::veriloga_generated::GeneratedDdtCoefficients::from_companion(
+                coefficients,
+                dt,
+            );
+        self.generated_veriloga_devices
+            .set_timepoint(time, dt, ddt_coefficients);
     }
 
     /// Commit build-time generated Verilog-A integrator state after acceptance.

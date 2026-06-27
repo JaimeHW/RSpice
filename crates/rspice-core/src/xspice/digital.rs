@@ -220,12 +220,20 @@ impl DigitalStrength {
 //=============================================================================
 
 /// Complete digital value with state and strength
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DigitalValue {
     /// Logic state
     pub state: DigitalState,
     /// Drive strength
     pub strength: DigitalStrength,
+}
+
+impl Default for DigitalValue {
+    fn default() -> Self {
+        // ngspice's `digital` user-defined-node initializer sets event nodes
+        // to ZERO with UNDETERMINED strength before any code model drives them.
+        Self::new(DigitalState::Zero, DigitalStrength::Undetermined)
+    }
 }
 
 impl DigitalValue {
@@ -287,6 +295,23 @@ impl DigitalValue {
                 }
             }
         }
+    }
+
+    /// Format using ngspice's XSPICE digital `eprint` token spelling.
+    pub fn to_ngspice_token(&self) -> String {
+        let state = match self.state {
+            DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => '0',
+            DigitalState::One | DigitalState::OneR | DigitalState::OneZ => '1',
+            DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => 'U',
+            DigitalState::HighZ => 'U',
+        };
+        let strength = match self.strength {
+            DigitalStrength::Strong => 's',
+            DigitalStrength::Resistive => 'r',
+            DigitalStrength::HighZ => 'z',
+            DigitalStrength::Undetermined => 'u',
+        };
+        format!("{state}{strength}")
     }
 }
 

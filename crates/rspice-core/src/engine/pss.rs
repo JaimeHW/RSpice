@@ -459,6 +459,7 @@ impl Engine {
                 num_nodes: circuit.num_nodes(),
                 branch_names: Vec::new(),
                 node_names: circuit.node_names_sorted(),
+                digital_traces: Vec::new(),
             };
 
             Ok((waveform, initial_state))
@@ -1044,6 +1045,7 @@ impl Engine {
             num_nodes,
             branch_names: Vec::new(),
             node_names,
+            digital_traces: Vec::new(),
         };
 
         let mut t = 0.0;

@@ -2,6 +2,26 @@
 
 use crate::Value;
 use crate::analysis::waveform::TransientResultCompressed;
+use crate::xspice::DigitalValue;
+
+/// One accepted digital event sample for a named XSPICE digital node.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DigitalTracePoint {
+    /// Event time in seconds.
+    pub time: Value,
+    /// Digital value at this event time.
+    pub value: DigitalValue,
+}
+
+/// Accepted digital event history for one XSPICE digital node.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalTrace {
+    /// Original netlist node name.
+    pub node_name: String,
+    /// Committed event samples for this node.
+    pub points: Vec<DigitalTracePoint>,
+}
+
 /// Result of transient analysis - time-domain waveforms
 #[derive(Debug, Clone)]
 pub struct TransientResult {
@@ -18,9 +38,60 @@ pub struct TransientResult {
     pub node_names: Vec<String>,
     /// Branch names aligned with `branch_currents`
     pub branch_names: Vec<String>,
+    /// XSPICE digital node histories captured at accepted transient points.
+    pub digital_traces: Vec<DigitalTrace>,
 }
 
 impl TransientResult {
+    /// Append committed XSPICE digital values at an accepted transient time.
+    pub(crate) fn record_digital_snapshot(
+        &mut self,
+        time: Value,
+        snapshot: &[(String, DigitalValue)],
+    ) {
+        for (node_name, value) in snapshot {
+            let trace_idx = self
+                .digital_traces
+                .iter()
+                .position(|trace| trace.node_name.eq_ignore_ascii_case(node_name))
+                .unwrap_or_else(|| {
+                    self.digital_traces.push(DigitalTrace {
+                        node_name: node_name.clone(),
+                        points: Vec::new(),
+                    });
+                    self.digital_traces.len() - 1
+                });
+
+            let trace = &mut self.digital_traces[trace_idx];
+            if trace
+                .points
+                .last()
+                .is_some_and(|point| point.time == time && point.value == *value)
+            {
+                continue;
+            }
+            if trace
+                .points
+                .last()
+                .is_some_and(|point| point.value == *value)
+            {
+                continue;
+            }
+            trace.points.push(DigitalTracePoint {
+                time,
+                value: *value,
+            });
+        }
+    }
+
+    /// Get the complete digital event trace for a named XSPICE digital node.
+    pub fn digital_trace_named(&self, name: &str) -> Option<&[DigitalTracePoint]> {
+        self.digital_traces
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case(name))
+            .map(|trace| trace.points.as_slice())
+    }
+
     /// Get voltage at a node at a specific time index.
     ///
     /// Panics for invalid non-ground node IDs or time indices. Use
@@ -146,6 +217,7 @@ impl From<TransientResultCompressed> for TransientResult {
             num_nodes: compressed.num_nodes,
             node_names,
             branch_names: Vec::new(),
+            digital_traces: Vec::new(),
         }
     }
 }

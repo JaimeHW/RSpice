@@ -428,6 +428,7 @@ mod tests {
             num_nodes: 1,
             node_names: vec!["out".to_string()],
             branch_names: vec!["v1".to_string()],
+            digital_traces: Vec::new(),
         }
     }
 

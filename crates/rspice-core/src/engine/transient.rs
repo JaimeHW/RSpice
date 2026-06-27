@@ -16,9 +16,8 @@ use crate::analysis::transient::{
 use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
-    BjtChargeSnapshot, BjtType, VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT,
+    BjtChargeSnapshot,
 };
-use crate::device::{NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::netlist::AnalysisCommand;
 use crate::{Netlist, Value};
 
@@ -46,7 +45,6 @@ mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
 mod truncation;
-mod vbic;
 
 pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
 
@@ -237,6 +235,7 @@ impl Engine {
                 num_nodes: 0,
                 node_names: Vec::new(),
                 branch_names: Vec::new(),
+                digital_traces: Vec::new(),
             };
             let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit);
             return Ok((result, checkpoint));
@@ -312,30 +311,6 @@ impl Engine {
             }
             solution.clone_from(&checkpoint.solution);
         }
-        // The SOI floating-body SmartVbs clamp (Vbs >= 0) belongs to the DC/OP
-        // phase only; during time-stepping the body may legitimately swing below
-        // the source, so disable it for the transient sweep. Transient also
-        // arms the ngspice-style device bypass: the B3SOI mode select and
-        // charge partition are discontinuous at vds = 0, and freezing a
-        // stationary device's evaluation (as ngspice's ByPass does) is what
-        // lets Newton contract on devices parked at that boundary.
-        let bypass_tolerances = Some((
-            self.voltage_reltol(),
-            self.current_abstol(),
-            self.voltage_abstol(),
-        ));
-        for dev in &circuit.b3soi.devices {
-            dev.set_dc_mode(false);
-            dev.set_bypass_tolerances(bypass_tolerances);
-        }
-        for dev in &circuit.b3soi_fd.devices {
-            dev.set_dc_mode(false);
-            dev.set_bypass_tolerances(bypass_tolerances);
-        }
-        for dev in &circuit.b3soi_pd.devices {
-            dev.set_dc_mode(false);
-            dev.set_bypass_tolerances(bypass_tolerances);
-        }
         // .IC overrides describe the t=0 state; a resumed run is already
         // mid-trajectory, so they must not re-apply.
         let applied_ic = if resume.is_none() {
@@ -369,13 +344,12 @@ impl Engine {
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
-        let legacy_ngspice_bjt_only_nonlinearity = Self::legacy_bjt_ngspice_backend_enabled()
-            && !circuit.bjts.is_empty()
+        let legacy_ngspice_bjt_only_nonlinearity = !circuit.bjts.is_empty()
             && circuit
                 .bjts
                 .devices
                 .iter()
-                .all(|bjt| !bjt.uses_vbic_dynamic_charges())
+                .all(crate::device::Bjt::uses_legacy_gummel_poon)
             && circuit.diodes.is_empty()
             && circuit.mosfets.is_empty()
             && circuit.jfets.is_empty()
@@ -415,16 +389,10 @@ impl Engine {
             circuit.has_xspice_devices(),
         );
 
-        // Initialize timestep controller.
-        // BJT-heavy decks (notably VBIC regression circuits) need a smaller startup
-        // timestep to capture sub-ns bias settling that ngspice resolves before
-        // transitioning to larger steps.
+        // Initialize timestep controller. BJT-heavy decks need a smaller
+        // startup timestep to capture fast bias settling before transitioning
+        // to larger steps.
         let has_bjts = !circuit.bjts.devices.is_empty();
-        let has_vbic_dynamic_charges = circuit
-            .bjts
-            .devices
-            .iter()
-            .any(|bjt| bjt.uses_vbic_dynamic_charges());
         let (_startup_div, min_div) = Self::startup_timestep_divisors(has_bjts);
         let tran_step_hint = netlist.analyses.iter().find_map(|analysis| match analysis {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
@@ -541,7 +509,9 @@ impl Engine {
             num_nodes,
             node_names,
             branch_names,
+            digital_traces: Vec::new(),
         };
+        result.record_digital_snapshot(resume_time, &circuit.xspice_digital_snapshot());
         let mut t = resume_time;
 
         // Grid-locked stepping: the accepted times are exactly the
@@ -631,8 +601,8 @@ impl Engine {
             Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution);
         // ngspice seeds CKTdeltaOld[] with maxstep before the first transient point.
-        // Mirror that here so early VBIC truncation/order checks have the same
-        // timestep history instead of falling back to a synthetic zero-history path.
+        // Mirror that here so early device-local truncation/order checks have the
+        // same timestep history instead of falling back to a synthetic zero-history path.
         bjt_history.accepted_dt_prev = hinted_max_step;
         bjt_history.accepted_dt_prev_prev = hinted_max_step;
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
@@ -662,10 +632,6 @@ impl Engine {
         let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
         bsim4_history.accepted_dt_prev = hinted_max_step;
         bsim4_history.accepted_dt_prev_prev = hinted_max_step;
-        let mut ekv26_history = Self::initialize_ekv26_history(&circuit, &solution);
-        ekv26_history.accepted_dt_prev = hinted_max_step;
-        ekv26_history.accepted_dt_prev_prev = hinted_max_step;
-        let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
 
@@ -774,7 +740,6 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
-                        &mut ekv26_history,
                     );
                     lte_estimator =
                         LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
@@ -921,6 +886,15 @@ impl Engine {
                 step_trap_order,
             ));
             let suppress_gate_charge = false;
+            for dev in &circuit.b3soi.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_fd.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_pd.devices {
+                dev.begin_timestep_iteration();
+            }
 
             let linearized_startup_recovery_points = matches!(
                 initial_solution_mode,
@@ -948,26 +922,12 @@ impl Engine {
 
             total_top_nanos += attempt_top_start.elapsed().as_nanos();
             let setup_phase_start = crate::time_compat::Instant::now();
-            // A new timestep attempt begins: the first Newton iterate must
-            // fully re-evaluate every bypass-capable device (ngspice's
-            // MODEINITPRED discipline), so bypass deltas are always measured
-            // against a linearization from the current attempt.
-            for dev in &circuit.b3soi.devices {
-                dev.begin_timestep_iteration();
-            }
-            for dev in &circuit.b3soi_fd.devices {
-                dev.begin_timestep_iteration();
-            }
-            for dev in &circuit.b3soi_pd.devices {
-                dev.begin_timestep_iteration();
-            }
-
             // Prepare for Newton iteration at this timestep by seeding the full
             // algebraic solution vector from accepted history when a predictor
             // state is available. ngspice's `NIpred()` predicts every solver
             // unknown, including branch-current equations, not just node
             // voltages. Matching that behavior materially improves the initial
-            // Newton guess for source-heavy VBIC decks.
+            // Newton guess for source-heavy compact-model decks.
             if let Some(predicted_solution) =
                 lte_estimator.predict_solution(dt, current_method, step_trap_order)
             {
@@ -1094,16 +1054,9 @@ impl Engine {
                         b3soi_history: &b3soi_history,
                         bsim3_history: &bsim3_history,
                         bsim4_history: &bsim4_history,
-                        ekv26_history: &ekv26_history,
                         suppress_gate_charge,
                         tline_dc_refs: &tline_dc_refs,
                         coupled_tline_refs: &coupled_tline_refs,
-                    },
-                    &mut vbic_snapshot_cache,
-                    if _iter == 0 {
-                        VbicCachedSnapshotReuse::SeedOnly
-                    } else {
-                        VbicCachedSnapshotReuse::NewtonBypass
                     },
                     !nonlinear_state_matches_new_solution,
                     0.0,
@@ -1353,7 +1306,7 @@ impl Engine {
                         }
 
                         let device_converged = !circuit.has_nonlinear_devices()
-                            || self.transient_static_device_convergence_met(&circuit);
+                            || circuit.nonlinear_converged(self.device_convergence_criteria());
                         total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 
                         if voltage_converged && device_converged && residual_converged {
@@ -1388,7 +1341,7 @@ impl Engine {
                     let v_conv =
                         self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
                     let d_conv = !circuit.has_nonlinear_devices()
-                        || self.transient_static_device_convergence_met(&circuit);
+                        || circuit.nonlinear_converged(self.device_convergence_criteria());
                     let r_conv = self.residual_convergence_met(&mut matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
@@ -1401,86 +1354,6 @@ impl Engine {
                         max_dv,
                         total_iterations
                     );
-                    if has_vbic_dynamic_charges {
-                        let nonlinear_r_conv = self.transient_nonlinear_residual_converged(
-                            &mut circuit,
-                            &mut matrix,
-                            &mut rhs,
-                            &new_solution,
-                            t + dt,
-                            dt,
-                            &residual::TransientSystemContext {
-                                coeff: &coeff,
-                                method: current_method,
-                                trap_order: step_trap_order,
-                                bjt_history: &bjt_history,
-                                jfet_history: &jfet_history,
-                                diode_history: &diode_history,
-                                diode_companion_slots: &diode_companion_slots,
-                                mosfet_history: &mosfet_history,
-                                mosfet_companion_slots: &mosfet_companion_slots,
-                                vdmos_history: &vdmos_history,
-                                vdmos_companion_slots: &vdmos_companion_slots,
-                                b3soi_history: &b3soi_history,
-                                bsim3_history: &bsim3_history,
-                                bsim4_history: &bsim4_history,
-                                ekv26_history: &ekv26_history,
-                                suppress_gate_charge,
-                                tline_dc_refs: &tline_dc_refs,
-                                coupled_tline_refs: &coupled_tline_refs,
-                            },
-                            &mut vbic_snapshot_cache,
-                        );
-                        let nonlinear_norm = matrix
-                            .scaled_residual_inf_norm(
-                                &new_solution,
-                                &rhs,
-                                self.current_abstol(),
-                                self.residual_reltol(),
-                            )
-                            .unwrap_or(Value::INFINITY);
-                        if let Ok(residuals) = matrix.residual_vector(&new_solution, &rhs) {
-                            let mut max_row = 0usize;
-                            let mut max_norm = 0.0;
-                            let mut max_residual = 0.0;
-                            let mut max_ax = 0.0;
-                            let mut max_rhs = 0.0;
-                            for row in 0..residuals.len() {
-                                let residual = residuals[row];
-                                let row_rhs = rhs[row];
-                                let row_ax = residual + row_rhs;
-                                let scale = self.current_abstol()
-                                    + self.residual_reltol() * row_ax.abs().max(row_rhs.abs());
-                                let normalized = residual.abs() / scale.max(self.current_abstol());
-                                if normalized > max_norm {
-                                    max_row = row;
-                                    max_norm = normalized;
-                                    max_residual = residual;
-                                    max_ax = row_ax;
-                                    max_rhs = row_rhs;
-                                }
-                            }
-                            log::warn!(
-                                "Nonlinear restamp residual at t={:.6e}, dt={:.3e}: conv={}, norm={:.3e}, row={}, raw={:.3e}, ax={:.3e}, rhs={:.3e}",
-                                t,
-                                dt,
-                                nonlinear_r_conv,
-                                nonlinear_norm,
-                                max_row,
-                                max_residual,
-                                max_ax,
-                                max_rhs
-                            );
-                        } else {
-                            log::warn!(
-                                "Nonlinear restamp residual at t={:.6e}, dt={:.3e}: conv={}, norm={:.3e}, residual-vector=unavailable",
-                                t,
-                                dt,
-                                nonlinear_r_conv,
-                                nonlinear_norm
-                            );
-                        }
-                    }
                 }
 
                 // Gmin-continuation rescue: a knife edge in the static
@@ -1513,12 +1386,10 @@ impl Engine {
                             b3soi_history: &b3soi_history,
                             bsim3_history: &bsim3_history,
                             bsim4_history: &bsim4_history,
-                            ekv26_history: &ekv26_history,
                             suppress_gate_charge,
                             tline_dc_refs: &tline_dc_refs,
                             coupled_tline_refs: &coupled_tline_refs,
                         },
-                        &mut vbic_snapshot_cache,
                     )
                 {
                     static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -1546,7 +1417,7 @@ impl Engine {
                     // Voltage settled but a device/residual criterion held the
                     // point back — the interesting bucket for criteria tuning.
                     if !circuit.has_nonlinear_devices()
-                        || self.transient_static_device_convergence_met(&circuit)
+                        || circuit.nonlinear_converged(self.device_convergence_criteria())
                     {
                         failed_residual_only += 1;
                     } else {
@@ -1766,8 +1637,6 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bjt_history,
-                            &vbic_snapshot_cache,
-                            self.voltage_abstol(),
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
@@ -1867,23 +1736,6 @@ impl Engine {
                     } else {
                         None
                     };
-                    let force_accept_ekv26_truncation_limit = if !circuit.ekv26s.is_empty() {
-                        Self::ekv26_ngspice_truncation_limit(
-                            &circuit,
-                            &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
-                            &ekv26_history,
-                            self.voltage_reltol(),
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
-                        )
-                        .filter(|limit| limit.is_finite() && *limit > 0.0)
-                    } else {
-                        None
-                    };
                     let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
@@ -1951,10 +1803,7 @@ impl Engine {
                                     ),
                                     force_accept_mosfet_truncation_limit,
                                 ),
-                                Self::min_truncation_limit(
-                                    force_accept_vdmos_truncation_limit,
-                                    force_accept_ekv26_truncation_limit,
-                                ),
+                                force_accept_vdmos_truncation_limit,
                             ),
                             force_accept_b3soi_truncation_limit,
                         ),
@@ -1986,8 +1835,6 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
-                        &mut ekv26_history,
-                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -2002,6 +1849,9 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                        if let Some(event_time) = circuit.next_xspice_event_time() {
+                            Self::add_breakpoint_if_in_range(&mut breakpoints, event_time, tstop);
+                        }
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -2023,6 +1873,7 @@ impl Engine {
                     for (i, currents) in result.branch_currents.iter_mut().enumerate() {
                         currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
                     }
+                    result.record_digital_snapshot(t, &circuit.xspice_digital_snapshot());
 
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
@@ -2075,37 +1926,17 @@ impl Engine {
                     // need two clean accepted points before the truncation
                     // estimators can difference them meaningfully.
                     || lte_warmup_skips > 0;
-            let vbic_truncation_limit =
-                if !first_accepted_transient_step && has_vbic_dynamic_charges {
-                    Self::vbic_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &bjt_history,
-                        self.voltage_reltol(),
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
-            let legacy_bjt_truncation_limit = if !linearized_startup_recovery_points
+            let bjt_truncation_limit = if !linearized_startup_recovery_points
                 && !first_accepted_transient_step
                 && has_bjts
             {
-                Self::legacy_bjt_ngspice_truncation_limit(
+                Self::bjt_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
                     current_method,
                     step_trap_order,
                     dt,
                     &bjt_history,
-                    &vbic_snapshot_cache,
-                    self.voltage_abstol(),
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
@@ -2115,8 +1946,6 @@ impl Engine {
             } else {
                 None
             };
-            let bjt_truncation_limit =
-                Self::min_truncation_limit(vbic_truncation_limit, legacy_bjt_truncation_limit);
             let capacitor_truncation_limit =
                 if !first_accepted_transient_step && !circuit.capacitors.is_empty() {
                     Self::capacitor_ngspice_truncation_limit(
@@ -2214,24 +2043,6 @@ impl Engine {
                 } else {
                     None
                 };
-            let ekv26_truncation_limit =
-                if !first_accepted_transient_step && !circuit.ekv26s.is_empty() {
-                    Self::ekv26_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &ekv26_history,
-                        self.voltage_reltol(),
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
             let b3soi_truncation_limit =
                 if !first_accepted_transient_step && circuit.has_b3soi_devices() {
                     Self::b3soi_ngspice_truncation_limit(
@@ -2302,14 +2113,11 @@ impl Engine {
                             ),
                             mosfet_truncation_limit,
                         ),
-                        Self::min_truncation_limit(vdmos_truncation_limit, ekv26_truncation_limit),
+                        vdmos_truncation_limit,
                     ),
                     b3soi_truncation_limit,
                 ),
-                Self::min_truncation_limit(
-                    Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
-                    None,
-                ),
+                Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
             );
             let ltra_truncation_limit = if !first_accepted_transient_step {
                 Self::ltra_candidate_truncation_limit(&circuit, &new_solution, t + dt)
@@ -2365,7 +2173,7 @@ impl Engine {
                     // clean stderr at the default log level.
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::debug!(
-                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ekv26={:?}, ltra={:?}, method={:?}, order={}",
+                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
                             limit,
@@ -2375,7 +2183,6 @@ impl Engine {
                             diode_truncation_limit,
                             mosfet_truncation_limit,
                             vdmos_truncation_limit,
-                            ekv26_truncation_limit,
                             ltra_truncation_limit,
                             current_method,
                             step_trap_order
@@ -2415,6 +2222,7 @@ impl Engine {
                     diode_truncation_limit,
                     mosfet_truncation_limit,
                     vdmos_truncation_limit,
+                    b3soi_truncation_limit,
                 );
             let device_or_startup_controls_lte = first_accepted_transient_step
                 || linearized_startup_recovery_points
@@ -2425,7 +2233,8 @@ impl Engine {
             let (lte, accept) = if locked_grid.is_some() || device_or_startup_controls_lte {
                 // For locked grids, first/startup recovery points, and decks
                 // covered by ngspice device-local truncation (CAPtrunc,
-                // MOStrunc, BJTtrunc, VBICtrunc, etc.), a converged Newton
+                // MOStrunc, BJTtrunc, generated compact-model truncation,
+                // etc.), a converged Newton
                 // solution at the imposed dt is the acceptance criterion.
                 (0.0, true)
             } else {
@@ -2597,8 +2406,6 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bjt_history,
-                            &vbic_snapshot_cache,
-                            self.voltage_abstol(),
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
@@ -2698,23 +2505,6 @@ impl Engine {
                     } else {
                         None
                     };
-                    let force_accept_ekv26_truncation_limit = if !circuit.ekv26s.is_empty() {
-                        Self::ekv26_ngspice_truncation_limit(
-                            &circuit,
-                            &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
-                            &ekv26_history,
-                            self.voltage_reltol(),
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
-                        )
-                        .filter(|limit| limit.is_finite() && *limit > 0.0)
-                    } else {
-                        None
-                    };
                     let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
@@ -2782,10 +2572,7 @@ impl Engine {
                                     ),
                                     force_accept_mosfet_truncation_limit,
                                 ),
-                                Self::min_truncation_limit(
-                                    force_accept_vdmos_truncation_limit,
-                                    force_accept_ekv26_truncation_limit,
-                                ),
+                                force_accept_vdmos_truncation_limit,
                             ),
                             force_accept_b3soi_truncation_limit,
                         ),
@@ -2817,8 +2604,6 @@ impl Engine {
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
-                        &mut ekv26_history,
-                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -2833,6 +2618,9 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                        if let Some(event_time) = circuit.next_xspice_event_time() {
+                            Self::add_breakpoint_if_in_range(&mut breakpoints, event_time, tstop);
+                        }
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -2854,6 +2642,7 @@ impl Engine {
                     for (i, currents) in result.branch_currents.iter_mut().enumerate() {
                         currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
                     }
+                    result.record_digital_snapshot(t, &circuit.xspice_digital_snapshot());
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -2978,10 +2767,8 @@ impl Engine {
                         &diode_history,
                         &mosfet_history,
                         &vdmos_history,
-                        &ekv26_history,
+                        &b3soi_history,
                         &lte_estimator,
-                        &vbic_snapshot_cache,
-                        self.voltage_abstol(),
                         self.voltage_reltol(),
                         self.current_abstol(),
                         self.charge_abstol(),
@@ -3009,8 +2796,6 @@ impl Engine {
                 &mut b3soi_history,
                 &mut bsim3_history,
                 &mut bsim4_history,
-                &mut ekv26_history,
-                Some(&vbic_snapshot_cache),
                 mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,
                 &tline_dc_refs,
@@ -3028,6 +2813,9 @@ impl Engine {
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                if let Some(event_time) = circuit.next_xspice_event_time() {
+                    Self::add_breakpoint_if_in_range(&mut breakpoints, event_time, tstop);
+                }
             }
             #[cfg(feature = "veriloga")]
             let veriloga_discontinuity = if circuit.has_veriloga_devices() {
@@ -3060,6 +2848,7 @@ impl Engine {
             for (i, currents) in result.branch_currents.iter_mut().enumerate() {
                 currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
             }
+            result.record_digital_snapshot(t, &circuit.xspice_digital_snapshot());
             if first_accepted_transient_step {
                 timestep.force_step(dt);
             } else {
