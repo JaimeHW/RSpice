@@ -4337,6 +4337,35 @@ pub(super) fn generate_mod_file() -> String {
     .join("\n")
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct StateFileExtensions {
+    pub params_visibility: &'static str,
+    pub instance_fields: String,
+    pub clone_fields: String,
+    pub new_initializers: String,
+    pub after_new: String,
+    pub restore_destructure_fields: String,
+    pub restore_initializers: String,
+    pub set_parameter_hook: String,
+    pub impl_methods: String,
+}
+
+impl Default for StateFileExtensions {
+    fn default() -> Self {
+        Self {
+            params_visibility: "pub",
+            instance_fields: String::new(),
+            clone_fields: String::new(),
+            new_initializers: String::new(),
+            after_new: String::new(),
+            restore_destructure_fields: String::new(),
+            restore_initializers: String::new(),
+            set_parameter_hook: String::new(),
+            impl_methods: String::new(),
+        }
+    }
+}
+
 pub(super) fn generate_state_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
@@ -4344,6 +4373,26 @@ pub(super) fn generate_state_file(
     ddt_state_count: usize,
     idt_state_count: usize,
     branch_count: usize,
+) -> Result<String, RustBackendError> {
+    generate_state_file_with_extensions(
+        artifact,
+        options,
+        parameter_fields,
+        ddt_state_count,
+        idt_state_count,
+        branch_count,
+        &StateFileExtensions::default(),
+    )
+}
+
+pub(super) fn generate_state_file_with_extensions(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+    parameter_fields: &HashMap<String, String>,
+    ddt_state_count: usize,
+    idt_state_count: usize,
+    branch_count: usize,
+    extensions: &StateFileExtensions,
 ) -> Result<String, RustBackendError> {
     let mut out = String::new();
     out.push_str("#![allow(dead_code, unused_parens, unused_variables)]\n\n");
@@ -4442,7 +4491,10 @@ pub(super) fn generate_state_file(
     out.push_str("pub struct Instance {\n");
     out.push_str(&format!("    pub nodes: [usize; {node_count}],\n"));
     out.push_str(&format!("    pub branches: [usize; {branch_count}],\n"));
-    out.push_str("    pub params: Box<Parameters>,\n");
+    out.push_str(&format!(
+        "    {} params: Box<Parameters>,\n",
+        extensions.params_visibility
+    ));
     out.push_str(&format!(
         "    pub(crate) param_given: Box<[bool; {parameter_count}]>,\n"
     ));
@@ -4467,6 +4519,7 @@ pub(super) fn generate_state_file(
     ));
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
+    out.push_str(&extensions.instance_fields);
     out.push_str(&format!(
         "    pub(crate) scratch: Option<Box<GenericScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
     ));
@@ -4491,6 +4544,7 @@ pub(super) fn generate_state_file(
     out.push_str("            idt_state_initialized: self.idt_state_initialized.clone(),\n");
     out.push_str("            time: self.time,\n");
     out.push_str("            timestep: self.timestep,\n");
+    out.push_str(&extensions.clone_fields);
     out.push_str("            scratch: None,\n");
     out.push_str("            reactive_scratch: None,\n");
     out.push_str("        }\n");
@@ -4537,7 +4591,11 @@ pub(super) fn generate_state_file(
     out.push_str("        assert_eq!(nodes.len(), Self::NODE_COUNT, \"generated Verilog-A node count mismatch\");\n");
     out.push_str("        let mut mapped = [0usize; Self::NODE_COUNT];\n");
     out.push_str("        mapped.copy_from_slice(nodes);\n");
-    out.push_str("        Self {\n");
+    if extensions.after_new.is_empty() {
+        out.push_str("        Self {\n");
+    } else {
+        out.push_str("        let mut instance = Self {\n");
+    }
     out.push_str("            nodes: mapped,\n");
     out.push_str("            branches: [0usize; Self::BRANCH_COUNT],\n");
     out.push_str("            params: Parameters::new_box(),\n");
@@ -4561,9 +4619,16 @@ pub(super) fn generate_state_file(
     out.push_str("            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),\n");
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
+    out.push_str(&extensions.new_initializers);
     out.push_str("            scratch: Some(GenericScratch::new_box()),\n");
     out.push_str("            reactive_scratch: Some(GenericReactiveScratch::new_box()),\n");
-    out.push_str("        }\n");
+    if extensions.after_new.is_empty() {
+        out.push_str("        }\n");
+    } else {
+        out.push_str("        };\n");
+        out.push_str(&extensions.after_new);
+        out.push_str("        instance\n");
+    }
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str("    pub fn restore_from_snapshot(&mut self, snapshot: Self) {\n");
@@ -4583,6 +4648,7 @@ pub(super) fn generate_state_file(
     out.push_str("            idt_state_initialized,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
+    out.push_str(&extensions.restore_destructure_fields);
     out.push_str("            scratch: _,\n");
     out.push_str("            reactive_scratch: _,\n");
     out.push_str("        } = snapshot;\n");
@@ -4600,6 +4666,7 @@ pub(super) fn generate_state_file(
     out.push_str("            idt_state_initialized,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
+    out.push_str(&extensions.restore_initializers);
     out.push_str("            scratch,\n");
     out.push_str("            reactive_scratch,\n");
     out.push_str("        };\n");
@@ -4619,13 +4686,15 @@ pub(super) fn generate_state_file(
         let validation =
             parameter_validation_call(parameter.name.as_str(), "value", parameter.range.as_ref())?;
         out.push_str(&format!(
-            "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); Ok(()) }}\n",
-            parameter.name.to_ascii_lowercase()
+            "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); {}Ok(()) }}\n",
+            parameter.name.to_ascii_lowercase(),
+            extensions.set_parameter_hook
         ));
         for alias in &parameter.aliases {
             out.push_str(&format!(
-                "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); Ok(()) }}\n",
-                alias.to_ascii_lowercase()
+                "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); {}Ok(()) }}\n",
+                alias.to_ascii_lowercase(),
+                extensions.set_parameter_hook
             ));
         }
     }
@@ -4726,6 +4795,7 @@ pub(super) fn generate_state_file(
         out.push_str("        }\n");
         out.push_str("    }\n");
     }
+    out.push_str(&extensions.impl_methods);
     out.push_str("}\n");
     Ok(out)
 }

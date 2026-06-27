@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, DerivativeLaneKind, EquationId, HirStatement,
@@ -9,6 +9,43 @@ use crate::canonical_ir::{
 use super::expr::parameter_field_names;
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
 use super::{RustTranspileOptions, device};
+
+struct ScalarStaticCache {
+    values: Vec<ValueId>,
+    set: HashSet<ValueId>,
+}
+
+impl ScalarStaticCache {
+    fn from_artifact(artifact: &CanonicalIrArtifact) -> Self {
+        let values: Vec<_> = artifact
+            .opt
+            .schedules
+            .iter()
+            .filter(|schedule| schedule.invalidation == InvalidationClass::InstanceStatic)
+            .flat_map(|schedule| schedule.ops.iter())
+            .filter_map(|op| match op {
+                OptOp::ComputeValue { value } => Some(*value),
+                OptOp::EvaluateEquation { .. } => None,
+            })
+            .collect();
+        let set = values.iter().copied().collect();
+        Self { values, set }
+    }
+
+    fn contains(&self, value: ValueId) -> bool {
+        self.set.contains(&value)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
+struct ValueEmitContext<'a> {
+    cached_values: &'a HashSet<ValueId>,
+    use_cached_fields: bool,
+    inline_uncached_constants: bool,
+}
 
 pub fn generate_device(
     artifact: &CanonicalIrArtifact,
@@ -26,7 +63,22 @@ pub fn generate_device(
         artifact.metadata.source_digest.as_str(),
     );
     let parameter_fields = parameter_field_names(artifact);
-    let stamp = generate_stamp_file(artifact, options, &parameter_fields)?;
+    let static_cache = ScalarStaticCache::from_artifact(artifact);
+    let stamp = generate_stamp_file(artifact, options, &parameter_fields, &static_cache)?;
+    let state = if static_cache.is_empty() {
+        device::generate_state_file(artifact, options, &parameter_fields, 0, 0, 0)?
+    } else {
+        let extensions = scalar_state_extensions(artifact, &parameter_fields, &static_cache)?;
+        device::generate_state_file_with_extensions(
+            artifact,
+            options,
+            &parameter_fields,
+            0,
+            0,
+            0,
+            &extensions,
+        )?
+    };
     let files = vec![
         GeneratedRustFile {
             relative_path: "mod.rs".to_string(),
@@ -34,7 +86,7 @@ pub fn generate_device(
         },
         GeneratedRustFile {
             relative_path: "state.rs".to_string(),
-            contents: device::generate_state_file(artifact, options, &parameter_fields, 0, 0, 0)?,
+            contents: state,
         },
         GeneratedRustFile {
             relative_path: "stamp.rs".to_string(),
@@ -55,8 +107,13 @@ fn generate_stamp_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
     parameter_fields: &HashMap<String, String>,
+    static_cache: &ScalarStaticCache,
 ) -> Result<String, RustBackendError> {
     let roots = scalar_equation_roots(artifact)?;
+    let stamp_live = collect_stamp_live_values(artifact, &roots, static_cache)?;
+    let stamp_needs_params = artifact.opt.values.iter().any(|value| {
+        stamp_live.contains(&value.id) && matches!(value.kind, OptValueKind::Parameter { .. })
+    });
     let mut out = String::new();
     out.push_str("#![allow(dead_code, unused_imports, unused_parens, unused_variables)]\n\n");
     out.push_str("use super::state::Instance;\n");
@@ -69,11 +126,21 @@ fn generate_stamp_file(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
     out.push_str("        let nodes = self.nodes;\n");
-    out.push_str("        let p = &(*self.params);\n");
+    if stamp_needs_params {
+        out.push_str("        let p = &(*self.params);\n");
+    }
     out.push_str("        let multiplicity = self.multiplicity;\n");
 
+    let stamp_context = ValueEmitContext {
+        cached_values: &static_cache.set,
+        use_cached_fields: true,
+        inline_uncached_constants: false,
+    };
     for value in &artifact.opt.values {
-        let expr = emit_value_expr(artifact, parameter_fields, value)?;
+        if !stamp_live.contains(&value.id) {
+            continue;
+        }
+        let expr = emit_value_expr(artifact, parameter_fields, value, &stamp_context)?;
         out.push_str(&format!(
             "        let {}: {} = {};\n",
             value_name(value.id),
@@ -92,7 +159,7 @@ fn generate_stamp_file(
                 format!("missing scalar value for {}", equation.id),
             )
         })?;
-        emit_current_stamp(artifact, equation, root, &mut out)?;
+        emit_current_stamp(artifact, equation, root, static_cache, &mut out)?;
     }
 
     out.push_str("    }\n\n");
@@ -104,10 +171,70 @@ fn generate_stamp_file(
     Ok(out)
 }
 
+fn scalar_state_extensions(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    static_cache: &ScalarStaticCache,
+) -> Result<device::StateFileExtensions, RustBackendError> {
+    let mut extensions = device::StateFileExtensions {
+        params_visibility: "pub(crate)",
+        ..device::StateFileExtensions::default()
+    };
+    let recompute_context = ValueEmitContext {
+        cached_values: &static_cache.set,
+        use_cached_fields: false,
+        inline_uncached_constants: true,
+    };
+    let mut recompute = String::new();
+    recompute.push_str("\n    #[inline]\n");
+    recompute.push_str("    fn recompute_instance_static(&mut self) {\n");
+    recompute.push_str("        let p = &(*self.params);\n");
+
+    for value_id in &static_cache.values {
+        let value = artifact
+            .opt
+            .values
+            .get(usize::from(*value_id))
+            .ok_or_else(|| {
+                unsupported(artifact, format!("missing static scalar value {value_id}"))
+            })?;
+        let field = cache_field_name(*value_id);
+        let ty = rust_type(value.value_type);
+        let default = default_value(value.value_type);
+        extensions
+            .instance_fields
+            .push_str(&format!("    pub(crate) {field}: {ty},\n"));
+        extensions
+            .clone_fields
+            .push_str(&format!("            {field}: self.{field},\n"));
+        extensions
+            .new_initializers
+            .push_str(&format!("            {field}: {default},\n"));
+        extensions
+            .restore_destructure_fields
+            .push_str(&format!("            {field},\n"));
+        extensions
+            .restore_initializers
+            .push_str(&format!("            {field},\n"));
+
+        let local = value_name(*value_id);
+        let expr = emit_value_expr(artifact, parameter_fields, value, &recompute_context)?;
+        recompute.push_str(&format!("        let {local}: {ty} = {expr};\n"));
+        recompute.push_str(&format!("        self.{field} = {local};\n"));
+    }
+
+    recompute.push_str("    }\n");
+    extensions.after_new = "        instance.recompute_instance_static();\n".to_string();
+    extensions.set_parameter_hook = "self.recompute_instance_static(); ".to_string();
+    extensions.impl_methods = recompute;
+    Ok(extensions)
+}
+
 fn emit_current_stamp(
     artifact: &CanonicalIrArtifact,
     equation: &MirEquation,
     root: ValueId,
+    static_cache: &ScalarStaticCache,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let root_value = artifact
@@ -133,13 +260,13 @@ fn emit_current_stamp(
         out.push_str(&format!(
             "        let {}: f64 = {};\n",
             derivative_name(root, *node),
-            value_name(*value)
+            cached_or_local_value_name(*value, static_cache)
         ));
     }
 
     let pos = optional_node_local_expr(equation.branch.pos_node);
     let neg = optional_node_local_expr(equation.branch.neg_node);
-    let root_name = value_name(root);
+    let root_name = cached_or_local_value_name(root, static_cache);
     match derivatives.as_slice() {
         [] => {
             out.push_str("        stamper.stamp_current_const_local(\n");
@@ -217,25 +344,13 @@ fn emit_value_expr(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     value: &OptValue,
+    context: &ValueEmitContext<'_>,
 ) -> Result<String, RustBackendError> {
     let expr = match &value.kind {
         OptValueKind::RealConstant(value) => format_f64(*value),
         OptValueKind::BooleanConstant(value) => value.to_string(),
         OptValueKind::Parameter { parameter } => {
-            let parameter = artifact
-                .mir
-                .parameters
-                .get(usize::from(*parameter))
-                .ok_or_else(|| unsupported(artifact, format!("missing parameter {parameter}")))?;
-            let field = parameter_fields
-                .get(parameter.name.as_str())
-                .ok_or_else(|| {
-                    unsupported(
-                        artifact,
-                        format!("missing parameter field '{}'", parameter.name),
-                    )
-                })?;
-            format!("p.{field}")
+            emit_parameter_expr(artifact, parameter_fields, *parameter)?
         }
         OptValueKind::NodePotential { node } => {
             format!("ctx.node_voltage(nodes[{}])", node.index())
@@ -246,17 +361,23 @@ fn emit_value_expr(
                 "branch current probes in scalar backend",
             ));
         }
-        OptValueKind::Unary { op, input } => emit_unary_expr(*op, *input),
-        OptValueKind::Binary { op, left, right } => emit_binary_expr(*op, *left, *right),
+        OptValueKind::Unary { op, input } => {
+            emit_unary_expr(*op, value_ref(artifact, parameter_fields, *input, context)?)
+        }
+        OptValueKind::Binary { op, left, right } => emit_binary_expr(
+            *op,
+            value_ref(artifact, parameter_fields, *left, context)?,
+            value_ref(artifact, parameter_fields, *right, context)?,
+        ),
         OptValueKind::Select {
             condition,
             then_value,
             else_value,
         } => format!(
             "(if {} {{ {} }} else {{ {} }})",
-            value_name(*condition),
-            value_name(*then_value),
-            value_name(*else_value)
+            value_ref(artifact, parameter_fields, *condition, context)?,
+            value_ref(artifact, parameter_fields, *then_value, context)?,
+            value_ref(artifact, parameter_fields, *else_value, context)?
         ),
         OptValueKind::EquationValue { .. } => {
             return Err(unsupported(
@@ -268,8 +389,57 @@ fn emit_value_expr(
     Ok(expr)
 }
 
-fn emit_unary_expr(op: OptUnaryOp, input: ValueId) -> String {
-    let input = value_name(input);
+fn emit_parameter_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    parameter: crate::canonical_ir::ParamId,
+) -> Result<String, RustBackendError> {
+    let parameter_slot = artifact
+        .mir
+        .parameters
+        .get(usize::from(parameter))
+        .ok_or_else(|| unsupported(artifact, format!("missing parameter {parameter}")))?;
+    let field = parameter_fields
+        .get(parameter_slot.name.as_str())
+        .ok_or_else(|| {
+            unsupported(
+                artifact,
+                format!("missing parameter field '{}'", parameter_slot.name),
+            )
+        })?;
+    Ok(format!("p.{field}"))
+}
+
+fn value_ref(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    value: ValueId,
+    context: &ValueEmitContext<'_>,
+) -> Result<String, RustBackendError> {
+    if context.use_cached_fields && context.cached_values.contains(&value) {
+        return Ok(format!("self.{}", cache_field_name(value)));
+    }
+
+    if context.inline_uncached_constants {
+        let value_slot = artifact
+            .opt
+            .values
+            .get(usize::from(value))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+        match value_slot.kind {
+            OptValueKind::RealConstant(value) => return Ok(format_f64(value)),
+            OptValueKind::BooleanConstant(value) => return Ok(value.to_string()),
+            OptValueKind::Parameter { parameter } => {
+                return emit_parameter_expr(artifact, parameter_fields, parameter);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(value_name(value))
+}
+
+fn emit_unary_expr(op: OptUnaryOp, input: String) -> String {
     match op {
         OptUnaryOp::Pos => input,
         OptUnaryOp::Neg => format!("(-{input})"),
@@ -289,9 +459,7 @@ fn emit_unary_expr(op: OptUnaryOp, input: ValueId) -> String {
     }
 }
 
-fn emit_binary_expr(op: OptBinaryOp, left: ValueId, right: ValueId) -> String {
-    let left = value_name(left);
-    let right = value_name(right);
+fn emit_binary_expr(op: OptBinaryOp, left: String, right: String) -> String {
     match op {
         OptBinaryOp::Add => format!("({left} + {right})"),
         OptBinaryOp::Sub => format!("({left} - {right})"),
@@ -342,6 +510,73 @@ fn scalar_equation_roots(
     }
 
     Ok(roots)
+}
+
+fn collect_stamp_live_values(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+    static_cache: &ScalarStaticCache,
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let mut live = HashSet::new();
+    for equation in &artifact.mir.equations {
+        let root = roots.get(&equation.id).copied().ok_or_else(|| {
+            unsupported(
+                artifact,
+                format!("missing scalar root for equation {}", equation.id),
+            )
+        })?;
+        mark_stamp_live_value(artifact, root, static_cache, &mut live)?;
+        let root_value =
+            artifact.opt.values.get(usize::from(root)).ok_or_else(|| {
+                unsupported(artifact, format!("missing root scalar value {root}"))
+            })?;
+        for derivative in &root_value.derivatives {
+            mark_stamp_live_value(artifact, derivative.value, static_cache, &mut live)?;
+        }
+    }
+    Ok(live)
+}
+
+fn mark_stamp_live_value(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    static_cache: &ScalarStaticCache,
+    live: &mut HashSet<ValueId>,
+) -> Result<(), RustBackendError> {
+    if static_cache.contains(value) || !live.insert(value) {
+        return Ok(());
+    }
+
+    let value_slot = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    match value_slot.kind {
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::EquationValue { .. } => {}
+        OptValueKind::Unary { input, .. } => {
+            mark_stamp_live_value(artifact, input, static_cache, live)?;
+        }
+        OptValueKind::Binary { left, right, .. } => {
+            mark_stamp_live_value(artifact, left, static_cache, live)?;
+            mark_stamp_live_value(artifact, right, static_cache, live)?;
+        }
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            mark_stamp_live_value(artifact, condition, static_cache, live)?;
+            mark_stamp_live_value(artifact, then_value, static_cache, live)?;
+            mark_stamp_live_value(artifact, else_value, static_cache, live)?;
+        }
+    }
+    Ok(())
 }
 
 fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(), RustBackendError> {
@@ -427,8 +662,27 @@ fn rust_type(value_type: OptValueType) -> &'static str {
     }
 }
 
+fn default_value(value_type: OptValueType) -> &'static str {
+    match value_type {
+        OptValueType::Real => "0.0",
+        OptValueType::Boolean => "false",
+    }
+}
+
 fn value_name(value: ValueId) -> String {
     format!("v{}", value.index())
+}
+
+fn cache_field_name(value: ValueId) -> String {
+    format!("scalar_v{}", value.index())
+}
+
+fn cached_or_local_value_name(value: ValueId, static_cache: &ScalarStaticCache) -> String {
+    if static_cache.contains(value) {
+        format!("self.{}", cache_field_name(value))
+    } else {
+        value_name(value)
+    }
 }
 
 fn derivative_name(root: ValueId, node: u32) -> String {

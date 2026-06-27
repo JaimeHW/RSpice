@@ -752,11 +752,20 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
         stamp.contains("let v1: f64 = ctx.node_voltage(nodes[1]);"),
         "{stamp}"
     );
-    assert!(stamp.contains("let v4: f64 = (v2 / v3);"), "{stamp}");
-    assert!(stamp.contains("= (v5 / v3);"), "{stamp}");
-    assert!(stamp.contains("= (v6 / v3);"), "{stamp}");
-    assert!(stamp.contains("let d4_dn0: f64 = v"), "{stamp}");
-    assert!(stamp.contains("let d4_dn1: f64 = v"), "{stamp}");
+    assert!(
+        stamp.contains("let v4: f64 = (v2 / self.scalar_v3);"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("= (v5 / v3);"), "{stamp}");
+    assert!(!stamp.contains("= (v6 / v3);"), "{stamp}");
+    assert!(
+        stamp.contains("let d4_dn0: f64 = self.scalar_v7;"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("let d4_dn1: f64 = self.scalar_v8;"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("(v3 * v3)"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
@@ -770,6 +779,56 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
     assert!(!stamp.contains("Scratch"), "{stamp}");
     assert!(!stamp.contains("s."), "{stamp}");
     assert!(!stamp.contains("GeneratedDerivative"), "{stamp}");
+}
+
+#[test]
+fn scalar_rust_backend_caches_parameter_static_values_outside_stamp() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(tiny_resistor_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile simple resistor with scalar backend");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(state.contains("pub(crate) scalar_v3: f64,"), "{state}");
+    assert!(state.contains("pub(crate) scalar_v7: f64,"), "{state}");
+    assert!(state.contains("pub(crate) scalar_v8: f64,"), "{state}");
+    assert!(
+        state.contains("fn recompute_instance_static(&mut self)"),
+        "{state}"
+    );
+    assert!(state.contains("self.scalar_v7 = v7;"), "{state}");
+    assert!(
+        state.contains("self.recompute_instance_static();"),
+        "{state}"
+    );
+    assert!(stamp.contains("self.scalar_v3"), "{stamp}");
+    assert!(stamp.contains("self.scalar_v7"), "{stamp}");
+    assert!(stamp.contains("self.scalar_v8"), "{stamp}");
+    assert!(!stamp.contains("let p ="), "{stamp}");
+    assert!(!stamp.contains("let v3: f64 = p.p0;"), "{stamp}");
+    assert!(!stamp.contains("let v5: f64 = 1.0;"), "{stamp}");
+    assert!(!stamp.contains("let v6: f64 = -1.0;"), "{stamp}");
+    assert!(!stamp.contains("let v7: f64 = (v5 / v3);"), "{stamp}");
+    assert!(!stamp.contains("let v8: f64 = (v6 / v3);"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -791,7 +850,8 @@ fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("p.p0"), "{stamp}");
+    assert!(stamp.contains("self.scalar_v2"), "{stamp}");
+    assert!(!stamp.contains("p.p0"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
