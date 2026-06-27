@@ -804,6 +804,32 @@ fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
 }
 
 #[test]
+fn scalar_rust_backend_emits_native_math_for_sine_current() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(sine_current_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile sine current with scalar backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains(".sin()"), "{stamp}");
+    assert!(stamp.contains(".cos()"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(constant_current_source())
@@ -11287,6 +11313,16 @@ module assigned_res(p, n);
         g = 1.0 / r;
         I(p, n) <+ g * V(p, n);
     end
+endmodule
+"#
+}
+
+fn sine_current_source() -> &'static str {
+    r#"
+module sin_i(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ sin(V(p, n));
 endmodule
 "#
 }

@@ -63,6 +63,12 @@ pub enum OptUnaryOp {
     Ln,
     Sqrt,
     Abs,
+    Sin,
+    Cos,
+    Tan,
+    Sinh,
+    Cosh,
+    Tanh,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -513,6 +519,12 @@ impl<'a> ScalarGraphBuilder<'a> {
                         OptUnaryOp::Ln => Some(value.ln()),
                         OptUnaryOp::Sqrt => Some(value.sqrt()),
                         OptUnaryOp::Abs => Some(value.abs()),
+                        OptUnaryOp::Sin => Some(value.sin()),
+                        OptUnaryOp::Cos => Some(value.cos()),
+                        OptUnaryOp::Tan => Some(value.tan()),
+                        OptUnaryOp::Sinh => Some(value.sinh()),
+                        OptUnaryOp::Cosh => Some(value.cosh()),
+                        OptUnaryOp::Tanh => Some(value.tanh()),
                         OptUnaryOp::Not => None,
                     };
                     if let Some(folded) = folded {
@@ -686,6 +698,70 @@ impl<'a> ScalarGraphBuilder<'a> {
                     let two = self.push_value(OptValueType::Real, OptValueKind::RealConstant(2.0));
                     let denominator = self.push_binary_value(OptBinaryOp::Mul, two, value);
                     self.push_binary_value(OptBinaryOp::Div, input_derivative, denominator)
+                }
+                OptUnaryOp::Sin => {
+                    let cos = self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Cos,
+                            input,
+                        },
+                    );
+                    self.push_binary_value(OptBinaryOp::Mul, cos, input_derivative)
+                }
+                OptUnaryOp::Cos => {
+                    let sin = self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Sin,
+                            input,
+                        },
+                    );
+                    let scaled = self.push_binary_value(OptBinaryOp::Mul, sin, input_derivative);
+                    self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Neg,
+                            input: scaled,
+                        },
+                    )
+                }
+                OptUnaryOp::Tan => {
+                    let cos = self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Cos,
+                            input,
+                        },
+                    );
+                    let denominator = self.push_binary_value(OptBinaryOp::Mul, cos, cos);
+                    self.push_binary_value(OptBinaryOp::Div, input_derivative, denominator)
+                }
+                OptUnaryOp::Sinh => {
+                    let cosh = self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Cosh,
+                            input,
+                        },
+                    );
+                    self.push_binary_value(OptBinaryOp::Mul, cosh, input_derivative)
+                }
+                OptUnaryOp::Cosh => {
+                    let sinh = self.push_value(
+                        OptValueType::Real,
+                        OptValueKind::Unary {
+                            op: OptUnaryOp::Sinh,
+                            input,
+                        },
+                    );
+                    self.push_binary_value(OptBinaryOp::Mul, sinh, input_derivative)
+                }
+                OptUnaryOp::Tanh => {
+                    let one = self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+                    let square = self.push_binary_value(OptBinaryOp::Mul, value, value);
+                    let scale = self.push_binary_value(OptBinaryOp::Sub, one, square);
+                    self.push_binary_value(OptBinaryOp::Mul, scale, input_derivative)
                 }
                 OptUnaryOp::Abs | OptUnaryOp::Not => continue,
             };
@@ -1064,6 +1140,12 @@ impl<'a> ScalarGraphBuilder<'a> {
             "ln" | "log" => OptUnaryOp::Ln,
             "sqrt" => OptUnaryOp::Sqrt,
             "abs" => OptUnaryOp::Abs,
+            "sin" => OptUnaryOp::Sin,
+            "cos" => OptUnaryOp::Cos,
+            "tan" => OptUnaryOp::Tan,
+            "sinh" => OptUnaryOp::Sinh,
+            "cosh" => OptUnaryOp::Cosh,
+            "tanh" => OptUnaryOp::Tanh,
             _ => return None,
         };
         self.lower_intrinsic_unary(op, args[0])

@@ -278,6 +278,12 @@ fn emit_unary_expr(op: OptUnaryOp, input: ValueId) -> String {
         OptUnaryOp::Ln => format!("{input}.ln()"),
         OptUnaryOp::Sqrt => format!("{input}.sqrt()"),
         OptUnaryOp::Abs => format!("{input}.abs()"),
+        OptUnaryOp::Sin => format!("{input}.sin()"),
+        OptUnaryOp::Cos => format!("{input}.cos()"),
+        OptUnaryOp::Tan => format!("{input}.tan()"),
+        OptUnaryOp::Sinh => format!("{input}.sinh()"),
+        OptUnaryOp::Cosh => format!("{input}.cosh()"),
+        OptUnaryOp::Tanh => format!("{input}.tanh()"),
     }
 }
 

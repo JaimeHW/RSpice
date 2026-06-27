@@ -200,6 +200,12 @@ fn evaluate_unary(
         OptUnaryOp::Ln => Ok(OptEvalValue::Real(real_value(values, input)?.ln())),
         OptUnaryOp::Sqrt => Ok(OptEvalValue::Real(real_value(values, input)?.sqrt())),
         OptUnaryOp::Abs => Ok(OptEvalValue::Real(real_value(values, input)?.abs())),
+        OptUnaryOp::Sin => Ok(OptEvalValue::Real(real_value(values, input)?.sin())),
+        OptUnaryOp::Cos => Ok(OptEvalValue::Real(real_value(values, input)?.cos())),
+        OptUnaryOp::Tan => Ok(OptEvalValue::Real(real_value(values, input)?.tan())),
+        OptUnaryOp::Sinh => Ok(OptEvalValue::Real(real_value(values, input)?.sinh())),
+        OptUnaryOp::Cosh => Ok(OptEvalValue::Real(real_value(values, input)?.cosh())),
+        OptUnaryOp::Tanh => Ok(OptEvalValue::Real(real_value(values, input)?.tanh())),
     })();
 
     result.map_err(|error| remap_type_mismatch(owner, error))

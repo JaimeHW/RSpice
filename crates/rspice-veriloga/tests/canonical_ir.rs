@@ -246,6 +246,16 @@ endmodule
 "#
 }
 
+fn sine_current_source() -> &'static str {
+    r#"
+module sin_i(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ sin(V(p, n));
+endmodule
+"#
+}
+
 fn named_branch_potential_source() -> &'static str {
     r#"
 module branch_potential(p, n);
@@ -817,6 +827,47 @@ fn opt_lowering_resolves_straight_line_scalar_assignment() {
             .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
         "assignment-fed scalar graph should not fall back to legacy equation values: {:?}",
         opt.values
+    );
+}
+
+#[test]
+fn opt_lowering_adds_sparse_derivatives_for_sine_current() {
+    let (_, _, _, opt) = lower_fixture_parts(sine_current_source(), "sin_i");
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
+        panic!("sine current should have a scalar root: {newton:?}");
+    };
+
+    let snapshot = opt
+        .evaluate(&OptEvalInputs {
+            parameters: Vec::new(),
+            node_potentials: vec![0.75, 0.25],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate sine scalar graph");
+    let expected_value = 0.5_f64.sin();
+    let expected_derivative = 0.5_f64.cos();
+
+    assert!((snapshot.real(*root).expect("root value") - expected_value).abs() < 1.0e-15);
+    assert!(
+        (snapshot
+            .derivative(*root, DerivativeLane::node(NodeId::new(0)))
+            .expect("positive node derivative")
+            - expected_derivative)
+            .abs()
+            < 1.0e-15
+    );
+    assert!(
+        (snapshot
+            .derivative(*root, DerivativeLane::node(NodeId::new(1)))
+            .expect("negative node derivative")
+            + expected_derivative)
+            .abs()
+            < 1.0e-15
     );
 }
 
