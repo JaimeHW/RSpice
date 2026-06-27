@@ -267,19 +267,20 @@ fn emit_current_stamp(
     let pos = optional_node_local_expr(equation.branch.pos_node);
     let neg = optional_node_local_expr(equation.branch.neg_node);
     let root_name = cached_or_local_value_name(root, static_cache);
+    let root_expr = current_root_expr(root_value.value_type, &root_name);
     match derivatives.as_slice() {
         [] => {
             out.push_str("        stamper.stamp_current_const_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_name}),\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
             out.push_str("        );\n");
         }
         [(node0, _)] => {
             out.push_str("        stamper.stamp_current_node1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_name}),\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
@@ -291,7 +292,7 @@ fn emit_current_stamp(
             out.push_str("        stamper.stamp_current_node2_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_name}),\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
@@ -308,7 +309,7 @@ fn emit_current_stamp(
             out.push_str("        stamper.stamp_current_node3_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            multiplicity * ({root_name}),\n"));
+            out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
@@ -338,6 +339,13 @@ fn emit_current_stamp(
         }
     }
     Ok(())
+}
+
+fn current_root_expr(value_type: OptValueType, root_name: &str) -> String {
+    match value_type {
+        OptValueType::Real => root_name.to_string(),
+        OptValueType::Boolean => format!("if {root_name} {{ 1.0 }} else {{ 0.0 }}"),
+    }
 }
 
 fn emit_value_expr(

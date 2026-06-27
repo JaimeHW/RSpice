@@ -895,6 +895,32 @@ fn rust_backend_auto_falls_back_to_legacy_for_unsupported_stateful_model() {
 }
 
 #[test]
+fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(comparison_value_device_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile comparison current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("if v"), "{stamp}");
+    assert!(stamp.contains("{ 1.0 } else { 0.0 }"), "{stamp}");
+    assert!(stamp.contains("stamp_current_const_local"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(assignment_fed_current_source())
