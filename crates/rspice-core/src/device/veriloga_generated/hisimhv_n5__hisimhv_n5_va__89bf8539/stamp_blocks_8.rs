@@ -3003,8 +3003,8 @@ impl Instance {
                 s.store_neg(1877, 1870);
                 s.store_neg(1878, 1872);
                 s.copy_ad(1879, 1869);
-                s.store_mul_scaled_ad_rhs(1880, 1875, -1.0, A::add_scaled_products(s.ad_value(1876), s.ad_value(1868), 1.0, s.ad_value(1877), s.ad_value(1871), 1.0));
-                s.store_mul_scaled_ad_rhs(1881, 1875, -1.0, A::add_scaled_products(s.ad_value(1878), s.ad_value(1868), 1.0, s.ad_value(1879), s.ad_value(1871), 1.0));
+                s.store_mul_add_scaled_products_indices_rhs(1880, 1875, 1876, 1868, -1.0, 1877, 1871, -1.0);
+                s.store_mul_add_scaled_products_indices_rhs(1881, 1875, 1878, 1868, -1.0, 1879, 1871, -1.0);
                 s.store_abs(335, 1880);
             }
             if ((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && (s.v[79] == 0.0)) {
@@ -3874,8 +3874,8 @@ impl Instance {
                 s.store_neg(1877, 1870);
                 s.store_neg(1878, 1872);
                 s.copy_ad(1879, 1869);
-                s.store_mul_scaled_ad_rhs(1880, 1875, -1.0, A::add_scaled_products(s.ad_value(1876), s.ad_value(1868), 1.0, s.ad_value(1877), s.ad_value(1871), 1.0));
-                s.store_mul_scaled_ad_rhs(1881, 1875, -1.0, A::add_scaled_products(s.ad_value(1878), s.ad_value(1868), 1.0, s.ad_value(1879), s.ad_value(1871), 1.0));
+                s.store_mul_add_scaled_products_indices_rhs(1880, 1875, 1876, 1868, -1.0, 1877, 1871, -1.0);
+                s.store_mul_add_scaled_products_indices_rhs(1881, 1875, 1878, 1868, -1.0, 1879, 1871, -1.0);
                 s.store_abs(335, 1880);
             }
             if (((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && (!s.b[1973])) && (s.v[79] == 0.0)) {

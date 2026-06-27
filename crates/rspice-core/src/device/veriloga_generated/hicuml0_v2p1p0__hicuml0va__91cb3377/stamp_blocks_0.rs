@@ -185,7 +185,7 @@ impl Instance {
 
         s.store_scale(203, 204, p.p12);
 
-        s.store_mul_scaled_ad_rhs(205, 204, p.p13, A::exp_scaled_input(s.ad_value(10), s.v[176]));
+        s.store_mul_scaled_exp_scaled_input_rhs(205, 204, p.p13, 10, s.v[176]);
 
         s.v[206] = p.p14;
 
@@ -299,7 +299,7 @@ impl Instance {
 
         if s.b[253] {
             s.store_scale(203, 204, p.p12);
-            s.store_mul_scaled_ad_rhs(205, 204, p.p13, A::exp_scaled_input(s.ad_value(10), s.v[176]));
+            s.store_mul_scaled_exp_scaled_input_rhs(205, 204, p.p13, 10, s.v[176]);
             s.store_scalar(206, p.p14);
         }
 
@@ -1427,7 +1427,7 @@ impl Instance {
 
         s.store_scale(203, 204, p.p12);
 
-        s.store_mul_scaled_ad_rhs(205, 204, p.p13, A::exp_scaled_input(s.ad_value(10), s.v[176]));
+        s.store_mul_scaled_exp_scaled_input_rhs(205, 204, p.p13, 10, s.v[176]);
 
         s.v[206] = p.p14;
 
@@ -1541,7 +1541,7 @@ impl Instance {
 
         if s.b[253] {
             s.store_scale(203, 204, p.p12);
-            s.store_mul_scaled_ad_rhs(205, 204, p.p13, A::exp_scaled_input(s.ad_value(10), s.v[176]));
+            s.store_mul_scaled_exp_scaled_input_rhs(205, 204, p.p13, 10, s.v[176]);
             s.store_scalar(206, p.p14);
         }
 

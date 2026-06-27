@@ -691,7 +691,7 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((!s.b[1441]) && s.b[2517]) {
-            s.store_mul_scaled_ad_rhs(339, 154, -1.0, A::sub(s.ad_value(2521), s.ad_value(993)));
+            s.store_mul_sub_scaled_inputs_rhs(339, 154, s.ad_value(2521), -1.0, s.ad_value(993), -1.0);
             s.store_abs(2533, 339);
             s.store_exp(340, 339);
             s.store_sub_ad_lhs(341, A::offset(s.ad_value(340), (-1.0)), 339);
@@ -1534,7 +1534,7 @@ impl Instance {
             s.store_mul3_lhs(336, 154, 111, 344);
             s.store_square(345, 344);
             s.store_mul_ad_rhs(112, 209, A::add_scaled_products(s.ad_value(104), s.ad_value(336), 1.0, s.ad_value(101), s.ad_value(335), (-1.0)));
-            s.store_mul_scaled_ad_rhs(113, 209, 0.5, A::add_scaled_products(s.ad_value(103), s.ad_value(336), -1.0, s.ad_value(100), s.ad_value(335), 1.0));
+            s.store_mul_add_scaled_products_indices_rhs(113, 209, 103, 336, ((-1.0) * (0.5)), 100, 335, 0.5);
             s.store_add(114, 112, 113);
             s.store_mul3_lhs(400, 115, 114, 253);
             s.store_mul(287, 288, 400);

@@ -291,13 +291,13 @@ impl Instance {
             s.store_neg(713, 713);
         }
 
-        s.store_mul_scaled_ad_rhs(714, 219, -1.0, A::add(s.ad_value(700), s.ad_value(710)));
+        s.store_mul_add_scaled_inputs_rhs(714, 219, s.ad_value(700), -1.0, s.ad_value(710), -1.0);
 
-        s.store_mul_scaled_ad_rhs(715, 219, -1.0, A::add(s.ad_value(701), s.ad_value(711)));
+        s.store_mul_add_scaled_inputs_rhs(715, 219, s.ad_value(701), -1.0, s.ad_value(711), -1.0);
 
-        s.store_mul_scaled_ad_rhs(345, 219, -1.0, A::add(s.ad_value(702), s.ad_value(712)));
+        s.store_mul_add_scaled_inputs_rhs(345, 219, s.ad_value(702), -1.0, s.ad_value(712), -1.0);
 
-        s.store_mul_scaled_ad_rhs(346, 219, -1.0, A::add(s.ad_value(703), s.ad_value(713)));
+        s.store_mul_add_scaled_inputs_rhs(346, 219, s.ad_value(703), -1.0, s.ad_value(713), -1.0);
 
         s.b[1245] = (p.p3 > 0.0);
         s.v[1245] = if s.b[1245] { 1.0 } else { 0.0 };
@@ -3545,8 +3545,8 @@ impl Instance {
         s.v[1751] = if s.b[1751] { 1.0 } else { 0.0 };
 
         if (s.b[1604] && s.b[1751]) {
-            s.store_mul_scaled_ad_rhs(2, 254, 0.6, A::exp_scaled_input(A::ln(A::offset(A::square(s.ad_value(1551)), 60.0)), (-0.1666666666667)));
-            s.store_mul_scaled_ad_rhs(3, 254, 0.6, A::exp_scaled_input(A::ln(A::offset(A::square(s.ad_value(1552)), 60.0)), (-0.1666666666667)));
+            s.store_mul_scaled_exp_ln_input_rhs(2, 254, 0.6, A::offset(A::square(s.ad_value(1551)), 60.0), (-0.1666666666667));
+            s.store_mul_scaled_exp_ln_input_rhs(3, 254, 0.6, A::offset(A::square(s.ad_value(1552)), 60.0), (-0.1666666666667));
             s.store_div_scaled_offset_numerator(1578, A::mul(s.ad_value(1456), s.ad_value(2)), 1.0, 1.0, s.ad_value(1437), 1.0);
             s.store_div_scaled_offset_numerator(1579, A::mul(s.ad_value(1457), s.ad_value(3)), 1.0, 1.0, s.ad_value(1438), 1.0);
         }
@@ -3637,8 +3637,8 @@ impl Instance {
         }
 
         if (s.b[1604] && (!s.b[1756])) {
-            s.store_mul_scaled_ad_rhs(1594, 1493, (-2.0), A::add(A::div(s.ad_value(1430), s.ad_value(1496)), s.ad_value(1499)));
-            s.store_mul_scaled_ad_rhs(1595, 1494, (-2.0), A::add(A::div(s.ad_value(1431), s.ad_value(1497)), s.ad_value(1499)));
+            s.store_mul_add_scaled_inputs_rhs(1594, 1493, A::div(s.ad_value(1430), s.ad_value(1496)), (-2.0), s.ad_value(1499), (-2.0));
+            s.store_mul_add_scaled_inputs_rhs(1595, 1494, A::div(s.ad_value(1431), s.ad_value(1497)), (-2.0), s.ad_value(1499), (-2.0));
             s.store_mul_sub_lhs(0, 1595, 1594, 1499);
             s.store_mul(2, 1594, 1430);
             s.store_mul(3, 1595, 1431);
@@ -3646,8 +3646,8 @@ impl Instance {
             s.store_offset_ad(5, A::add_scaled_products(s.ad_value(1493), s.ad_value(1430), 2.0, s.ad_value(1494), s.ad_value(1431), 2.0), 3.0);
             s.store_div_scaled_inputs3(1596, s.ad_value(3), 1.0, s.ad_value(0), 1.0, A::div(s.ad_value(4), s.ad_value(1496)), -1.0, s.ad_value(5), 1.0);
             s.store_div_scaled_inputs3(1597, s.ad_value(2), 1.0, s.ad_value(0), (-1.0), A::div(s.ad_value(4), s.ad_value(1497)), -1.0, s.ad_value(5), 1.0);
-            s.store_mul_scaled_ad_rhs(1590, 1496, -1.0, A::add_scaled_product(s.ad_value(1499), 1.0, s.ad_value(1596), s.ad_value(1496), 1.0));
-            s.store_mul_scaled_ad_rhs(1593, 1497, -1.0, A::add_scaled_product(s.ad_value(1499), 1.0, s.ad_value(1597), s.ad_value(1497), 1.0));
+            s.store_mul_add_scaled_product_rhs(1590, 1496, s.ad_value(1499), -1.0, s.ad_value(1596), s.ad_value(1496), -1.0);
+            s.store_mul_add_scaled_product_rhs(1593, 1497, s.ad_value(1499), -1.0, s.ad_value(1597), s.ad_value(1497), -1.0);
         }
 
         if s.b[1604] {
@@ -3782,7 +3782,7 @@ impl Instance {
 
         s.store_mul(358, 0, 1323);
 
-        s.store_mul_scaled_ad_rhs(359, 0, -1.0, A::add(s.ad_value(1324), s.ad_value(1325)));
+        s.store_mul_add_scaled_inputs_rhs(359, 0, s.ad_value(1324), -1.0, s.ad_value(1325), -1.0);
 
         s.b[1759] = (s.v[119] > 0.0);
         s.v[1759] = if s.b[1759] { 1.0 } else { 0.0 };

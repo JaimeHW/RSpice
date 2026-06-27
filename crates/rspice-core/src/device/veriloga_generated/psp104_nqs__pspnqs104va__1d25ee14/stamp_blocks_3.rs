@@ -4990,7 +4990,7 @@ impl Instance {
             s.store_mul3_ad_scaled_output(79, A::scale_offset(s.ad_value(314), p.p286, 1.0), A::scale_offset(s.ad_value(316), p.p287, 1.0), A::scale_offset(s.ad_value(318), p.p288, 1.0), p.p285);
             s.store_scalar(80, p.p289);
             s.store_scalar(81, p.p290);
-            s.store_mul_scaled_ad_rhs(82, 316, p.p291, A::scale_offset(s.ad_value(316), p.p292, 1.0));
+            s.store_mul_scale_offset_rhs(82, 316, 316, ((p.p292) * (p.p291)), p.p291);
             s.store_scalar(83, p.p293);
             s.store_scalar(84, p.p294);
             s.store_scalar(85, p.p295);

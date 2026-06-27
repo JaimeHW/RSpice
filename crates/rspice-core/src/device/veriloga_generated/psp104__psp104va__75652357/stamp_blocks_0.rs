@@ -1269,7 +1269,7 @@ impl Instance {
             s.store_mul3_ad_scaled_output(75, A::scale_offset(s.ad_value(308), p.p284, 1.0), A::scale_offset(s.ad_value(310), p.p285, 1.0), A::scale_offset(s.ad_value(312), p.p286, 1.0), p.p283);
             s.store_scalar(76, p.p287);
             s.store_scalar(77, p.p288);
-            s.store_mul_scaled_ad_rhs(78, 310, p.p289, A::scale_offset(s.ad_value(310), p.p290, 1.0));
+            s.store_mul_scale_offset_rhs(78, 310, 310, ((p.p290) * (p.p289)), p.p289);
             s.store_scalar(79, p.p291);
             s.store_scalar(80, p.p292);
             s.store_scalar(81, p.p293);

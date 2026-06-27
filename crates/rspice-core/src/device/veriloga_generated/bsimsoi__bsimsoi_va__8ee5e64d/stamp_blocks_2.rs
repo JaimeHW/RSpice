@@ -644,7 +644,7 @@ impl Instance {
             s.store_mul(1188, 1195, 1224);
             s.store_mul(1186, 1225, 1188);
             s.store_mul(1185, 1225, 1224);
-            s.store_mul_scaled_ad_rhs(1179, 1195, 2.0, A::add(A::offset(s.ad_value(1188), (-1.0)), A::div_from_scalar(1.0, s.ad_value(1209))));
+            s.store_mul_add_scaled_inputs_rhs(1179, 1195, A::offset(s.ad_value(1188), (-1.0)), 2.0, A::div_from_scalar(1.0, s.ad_value(1209)), 2.0);
             s.store_add_scaled_ad_lhs(1180, A::add_scaled_products(s.ad_value(1225), A::offset(A::div_from_scalar(2.0, s.ad_value(1209)), (-1.0)), 1.0, s.ad_value(1195), s.ad_value(1174), 1.0), 1186, 3.0);
             s.store_mul_add_scaled_inputs_rhs(1181, 1225, s.ad_value(1174), 1.0, s.ad_value(1185), 2.0);
             s.store_sqrt_ad(1182, A::add_scaled_square_product(s.ad_value(1180), 1.0, s.ad_value(1179), s.ad_value(1181), (-2.0)));
@@ -1805,7 +1805,7 @@ impl Instance {
             s.store_mul(1181, 1447, 1446);
             s.store_add_scaled_product_indices(1182, 614, (-1.0), 613, 615, 1.0);
             s.store_mul(1183, 614, 615);
-            s.store_mul_scaled_ad_rhs(1184, 1191, (-s.v[357]), A::sub(A::add_scaled_product(s.ad_value(613), 1.0, s.ad_value(1182), s.ad_value(1446), 1.0), A::mul3(s.ad_value(1183), s.ad_value(1446), s.ad_value(1446))));
+            s.store_mul_sub_scaled_inputs_rhs(1184, 1191, A::add_scaled_product(s.ad_value(613), 1.0, s.ad_value(1182), s.ad_value(1446), 1.0), (-s.v[357]), A::mul3(s.ad_value(1183), s.ad_value(1446), s.ad_value(1446)), (-s.v[357]));
         }
 
         s.b[1694] = (s.v[1184] > 100.0);
@@ -1928,7 +1928,7 @@ impl Instance {
         }
 
         if ((s.b[1696] && (!s.b[1697])) && (!s.b[1709])) {
-            s.store_mul_scaled_ad_rhs(1182, 634, -1.0, A::pow(s.ad_value(1180), s.ad_value(1181)));
+            s.store_mul_scaled_pow_ad_rhs(1182, 634, -1.0, s.ad_value(1180), s.ad_value(1181));
         }
 
         s.b[1710] = (s.v[1182] > 100.0);
@@ -2410,7 +2410,7 @@ impl Instance {
 
         if (s.b[1733] && s.b[1746]) {
             s.store_scale(1180, 1180, 2.0);
-            s.store_mul_scaled_ad_rhs(1254, 1178, -1.0, A::add_scaled_inputs3(s.ad_value(1210), 0.5, s.ad_value(1179), 0.25, A::div_scaled_product(s.ad_value(1179), s.ad_value(1179), 1.0, s.ad_value(1180), 1.0), -1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(1254, 1178, s.ad_value(1210), ((0.5) * (-1.0)), s.ad_value(1179), ((0.25) * (-1.0)), A::div_scaled_product(s.ad_value(1179), s.ad_value(1179), 1.0, s.ad_value(1180), 1.0), ((-1.0) * (-1.0)), 0.0);
         }
 
         s.b[1747] = (((s.v[57] != 2.0) && (s.v[760] != 0.0)) && (s.v[63] > 0.0));
@@ -2891,14 +2891,14 @@ impl Instance {
         s.v[1780] = if s.b[1780] { 1.0 } else { 0.0 };
 
         if (((!s.b[1733]) && s.b[1751]) && s.b[1780]) {
-            s.store_mul_scaled_ad_rhs(1254, 1338, -1.0, A::add_scaled_inputs3(s.ad_value(1180), 0.5, s.ad_value(1179), 0.25, A::div_scaled_product(s.ad_value(1179), s.ad_value(1179), 0.5, s.ad_value(1181), 1.0), -1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(1254, 1338, s.ad_value(1180), ((0.5) * (-1.0)), s.ad_value(1179), ((0.25) * (-1.0)), A::div_scaled_product(s.ad_value(1179), s.ad_value(1179), 0.5, s.ad_value(1181), 1.0), ((-1.0) * (-1.0)), 0.0);
         }
 
         s.b[1781] = (((s.v[57] != 2.0) && (s.v[760] != 0.0)) && (s.v[63] > 0.0));
         s.v[1781] = if s.b[1781] { 1.0 } else { 0.0 };
 
         if ((((!s.b[1733]) && s.b[1751]) && s.b[1780]) && s.b[1781]) {
-            s.store_mul_scaled_ad_rhs(1470, 1467, -1.0, A::add_scaled_inputs4(s.ad_value(1451), 0.5, s.ad_value(1469), (-0.5), s.ad_value(1454), 0.25, A::div_scaled_product(s.ad_value(1454), s.ad_value(1454), 0.5, s.ad_value(1455), 1.0), -1.0));
+            s.store_mul_add_scaled_inputs4_rhs(1470, 1467, s.ad_value(1451), ((0.5) * (-1.0)), s.ad_value(1469), (((-0.5)) * (-1.0)), s.ad_value(1454), ((0.25) * (-1.0)), A::div_scaled_product(s.ad_value(1454), s.ad_value(1454), 0.5, s.ad_value(1455), 1.0), ((-1.0) * (-1.0)));
             s.store_add(1254, 1254, 1470);
         }
 

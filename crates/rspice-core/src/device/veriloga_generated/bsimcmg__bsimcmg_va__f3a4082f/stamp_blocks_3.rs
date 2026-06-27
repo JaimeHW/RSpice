@@ -3585,7 +3585,7 @@ impl Instance {
             s.store_scaled_mul(170, 372, 581, 10000000000.0);
             s.store_scaled_mul(583, 372, 392, 6.241457005723417e18);
             s.store_scaled_mul(584, 372, 393, 6.241457005723417e18);
-            s.store_mul_scaled_ad_rhs(585, 179, 1.0 / (1.60219e-19), A::add(s.ad_value(372), s.ad_value(669)));
+            s.store_mul_add_scaled_inputs_rhs(585, 179, s.ad_value(372), 1.0 / (1.60219e-19), s.ad_value(669), 1.0 / (1.60219e-19));
         }
 
         if (s.b[1678] && s.b[1680]) {

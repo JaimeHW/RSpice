@@ -576,7 +576,7 @@ impl Instance {
             s.store_mul(2326, 2294, 2320);
             s.store_sqrt_square_add(1930, 2297, 2295);
             s.store_sqrt_ad(1931, A::add_scaled_product(s.ad_value(2295), 1.0, A::sub(s.ad_value(2297), s.ad_value(2325)), A::sub(s.ad_value(2297), s.ad_value(2325)), 1.0));
-            s.store_mul_scaled_ad_rhs(2327, 2320, 0.5, A::add_scaled_inputs3(s.ad_value(2325), 1.0, s.ad_value(1930), 1.0, s.ad_value(1931), -1.0));
+            s.store_mul_add_scaled_inputs3_offset_rhs(2327, 2320, s.ad_value(2325), 0.5, s.ad_value(1930), 0.5, s.ad_value(1931), ((-1.0) * (0.5)), 0.0);
             s.store_add(2328, 2326, 2322);
             s.store_sub(2329, 2328, 2327);
         }

@@ -727,7 +727,7 @@ impl Instance {
             s.store_scale(294, 412, (-(p.p63 * s.v[635])));
         }
 
-        s.store_mul_scaled_ad_rhs(298, 294, -1.0, A::sub(s.ad_value(734), s.ad_value(733)));
+        s.store_mul_sub_scaled_inputs_rhs(298, 294, s.ad_value(734), -1.0, s.ad_value(733), -1.0);
 
         s.b[3221] = (s.v[949] == 1.0);
         s.v[3221] = if s.b[3221] { 1.0 } else { 0.0 };
@@ -1906,7 +1906,7 @@ impl Instance {
 
         s.store_mul_scaled_ln_ad_rhs(934, 155, s.v[906], A::div_from_scalar(s.v[903], s.ad_value(907)));
 
-        s.store_mul_scaled_ad_rhs(935, 155, s.v[906], A::add(A::ln(A::div_from_scalar(s.v[903], s.ad_value(907))), A::div_from_scalar(p.p545, s.ad_value(912))));
+        s.store_mul_add_scaled_inputs_rhs(935, 155, A::ln(A::div_from_scalar(s.v[903], s.ad_value(907))), s.v[906], A::div_from_scalar(p.p545, s.ad_value(912)), s.v[906]);
 
         s.b[3301] = (p.p539 > 0.0);
         s.v[3301] = if s.b[3301] { 1.0 } else { 0.0 };
