@@ -620,7 +620,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                         return (OptValueType::Real, OptValueKind::RealConstant(folded));
                     }
                 }
-                if let (OptUnaryOp::Not, Some(value)) = (op, self.boolean_constant(input)) {
+                if let (OptUnaryOp::Not, Some(value)) = (op, self.constant_truth(input)) {
                     return (OptValueType::Boolean, OptValueKind::BooleanConstant(!value));
                 }
                 (value_type, OptValueKind::Unary { op, input })
@@ -668,6 +668,18 @@ impl<'a> ScalarGraphBuilder<'a> {
         left: ValueId,
         right: ValueId,
     ) -> Option<(OptValueType, OptValueKind)> {
+        if matches!(op, OptBinaryOp::And | OptBinaryOp::Or)
+            && let (Some(left), Some(right)) =
+                (self.constant_truth(left), self.constant_truth(right))
+        {
+            let value = match op {
+                OptBinaryOp::And => left && right,
+                OptBinaryOp::Or => left || right,
+                _ => unreachable!(),
+            };
+            return Some((OptValueType::Boolean, OptValueKind::BooleanConstant(value)));
+        }
+
         if let (Some(left), Some(right)) = (self.real_constant(left), self.real_constant(right)) {
             let real = |value| Some((OptValueType::Real, OptValueKind::RealConstant(value)));
             let boolean =
@@ -749,6 +761,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             Some(OptValueKind::BooleanConstant(value)) => Some(*value),
             _ => None,
         }
+    }
+
+    fn constant_truth(&self, value: ValueId) -> Option<bool> {
+        self.boolean_constant(value)
+            .or_else(|| self.real_constant(value).map(real_truth_value))
     }
 
     fn add_sparse_derivatives(&mut self) {
@@ -1559,6 +1576,10 @@ pub(crate) fn limexp_derivative(value: f64) -> f64 {
     } else {
         LIMEXP_MAX
     }
+}
+
+pub(crate) fn real_truth_value(value: f64) -> bool {
+    value != 0.0
 }
 
 fn supported_assignment_value_type(value_type: CanonicalValueType) -> bool {

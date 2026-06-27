@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::opt::{limexp_derivative, limexp_value};
+use super::opt::{limexp_derivative, limexp_value, real_truth_value};
 use super::{
     DerivativeLane, EquationId, IrDiagnostic, OptBinaryOp, OptModel, OptUnaryOp, OptValueKind,
     ValueId,
@@ -196,7 +196,7 @@ fn evaluate_unary(
     let result = (|| match op {
         OptUnaryOp::Pos => Ok(OptEvalValue::Real(real_value(values, input)?)),
         OptUnaryOp::Neg => Ok(OptEvalValue::Real(-real_value(values, input)?)),
-        OptUnaryOp::Not => Ok(OptEvalValue::Boolean(!boolean_value(values, input)?)),
+        OptUnaryOp::Not => Ok(OptEvalValue::Boolean(!truth_value(values, input)?)),
         OptUnaryOp::Exp => Ok(OptEvalValue::Real(real_value(values, input)?.exp())),
         OptUnaryOp::LimExp => Ok(OptEvalValue::Real(limexp_value(real_value(values, input)?))),
         OptUnaryOp::LimExpDerivative => Ok(OptEvalValue::Real(limexp_derivative(real_value(
@@ -260,10 +260,10 @@ fn evaluate_binary(
             real_value(values, left)? >= real_value(values, right)?,
         )),
         OptBinaryOp::And => Ok(OptEvalValue::Boolean(
-            boolean_value(values, left)? && boolean_value(values, right)?,
+            truth_value(values, left)? && truth_value(values, right)?,
         )),
         OptBinaryOp::Or => Ok(OptEvalValue::Boolean(
-            boolean_value(values, left)? || boolean_value(values, right)?,
+            truth_value(values, left)? || truth_value(values, right)?,
         )),
     })();
 
@@ -314,4 +314,11 @@ fn boolean_value(values: &[OptEvalValue], value: ValueId) -> Result<bool, OptEva
         expected: "boolean",
         found: evaluated.label(),
     })
+}
+
+fn truth_value(values: &[OptEvalValue], value: ValueId) -> Result<bool, OptEvalError> {
+    match value_at(values, value) {
+        OptEvalValue::Real(value) => Ok(real_truth_value(value)),
+        OptEvalValue::Boolean(value) => Ok(value),
+    }
 }

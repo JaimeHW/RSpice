@@ -1159,6 +1159,42 @@ fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_numeric_truth_operands() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(scalar_numeric_truth_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile numeric truth current through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+
+    assert!(state.matches("!= 0.0").count() >= 3, "{state}");
+    assert!(
+        stamp.contains("stamper.stamp_current_node2_local("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_static_equations_inside_dynamic_models() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(resistor_capacitor_source())
@@ -16246,6 +16282,21 @@ module scalar_limexp(p, n);
     parameter real gain = 2.0;
     analog begin
         I(p, n) <+ limexp(V(p, n) * gain);
+    end
+endmodule
+"#
+}
+
+fn scalar_numeric_truth_source() -> &'static str {
+    r#"
+module scalar_numeric_truth(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real enabled = 1.0;
+    parameter real mode = 2.0;
+    parameter real inhibit = 0.0;
+    analog begin
+        I(p, n) <+ ((enabled && mode) || !inhibit) ? V(p, n) : 0.0;
     end
 endmodule
 "#

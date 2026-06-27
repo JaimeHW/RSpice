@@ -1270,13 +1270,20 @@ fn emit_value_expr(
         OptValueKind::Unary { op, input } => emit_unary_expr(
             *op,
             value_ref(artifact, parameter_fields, *input, context)?,
+            value_type(artifact, *input)?,
             &context.limexp_max_expr,
         ),
-        OptValueKind::Binary { op, left, right } => emit_binary_expr(
-            *op,
-            value_ref(artifact, parameter_fields, *left, context)?,
-            value_ref(artifact, parameter_fields, *right, context)?,
-        ),
+        OptValueKind::Binary { op, left, right } => {
+            let left_type = value_type(artifact, *left)?;
+            let right_type = value_type(artifact, *right)?;
+            emit_binary_expr(
+                *op,
+                value_ref(artifact, parameter_fields, *left, context)?,
+                left_type,
+                value_ref(artifact, parameter_fields, *right, context)?,
+                right_type,
+            )
+        }
         OptValueKind::Select {
             condition,
             then_value,
@@ -1347,11 +1354,28 @@ fn value_ref(
     Ok(value_name(value))
 }
 
-fn emit_unary_expr(op: OptUnaryOp, input: String, limexp_max: &str) -> String {
+fn value_type(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+) -> Result<OptValueType, RustBackendError> {
+    artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .map(|value| value.value_type)
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))
+}
+
+fn emit_unary_expr(
+    op: OptUnaryOp,
+    input: String,
+    input_type: OptValueType,
+    limexp_max: &str,
+) -> String {
     match op {
         OptUnaryOp::Pos => input,
         OptUnaryOp::Neg => format!("(-{input})"),
-        OptUnaryOp::Not => format!("(!{input})"),
+        OptUnaryOp::Not => format!("(!{})", truth_expr(input, input_type)),
         OptUnaryOp::Exp => format!("{input}.exp()"),
         OptUnaryOp::LimExp => format!(
             "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} * (1.0 + (limexp_arg - 80.0)) }} }}"
@@ -1373,7 +1397,13 @@ fn emit_unary_expr(op: OptUnaryOp, input: String, limexp_max: &str) -> String {
     }
 }
 
-fn emit_binary_expr(op: OptBinaryOp, left: String, right: String) -> String {
+fn emit_binary_expr(
+    op: OptBinaryOp,
+    left: String,
+    left_type: OptValueType,
+    right: String,
+    right_type: OptValueType,
+) -> String {
     match op {
         OptBinaryOp::Add => format!("({left} + {right})"),
         OptBinaryOp::Sub => format!("({left} - {right})"),
@@ -1386,8 +1416,23 @@ fn emit_binary_expr(op: OptBinaryOp, left: String, right: String) -> String {
         OptBinaryOp::Le => format!("({left} <= {right})"),
         OptBinaryOp::Gt => format!("({left} > {right})"),
         OptBinaryOp::Ge => format!("({left} >= {right})"),
-        OptBinaryOp::And => format!("({left} && {right})"),
-        OptBinaryOp::Or => format!("({left} || {right})"),
+        OptBinaryOp::And => format!(
+            "({} && {})",
+            truth_expr(left, left_type),
+            truth_expr(right, right_type)
+        ),
+        OptBinaryOp::Or => format!(
+            "({} || {})",
+            truth_expr(left, left_type),
+            truth_expr(right, right_type)
+        ),
+    }
+}
+
+fn truth_expr(expr: String, value_type: OptValueType) -> String {
+    match value_type {
+        OptValueType::Boolean => expr,
+        OptValueType::Real => format!("({expr} != 0.0)"),
     }
 }
 
