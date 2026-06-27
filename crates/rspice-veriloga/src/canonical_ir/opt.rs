@@ -684,7 +684,15 @@ impl<'a> ScalarGraphBuilder<'a> {
                     self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
                 BTreeMap::from([(DerivativeLane::node(node), derivative)])
             }
-            OptValueKind::BranchFlow { .. } => BTreeMap::new(),
+            OptValueKind::BranchFlow { branch } => {
+                if let Some(branch_unknown) = self.branch_unknown_for_branch(branch) {
+                    let derivative =
+                        self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+                    BTreeMap::from([(DerivativeLane::branch_unknown(branch_unknown), derivative)])
+                } else {
+                    BTreeMap::new()
+                }
+            }
             OptValueKind::Unary { op, input } => self.lower_unary_derivatives(value, op, input),
             OptValueKind::Binary { op, left, right } => {
                 self.lower_binary_derivatives(op, left, right)
@@ -1064,7 +1072,14 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn lower_named_branch_access(&mut self, access: &SmolStr, name: &SmolStr) -> Option<ValueId> {
         match access.as_str() {
-            "I" => self.branch_current_values.get(name.as_str()).copied(),
+            "I" => {
+                if let Some(current) = self.branch_current_values.get(name.as_str()).copied() {
+                    return Some(current);
+                }
+                let branch = self.branch_id_by_name(name)?;
+                self.branch_unknown_for_branch(branch)?;
+                Some(self.push_value(OptValueType::Real, OptValueKind::BranchFlow { branch }))
+            }
             "V" => {
                 let (pos, neg) = self
                     .mir
@@ -1159,6 +1174,36 @@ impl<'a> ScalarGraphBuilder<'a> {
         let first = matches.next()?;
         if matches.next().is_none() {
             Some(first.name.to_string())
+        } else {
+            None
+        }
+    }
+
+    fn branch_id_by_name(&self, name: &str) -> Option<BranchId> {
+        self.mir
+            .branches
+            .iter()
+            .find(|branch| branch.name.as_str() == name)
+            .map(|branch| branch.id)
+    }
+
+    fn branch_unknown_for_branch(&self, branch_id: BranchId) -> Option<BranchUnknownId> {
+        let branch = self.mir.branches.get(usize::from(branch_id))?;
+        if let Some(unknown) = self.mir.branch_unknowns.iter().find(|unknown| {
+            unknown
+                .declared_name
+                .as_deref()
+                .is_some_and(|name| name == branch.name.as_str())
+        }) {
+            return Some(unknown.id);
+        }
+
+        let mut matches = self.mir.branch_unknowns.iter().filter(|unknown| {
+            unknown.pos_node == branch.pos_node && unknown.neg_node == branch.neg_node
+        });
+        let first = matches.next()?;
+        if matches.next().is_none() {
+            Some(first.id)
         } else {
             None
         }

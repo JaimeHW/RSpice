@@ -962,6 +962,34 @@ fn rust_backend_auto_scalarizes_named_branch_current_probes() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_mixed_sparse_potential_branch_derivatives() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(mixed_sparse_potential_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile mixed sparse potential through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_potential_node2_branch1_local("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(comparison_value_device_source())
@@ -1103,6 +1131,32 @@ fn scalar_rust_backend_emits_native_inverse_math_intrinsics() {
         assert!(!stamp.contains("Scratch"), "{stamp}");
         assert_generated_rust_compiles(&generated);
     }
+}
+
+#[test]
+fn scalar_rust_backend_emits_mixed_sparse_potential_branch_derivatives() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(mixed_sparse_potential_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile mixed sparse potential with scalar backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("stamper.stamp_potential_node2_branch1_local("),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
