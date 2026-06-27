@@ -3126,6 +3126,51 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_offset_lhs_mixed_add_sub_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_add_offset_lhs(",
+            "fn store_add_offset_ad_lhs(",
+            "fn store_sub_offset_lhs(",
+            "fn store_sub_offset_ad_lhs(",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(160, AdValue::add(AdValue::offset(scratch.ad_value(2), params.bias), scratch.ad_value(3)));
+    scratch.store_ad_value(161, AdValue::sub(AdValue::offset(scratch.ad_value(4), params.bias), scratch.ad_value(5)));
+    scratch.store_ad_value(162, AdValue::add(AdValue::offset(AdValue::ln(scratch.ad_value(6)), params.bias), scratch.ad_value(7)));
+    scratch.store_ad_value(163, AdValue::sub(AdValue::offset(AdValue::sqrt(scratch.ad_value(8)), params.bias), scratch.ad_value(9)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_add_offset_lhs(160, 2, p.bias, 3);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_offset_lhs(161, 4, p.bias, 5);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_offset_ad_lhs(162, A::ln(s.ad_value(6)), p.bias, 7);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_sub_offset_ad_lhs(163, A::sqrt(s.ad_value(8)), p.bias, 9);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_add_ad_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_sub_ad_lhs("), "{compact}");
+        assert!(!compact.contains("A::offset("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_div_from_scalar_offset_mul_sub_from_scalar_lhs_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         for helper in [
@@ -8794,6 +8839,36 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left.value - right_value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - right_node_derivatives[axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset_lhs_mixed_components(&mut self, index: usize, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset: f64, right: usize, right_scale: f64) {",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_value + offset + right_value * right_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
+        "        self.store_offset_lhs_mixed_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right, 1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_offset_ad_lhs(&mut self, index: usize, left: AdValue, offset: f64, right: usize) {",
+        "        self.store_offset_lhs_mixed_components(index, left.value, left.node_derivatives, left.branch_derivatives, offset, right, 1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
+        "        self.store_offset_lhs_mixed_components(index, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], offset, right, -1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_offset_ad_lhs(&mut self, index: usize, left: AdValue, offset: f64, right: usize) {",
+        "        self.store_offset_lhs_mixed_components(index, left.value, left.node_derivatives, left.branch_derivatives, offset, right, -1.0);",
         "    }",
         "",
         "    #[inline]",
@@ -18715,11 +18790,53 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
                     args[1]
                 ))
             }
-            (None, Some(right)) => Some(format!(
-                "scratch.{lhs_helper}({target_index}, {}, {right});",
-                args[0]
-            )),
+            (None, Some(right)) => {
+                if matches!(name, "add" | "sub")
+                    && let Some(line) = compact_offset_lhs_mixed_add_sub_store_helper_line(
+                        target_index,
+                        name,
+                        args[0],
+                        right,
+                    )
+                {
+                    return Some(line);
+                }
+                Some(format!(
+                    "scratch.{lhs_helper}({target_index}, {}, {right});",
+                    args[0]
+                ))
+            }
         };
+    }
+    None
+}
+
+fn compact_offset_lhs_mixed_add_sub_store_helper_line(
+    target_index: usize,
+    op: &str,
+    left: &str,
+    right: usize,
+) -> Option<String> {
+    let args = compact_ad_call_args(left, "offset")?;
+    if args.len() != 2 {
+        return None;
+    }
+    let offset_source = args[0];
+    let offset = args[1];
+    let helper = match op {
+        "add" => "store_add_offset",
+        "sub" => "store_sub_offset",
+        _ => return None,
+    };
+    if let Some(left) = compact_scratch_ad_value_index(offset_source) {
+        return Some(format!(
+            "scratch.{helper}_lhs({target_index}, {left}, {offset}, {right});"
+        ));
+    }
+    if compact_non_atomic_ad_value(offset_source) {
+        return Some(format!(
+            "scratch.{helper}_ad_lhs({target_index}, {offset_source}, {offset}, {right});"
+        ));
     }
     None
 }
