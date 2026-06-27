@@ -4552,6 +4552,12 @@ fn stamp() {
             ),
             "{support}"
         );
+        assert!(
+            support.contains(
+                "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs("
+            ),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -4569,6 +4575,20 @@ fn stamp() {
             params.rhs_offset
         )
     ), params.outer_offset)));
+    scratch.store_ad_value(131, AdValue::div_from_scalar(params.scalar, AdValue::offset(AdValue::mul_sub_from_scalar_lhs(
+        params.inner_scalar,
+        AdValue::scale(scratch.ad_value(8), params.value_scale),
+        AdValue::offset(
+            AdValue::mul_sub_from_scalar_scaled_offset_self(
+                params.inner_scalar,
+                AdValue::scale(scratch.ad_value(8), params.value_scale),
+                params.rhs_input_scale,
+                params.rhs_inner_offset,
+                params.rhs_output_scale
+            ),
+            params.rhs_offset
+        )
+    ), params.outer_offset)));
 }
 "#;
 
@@ -4577,6 +4597,12 @@ fn stamp() {
         assert!(
             compact.contains(
                 "s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_self_offset_rhs(130, p.scalar, p.inner_scalar, 6, p.rhs_input_scale, p.rhs_inner_offset, p.rhs_output_scale, p.rhs_offset, p.outer_offset);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs(131, p.scalar, p.inner_scalar, A::scale(s.ad_value(8), p.value_scale), p.rhs_input_scale, p.rhs_inner_offset, p.rhs_output_scale, p.rhs_offset, p.outer_offset);"
             ),
             "{compact}"
         );
@@ -9906,7 +9932,24 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_div_from_scalar_offset_mul_offset_lhs_components(&mut self, index: usize, scalar: f64, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_offset: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], output_offset: f64) {",
+        "    fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs(&mut self, index: usize, scalar: f64, inner_scalar: f64, value: AdValue, rhs_input_scale: f64, rhs_inner_offset: f64, rhs_output_scale: f64, rhs_offset: f64, outer_offset: f64) {",
+        "        let value_raw = value.value;",
+        "        let left_value = inner_scalar - value_raw;",
+        "        let rhs_affine_value = left_value * rhs_input_scale + rhs_inner_offset;",
+        "        let right_raw = left_value * rhs_affine_value * rhs_output_scale + rhs_offset;",
+        "        let denominator = left_value * right_raw + outer_offset;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_scale = -quotient * reciprocal;",
+        "        let rhs_derivative_scale = -((2.0 * rhs_input_scale * left_value + rhs_inner_offset) * rhs_output_scale);",
+        "        let denominator_derivative_scale = (-right_raw + left_value * rhs_derivative_scale) * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * denominator_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * denominator_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+    "    fn store_div_from_scalar_offset_mul_offset_lhs_components(&mut self, index: usize, scalar: f64, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_offset: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], output_offset: f64) {",
         "        let offset_left = left_raw + left_offset;",
         "        let denominator = offset_left * right_raw + output_offset;",
         "        let reciprocal = 1.0 / denominator;",
@@ -24704,6 +24747,18 @@ fn compact_div_from_scalar_offset_mul_sub_from_scalar_lhs_store_helper_line(
             ))
         }
         (None, None) => {
+            if let Some((rhs_input_scale, rhs_inner_offset, rhs_output_scale, rhs_offset)) =
+                compact_mul_sub_from_scalar_scaled_offset_self_offset_rhs_ad_args(
+                    inner_scalar,
+                    value_arg,
+                    right_arg,
+                )
+            {
+                let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
+                return Some(format!(
+                    "scratch.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs({target_index}, {scalar}, {inner_scalar}, {value}, {rhs_input_scale}, {rhs_inner_offset}, {rhs_output_scale}, {rhs_offset}, {offset});"
+                ));
+            }
             let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
             let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
             Some(format!(
@@ -24730,6 +24785,30 @@ fn compact_mul_sub_from_scalar_scaled_offset_self_offset_rhs_args<'a>(
 
     if !compact_scalar_same_wrapped(inner_scalar, self_args[0])
         || compact_scratch_ad_value_index(self_args[1])? != value_index
+    {
+        return None;
+    }
+
+    Some((self_args[2], self_args[3], self_args[4], offset_args[1]))
+}
+
+fn compact_mul_sub_from_scalar_scaled_offset_self_offset_rhs_ad_args<'a>(
+    inner_scalar: &str,
+    value_arg: &str,
+    right: &'a str,
+) -> Option<(&'a str, &'a str, &'a str, &'a str)> {
+    let offset_args = compact_ad_call_args(right, "offset")?;
+    if offset_args.len() != 2 {
+        return None;
+    }
+
+    let self_args = compact_ad_call_args(offset_args[0], "mul_sub_from_scalar_scaled_offset_self")?;
+    if self_args.len() != 5 {
+        return None;
+    }
+
+    if !compact_scalar_same_wrapped(inner_scalar, self_args[0])
+        || !compact_ad_expression_same(value_arg, self_args[1])
     {
         return None;
     }
