@@ -573,6 +573,16 @@ impl NativeProgram {
                     depth -= 1;
                     ops.push(NativeOp::Extremum(extremum_op(instruction)));
                 }
+                Instruction::AboveState(_) => {
+                    pop_binary_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::Compare(CompareOp::Gt));
+                }
                 Instruction::PushCurrent(pos, neg) => {
                     let pair_index =
                         current_pair_index(model.clone(), *pos, *neg, limits.terminal_count)?;
@@ -1321,6 +1331,31 @@ mod tests {
             "got: {msg}"
         );
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowers_above_state_as_native_ordered_compare() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(300.0),
+                Instruction::AboveState(7),
+            ],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("above", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("above state has native x64 lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(300.0),
+                NativeOp::Compare(CompareOp::Gt),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 2);
     }
 
     #[test]
