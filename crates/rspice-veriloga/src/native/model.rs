@@ -17,6 +17,7 @@ impl CodeOffset {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeEntryOffsets {
     pub assignment: CodeOffset,
+    pub static_conditions: Vec<Option<CodeOffset>>,
     pub stamp_values: Vec<CodeOffset>,
     pub jacobians: Vec<Vec<CodeOffset>>,
     pub reactive_jacobians: Vec<Vec<CodeOffset>>,
@@ -32,6 +33,7 @@ pub(crate) struct NativeCurrentDependencies {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PlanStats {
     pub assignment_entry_points: usize,
+    pub static_condition_entry_points: usize,
     pub stamp_value_entry_points: usize,
     pub jacobian_entry_points: usize,
     pub reactive_jacobian_entry_points: usize,
@@ -87,8 +89,10 @@ impl NativeModel {
 
         let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
         let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
+        let static_condition_entry_points = entries.static_conditions.iter().flatten().count();
         let stats = PlanStats {
             assignment_entry_points: 1,
+            static_condition_entry_points,
             stamp_value_entry_points: entries.stamp_values.len(),
             jacobian_entry_points,
             reactive_jacobian_entry_points,
@@ -117,6 +121,7 @@ impl NativeModel {
         let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            static_conditions: vec![Some(stamp_entry); stamp_value_entry_points],
             stamp_values: vec![stamp_entry; stamp_value_entry_points],
             jacobians: jacobian_entry_points
                 .into_iter()
@@ -134,7 +139,17 @@ impl NativeModel {
 
     #[allow(dead_code)]
     fn validate_entry_offsets(entries: &NativeEntryOffsets, image_len: usize) -> JitResult<()> {
+        if entries.static_conditions.len() != entries.stamp_values.len() {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "static-condition entry shape does not match stamp entry shape".into(),
+            });
+        }
+
         Self::validate_entry_offset(entries.assignment, image_len)?;
+        for offset in entries.static_conditions.iter().flatten() {
+            Self::validate_entry_offset(*offset, image_len)?;
+        }
         for offset in &entries.stamp_values {
             Self::validate_entry_offset(*offset, image_len)?;
         }
@@ -228,6 +243,18 @@ impl NativeModel {
         self.run_value_entry(self.entries.stamp_values[index], ctx, vars)
     }
 
+    pub(crate) fn run_static_condition(
+        &self,
+        index: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> Option<f64> {
+        self.entries
+            .static_conditions
+            .get(index)
+            .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
+    }
+
     pub(crate) fn stamp_value_current_pairs(&self, index: usize) -> &[usize] {
         &self.current_dependencies.stamp_values[index]
     }
@@ -301,6 +328,7 @@ mod tests {
     fn native_model_entry_points_are_not_optional() {
         let model = NativeModel::new_for_test(2, 1, vec![1], vec![]);
         assert_eq!(model.chunk_count(), 1);
+        assert_eq!(model.plan_stats().static_condition_entry_points, 1);
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
         assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 0);
@@ -337,6 +365,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                static_conditions: vec![Some(stamp_entry)],
                 stamp_values: vec![stamp_entry],
                 jacobians: vec![vec![jacobian_entry]],
                 reactive_jacobians: vec![vec![reactive_jacobian_entry]],
@@ -346,6 +375,10 @@ mod tests {
 
         let ctx = empty_eval_context();
         model.run_assignments(&ctx, std::ptr::null_mut());
+        assert_eq!(
+            model.run_static_condition(0, &ctx, std::ptr::null()),
+            Some(1.0)
+        );
         assert_eq!(model.run_stamp_value(0, &ctx, std::ptr::null()), 1.0);
         assert_eq!(model.run_jacobian(0, 0, &ctx, std::ptr::null()), 2.0);
         assert_eq!(
@@ -365,6 +398,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(1),
+                static_conditions: vec![],
                 stamp_values: vec![],
                 jacobians: vec![],
                 reactive_jacobians: vec![],

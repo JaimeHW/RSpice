@@ -7,6 +7,7 @@ use smol_str::SmolStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
     Assignment,
+    StaticCondition,
     StampValue,
     Jacobian,
     ReactiveJacobian,
@@ -229,6 +230,7 @@ impl NativeProgram {
         let mut max_stack_depth = 0usize;
 
         for instruction in &program.instructions {
+            validate_entry_instruction(model.clone(), entry_kind, instruction)?;
             match instruction {
                 Instruction::PushConst(value) => {
                     ops.push(NativeOp::Const(*value));
@@ -739,6 +741,81 @@ impl NativeProgram {
 fn push_stack(depth: &mut usize, max_stack_depth: &mut usize) {
     *depth += 1;
     *max_stack_depth = (*max_stack_depth).max(*depth);
+}
+
+fn validate_entry_instruction(
+    model: SmolStr,
+    entry_kind: EntryKind,
+    instruction: &Instruction,
+) -> JitResult<()> {
+    if matches!(entry_kind, EntryKind::StaticCondition)
+        && !is_static_condition_instruction(instruction)
+    {
+        return Err(JitError::unsupported_program_op(
+            model,
+            format!("StaticCondition {}", instruction_name(instruction)),
+        ));
+    }
+
+    Ok(())
+}
+
+fn is_static_condition_instruction(instruction: &Instruction) -> bool {
+    matches!(
+        instruction,
+        Instruction::PushConst(_)
+            | Instruction::PushParam(_)
+            | Instruction::PushParamGiven(_)
+            | Instruction::PushPortConnected(_)
+            | Instruction::PushVariable(_)
+            | Instruction::PushVariableDyn { .. }
+            | Instruction::PushTemperature
+            | Instruction::PushVt
+            | Instruction::PushMfactor
+            | Instruction::Add
+            | Instruction::Sub
+            | Instruction::Mul
+            | Instruction::Div
+            | Instruction::Pow
+            | Instruction::Mod
+            | Instruction::Shl
+            | Instruction::Shr
+            | Instruction::BitAnd
+            | Instruction::BitOr
+            | Instruction::BitXor
+            | Instruction::Neg
+            | Instruction::Abs
+            | Instruction::Sqrt
+            | Instruction::Exp
+            | Instruction::Log
+            | Instruction::Log10
+            | Instruction::Sin
+            | Instruction::Cos
+            | Instruction::Tan
+            | Instruction::Sinh
+            | Instruction::Cosh
+            | Instruction::Tanh
+            | Instruction::Min
+            | Instruction::Max
+            | Instruction::Limexp
+            | Instruction::Asin
+            | Instruction::Acos
+            | Instruction::Atan
+            | Instruction::Atan2
+            | Instruction::Floor
+            | Instruction::Ceil
+            | Instruction::FnPow
+            | Instruction::Gt
+            | Instruction::Lt
+            | Instruction::Ge
+            | Instruction::Le
+            | Instruction::Eq
+            | Instruction::Ne
+            | Instruction::And
+            | Instruction::Or
+            | Instruction::Not
+            | Instruction::IfElse
+    )
 }
 
 fn pop_binary_stack(
