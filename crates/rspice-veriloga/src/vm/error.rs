@@ -3,6 +3,8 @@
 pub enum VmError {
     StackUnderflow(&'static str),
     InvalidInstruction(&'static str),
+    /// Native JIT compilation failed while native execution was required.
+    NativeJit(String),
     /// Runtime array index outside the declared bounds
     IndexOutOfBounds {
         index: i64,
@@ -16,6 +18,7 @@ impl std::fmt::Display for VmError {
         match self {
             VmError::StackUnderflow(msg) => write!(f, "Stack underflow: {}", msg),
             VmError::InvalidInstruction(msg) => write!(f, "Invalid instruction: {}", msg),
+            VmError::NativeJit(msg) => write!(f, "native JIT error: {}", msg),
             VmError::IndexOutOfBounds {
                 index,
                 lower,
@@ -30,3 +33,19 @@ impl std::fmt::Display for VmError {
 }
 
 impl std::error::Error for VmError {}
+
+#[cfg(test)]
+mod tests {
+    use super::VmError;
+
+    #[test]
+    fn native_jit_error_display_mentions_no_fallback() {
+        let err = VmError::NativeJit(
+            "model rjit: unsupported canonical op EvaluateEquation; no interpreter fallback"
+                .to_string(),
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("native JIT"));
+        assert!(msg.contains("no interpreter fallback"));
+    }
+}
