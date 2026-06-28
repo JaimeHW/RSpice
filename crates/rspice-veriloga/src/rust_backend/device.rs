@@ -4320,6 +4320,36 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_sqrt_add_scaled_square_product_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sqrt_add_scaled_square_product"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(17, AdValue::sqrt(AdValue::add_scaled_square_product(scratch.ad_value(2), params.square_scale, scratch.ad_value(3), scratch.ad_value(4), params.product_scale)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_sqrt_add_scaled_square_product(17, 2, p.square_scale, 3, 4, p.product_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_sqrt_ad("), "{compact}");
+        assert!(
+            !compact.contains("A::add_scaled_square_product("),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_div_scaled_product_sqrt_square_sum_denominator_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -14048,6 +14078,26 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_derivative_scale + input_node_derivatives[axis] * input_derivative_scale; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_derivative_scale + input_branch_derivatives[axis] * input_derivative_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_sqrt_add_scaled_square_product(&mut self, index: usize, square_source: usize, square_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {",
+    "        let square_value = self.values[square_source];",
+    "        let product_left_value = self.values[product_left];",
+    "        let product_right_value = self.values[product_right];",
+    "        let value = (square_value * square_value * square_scale + product_left_value * product_right_value * product_scale).sqrt();",
+    "        let sqrt_derivative_scale = 1.0 / (2.0 * value);",
+    "        let square_derivative_scale = 2.0 * square_value * square_scale * sqrt_derivative_scale;",
+    "        let product_derivative_scale = product_scale * sqrt_derivative_scale;",
+    "        let square_node_derivatives = self.node_derivatives[square_source];",
+    "        let product_left_node_derivatives = self.node_derivatives[product_left];",
+    "        let product_right_node_derivatives = self.node_derivatives[product_right];",
+    "        let square_branch_derivatives = self.branch_derivatives[square_source];",
+    "        let product_left_branch_derivatives = self.branch_derivatives[product_left];",
+    "        let product_right_branch_derivatives = self.branch_derivatives[product_right];",
+    "        self.values[index] = value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_derivative_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_derivative_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_derivative_scale; }",
     "    }",
     "",
     "    #[inline]",
@@ -26630,6 +26680,21 @@ fn compact_sqrt_square_and_affine_store_helper_call(
                 "scratch.store_sqrt_square_add({target_index}, {square_source}, {add_source});"
             ));
         }
+    }
+
+    if let Some(add_scaled_square_product_args) =
+        compact_ad_call_args(inner, "add_scaled_square_product")
+    {
+        if add_scaled_square_product_args.len() != 5 {
+            return None;
+        }
+        let square_source = compact_scratch_ad_value_index(add_scaled_square_product_args[0])?;
+        let product_left = compact_scratch_ad_value_index(add_scaled_square_product_args[2])?;
+        let product_right = compact_scratch_ad_value_index(add_scaled_square_product_args[3])?;
+        return Some(format!(
+            "scratch.store_sqrt_add_scaled_square_product({target_index}, {square_source}, {}, {product_left}, {product_right}, {});",
+            add_scaled_square_product_args[1], add_scaled_square_product_args[4]
+        ));
     }
 
     if let Some(add_scaled_args) = compact_ad_call_args(inner, "add_scaled_inputs") {
