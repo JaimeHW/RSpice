@@ -128,53 +128,7 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
     let assignments = model
         .assignment_steps
         .iter()
-        .map(|step| {
-            let limits = NativeLoweringLimits::for_model(model);
-            match step {
-                AssignmentStep::Assign(assignment) => {
-                    let program = NativeProgram::from_bytecode(
-                        model.name.clone(),
-                        EntryKind::Assignment,
-                        &assignment.program,
-                        limits,
-                    )?;
-                    Ok(NativeAssignment::Direct {
-                        var_index: assignment.var_index,
-                        program,
-                    })
-                }
-                AssignmentStep::AssignIndexed {
-                    base,
-                    len,
-                    lower,
-                    index,
-                    value,
-                } => {
-                    let index = NativeProgram::from_bytecode(
-                        model.name.clone(),
-                        EntryKind::Assignment,
-                        index,
-                        limits,
-                    )?;
-                    let value = NativeProgram::from_bytecode(
-                        model.name.clone(),
-                        EntryKind::Assignment,
-                        value,
-                        limits,
-                    )?;
-                    Ok(NativeAssignment::Indexed {
-                        base: *base,
-                        len: *len,
-                        lower: *lower,
-                        index,
-                        value,
-                    })
-                }
-                AssignmentStep::Loop { .. } => {
-                    unreachable!("unsupported assignment loop was rejected before lowering")
-                }
-            }
-        })
+        .map(|step| lower_assignment_step(model, step))
         .collect::<JitResult<Vec<_>>>()?;
 
     let bytes = if assignments.is_empty() {
@@ -184,6 +138,67 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
     };
     image.extend_from_slice(&bytes);
     Ok(())
+}
+
+fn lower_assignment_step(
+    model: &CompiledModel,
+    step: &AssignmentStep,
+) -> JitResult<NativeAssignment> {
+    let limits = NativeLoweringLimits::for_model(model);
+    match step {
+        AssignmentStep::Assign(assignment) => {
+            let program = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::Assignment,
+                &assignment.program,
+                limits,
+            )?;
+            Ok(NativeAssignment::Direct {
+                var_index: assignment.var_index,
+                program,
+            })
+        }
+        AssignmentStep::AssignIndexed {
+            base,
+            len,
+            lower,
+            index,
+            value,
+        } => {
+            let index = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::Assignment,
+                index,
+                limits,
+            )?;
+            let value = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::Assignment,
+                value,
+                limits,
+            )?;
+            Ok(NativeAssignment::Indexed {
+                base: *base,
+                len: *len,
+                lower: *lower,
+                index,
+                value,
+            })
+        }
+        AssignmentStep::Loop { condition, body } => {
+            let condition = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::Assignment,
+                condition,
+                limits,
+            )?;
+            let body = body
+                .iter()
+                .map(|step| lower_assignment_step(model, step))
+                .collect::<JitResult<Vec<_>>>()?;
+            Ok(NativeAssignment::Loop { condition, body })
+        }
+    }
 }
 
 fn append_value_entry(image: &mut Vec<u8>, program: &NativeProgram) -> JitResult<CodeOffset> {

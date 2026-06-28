@@ -17,29 +17,16 @@ fn compile(source: &str) -> rspice_veriloga::CompiledModel {
         .expect("Verilog-A source must compile")
 }
 
-fn hybrid_fallback_model() -> rspice_veriloga::CompiledModel {
+fn dependent_default_failure_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
 `include "disciplines.vams"
-module hybrid(p, n);
+module native_dependent_default(p, n);
     inout p, n;
     electrical p, n;
-    parameter integer nseg = 5 from [1:8];
-    parameter real scale = 1.0;
-    real w[1:8];
-    integer i;
-    real total, gmod;
-    analog begin
-        gmod = (12 % 5) * 1.0e-4;
-        if ($param_given(scale))
-            gmod = gmod * scale;
-        for (i = 1; i <= nseg; i = i + 1)
-            w[i] = 0.001 * i * V(p, n);
-        total = 0.0;
-        for (i = 1; i <= nseg; i = i + 1)
-            total = total + w[i];
-        I(p, n) <+ total + gmod * V(p, n);
-    end
+    parameter real base = 2.0;
+    parameter real derived = base * 3.0;
+    analog I(p, n) <+ V(p, n) * derived;
 endmodule
 "#,
     )
@@ -518,6 +505,46 @@ module loop_native(p, n);
         for (i = 0; i < nseg; i = i + 1)
             total = total + V(p, n);
         I(p, n) <+ total;
+    end
+endmodule
+"#,
+    )
+}
+
+fn runtime_loop_limit_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module loop_limit_native(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer keep_running = 1;
+    integer i;
+    analog begin
+        i = 0;
+        while (keep_running)
+            i = i + 1;
+        I(p, n) <+ i * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
+fn runtime_loop_truthiness_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module loop_truth_native(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gate = -0.0;
+    integer i;
+    analog begin
+        i = 0;
+        while (gate)
+            i = i + 1;
+        I(p, n) <+ i * V(p, n);
     end
 endmodule
 "#,
@@ -1601,8 +1628,9 @@ fn native_device_stamps_internal_node_jacobians() {
     );
 }
 
+#[cfg(target_arch = "x86_64")]
 #[test]
-fn native_compile_rejects_runtime_loop_assignments_without_fallback() {
+fn native_device_executes_runtime_loop_assignments_without_fallback() {
     let model = runtime_loop_model();
     assert!(
         model
@@ -1612,11 +1640,110 @@ fn native_compile_rejects_runtime_loop_assignments_without_fallback() {
         "fixture must contain a runtime assignment loop"
     );
 
-    let err = compile_native(&model).expect_err("native JIT must reject runtime assignment loops");
+    let mut default_segments = VerilogADevice::try_new("LOOP1", model.clone(), &[1, 0])
+        .expect("runtime loop model uses native JIT");
+    assert!(default_segments.is_using_native());
+    default_segments.update_voltages(&[3.0]);
+    let currents = default_segments
+        .try_evaluate()
+        .expect("native runtime loop evaluates default segment count");
+    assert!(
+        (currents[0] - 6.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut four_segments = VerilogADevice::try_new("LOOP2", model, &[1, 0])
+        .expect("runtime loop model uses native JIT");
+    assert!(four_segments.set_parameter("nseg", 4.0));
+    four_segments
+        .try_resolve_parameter_defaults()
+        .expect("runtime loop parameter refresh succeeds");
+    four_segments.update_voltages(&[3.0]);
+    let currents = four_segments
+        .try_evaluate()
+        .expect("native runtime loop evaluates updated segment count");
+    assert!(
+        (currents[0] - 12.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
+    let model = runtime_loop_limit_model();
+    assert!(
+        model
+            .assignment_steps
+            .iter()
+            .any(|step| matches!(step, rspice_veriloga::codegen::AssignmentStep::Loop { .. })),
+        "fixture must contain a runtime assignment loop"
+    );
+
+    let mut device =
+        VerilogADevice::try_new("LOOPLIMIT1", model, &[1, 0]).expect("loop model uses native JIT");
+    device.update_voltages(&[1.0]);
+    let err = device
+        .try_evaluate()
+        .expect_err("native runtime loop limit must hard-fail");
     let msg = err.to_string();
 
     assert_native_hard_fail_message(&msg);
-    assert!(msg.contains("Loop"), "error must name Loop, got: {msg}");
+    assert!(
+        msg.contains("runtime loop iteration limit exceeded"),
+        "error must preserve runtime loop limit diagnostic, got: {msg}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
+    let model = runtime_loop_truthiness_model();
+    assert!(
+        model
+            .assignment_steps
+            .iter()
+            .any(|step| matches!(step, rspice_veriloga::codegen::AssignmentStep::Loop { .. })),
+        "fixture must contain a runtime assignment loop"
+    );
+
+    let mut negative_zero = VerilogADevice::try_new("LOOPTRUTH1", model.clone(), &[1, 0])
+        .expect("loop truthiness model uses native JIT");
+    assert!(negative_zero.is_using_native());
+    negative_zero.update_voltages(&[1.0]);
+    let currents = negative_zero
+        .try_evaluate()
+        .expect("native loop exits on -0.0 condition");
+    assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
+
+    let mut positive_zero = VerilogADevice::try_new("LOOPTRUTH2", model.clone(), &[1, 0])
+        .expect("loop truthiness model uses native JIT");
+    assert!(positive_zero.set_parameter("gate", 0.0));
+    positive_zero
+        .try_resolve_parameter_defaults()
+        .expect("loop truthiness parameter refresh succeeds");
+    positive_zero.update_voltages(&[1.0]);
+    let currents = positive_zero
+        .try_evaluate()
+        .expect("native loop exits on +0.0 condition");
+    assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
+
+    let mut nan = VerilogADevice::try_new("LOOPTRUTH3", model, &[1, 0])
+        .expect("loop truthiness model uses native JIT");
+    assert!(nan.set_parameter("gate", f64::NAN));
+    nan.try_resolve_parameter_defaults()
+        .expect("loop truthiness parameter refresh succeeds");
+    nan.update_voltages(&[1.0]);
+    let err = nan
+        .try_evaluate()
+        .expect_err("NaN loop condition must stay active until the native loop limit");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("runtime loop iteration limit exceeded"),
+        "error must preserve runtime loop limit diagnostic, got: {msg}"
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -2240,7 +2367,7 @@ fn native_evaluate_rejects_nonfinite_terminal_pair_current_probes_without_fallba
 
 #[test]
 fn native_compile_failure_is_not_interpreter_fallback() {
-    let model = hybrid_fallback_model();
+    let model = dependent_default_failure_model();
 
     let err = VerilogADevice::try_new("H1", model, &[1, 0])
         .expect_err("native mode must fail until a complete native image exists");
@@ -2251,7 +2378,7 @@ fn native_compile_failure_is_not_interpreter_fallback() {
 
 #[test]
 fn native_new_panics_instead_of_falling_back() {
-    let model = hybrid_fallback_model();
+    let model = dependent_default_failure_model();
 
     let panic = std::panic::catch_unwind(|| {
         let _ = VerilogADevice::new("H2", model, &[1, 0]);
