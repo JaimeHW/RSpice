@@ -44,6 +44,7 @@ pub(crate) enum NativeOp {
     Logical(LogicalOp),
     IfElse,
     Extremum(ExtremumOp),
+    UnaryMath(UnaryMathOp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +68,12 @@ pub(crate) enum LogicalOp {
 pub(crate) enum ExtremumOp {
     Min,
     Max,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnaryMathOp {
+    Exp,
+    Limexp,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -310,6 +317,16 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::Sqrt);
+                }
+                Instruction::Exp | Instruction::Limexp => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::UnaryMath(unary_math_op(instruction)));
                 }
                 Instruction::Gt
                 | Instruction::Lt
@@ -624,6 +641,14 @@ fn extremum_op(instruction: &Instruction) -> ExtremumOp {
     }
 }
 
+fn unary_math_op(instruction: &Instruction) -> UnaryMathOp {
+    match instruction {
+        Instruction::Exp => UnaryMathOp::Exp,
+        Instruction::Limexp => UnaryMathOp::Limexp,
+        _ => unreachable!("unary math lowering only accepts supported unary math instructions"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -892,6 +917,30 @@ mod tests {
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_exp_limexp_as_native_unary_math_ops() {
+        let cases = [
+            (Instruction::Exp, UnaryMathOp::Exp),
+            (Instruction::Limexp, UnaryMathOp::Limexp),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushTemperature, instruction],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode("math", EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("exp/limexp have direct native x64 helper-call lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::LoadTemperature, NativeOp::UnaryMath(expected)]
+            );
+            assert_eq!(lowered.max_stack_depth(), 1);
         }
     }
 

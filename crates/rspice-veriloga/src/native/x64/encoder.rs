@@ -4,12 +4,15 @@ pub(crate) enum Gpr {
     Rax,
     Rcx,
     Rdx,
+    Rsp,
     Rdi,
     Rsi,
     R8,
     R9,
     R10,
     R11,
+    R12,
+    R13,
 }
 
 #[allow(dead_code)]
@@ -19,12 +22,15 @@ impl Gpr {
             Self::Rax => 0,
             Self::Rcx => 1,
             Self::Rdx => 2,
+            Self::Rsp => 4,
             Self::Rsi => 6,
             Self::Rdi => 7,
             Self::R8 => 8,
             Self::R9 => 9,
             Self::R10 => 10,
             Self::R11 => 11,
+            Self::R12 => 12,
+            Self::R13 => 13,
         }
     }
 }
@@ -110,6 +116,44 @@ impl X64Encoder {
     pub fn mov_eax_imm32(&mut self, value: u32) {
         self.emit_u8(0xB8);
         self.emit_all(&value.to_le_bytes());
+    }
+
+    pub(crate) fn push_r64(&mut self, reg: Gpr) {
+        self.emit_rex(false, 0, 0, reg.code());
+        self.emit_u8(0x50 + (reg.code() & 0b111));
+    }
+
+    pub(crate) fn pop_r64(&mut self, reg: Gpr) {
+        self.emit_rex(false, 0, 0, reg.code());
+        self.emit_u8(0x58 + (reg.code() & 0b111));
+    }
+
+    pub(crate) fn mov_r64_r64(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex(true, src.code(), 0, dst.code());
+        self.emit_u8(0x89);
+        self.emit_modrm(0b11, src.code(), dst.code());
+    }
+
+    pub(crate) fn movabs_r64_imm64(&mut self, dst: Gpr, value: u64) {
+        self.emit_rex(true, 0, 0, dst.code());
+        self.emit_u8(0xB8 + (dst.code() & 0b111));
+        self.emit_all(&value.to_le_bytes());
+    }
+
+    pub(crate) fn call_r64(&mut self, target: Gpr) {
+        self.emit_rex(false, 0, 0, target.code());
+        self.emit_u8(0xFF);
+        self.emit_modrm(0b11, 0b010, target.code());
+    }
+
+    pub(crate) fn sub_rsp_imm32(&mut self, value: i32) {
+        self.emit_all(&[0x48, 0x81, 0xEC]);
+        self.emit_i32(value);
+    }
+
+    pub(crate) fn add_rsp_imm32(&mut self, value: i32) {
+        self.emit_all(&[0x48, 0x81, 0xC4]);
+        self.emit_i32(value);
     }
 
     pub(crate) fn mov_r64_m64_base_disp32(&mut self, dst: Gpr, base: Gpr, disp: i32) {
@@ -317,6 +361,9 @@ impl X64Encoder {
 
     fn emit_base_disp32_modrm(&mut self, reg: u8, base: u8, disp: i32) {
         self.emit_modrm(0b10, reg, base);
+        if needs_sib_base(base) {
+            self.emit_sib(0, 0b100, base);
+        }
         self.emit_i32(disp);
     }
 
@@ -326,6 +373,10 @@ impl X64Encoder {
 
     fn emit_modrm(&mut self, mode: u8, reg: u8, rm: u8) {
         self.emit_u8(((mode & 0b11) << 6) | ((reg & 0b111) << 3) | (rm & 0b111));
+    }
+
+    fn emit_sib(&mut self, scale: u8, index: u8, base: u8) {
+        self.emit_u8(((scale & 0b11) << 6) | ((index & 0b111) << 3) | (base & 0b111));
     }
 
     fn emit_rex(&mut self, w: bool, reg: u8, index: u8, base: u8) {
@@ -363,6 +414,10 @@ impl X64Encoder {
 
 fn requires_low_byte_rex(reg: u8) -> bool {
     matches!(reg & 0b111, 0b100..=0b111)
+}
+
+fn needs_sib_base(base: u8) -> bool {
+    base & 0b111 == 0b100
 }
 
 #[cfg(test)]
@@ -427,6 +482,22 @@ mod tests {
             encoder.into_bytes(),
             [
                 0x48, 0x8B, 0x87, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_r12_disp32_memory_base_with_sib() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R12, 16);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::R12, 80);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x49, 0x8B, 0x84, 0x24, 16, 0, 0, 0, 0xF2, 0x41, 0x0F, 0x10, 0x84, 0x24, 80, 0, 0,
+                0,
             ]
         );
     }
@@ -581,6 +652,32 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [0x45, 0x84, 0xD2, 0x49, 0x0F, 0x45, 0xC3]
+        );
+    }
+
+    #[test]
+    fn encodes_call_preservation_primitives() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.push_r64(Gpr::R12);
+        encoder.push_r64(Gpr::R13);
+        encoder.mov_r64_r64(Gpr::R12, Gpr::Rcx);
+        encoder.mov_r64_r64(Gpr::R13, Gpr::Rdx);
+        encoder.sub_rsp_imm32(88);
+        encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        encoder.movabs_r64_imm64(Gpr::Rax, 0x1122_3344_5566_7788);
+        encoder.call_r64(Gpr::Rax);
+        encoder.add_rsp_imm32(88);
+        encoder.pop_r64(Gpr::R13);
+        encoder.pop_r64(Gpr::R12);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x41, 0x54, 0x41, 0x55, 0x49, 0x89, 0xCC, 0x49, 0x89, 0xD5, 0x48, 0x81, 0xEC, 0x58,
+                0, 0, 0, 0x49, 0x89, 0xE3, 0x48, 0xB8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
+                0x11, 0xFF, 0xD0, 0x48, 0x81, 0xC4, 0x58, 0, 0, 0, 0x41, 0x5D, 0x41, 0x5C,
+            ]
         );
     }
 
