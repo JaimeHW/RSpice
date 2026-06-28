@@ -134,7 +134,7 @@ module native_context_scalar(p, n);
     electrical p, n;
     real gain;
     analog begin
-        gain = (($temperature - 300.0) * 1.0e-3) + $abstime + $mfactor;
+        gain = (($temperature - 300.0) * 1.0e-3) + (2.0 * $abstime) + (3.0 * $mfactor);
         I(p, n) <+ gain * V(p, n);
     end
 endmodule
@@ -152,7 +152,7 @@ module native_context_flags(p, n, opt);
     parameter real rknob = 2.0 from (0:inf);
     real gain;
     analog begin
-        gain = ($param_given(rknob) + $port_connected(opt)) * 0.5;
+        gain = (2.0 * $param_given(rknob)) + (3.0 * $port_connected(opt));
         I(p, n) <+ gain * V(p, n);
     end
 endmodule
@@ -295,6 +295,35 @@ endmodule
     )
 }
 
+fn unavailable_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_missing_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ I(p, n);
+endmodule
+"#,
+    )
+}
+
+fn nonfinite_prior_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_nonfinite_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) / 0.0;
+        I(p, n) <+ I(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_compile_accepts_simple_resistor_subset() {
@@ -351,22 +380,33 @@ fn native_device_stamps_multiple_flow_contributions_from_one_image() {
     let jacobians = device
         .try_compute_jacobian()
         .expect("native multi-stamp jacobian evaluate");
-    assert!(
-        jacobians.iter().any(|entry| {
-            entry.program_idx == 0
-                && entry.jacobian_idx == 0
-                && (entry.value - 0.25).abs() < 1e-12
-        }),
+    let jacobian_order = jacobians
+        .iter()
+        .map(|entry| (entry.program_idx, entry.jacobian_idx, entry.value))
+        .collect::<Vec<_>>();
+    let expected = [
+        (0, 0, 0.25),
+        (0, 1, -0.25),
+        (0, 2, -0.25),
+        (0, 3, 0.25),
+        (1, 0, 0.75),
+        (1, 1, -0.75),
+        (1, 2, -0.75),
+        (1, 3, 0.75),
+    ];
+    assert_eq!(
+        jacobian_order.len(),
+        expected.len(),
         "jacobians: {jacobians:?}"
     );
-    assert!(
-        jacobians.iter().any(|entry| {
-            entry.program_idx == 1
-                && entry.jacobian_idx == 0
-                && (entry.value - 0.75).abs() < 1e-12
-        }),
-        "jacobians: {jacobians:?}"
-    );
+    for (actual, expected) in jacobian_order.iter().zip(expected) {
+        assert_eq!(actual.0, expected.0, "jacobians: {jacobians:?}");
+        assert_eq!(actual.1, expected.1, "jacobians: {jacobians:?}");
+        assert!(
+            (actual.2 - expected.2).abs() < 1e-12,
+            "jacobians: {jacobians:?}"
+        );
+    }
 
     let (matrix, rhs) = stamp_device(&mut device, &[4.0]);
     assert!((matrix.get(&(0, 0)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
@@ -393,7 +433,10 @@ fn native_device_stamps_potential_branch_unknowns() {
     assert!((matrix.get(&(2, 0)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
     assert!((matrix.get(&(2, 1)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
     assert!((matrix.get(&(2, 2)).copied().unwrap_or_default() + 2000.0).abs() < 1e-9);
-    assert!(rhs.get(&2).copied().unwrap_or_default().abs() < 1e-12, "rhs: {rhs:?}");
+    assert!(
+        rhs.get(&2).copied().unwrap_or_default().abs() < 1e-12,
+        "rhs: {rhs:?}"
+    );
     assert!(
         rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
         "rhs: {rhs:?}"
@@ -481,10 +524,10 @@ fn native_device_executes_scalar_simulator_context_reads() {
         .expect("native context scalar evaluation succeeds");
 
     assert!(
-        (currents[0] - 20.04).abs() < 1e-12,
+        (currents[0] - 52.04).abs() < 1e-12,
         "currents: {currents:?}"
     );
-    assert!((device.variable("gain").unwrap() - 5.01).abs() < 1e-12);
+    assert!((device.variable("gain").unwrap() - 13.01).abs() < 1e-12);
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -498,14 +541,29 @@ fn native_device_executes_param_given_and_port_connected_reads() {
     assert_eq!(omitted.try_evaluate().unwrap()[0], 0.0);
     assert_eq!(omitted.variable("gain"), Some(0.0));
 
+    let mut param_only = VerilogADevice::try_new("FLG2", model.clone(), &[1, 0])
+        .expect("flag model uses native JIT");
+    assert!(param_only.set_parameter("rknob", 2.0));
+    param_only.update_voltages(&[2.0]);
+    let currents = param_only.try_evaluate().unwrap();
+    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(param_only.variable("gain"), Some(2.0));
+
+    let mut port_only = VerilogADevice::try_new("FLG3", model.clone(), &[1, 0, 0])
+        .expect("flag model uses native JIT");
+    port_only.update_voltages(&[2.0]);
+    let currents = port_only.try_evaluate().unwrap();
+    assert!((currents[0] - 6.0).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(port_only.variable("gain"), Some(3.0));
+
     let mut connected =
-        VerilogADevice::try_new("FLG2", model, &[1, 0, 0]).expect("flag model uses native JIT");
+        VerilogADevice::try_new("FLG4", model, &[1, 0, 0]).expect("flag model uses native JIT");
     assert!(connected.set_parameter("rknob", 2.0));
     connected.update_voltages(&[2.0]);
 
     let currents = connected.try_evaluate().unwrap();
-    assert!((currents[0] - 2.0).abs() < 1e-12, "currents: {currents:?}");
-    assert_eq!(connected.variable("gain"), Some(1.0));
+    assert!((currents[0] - 10.0).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(connected.variable("gain"), Some(5.0));
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -631,14 +689,54 @@ fn native_compile_rejects_reactive_jacobians_without_fallback() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_compile_rejects_terminal_pair_current_probes_without_fallback() {
+fn native_device_executes_terminal_pair_current_probes_in_source_order() {
     let model = current_probe_model();
+    let mut device = VerilogADevice::try_new("CP1", model, &[1, 0])
+        .expect("current probe model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[4.0]);
 
-    let err = compile_native(&model).expect_err("PushCurrent remains outside this native slice");
+    let currents = device
+        .try_evaluate()
+        .expect("native current-probe evaluation succeeds");
+
+    assert_eq!(currents.len(), 2);
+    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+    assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_compile_rejects_unavailable_terminal_pair_current_probes_without_fallback() {
+    let model = unavailable_current_probe_model();
+
+    let err = compile_native(&model).expect_err("missing current probe source must not compile");
     let msg = err.to_string();
 
     assert_native_hard_fail_message(&msg);
-    assert!(msg.contains("PushCurrent"), "error must name PushCurrent, got: {msg}");
+    assert!(
+        msg.contains("PushCurrent terminal pair 0,1 unavailable"),
+        "error must name unavailable current pair, got: {msg}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_evaluate_rejects_nonfinite_terminal_pair_current_probes_without_fallback() {
+    let model = nonfinite_prior_current_probe_model();
+    let mut device = VerilogADevice::try_new("CPINF1", model, &[1, 0])
+        .expect("structurally available current probe compiles native");
+    device.update_voltages(&[4.0]);
+
+    let err = device
+        .try_evaluate()
+        .expect_err("non-finite prior terminal-pair current must be a runtime error");
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("missing terminal-pair current slot"),
+        "error must match interpreter current-probe semantics, got: {msg}"
+    );
 }
 
 #[test]

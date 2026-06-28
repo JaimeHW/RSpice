@@ -22,6 +22,13 @@ pub(crate) struct NativeEntryOffsets {
     pub reactive_jacobians: Vec<Vec<CodeOffset>>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct NativeCurrentDependencies {
+    pub stamp_values: Vec<Vec<usize>>,
+    pub jacobians: Vec<Vec<Vec<usize>>>,
+    pub reactive_jacobians: Vec<Vec<Vec<usize>>>,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PlanStats {
     pub assignment_entry_points: usize,
@@ -34,6 +41,7 @@ pub struct NativeModel {
     pub num_variables: usize,
     image: ExecutableMemory,
     entries: NativeEntryOffsets,
+    current_dependencies: NativeCurrentDependencies,
     stats: PlanStats,
 }
 
@@ -59,7 +67,23 @@ impl NativeModel {
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
     ) -> JitResult<Self> {
+        let current_dependencies = Self::empty_current_dependencies(&entries);
+        Self::from_executable_image_with_dependencies(
+            num_variables,
+            image,
+            entries,
+            current_dependencies,
+        )
+    }
+
+    pub(crate) fn from_executable_image_with_dependencies(
+        num_variables: usize,
+        image: ExecutableMemory,
+        entries: NativeEntryOffsets,
+        current_dependencies: NativeCurrentDependencies,
+    ) -> JitResult<Self> {
         Self::validate_entry_offsets(&entries, image.len())?;
+        Self::validate_current_dependencies(&entries, &current_dependencies)?;
 
         let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
         let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
@@ -74,6 +98,7 @@ impl NativeModel {
             num_variables,
             image,
             entries,
+            current_dependencies,
             stats,
         })
     }
@@ -140,6 +165,49 @@ impl NativeModel {
         Ok(())
     }
 
+    fn empty_current_dependencies(entries: &NativeEntryOffsets) -> NativeCurrentDependencies {
+        NativeCurrentDependencies {
+            stamp_values: vec![Vec::new(); entries.stamp_values.len()],
+            jacobians: entries
+                .jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
+            reactive_jacobians: entries
+                .reactive_jacobians
+                .iter()
+                .map(|entries| vec![Vec::new(); entries.len()])
+                .collect(),
+        }
+    }
+
+    fn validate_current_dependencies(
+        entries: &NativeEntryOffsets,
+        dependencies: &NativeCurrentDependencies,
+    ) -> JitResult<()> {
+        if dependencies.stamp_values.len() != entries.stamp_values.len()
+            || dependencies.jacobians.len() != entries.jacobians.len()
+            || dependencies.reactive_jacobians.len() != entries.reactive_jacobians.len()
+            || dependencies
+                .jacobians
+                .iter()
+                .zip(&entries.jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
+            || dependencies
+                .reactive_jacobians
+                .iter()
+                .zip(&entries.reactive_jacobians)
+                .any(|(dependencies, entries)| dependencies.len() != entries.len())
+        {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "current dependency shape does not match native entry shape".into(),
+            });
+        }
+
+        Ok(())
+    }
+
     fn entry_ptr(&self, offset: CodeOffset) -> *const u8 {
         self.image
             .ptr_at(offset.0)
@@ -160,6 +228,10 @@ impl NativeModel {
         self.run_value_entry(self.entries.stamp_values[index], ctx, vars)
     }
 
+    pub(crate) fn stamp_value_current_pairs(&self, index: usize) -> &[usize] {
+        &self.current_dependencies.stamp_values[index]
+    }
+
     pub(crate) fn run_jacobian(
         &self,
         stamp: usize,
@@ -170,6 +242,10 @@ impl NativeModel {
         self.run_value_entry(self.entries.jacobians[stamp][entry], ctx, vars)
     }
 
+    pub(crate) fn jacobian_current_pairs(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.jacobians[stamp][entry]
+    }
+
     pub(crate) fn run_reactive_jacobian(
         &self,
         stamp: usize,
@@ -178,6 +254,10 @@ impl NativeModel {
         vars: *const f64,
     ) -> f64 {
         self.run_value_entry(self.entries.reactive_jacobians[stamp][entry], ctx, vars)
+    }
+
+    pub(crate) fn reactive_jacobian_current_pairs(&self, stamp: usize, entry: usize) -> &[usize] {
+        &self.current_dependencies.reactive_jacobians[stamp][entry]
     }
 
     fn run_value_entry(&self, offset: CodeOffset, ctx: &EvalContext, vars: *const f64) -> f64 {

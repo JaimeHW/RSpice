@@ -209,7 +209,7 @@ mod tests {
     use super::{Gpr, X64Encoder, Xmm};
 
     #[cfg(all(feature = "native", target_arch = "x86_64"))]
-    use crate::native::{runtime::ExecutableMemory, EvalContext};
+    use crate::native::{EvalContext, runtime::ExecutableMemory};
 
     #[test]
     fn encodes_mov_eax_imm32_ret() {
@@ -249,7 +249,9 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [0x48, 0x8B, 0x81, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,]
+            [
+                0x48, 0x8B, 0x81, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
+            ]
         );
     }
 
@@ -262,7 +264,9 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [0x48, 0x8B, 0x87, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,]
+            [
+                0x48, 0x8B, 0x87, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
+            ]
         );
     }
 
@@ -274,7 +278,9 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [0x44, 0x0F, 0xB6, 0x90, 8, 0, 0, 0, 0xF2, 0x41, 0x0F, 0x2A, 0xC2,]
+            [
+                0x44, 0x0F, 0xB6, 0x90, 8, 0, 0, 0, 0xF2, 0x41, 0x0F, 0x2A, 0xC2,
+            ]
         );
     }
 

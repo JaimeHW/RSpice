@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::{JitError, JitResult};
-use crate::codegen::{BytecodeProgram, Instruction};
+use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use smol_str::SmolStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +25,7 @@ pub(crate) enum NativeOp {
     LoadParamGiven(usize),
     LoadPortConnected(usize),
     LoadVoltage { pos: VoltageNode, neg: VoltageNode },
+    LoadCurrent(usize),
     LoadInternalVoltage(usize),
     LoadVariable(usize),
     LoadBranchUnknown(usize),
@@ -42,6 +43,60 @@ pub(crate) enum NativeOp {
 pub(crate) struct NativeProgram {
     ops: Vec<NativeOp>,
     max_stack_depth: usize,
+    current_pair_dependencies: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NativeLoweringLimits<'a> {
+    terminal_count: usize,
+    internal_node_count: usize,
+    parameter_count: usize,
+    variable_count: usize,
+    branch_unknown_count: usize,
+    available_current_pairs: &'a [usize],
+}
+
+impl<'a> NativeLoweringLimits<'a> {
+    pub(crate) fn new(
+        terminal_count: usize,
+        internal_node_count: usize,
+        parameter_count: usize,
+        variable_count: usize,
+        branch_unknown_count: usize,
+    ) -> Self {
+        Self {
+            terminal_count,
+            internal_node_count,
+            parameter_count,
+            variable_count,
+            branch_unknown_count,
+            available_current_pairs: &[],
+        }
+    }
+
+    pub(crate) fn for_model(model: &CompiledModel) -> NativeLoweringLimits<'static> {
+        NativeLoweringLimits::new(
+            model.num_terminals,
+            model.internal_nodes,
+            model.parameters.len(),
+            model.num_variables,
+            model.branch_sources.len(),
+        )
+    }
+
+    pub(crate) fn with_available_current_pairs<'b>(
+        self,
+        available_current_pairs: &'b [usize],
+    ) -> NativeLoweringLimits<'b> {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            branch_unknown_count: self.branch_unknown_count,
+            available_current_pairs,
+        }
+    }
 }
 
 impl NativeProgram {
@@ -49,11 +104,11 @@ impl NativeProgram {
         model: impl Into<SmolStr>,
         entry_kind: EntryKind,
         program: &BytecodeProgram,
-        terminal_count: usize,
-        internal_node_count: usize,
+        limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
         let mut ops = Vec::with_capacity(program.instructions.len());
+        let mut current_pair_dependencies = Vec::new();
         let mut depth = 0usize;
         let mut max_stack_depth = 0usize;
 
@@ -64,14 +119,32 @@ impl NativeProgram {
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushParam(index) => {
+                    validate_index(
+                        model.clone(),
+                        "PushParam parameter",
+                        *index,
+                        limits.parameter_count,
+                    )?;
                     ops.push(NativeOp::LoadParam(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushParamGiven(index) => {
+                    validate_index(
+                        model.clone(),
+                        "PushParamGiven parameter",
+                        *index,
+                        limits.parameter_count,
+                    )?;
                     ops.push(NativeOp::LoadParamGiven(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushPortConnected(index) => {
+                    validate_index(
+                        model.clone(),
+                        "PushPortConnected terminal",
+                        *index,
+                        limits.terminal_count,
+                    )?;
                     ops.push(NativeOp::LoadPortConnected(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
@@ -80,33 +153,45 @@ impl NativeProgram {
                         pos: lower_voltage_node(
                             model.clone(),
                             *pos,
-                            terminal_count,
-                            internal_node_count,
+                            limits.terminal_count,
+                            limits.internal_node_count,
                         )?,
                         neg: lower_voltage_node(
                             model.clone(),
                             *neg,
-                            terminal_count,
-                            internal_node_count,
+                            limits.terminal_count,
+                            limits.internal_node_count,
                         )?,
                     });
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushInternalVoltage(index) => {
-                    if *index >= internal_node_count {
-                        return Err(JitError::unsupported_program_op(
-                            model,
-                            format!("PushInternalVoltage internal node {index}"),
-                        ));
-                    }
+                    validate_index(
+                        model.clone(),
+                        "PushInternalVoltage internal node",
+                        *index,
+                        limits.internal_node_count,
+                    )?;
                     ops.push(NativeOp::LoadInternalVoltage(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushVariable(index) => {
+                    validate_index(
+                        model.clone(),
+                        "PushVariable variable",
+                        *index,
+                        limits.variable_count,
+                    )?;
                     ops.push(NativeOp::LoadVariable(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushBranchCurrent(index) => {
+                    validate_index(
+                        model.clone(),
+                        "PushBranchCurrent branch unknown",
+                        *index,
+                        limits.branch_unknown_count,
+                    )?;
                     ops.push(NativeOp::LoadBranchUnknown(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
@@ -172,11 +257,20 @@ impl NativeProgram {
                     )?;
                     ops.push(NativeOp::Neg);
                 }
-                Instruction::PushCurrent(_, _) => {
-                    return Err(JitError::unsupported_program_op(
-                        model,
-                        instruction_name(instruction),
-                    ));
+                Instruction::PushCurrent(pos, neg) => {
+                    let pair_index =
+                        current_pair_index(model.clone(), *pos, *neg, limits.terminal_count)?;
+                    if !limits.available_current_pairs.contains(&pair_index) {
+                        return Err(JitError::unsupported_program_op(
+                            model,
+                            format!("PushCurrent terminal pair {pos},{neg} unavailable"),
+                        ));
+                    }
+                    if !current_pair_dependencies.contains(&pair_index) {
+                        current_pair_dependencies.push(pair_index);
+                    }
+                    ops.push(NativeOp::LoadCurrent(pair_index));
+                    push_stack(&mut depth, &mut max_stack_depth);
                 }
                 _ => {
                     return Err(JitError::unsupported_program_op(
@@ -198,6 +292,7 @@ impl NativeProgram {
         Ok(Self {
             ops,
             max_stack_depth,
+            current_pair_dependencies,
         })
     }
 
@@ -207,6 +302,10 @@ impl NativeProgram {
 
     pub(crate) fn max_stack_depth(&self) -> usize {
         self.max_stack_depth
+    }
+
+    pub(crate) fn current_pair_dependencies(&self) -> &[usize] {
+        &self.current_pair_dependencies
     }
 }
 
@@ -236,6 +335,17 @@ fn require_stack(
             model,
             entry_kind,
             format!("{op} requires stack depth {required}, found {depth}"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_index(model: SmolStr, op: &'static str, index: usize, len: usize) -> JitResult<()> {
+    if index >= len {
+        return Err(JitError::unsupported_program_op(
+            model,
+            format!("{op} {index}"),
         ));
     }
 
@@ -272,6 +382,27 @@ fn lower_voltage_node(
         model,
         format!("PushVoltage unified node {node}"),
     ))
+}
+
+fn current_pair_index(
+    model: SmolStr,
+    pos: usize,
+    neg: usize,
+    terminal_count: usize,
+) -> JitResult<usize> {
+    if pos >= terminal_count || neg >= terminal_count {
+        return Err(JitError::unsupported_program_op(
+            model,
+            format!("PushCurrent terminal pair {pos},{neg}"),
+        ));
+    }
+
+    pos.checked_mul(terminal_count)
+        .and_then(|base| base.checked_add(neg))
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model,
+            detail: format!("PushCurrent terminal pair {pos},{neg} index overflow").into(),
+        })
 }
 
 fn instruction_name(instruction: &Instruction) -> &'static str {
@@ -359,6 +490,10 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
 mod tests {
     use super::*;
 
+    fn limits(terminal_count: usize, internal_node_count: usize) -> NativeLoweringLimits<'static> {
+        NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
+    }
+
     #[test]
     fn lowers_supported_stack_program_to_native_expr_ops() {
         let program = BytecodeProgram {
@@ -371,8 +506,9 @@ mod tests {
             ],
         };
 
-        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, 2, 0)
-            .expect("lower supported program");
+        let lowered =
+            NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, limits(2, 0))
+                .expect("lower supported program");
 
         assert_eq!(
             lowered.ops(),
@@ -396,8 +532,9 @@ mod tests {
             instructions: vec![Instruction::PushVoltage(0, usize::MAX)],
         };
 
-        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, 1, 0)
-            .expect("lower terminal-to-ground voltage");
+        let lowered =
+            NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, limits(1, 0))
+                .expect("lower terminal-to-ground voltage");
 
         assert_eq!(
             lowered.ops(),
@@ -415,8 +552,9 @@ mod tests {
             instructions: vec![Instruction::PushVoltage(usize::MAX, 0)],
         };
 
-        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, 1, 0)
-            .expect("lower ground-to-terminal voltage");
+        let lowered =
+            NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, limits(1, 0))
+                .expect("lower ground-to-terminal voltage");
 
         assert_eq!(
             lowered.ops(),
@@ -434,8 +572,9 @@ mod tests {
             instructions: vec![Instruction::PushVoltage(1, 2)],
         };
 
-        let lowered = NativeProgram::from_bytecode("int", EntryKind::StampValue, &program, 2, 1)
-            .expect("lower terminal-to-internal voltage");
+        let lowered =
+            NativeProgram::from_bytecode("int", EntryKind::StampValue, &program, limits(2, 1))
+                .expect("lower terminal-to-internal voltage");
 
         assert_eq!(
             lowered.ops(),
@@ -452,8 +591,9 @@ mod tests {
             instructions: vec![Instruction::PushVoltage(3, usize::MAX)],
         };
 
-        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, 2, 1)
-            .expect_err("node outside terminals plus internals must fail closed");
+        let error =
+            NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, limits(2, 1))
+                .expect_err("node outside terminals plus internals must fail closed");
         let msg = error.to_string();
         assert!(msg.contains("PushVoltage unified node 3"), "got: {msg}");
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
@@ -465,8 +605,9 @@ mod tests {
             instructions: vec![Instruction::PushInternalVoltage(1)],
         };
 
-        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, 0, 1)
-            .expect_err("direct internal voltage outside known internals must fail closed");
+        let error =
+            NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, limits(0, 1))
+                .expect_err("direct internal voltage outside known internals must fail closed");
         let msg = error.to_string();
         assert!(
             msg.contains("PushInternalVoltage internal node 1"),
@@ -476,17 +617,120 @@ mod tests {
     }
 
     #[test]
-    fn lowering_rejects_current_probe_without_fallback() {
+    fn lowers_terminal_pair_current_probe_when_terminals_are_known() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(0, 1)],
+        };
+        let available = [1];
+
+        let lowered = NativeProgram::from_bytecode(
+            "probe",
+            EntryKind::StampValue,
+            &program,
+            limits(2, 0).with_available_current_pairs(&available),
+        )
+        .expect("terminal-pair current probes are native-loadable");
+
+        assert_eq!(lowered.ops(), &[NativeOp::LoadCurrent(1)]);
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.current_pair_dependencies(), &[1]);
+    }
+
+    #[test]
+    fn lowering_rejects_current_probe_before_pair_is_available() {
         let program = BytecodeProgram {
             instructions: vec![Instruction::PushCurrent(0, 1)],
         };
 
-        let error = NativeProgram::from_bytecode("probe", EntryKind::StampValue, &program, 0, 0)
-            .expect_err("current probe is outside this slice");
+        let error =
+            NativeProgram::from_bytecode("probe", EntryKind::StampValue, &program, limits(2, 0))
+                .expect_err("current probes must not read unavailable terminal-pair slots");
         let msg = error.to_string();
-        assert!(msg.contains("PushCurrent"));
+        assert!(
+            msg.contains("PushCurrent terminal pair 0,1 unavailable"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_current_probe_outside_terminal_pairs() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushCurrent(0, 2)],
+        };
+
+        let error =
+            NativeProgram::from_bytecode("probe", EntryKind::StampValue, &program, limits(2, 1))
+                .expect_err("current probes outside terminal pair matrix must fail closed");
+        let msg = error.to_string();
+        assert!(msg.contains("PushCurrent terminal pair 0,2"), "got: {msg}");
         assert!(msg.contains("native JIT"));
         assert!(msg.contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn lowering_rejects_param_given_outside_known_parameters() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushParamGiven(1)],
+        };
+        let limits = NativeLoweringLimits::new(0, 0, 1, 0, 0);
+
+        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, limits)
+            .expect_err("parameter-given index outside known parameters must fail closed");
+        let msg = error.to_string();
+        assert!(msg.contains("PushParamGiven parameter 1"), "got: {msg}");
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_port_connected_outside_known_terminals() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushPortConnected(2)],
+        };
+        let limits = NativeLoweringLimits::new(2, 0, 0, 0, 0);
+
+        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, limits)
+            .expect_err("port-connected index outside known terminals must fail closed");
+        let msg = error.to_string();
+        assert!(msg.contains("PushPortConnected terminal 2"), "got: {msg}");
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_direct_indexed_loads_outside_known_storage() {
+        let cases = [
+            (
+                "PushParam",
+                Instruction::PushParam(1),
+                NativeLoweringLimits::new(0, 0, 1, 0, 0),
+                "PushParam parameter 1",
+            ),
+            (
+                "PushVariable",
+                Instruction::PushVariable(1),
+                NativeLoweringLimits::new(0, 0, 0, 1, 0),
+                "PushVariable variable 1",
+            ),
+            (
+                "PushBranchCurrent",
+                Instruction::PushBranchCurrent(1),
+                NativeLoweringLimits::new(0, 0, 0, 0, 1),
+                "PushBranchCurrent branch unknown 1",
+            ),
+        ];
+
+        for (name, instruction, limits, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![instruction],
+            };
+
+            let error =
+                NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, limits)
+                    .unwrap_err();
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{name}: {msg}");
+            assert!(msg.contains("no interpreter fallback"), "{name}: {msg}");
+        }
     }
 
     #[test]
@@ -495,8 +739,9 @@ mod tests {
             instructions: vec![Instruction::Add],
         };
 
-        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, 0, 0)
-            .expect_err("binary op without operands must fail");
+        let error =
+            NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, limits(0, 0))
+                .expect_err("binary op without operands must fail");
         assert!(error.to_string().contains("stack"));
     }
 }
