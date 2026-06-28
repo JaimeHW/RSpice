@@ -33,6 +33,7 @@ use crate::native::{NativeModel, clear_native_runtime_error, take_native_runtime
 #[cfg(feature = "native")]
 #[derive(Clone, Copy)]
 enum NativeValueEntry {
+    ParameterDefault(usize),
     StaticCondition(usize),
     StampValue(usize),
     Jacobian { stamp: usize, entry: usize },
@@ -504,12 +505,7 @@ impl VerilogADevice {
             }
 
             #[cfg(feature = "native")]
-            {
-                return Err(Self::native_unsupported_coverage(
-                    &self.model,
-                    "DependentParameterDefaults",
-                ));
-            }
+            let value = self.run_native_parameter_default(i)?;
 
             #[cfg(not(feature = "native"))]
             let value = {
@@ -533,6 +529,18 @@ impl VerilogADevice {
                 };
                 self.context.set_param(i, clamped);
             }
+
+            #[cfg(feature = "native")]
+            {
+                let (min, max) = (self.model.parameters[i].min, self.model.parameters[i].max);
+                let clamped = match (min, max) {
+                    (Some(min), Some(max)) => value.clamp(min, max),
+                    (Some(min), None) => value.max(min),
+                    (None, Some(max)) => value.min(max),
+                    (None, None) => value,
+                };
+                self.context.set_param(i, clamped);
+            }
         }
 
         // Topology guards depend on final parameter values.
@@ -546,10 +554,23 @@ impl VerilogADevice {
     }
 
     #[cfg(feature = "native")]
-    fn native_unsupported_coverage(model: &CompiledModel, feature: &'static str) -> VmError {
-        VmError::NativeJit(
-            crate::native::JitError::unsupported_native_coverage(model.name.clone(), feature)
-                .to_string(),
+    fn run_native_parameter_default(&mut self, index: usize) -> Result<f64, VmError> {
+        if self.context.variables.len() < self.model.num_variables {
+            self.context.variables.resize(self.model.num_variables, 0.0);
+        }
+
+        let default_program = self.model.parameters[index]
+            .default_program
+            .clone()
+            .expect("default program checked above");
+        let native = std::sync::Arc::clone(&self.native_model);
+        let context = &mut self.context;
+        let mut vm = Vm::new(context);
+        Self::run_value_program(
+            &mut vm,
+            &default_program,
+            native.as_ref(),
+            NativeValueEntry::ParameterDefault(index),
         )
     }
 
@@ -689,6 +710,13 @@ impl VerilogADevice {
     fn missing_native_static_condition_entry(index: usize) -> VmError {
         VmError::NativeJit(format!(
             "native JIT missing static-condition entry for stamp {index}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_parameter_default_entry(index: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing parameter-default entry for parameter {index}; no interpreter fallback"
         ))
     }
 
@@ -1171,6 +1199,7 @@ impl VerilogADevice {
         entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
         let current_pairs = match entry {
+            NativeValueEntry::ParameterDefault(_) => &[],
             NativeValueEntry::StaticCondition(_) => &[],
             NativeValueEntry::StampValue(index) => native.stamp_value_current_pairs(index),
             NativeValueEntry::Jacobian { stamp, entry } => {
@@ -1186,6 +1215,9 @@ impl VerilogADevice {
         let vars_ptr = vm.context.variables.as_ptr();
         clear_native_runtime_error();
         let value = match entry {
+            NativeValueEntry::ParameterDefault(index) => native
+                .run_parameter_default(index, &ctx, vars_ptr)
+                .ok_or_else(|| Self::missing_native_parameter_default_entry(index))?,
             NativeValueEntry::StaticCondition(index) => native
                 .run_static_condition(index, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_static_condition_entry(index))?,
@@ -2068,7 +2100,7 @@ endmodule
     }
 
     #[test]
-    fn native_rejects_dependent_parameter_defaults_without_bytecode_execution() {
+    fn native_missing_parameter_default_entry_hard_fails_without_bytecode_execution() {
         let model = compile(
             r#"
 `include "disciplines.vams"
@@ -2092,9 +2124,9 @@ endmodule
         let mut device = native_test_device(model);
         let err = device
             .try_resolve_parameter_defaults()
-            .expect_err("native mode must reject dependent default bytecode");
+            .expect_err("native mode must not execute dependent default bytecode fallback");
 
-        assert_native_hard_fail(err, "DependentParameterDefaults");
+        assert_native_hard_fail(err, "missing parameter-default entry");
     }
 
     #[test]
