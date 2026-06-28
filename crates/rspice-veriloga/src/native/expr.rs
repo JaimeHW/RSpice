@@ -80,6 +80,12 @@ impl NativeProgram {
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushInternalVoltage(index) => {
+                    if *index >= internal_node_count {
+                        return Err(JitError::unsupported_program_op(
+                            model,
+                            format!("PushInternalVoltage internal node {index}"),
+                        ));
+                    }
                     ops.push(NativeOp::LoadInternalVoltage(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
@@ -425,6 +431,22 @@ mod tests {
             .expect_err("node outside terminals plus internals must fail closed");
         let msg = error.to_string();
         assert!(msg.contains("PushVoltage unified node 3"), "got: {msg}");
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_direct_internal_voltage_outside_known_nodes() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushInternalVoltage(1)],
+        };
+
+        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, 0, 1)
+            .expect_err("direct internal voltage outside known internals must fail closed");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("PushInternalVoltage internal node 1"),
+            "got: {msg}"
+        );
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
     }
 
