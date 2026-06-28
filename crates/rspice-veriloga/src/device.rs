@@ -1093,6 +1093,12 @@ impl VerilogADevice {
             } else {
                 context.state_values.as_mut_ptr()
             },
+            state_initialized: if context.state_initialized.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_initialized.as_mut_ptr() as *mut u8
+            },
+            state_initialized_len: context.state_initialized.len(),
             lookup_tables: if context.lookup_tables.is_empty() {
                 std::ptr::null()
             } else {

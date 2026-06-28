@@ -51,6 +51,7 @@ pub(crate) enum NativeOp {
     IntegerBinary(IntegerBinaryOp),
     TableLookup(usize),
     TableDerivative(usize),
+    LimitState(usize),
     DdtState(usize),
     DdtJacobian,
     IdtState(usize),
@@ -398,6 +399,17 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::TableDerivative(*table_id));
+                }
+                Instruction::LimitState(index) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::LimitState(*index));
                 }
                 Instruction::Neg => {
                     require_stack(
@@ -1263,6 +1275,52 @@ mod tests {
             assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
             assert_eq!(lowered.max_stack_depth(), 1);
         }
+    }
+
+    #[test]
+    fn lowers_limit_state_as_native_stateful_op() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(0.5),
+                Instruction::LimitState(2),
+            ],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("limit", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("limit state has native x64 lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(0.5),
+                NativeOp::LimitState(2),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowering_rejects_limit_state_without_value_and_step() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushTemperature, Instruction::LimitState(0)],
+        };
+
+        let error = NativeProgram::from_bytecode(
+            "bad-limit",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect_err("limit state requires value and step operands");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("LimitState requires stack depth 2"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
     }
 
     #[test]

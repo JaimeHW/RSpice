@@ -51,6 +51,7 @@ pub(crate) enum ConditionCode {
     Above,
     AboveOrEqual,
     Below,
+    BelowOrEqual,
     Equal,
     NotParity,
     Parity,
@@ -75,6 +76,7 @@ impl ConditionCode {
             Self::Above => 0x97,
             Self::AboveOrEqual => 0x93,
             Self::Below => 0x92,
+            Self::BelowOrEqual => 0x96,
             Self::Equal => 0x94,
             Self::NotParity => 0x9B,
             Self::Parity => 0x9A,
@@ -86,6 +88,7 @@ impl ConditionCode {
             Self::Above => 0x87,
             Self::AboveOrEqual => 0x83,
             Self::Below => 0x82,
+            Self::BelowOrEqual => 0x86,
             Self::Equal => 0x84,
             Self::NotParity => 0x8B,
             Self::Parity => 0x8A,
@@ -206,11 +209,25 @@ impl X64Encoder {
         self.emit_u8(value);
     }
 
+    pub(crate) fn cmp_r64_imm32(&mut self, reg: Gpr, value: i32) {
+        self.emit_rex(true, 0, 0, reg.code());
+        self.emit_u8(0x81);
+        self.emit_modrm(0b11, 0b111, reg.code());
+        self.emit_i32(value);
+    }
+
     pub(crate) fn movsd_m64_base_disp32_xmm(&mut self, base: Gpr, disp: i32, src: Xmm) {
         self.emit_u8(0xF2);
         self.emit_rex(false, src.code(), 0, base.code());
         self.emit_all(&[0x0F, 0x11]);
         self.emit_base_disp32_modrm(src.code(), base.code(), disp);
+    }
+
+    pub(crate) fn mov_m8_base_disp32_imm8(&mut self, base: Gpr, disp: i32, value: u8) {
+        self.emit_rex_for_byte_operands(false, 0, 0, base.code(), false, true);
+        self.emit_u8(0xC6);
+        self.emit_base_disp32_modrm(0, base.code(), disp);
+        self.emit_u8(value);
     }
 
     pub(crate) fn movsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
@@ -249,6 +266,13 @@ impl X64Encoder {
         self.emit_rex(true, 0, 0, reg.code());
         self.emit_all(&[0x0F, 0xBA]);
         self.emit_modrm(0b11, 0b110, reg.code());
+        self.emit_u8(bit);
+    }
+
+    pub(crate) fn btc_r64_imm8(&mut self, reg: Gpr, bit: u8) {
+        self.emit_rex(true, 0, 0, reg.code());
+        self.emit_all(&[0x0F, 0xBA]);
+        self.emit_modrm(0b11, 0b111, reg.code());
         self.emit_u8(bit);
     }
 
@@ -322,6 +346,10 @@ impl X64Encoder {
         self.emit_sse_reg_rip_disp32(0xF2, 0x58, dst, disp)
     }
 
+    pub(crate) fn addsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0xF2, 0x58, dst, base, disp);
+    }
+
     pub fn addsd_xmm0_xmm1(&mut self) {
         self.addsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }
@@ -332,6 +360,10 @@ impl X64Encoder {
 
     pub(crate) fn subsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
         self.emit_sse_reg_rip_disp32(0xF2, 0x5C, dst, disp)
+    }
+
+    pub(crate) fn subsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0xF2, 0x5C, dst, base, disp);
     }
 
     pub fn subsd_xmm0_xmm1(&mut self) {
@@ -366,6 +398,10 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0xF2, 0x5D, dst, src);
     }
 
+    pub(crate) fn minsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_sse_reg_base_disp32(0xF2, 0x5D, dst, base, disp);
+    }
+
     pub(crate) fn maxsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x5F, dst, src);
     }
@@ -389,6 +425,13 @@ impl X64Encoder {
         let offset = self.position();
         self.emit_i32(disp);
         offset
+    }
+
+    fn emit_sse_reg_base_disp32(&mut self, prefix: u8, opcode: u8, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_u8(prefix);
+        self.emit_rex(false, dst.code(), 0, base.code());
+        self.emit_all(&[0x0F, opcode]);
+        self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
     }
 
     fn emit_base_disp32_modrm(&mut self, reg: u8, base: u8, disp: i32) {
@@ -762,6 +805,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn encodes_limit_state_sequence_primitives() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.mov_m8_base_disp32_imm8(Gpr::R10, 16, 1);
+        encoder.btc_r64_imm8(Gpr::R11, 63);
+        encoder.cmp_r64_imm32(Gpr::R11, 1);
+        let branch = encoder.jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+        encoder.patch_i32(branch, 0);
+        encoder.subsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 24);
+        encoder.minsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rsp, 0);
+        encoder.addsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 24);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x41, 0xC6, 0x82, 16, 0, 0, 0, 1, 0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x81, 0xFB, 1,
+                0, 0, 0, 0x0F, 0x86, 0, 0, 0, 0, 0xF2, 0x0F, 0x5C, 0x88, 24, 0, 0, 0, 0xF2, 0x0F,
+                0x5D, 0x8C, 0x24, 0, 0, 0, 0, 0xF2, 0x0F, 0x58, 0x88, 24, 0, 0, 0,
+            ]
+        );
+    }
+
     #[cfg(all(feature = "native", target_arch = "x86_64"))]
     #[test]
     fn encoded_leaf_loads_and_combines_context_values() {
@@ -786,6 +852,8 @@ mod tests {
             timestep: 0.0,
             state_prev: std::ptr::null(),
             state_values: std::ptr::null_mut(),
+            state_initialized: std::ptr::null_mut(),
+            state_initialized_len: 0,
             lookup_tables: std::ptr::null(),
             lookup_tables_len: 0,
             laplace_filters: std::ptr::null_mut(),
@@ -808,7 +876,7 @@ mod tests {
         encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 0);
         encoder.mulsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
         encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm1, vars_reg, 8);
-        encoder.mov_r64_m64_base_disp32(Gpr::Rax, ctx_reg, 160);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, ctx_reg, 176);
         encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm2, Gpr::Rax, 0);
         encoder.divsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm2);
         encoder.addsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);

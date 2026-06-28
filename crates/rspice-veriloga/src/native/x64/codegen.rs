@@ -21,12 +21,14 @@ const TIME_OFFSET: i32 = 88;
 const TIMESTEP_OFFSET: i32 = 96;
 const STATE_PREV_OFFSET: i32 = 104;
 const STATE_VALUES_OFFSET: i32 = 112;
-const LOOKUP_TABLES_OFFSET: i32 = 120;
-const LOOKUP_TABLES_LEN_OFFSET: i32 = 128;
-const PARAM_GIVEN_OFFSET: i32 = 152;
-const BRANCH_UNKNOWNS_OFFSET: i32 = 160;
-const ANALYSIS_TYPE_OFFSET: i32 = 168;
-const MFACTOR_OFFSET: i32 = 176;
+const STATE_INITIALIZED_OFFSET: i32 = 120;
+const STATE_INITIALIZED_LEN_OFFSET: i32 = 128;
+const LOOKUP_TABLES_OFFSET: i32 = 136;
+const LOOKUP_TABLES_LEN_OFFSET: i32 = 144;
+const PARAM_GIVEN_OFFSET: i32 = 168;
+const BRANCH_UNKNOWNS_OFFSET: i32 = 176;
+const ANALYSIS_TYPE_OFFSET: i32 = 184;
+const MFACTOR_OFFSET: i32 = 192;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
@@ -199,6 +201,7 @@ impl FunctionCompiler {
                 NativeOp::TableDerivative(table_id) => {
                     self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
                 }
+                NativeOp::LimitState(index) => self.emit_limit_state(index)?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
                 NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
                 NativeOp::IdtState(index) => self.emit_idt_state(index)?,
@@ -505,6 +508,81 @@ impl FunctionCompiler {
         self.encoder
             .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        Ok(())
+    }
+
+    fn emit_limit_state(&mut self, state_index: usize) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("limit state requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let value = XMM_STACK[self.depth - 2];
+        let step = XMM_STACK[self.depth - 1];
+        let state_disp = byte_disp(state_index)?;
+        let initialized_disp = byte_disp_u8(state_index)?;
+        let state_index_i32 = i32::try_from(state_index).map_err(|_| JitError::Encoding {
+            model: MODEL.into(),
+            detail: format!("state index {state_index} exceeds x64 imm32 range").into(),
+        })?;
+
+        self.emit_context_pointer_load(STATE_VALUES_OFFSET);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let no_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
+        self.encoder.mov_r64_m64_base_disp32(
+            Gpr::R10,
+            self.ctx_arg_reg(),
+            STATE_INITIALIZED_OFFSET,
+        );
+        self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
+        let no_initialized_flags = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
+        self.encoder.mov_r64_m64_base_disp32(
+            Gpr::R11,
+            self.ctx_arg_reg(),
+            STATE_INITIALIZED_LEN_OFFSET,
+        );
+        self.encoder.cmp_r64_imm32(Gpr::R11, state_index_i32);
+        let initialized_flags_out_of_range = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+
+        self.encoder
+            .movzx_r32_m8_base_disp32(Gpr::R11, Gpr::R10, initialized_disp);
+        self.encoder.test_r8_r8(Gpr::R11, Gpr::R11);
+        let first_evaluation = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
+        self.encoder.sub_rsp_imm32(WORD_BYTES as i32);
+        self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, step);
+        self.encoder
+            .subsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
+        self.encoder.ucomisd_xmm_xmm(value, value);
+        let unordered_delta = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
+        self.encoder.movq_r64_xmm(Gpr::R11, step);
+        self.encoder.btc_r64_imm8(Gpr::R11, 63);
+        self.encoder.movq_xmm_r64(step, Gpr::R11);
+        self.encoder.maxsd_xmm_xmm(value, step);
+        self.encoder.minsd_xmm_m64_base_disp32(value, Gpr::Rsp, 0);
+        self.encoder
+            .addsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
+        self.patch_rel32_to_current(unordered_delta)?;
+        self.encoder.add_rsp_imm32(WORD_BYTES as i32);
+
+        self.patch_rel32_to_current(first_evaluation)?;
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, value);
+        self.encoder
+            .mov_m8_base_disp32_imm8(Gpr::R10, initialized_disp, 1);
+        let done_after_initialized_store = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(no_initialized_flags)?;
+        self.patch_rel32_to_current(initialized_flags_out_of_range)?;
+        self.patch_rel32_to_current(no_state)?;
+        self.patch_rel32_to_current(done_after_initialized_store)?;
+        self.depth -= 1;
         Ok(())
     }
 
@@ -1736,6 +1814,84 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_computes_limit_state_and_records_iteration_value() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::LimitState(1),
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile limit state leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate limit state leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_initialized = [0_u8, 0_u8];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
+
+        let vars = [10.0_f64];
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 10.0_f64.to_bits());
+        assert_eq!(state_initialized[1], 1);
+
+        let vars = [11.0_f64];
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 10.5_f64.to_bits());
+        assert_eq!(state_initialized[1], 1);
+
+        let vars = [0.0_f64];
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 10.0_f64.to_bits());
+
+        state_values[1] = 0.0;
+        state_initialized[1] = 1;
+        assert_eq!(state_initialized[1], 1);
+        let vars = [10.0_f64];
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            0.5_f64.to_bits(),
+            "initialized zero state must clamp instead of behaving like first evaluation"
+        );
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+
+        ctx.state_initialized_len = 1;
+        state_values[1] = 10.0;
+        state_initialized[1] = 1;
+        assert_eq!(state_initialized[1], 1);
+        let vars = [20.0_f64];
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            20.0_f64.to_bits(),
+            "native limit must not index past state_initialized_len"
+        );
+        assert_eq!(
+            state_values[1].to_bits(),
+            10.0_f64.to_bits(),
+            "out-of-range state flag metadata must leave native state untouched"
+        );
+
+        ctx.state_initialized_len = state_initialized.len();
+        state_values[1] = 1.0;
+        state_initialized[1] = 1;
+        assert_eq!(state_initialized[1], 1);
+        let vars = [f64::NAN];
+        let result = f(&ctx, vars.as_ptr());
+        assert!(result.is_nan(), "initialized limit must propagate NaN");
+        assert!(
+            state_values[1].is_nan(),
+            "native state should record propagated NaN"
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_computes_sqrt_in_place() {
         let program = native_program(
             EntryKind::StampValue,
@@ -2589,6 +2745,8 @@ mod tests {
             timestep: 0.0,
             state_prev: std::ptr::null(),
             state_values: std::ptr::null_mut(),
+            state_initialized: std::ptr::null_mut(),
+            state_initialized_len: 0,
             lookup_tables: std::ptr::null(),
             lookup_tables_len: 0,
             laplace_filters: std::ptr::null_mut(),
