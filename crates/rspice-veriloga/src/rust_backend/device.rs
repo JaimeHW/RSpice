@@ -474,6 +474,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_mul_pow_helper_calls(source);
     source = compact_mul_add_sub_helper_calls(source);
     source = compact_mul_square_exp_scaled_input_helper_calls(source);
+    source = compact_mul_scale_offset_helper_calls(source);
     source = compact_sqrt_mul_sub_operand_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
@@ -2192,6 +2193,84 @@ fn compact_mul_square_exp_scaled_input_helper_line(
         "scratch.store_mul_square_exp_scaled_input({target_index}, {square_source}, {exp_source}, {});",
         exp_args[1]
     ))
+}
+
+fn compact_mul_scale_offset_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_scale_offset_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_scale_offset_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = compact_mul_scale_offset_helper_line(target_index, left, right)
+        .or_else(|| compact_mul_scale_offset_helper_line(target_index, right, left))?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_scale_offset_helper_line(
+    target_index: usize,
+    scale_offset: &str,
+    factor: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(scale_offset, "scale_offset")?;
+    if args.len() != 3 {
+        return None;
+    }
+    compact_index_or_mixed_mul_scale_offset_helper_line(
+        target_index,
+        factor,
+        args[0],
+        args[1],
+        args[2],
+    )
 }
 
 fn compact_sqrt_mul_sub_operand_helper_calls(source: String) -> String {
@@ -5372,6 +5451,39 @@ fn stamp() {
         );
         assert!(
             compact.contains("s.store_mul_square_exp_scaled_input(211, 5, 4, -1.0);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_scale_offset_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_mul_scale_offset_components",
+            "fn store_mul_scale_offset_mixed_ai",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(220, AdValue::exp(scratch.ad_value(2)), AdValue::scale_offset(scratch.ad_value(3), params.scale, params.offset));
+    scratch.store_mul_ad(221, AdValue::scale_offset(scratch.ad_value(4), 2.0, 1.0), AdValue::sqrt(scratch.ad_value(5)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_scale_offset_mixed_ai(220, A::exp(s.ad_value(2)), 3, p.scale, p.offset);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_scale_offset_mixed_ai(221, A::sqrt(s.ad_value(5)), 4, 2.0, 1.0);"
+            ),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
@@ -15604,6 +15716,19 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_mul_scale_offset_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_raw: f64, value_node_derivatives: [f64; Instance::NODE_COUNT], value_branch_derivatives: [f64; Instance::BRANCH_COUNT], input_scale: f64, offset: f64) {",
+    "        let affine_value = value_raw * input_scale + offset;",
+    "        self.values[index] = factor_value * affine_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor_node_derivatives[axis] * affine_value + factor_value * value_node_derivatives[axis] * input_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * affine_value + factor_value * value_branch_derivatives[axis] * input_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_scale_offset(&mut self, index: usize, factor: AdValue, value: AdValue, input_scale: f64, offset: f64) {",
+    "        self.store_mul_scale_offset_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, value.value, value.node_derivatives, value.branch_derivatives, input_scale, offset);",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_mul_scale_offset_rhs(&mut self, index: usize, left: usize, right: usize, input_scale: f64, offset: f64) {",
     "        let left_value = self.values[left];",
     "        let right_value = self.values[right] * input_scale + offset;",
@@ -17613,6 +17738,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         ));
     }
     for mask in index_or_mixed_masks(2) {
+        out.push_str(&generate_index_or_mixed_mul_scale_offset_helper(&mask));
+    }
+    for mask in index_or_mixed_masks(2) {
         out.push_str(
             &generate_index_or_mixed_div_scaled_product_add_scaled_denominator_helper(&mask),
         );
@@ -18588,6 +18716,25 @@ fn generate_index_or_mixed_mul_add_sub_helper(mask: &str, base: &str) -> String 
         factor_ty = mixed_helper_type(mask, 0),
         left_ty = mixed_helper_type(mask, 1),
         right_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_index_or_mixed_mul_scale_offset_helper(mask: &str) -> String {
+    let operands = ["factor", "value"];
+    let helper = index_or_mixed_helper_name("store_mul_scale_offset", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let factor = mixed_helper_component_args(mask, 0, "factor");
+    let value = mixed_helper_component_args(mask, 1, "value");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, factor: {factor_ty}, value: {value_ty}, input_scale: f64, offset: f64) {{
+{locals}        self.store_mul_scale_offset_components(index, {factor}, {value}, input_scale, offset);
+    }}
+"#,
+        factor_ty = mixed_helper_type(mask, 0),
+        value_ty = mixed_helper_type(mask, 1),
     )
 }
 
@@ -27716,6 +27863,23 @@ fn compact_index_or_mixed_mul_add_sub_helper_line(
     let mut call_args = Vec::with_capacity(4);
     call_args.push(target_index.to_string());
     call_args.extend(value_args);
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_mul_scale_offset_helper_line(
+    target_index: usize,
+    factor: &str,
+    value: &str,
+    input_scale: &str,
+    offset: &str,
+) -> Option<String> {
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_mul_scale_offset", &[factor, value])?;
+    let mut call_args = Vec::with_capacity(5);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    call_args.push(input_scale.to_string());
+    call_args.push(offset.to_string());
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
