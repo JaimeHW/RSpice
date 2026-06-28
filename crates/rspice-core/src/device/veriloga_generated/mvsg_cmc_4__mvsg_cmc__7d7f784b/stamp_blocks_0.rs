@@ -104,7 +104,7 @@ impl Instance {
             s.store_scalar(223, 0.1);
         }
 
-        s.store_powi_ad(112, A::scale(s.ad_value(111), 1.0 / (s.v[109])), 3);
+        s.store_powi_scaled_input(112, 111, 1.0 / (s.v[109]), 3);
 
         s.store_scale_ad(7, {
             if ((1.0 + (p.p21 * (s.v[111] - s.v[109]))) < 0.01) {
