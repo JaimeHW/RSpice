@@ -1997,6 +1997,7 @@ mod compact_generated_stamp_surface_tests {
     use super::{
         compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
         compact_generated_stamp_surface, compact_limited_exp_div_scaled_inputs_expression,
+        compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
         duplicate_hoistable_derivative_rhs, generate_scratch_operation_helpers,
         is_hoistable_generated_derivative_rhs, render_runtime_support_module,
@@ -5226,6 +5227,25 @@ fn stamp() {
         assert_eq!(
             compact,
             "AdValue::mul_sub_from_scalar_rhs_div_scaled_inputs_lhs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale, params.scalar, scratch.ad_value(4))"
+        );
+    }
+
+    #[test]
+    fn rewrites_ln_offset_div_scaled_inputs_as_fused_expression() {
+        let support = render_runtime_support_module();
+        assert!(
+            support.contains("fn ln_offset_div_scaled_inputs("),
+            "missing fused log offset divided-input helper"
+        );
+
+        let compact = compact_ln_offset_div_scaled_inputs_expression(
+            "AdValue::offset(AdValue::div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale), params.offset)",
+        )
+        .expect("offset divided input should compact");
+
+        assert_eq!(
+            compact,
+            "AdValue::ln_offset_div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale, params.offset)"
         );
     }
 
@@ -18648,6 +18668,22 @@ fn generate_ad_value_struct() -> String {
         "    #[inline]",
         "    fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }",
         "    #[inline]",
+        "    fn ln_offset_div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64, offset: f64) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let raw = quotient + offset;",
+        "        let output_derivative_scale = 1.0 / raw;",
+        "        let left_derivative_scale = left_scale * reciprocal * output_derivative_scale;",
+        "        let right_derivative_scale = -quotient * reciprocal * right_scale * output_derivative_scale;",
+        "        value.value = raw.ln();",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * left_derivative_scale + right.branch_derivatives[index] * right_derivative_scale; }",
+        "        value",
+        "    }",
+        "    #[inline]",
         "    fn ln_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; Self::unary_intrinsic(arg, raw.ln(), scale / raw) }",
         "    #[inline]",
         "    fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) { if raw > 0.0 { (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp())) } else { let exp = raw.exp(); (exp.ln_1p(), exp / (1.0 + exp)) } }",
@@ -30684,6 +30720,22 @@ fn compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression(
     ))
 }
 
+fn compact_ln_offset_div_scaled_inputs_expression(value: &str) -> Option<String> {
+    let offset_args = compact_ad_call_args(value, "offset")?;
+    if offset_args.len() != 2 {
+        return None;
+    }
+
+    let div_args = compact_ad_call_args(offset_args[0], "div_scaled_inputs")?;
+    if div_args.len() != 4 {
+        return None;
+    }
+    Some(format!(
+        "AdValue::ln_offset_div_scaled_inputs({}, {}, {}, {}, {})",
+        div_args[0], div_args[1], div_args[2], div_args[3], offset_args[1]
+    ))
+}
+
 struct CompactAffineTerm<'a> {
     value: &'a str,
     scale: String,
@@ -34616,7 +34668,11 @@ impl CompactAdEmitter<'_> {
                 compact_limited_exp_div_scaled_inputs_expression(&value)
                     .unwrap_or_else(|| format!("AdValue::limited_exp({value})"))
             }
-            "ln" | "log" => format!("AdValue::ln({})", lower_arg(0)?),
+            "ln" | "log" => {
+                let value = lower_arg(0)?;
+                compact_ln_offset_div_scaled_inputs_expression(&value)
+                    .unwrap_or_else(|| format!("AdValue::ln({value})"))
+            }
             "log10" => format!("AdValue::log10({})", lower_arg(0)?),
             "sin" => format!("AdValue::sin({})", lower_arg(0)?),
             "cos" => format!("AdValue::cos({})", lower_arg(0)?),
