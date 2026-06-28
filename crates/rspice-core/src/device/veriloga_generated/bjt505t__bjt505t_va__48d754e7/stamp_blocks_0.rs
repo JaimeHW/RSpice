@@ -1908,7 +1908,7 @@ impl Instance {
         if s.b[606] {
             s.store_offset_mul(192, 193, 194, 3.0);
             s.store_scaled_mul(195, 23, 192, (1.0 - p.p68));
-            s.store_mul_ad(198, A::div_scaled_product3(s.ad_value(149), s.ad_value(272), s.ad_value(8), 1.0, s.ad_value(48), 1.0), A::div_from_scalar(0.5, A::sqrt(A::offset(s.ad_value(150), 1.0))));
+            s.store_mul_div_scaled_product3_div_from_scalar_sqrt_offset(198, 149, 272, 8, 1.0, 48, 1.0, 0.5, 150, 1.0);
             s.store_mul3_affine_lhs(196, 225, 187, 0.5, 0.0, 198);
             s.store_div_scaled_inputs_indices(197, 242, 1.0, 6, p.p85);
             s.store_mul_add_scaled_inputs3_offset_rhs(228, 254, s.ad_value(195), 0.2, s.ad_value(196), 0.2, s.ad_value(197), 0.2, 0.0);
@@ -3535,7 +3535,7 @@ impl Instance {
         if s.b[606] {
             s.store_offset_mul(192, 193, 194, 3.0);
             s.store_scaled_mul(195, 23, 192, (1.0 - p.p68));
-            s.store_mul_ad(198, A::div_scaled_product3(s.ad_value(149), s.ad_value(272), s.ad_value(8), 1.0, s.ad_value(48), 1.0), A::div_from_scalar(0.5, A::sqrt(A::offset(s.ad_value(150), 1.0))));
+            s.store_mul_div_scaled_product3_div_from_scalar_sqrt_offset(198, 149, 272, 8, 1.0, 48, 1.0, 0.5, 150, 1.0);
             s.store_mul3_affine_lhs(196, 225, 187, 0.5, 0.0, 198);
             s.store_div_scaled_inputs_indices(197, 242, 1.0, 6, p.p85);
             s.store_mul_add_scaled_inputs3_offset_rhs(228, 254, s.ad_value(195), 0.2, s.ad_value(196), 0.2, s.ad_value(197), 0.2, 0.0);
