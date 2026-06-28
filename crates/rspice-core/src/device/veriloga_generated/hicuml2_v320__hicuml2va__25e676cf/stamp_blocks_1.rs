@@ -648,6 +648,27 @@ impl Instance {
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
         let nv7 = ctx.node_voltage(nodes[7]);
+        let __rspice_deriv_cse_0: f64 = (p.p148 * s.dn[195][0]);
+        let __rspice_deriv_cse_1: f64 = (p.p148 * s.dn[195][1]);
+        let __rspice_deriv_cse_2: f64 = (p.p148 * s.dn[195][2]);
+        let __rspice_deriv_cse_3: f64 = (p.p148 * s.dn[195][3]);
+        let __rspice_deriv_cse_4: f64 = (p.p148 * s.dn[195][4]);
+        let __rspice_deriv_cse_5: f64 = (p.p148 * s.dn[195][5]);
+        let __rspice_deriv_cse_6: f64 = (p.p148 * s.dn[195][6]);
+        let __rspice_deriv_cse_7: f64 = (p.p148 * s.dn[195][7]);
+        let __rspice_deriv_cse_8: f64 = (p.p148 * s.dn[195][8]);
+        let __rspice_deriv_cse_9: f64 = (p.p148 * s.dn[195][9]);
+        let __rspice_deriv_cse_10: f64 = (p.p148 * s.dn[195][10]);
+        let __rspice_deriv_cse_11: f64 = (p.p148 * s.dn[195][11]);
+        let __rspice_deriv_cse_12: f64 = (p.p148 * s.dn[195][12]);
+        let __rspice_deriv_cse_13: f64 = (p.p148 * s.dn[195][13]);
+        let __rspice_deriv_cse_14: f64 = (p.p148 * s.dn[195][14]);
+        let __rspice_deriv_cse_15: f64 = (p.p148 * s.db[195][0]);
+        let __rspice_deriv_cse_16: f64 = (p.p148 * s.db[195][1]);
+        let __rspice_deriv_cse_17: f64 = (p.p148 * s.db[195][2]);
+        let __rspice_deriv_cse_18: f64 = (p.p148 * s.db[195][3]);
+        let __rspice_deriv_cse_19: f64 = (p.p148 * s.db[195][4]);
+        let __rspice_deriv_cse_20: f64 = (p.p148 * s.db[195][5]);
         let eq11_e228: f64 = (-p.p148);
         let eq11_e230: f64 = (eq11_e228 * s.v[193]);
         let eq11_e230_d_n0: f64 = (eq11_e228 * s.dn[193][0]);
@@ -1050,28 +1071,7 @@ impl Instance {
         let (eq29_e316, eq29_e316_d_n0, eq29_e316_d_n1, eq29_e316_d_n2, eq29_e316_d_n3, eq29_e316_d_n4, eq29_e316_d_n5, eq29_e316_d_n6, eq29_e316_d_n7, eq29_e316_d_n8, eq29_e316_d_n9, eq29_e316_d_n10, eq29_e316_d_n11, eq29_e316_d_n12, eq29_e316_d_n13, eq29_e316_d_n14, eq29_e316_d_b0, eq29_e316_d_b1, eq29_e316_d_b2, eq29_e316_d_b3, eq29_e316_d_b4, eq29_e316_d_b5,) = {
     if (s.b[514] && s.b[515]) {
         let eq29_e314: f64 = (p.p148 * s.v[195]);
-        let eq29_e314_d_n0: f64 = (p.p148 * s.dn[195][0]);
-        let eq29_e314_d_n1: f64 = (p.p148 * s.dn[195][1]);
-        let eq29_e314_d_n2: f64 = (p.p148 * s.dn[195][2]);
-        let eq29_e314_d_n3: f64 = (p.p148 * s.dn[195][3]);
-        let eq29_e314_d_n4: f64 = (p.p148 * s.dn[195][4]);
-        let eq29_e314_d_n5: f64 = (p.p148 * s.dn[195][5]);
-        let eq29_e314_d_n6: f64 = (p.p148 * s.dn[195][6]);
-        let eq29_e314_d_n7: f64 = (p.p148 * s.dn[195][7]);
-        let eq29_e314_d_n8: f64 = (p.p148 * s.dn[195][8]);
-        let eq29_e314_d_n9: f64 = (p.p148 * s.dn[195][9]);
-        let eq29_e314_d_n10: f64 = (p.p148 * s.dn[195][10]);
-        let eq29_e314_d_n11: f64 = (p.p148 * s.dn[195][11]);
-        let eq29_e314_d_n12: f64 = (p.p148 * s.dn[195][12]);
-        let eq29_e314_d_n13: f64 = (p.p148 * s.dn[195][13]);
-        let eq29_e314_d_n14: f64 = (p.p148 * s.dn[195][14]);
-        let eq29_e314_d_b0: f64 = (p.p148 * s.db[195][0]);
-        let eq29_e314_d_b1: f64 = (p.p148 * s.db[195][1]);
-        let eq29_e314_d_b2: f64 = (p.p148 * s.db[195][2]);
-        let eq29_e314_d_b3: f64 = (p.p148 * s.db[195][3]);
-        let eq29_e314_d_b4: f64 = (p.p148 * s.db[195][4]);
-        let eq29_e314_d_b5: f64 = (p.p148 * s.db[195][5]);
-        (eq29_e314, eq29_e314_d_n0, eq29_e314_d_n1, eq29_e314_d_n2, eq29_e314_d_n3, eq29_e314_d_n4, eq29_e314_d_n5, eq29_e314_d_n6, eq29_e314_d_n7, eq29_e314_d_n8, eq29_e314_d_n9, eq29_e314_d_n10, eq29_e314_d_n11, eq29_e314_d_n12, eq29_e314_d_n13, eq29_e314_d_n14, eq29_e314_d_b0, eq29_e314_d_b1, eq29_e314_d_b2, eq29_e314_d_b3, eq29_e314_d_b4, eq29_e314_d_b5,)
+        (eq29_e314, __rspice_deriv_cse_0, __rspice_deriv_cse_1, __rspice_deriv_cse_2, __rspice_deriv_cse_3, __rspice_deriv_cse_4, __rspice_deriv_cse_5, __rspice_deriv_cse_6, __rspice_deriv_cse_7, __rspice_deriv_cse_8, __rspice_deriv_cse_9, __rspice_deriv_cse_10, __rspice_deriv_cse_11, __rspice_deriv_cse_12, __rspice_deriv_cse_13, __rspice_deriv_cse_14, __rspice_deriv_cse_15, __rspice_deriv_cse_16, __rspice_deriv_cse_17, __rspice_deriv_cse_18, __rspice_deriv_cse_19, __rspice_deriv_cse_20,)
     } else {
         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
@@ -1090,28 +1090,7 @@ impl Instance {
         let (eq31_e331, eq31_e331_d_n0, eq31_e331_d_n1, eq31_e331_d_n2, eq31_e331_d_n3, eq31_e331_d_n4, eq31_e331_d_n5, eq31_e331_d_n6, eq31_e331_d_n7, eq31_e331_d_n8, eq31_e331_d_n9, eq31_e331_d_n10, eq31_e331_d_n11, eq31_e331_d_n12, eq31_e331_d_n13, eq31_e331_d_n14, eq31_e331_d_b0, eq31_e331_d_b1, eq31_e331_d_b2, eq31_e331_d_b3, eq31_e331_d_b4, eq31_e331_d_b5,) = {
     if (!s.b[514]) {
         let eq31_e329: f64 = (p.p148 * s.v[195]);
-        let eq31_e329_d_n0: f64 = (p.p148 * s.dn[195][0]);
-        let eq31_e329_d_n1: f64 = (p.p148 * s.dn[195][1]);
-        let eq31_e329_d_n2: f64 = (p.p148 * s.dn[195][2]);
-        let eq31_e329_d_n3: f64 = (p.p148 * s.dn[195][3]);
-        let eq31_e329_d_n4: f64 = (p.p148 * s.dn[195][4]);
-        let eq31_e329_d_n5: f64 = (p.p148 * s.dn[195][5]);
-        let eq31_e329_d_n6: f64 = (p.p148 * s.dn[195][6]);
-        let eq31_e329_d_n7: f64 = (p.p148 * s.dn[195][7]);
-        let eq31_e329_d_n8: f64 = (p.p148 * s.dn[195][8]);
-        let eq31_e329_d_n9: f64 = (p.p148 * s.dn[195][9]);
-        let eq31_e329_d_n10: f64 = (p.p148 * s.dn[195][10]);
-        let eq31_e329_d_n11: f64 = (p.p148 * s.dn[195][11]);
-        let eq31_e329_d_n12: f64 = (p.p148 * s.dn[195][12]);
-        let eq31_e329_d_n13: f64 = (p.p148 * s.dn[195][13]);
-        let eq31_e329_d_n14: f64 = (p.p148 * s.dn[195][14]);
-        let eq31_e329_d_b0: f64 = (p.p148 * s.db[195][0]);
-        let eq31_e329_d_b1: f64 = (p.p148 * s.db[195][1]);
-        let eq31_e329_d_b2: f64 = (p.p148 * s.db[195][2]);
-        let eq31_e329_d_b3: f64 = (p.p148 * s.db[195][3]);
-        let eq31_e329_d_b4: f64 = (p.p148 * s.db[195][4]);
-        let eq31_e329_d_b5: f64 = (p.p148 * s.db[195][5]);
-        (eq31_e329, eq31_e329_d_n0, eq31_e329_d_n1, eq31_e329_d_n2, eq31_e329_d_n3, eq31_e329_d_n4, eq31_e329_d_n5, eq31_e329_d_n6, eq31_e329_d_n7, eq31_e329_d_n8, eq31_e329_d_n9, eq31_e329_d_n10, eq31_e329_d_n11, eq31_e329_d_n12, eq31_e329_d_n13, eq31_e329_d_n14, eq31_e329_d_b0, eq31_e329_d_b1, eq31_e329_d_b2, eq31_e329_d_b3, eq31_e329_d_b4, eq31_e329_d_b5,)
+        (eq31_e329, __rspice_deriv_cse_0, __rspice_deriv_cse_1, __rspice_deriv_cse_2, __rspice_deriv_cse_3, __rspice_deriv_cse_4, __rspice_deriv_cse_5, __rspice_deriv_cse_6, __rspice_deriv_cse_7, __rspice_deriv_cse_8, __rspice_deriv_cse_9, __rspice_deriv_cse_10, __rspice_deriv_cse_11, __rspice_deriv_cse_12, __rspice_deriv_cse_13, __rspice_deriv_cse_14, __rspice_deriv_cse_15, __rspice_deriv_cse_16, __rspice_deriv_cse_17, __rspice_deriv_cse_18, __rspice_deriv_cse_19, __rspice_deriv_cse_20,)
     } else {
         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
