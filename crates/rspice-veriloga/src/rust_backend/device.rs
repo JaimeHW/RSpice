@@ -471,6 +471,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_mul_div_scaled_product_helper_calls(source);
     source = compact_mul_product3_helper_calls(source);
     source = compact_mul_powf_helper_calls(source);
+    source = compact_mul_pow_helper_calls(source);
     source = compact_sqrt_mul_sub_operand_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
@@ -1941,12 +1942,78 @@ fn compact_mul_powf_helper_call_replacement(
         if powf_args.len() != 2 {
             return None;
         }
-        compact_index_or_mixed_mul_powf_helper_line(
-            target_index,
-            left,
-            powf_args[0],
-            powf_args[1],
-        )?
+        compact_index_or_mixed_mul_powf_helper_line(target_index, left, powf_args[0], powf_args[1])?
+    } else {
+        return None;
+    };
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_pow_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_pow_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_pow_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = if let Some(pow_args) = compact_ad_call_args(left, "pow") {
+        if pow_args.len() != 2 {
+            return None;
+        }
+        compact_index_or_mixed_mul_pow_helper_line(target_index, right, pow_args[0], pow_args[1])?
+    } else if let Some(pow_args) = compact_ad_call_args(right, "pow") {
+        if pow_args.len() != 2 {
+            return None;
+        }
+        compact_index_or_mixed_mul_pow_helper_line(target_index, left, pow_args[0], pow_args[1])?
     } else {
         return None;
     };
@@ -5027,6 +5094,42 @@ fn stamp() {
         assert!(
             compact.contains(
                 "s.store_mul_powf(152, A::powf(s.ad_value(7), p.other_exponent), A::sqrt(s.ad_value(6)), p.exponent);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_pow_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_mul_pow_components",
+            "fn store_mul_pow_mixed_aii",
+            "fn store_mul_pow_mixed_aai",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(153, AdValue::add_scaled_product(scratch.ad_value(2), 1.0, scratch.ad_value(3), scratch.ad_value(4), params.scale), AdValue::pow(scratch.ad_value(5), scratch.ad_value(6)));
+    scratch.store_mul_ad(154, AdValue::pow(AdValue::div(scratch.ad_value(7), scratch.ad_value(8)), scratch.ad_value(9)), AdValue::pow(scratch.ad_value(10), AdValue::sqrt(scratch.ad_value(11))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_mul_pow_mixed_aii(153, A::add_scaled_product(s.ad_value(2), 1.0, s.ad_value(3), s.ad_value(4), p.scale), 5, 6);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_pow_mixed_aai(154, A::pow(s.ad_value(10), A::sqrt(s.ad_value(11))), A::div(s.ad_value(7), s.ad_value(8)), 9);"
             ),
             "{compact}"
         );
@@ -14272,6 +14375,19 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_mul_pow_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], base_value: f64, base_node_derivatives: [f64; Instance::NODE_COUNT], base_branch_derivatives: [f64; Instance::BRANCH_COUNT], exponent_value: f64, exponent_node_derivatives: [f64; Instance::NODE_COUNT], exponent_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
+    "        let output = base_value.powf(exponent_value);",
+    "        self.values[index] = factor_value * output;",
+    "        for axis in 0..Instance::NODE_COUNT { let derivative = AdValue::pow_derivative(output, base_value, exponent_value, base_node_derivatives[axis], exponent_node_derivatives[axis]); self.node_derivatives[index][axis] = factor_node_derivatives[axis] * output + factor_value * derivative; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let derivative = AdValue::pow_derivative(output, base_value, exponent_value, base_branch_derivatives[axis], exponent_branch_derivatives[axis]); self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * output + factor_value * derivative; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_pow(&mut self, index: usize, factor: AdValue, base: AdValue, exponent: AdValue) {",
+    "        self.store_mul_pow_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, base.value, base.node_derivatives, base.branch_derivatives, exponent.value, exponent.node_derivatives, exponent.branch_derivatives);",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_mul_pow_ad_lhs(&mut self, index: usize, left: AdValue, right: AdValue, source: usize) {",
     "        let source_value = self.values[source];",
     "        let source_node_derivatives = self.node_derivatives[source];",
@@ -17178,6 +17294,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_mul_powf_helper(&mask));
     }
+    for mask in index_or_mixed_masks(3) {
+        out.push_str(&generate_index_or_mixed_mul_pow_helper(&mask));
+    }
     for mask in index_or_mixed_masks(2) {
         out.push_str(
             &generate_index_or_mixed_div_scaled_product_add_scaled_denominator_helper(&mask),
@@ -18111,6 +18230,27 @@ fn generate_index_or_mixed_mul_powf_helper(mask: &str) -> String {
 "#,
         factor_ty = mixed_helper_type(mask, 0),
         base_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_mul_pow_helper(mask: &str) -> String {
+    let operands = ["factor", "base", "exponent"];
+    let helper = index_or_mixed_helper_name("store_mul_pow", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let factor = mixed_helper_component_args(mask, 0, "factor");
+    let base = mixed_helper_component_args(mask, 1, "base");
+    let exponent = mixed_helper_component_args(mask, 2, "exponent");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, factor: {factor_ty}, base: {base_ty}, exponent: {exponent_ty}) {{
+{locals}        self.store_mul_pow_components(index, {factor}, {base}, {exponent});
+    }}
+"#,
+        factor_ty = mixed_helper_type(mask, 0),
+        base_ty = mixed_helper_type(mask, 1),
+        exponent_ty = mixed_helper_type(mask, 2),
     )
 }
 
@@ -27205,11 +27345,26 @@ fn compact_index_or_mixed_mul_powf_helper_line(
     base: &str,
     exponent: &str,
 ) -> Option<String> {
-    let (helper, value_args) = compact_index_or_mixed_value_args("store_mul_powf", &[factor, base])?;
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_mul_powf", &[factor, base])?;
     let mut call_args = Vec::with_capacity(4);
     call_args.push(target_index.to_string());
     call_args.extend(value_args);
     call_args.push(exponent.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_mul_pow_helper_line(
+    target_index: usize,
+    factor: &str,
+    base: &str,
+    exponent: &str,
+) -> Option<String> {
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_mul_pow", &[factor, base, exponent])?;
+    let mut call_args = Vec::with_capacity(4);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
