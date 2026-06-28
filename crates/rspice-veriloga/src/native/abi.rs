@@ -74,6 +74,10 @@ pub struct EvalContext {
     pub delay_buffers: *mut crate::vm::DelayBuffer,
     /// Number of delay buffers
     pub delay_buffers_len: usize,
+    /// Cross detectors (mutable for cross(...) evaluation)
+    pub cross_detectors: *mut crate::vm::CrossDetector,
+    /// Number of cross detectors
+    pub cross_detectors_len: usize,
 }
 
 thread_local! {
@@ -708,6 +712,66 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
     }
 }
 
+/// External helper function for native x64 threshold-crossing detectors.
+///
+/// `operands` points to two contiguous f64 values emitted by the JIT in VM
+/// stack order: expression value and direction. Native mode requires
+/// preallocated detector storage and hard-fails through the native runtime
+/// error channel when it is missing.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid EvalContext
+/// pointer and a valid two-element operand slice. Invalid pointers are reported
+/// through the native runtime error channel.
+#[unsafe(export_name = "rspice_cross_state_native")]
+pub unsafe extern "C" fn rspice_cross_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    detector_id: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_runtime_error("native cross helper missing operands; no interpreter fallback");
+        return 0.0;
+    }
+    if ctx.is_null() {
+        set_native_runtime_error(
+            "native cross helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+
+    let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
+    let value = operands[0];
+    let direction_raw = operands[1];
+    let direction = if direction_raw > 0.5 {
+        1
+    } else if direction_raw < -0.5 {
+        -1
+    } else {
+        0
+    };
+    let ctx = unsafe { &*ctx };
+
+    if ctx.cross_detectors.is_null() {
+        set_native_runtime_error(format!(
+            "native cross helper missing detector storage for detector {detector_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if detector_id >= ctx.cross_detectors_len {
+        set_native_runtime_error(format!(
+            "native cross helper detector {detector_id} outside detector table length {}; no interpreter fallback",
+            ctx.cross_detectors_len
+        ));
+        return 0.0;
+    }
+
+    let detectors =
+        unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
+    let crossed = detectors[detector_id].update(value, ctx.time, direction);
+    if ctx.analysis_type == 2 { crossed } else { 0.0 }
+}
+
 /// External helper function for native x64 runtime-indexed variable reads.
 ///
 /// `base_ptr` points at the first element of the array variable run. The helper
@@ -835,11 +899,12 @@ pub unsafe extern "C" fn rspice_current_lookup(
 mod tests {
     use super::{
         EvalContext, clear_native_runtime_error, rspice_absdelay_state_native,
-        rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native,
-        rspice_laplace_step_native, rspice_slew_state_native, rspice_timer_state_native,
-        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
+        rspice_cross_state_native, rspice_dynamic_variable_load_native,
+        rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_slew_state_native,
+        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
+        take_native_runtime_error,
     };
-    use crate::vm::{DelayBuffer, SlewFilter, TransitionFilter};
+    use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use std::mem::{align_of, offset_of, size_of};
 
     #[test]
@@ -877,7 +942,9 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, slew_filters_len), 240);
         assert_eq!(offset_of!(EvalContext, delay_buffers), 248);
         assert_eq!(offset_of!(EvalContext, delay_buffers_len), 256);
-        assert_eq!(size_of::<EvalContext>(), 264);
+        assert_eq!(offset_of!(EvalContext, cross_detectors), 264);
+        assert_eq!(offset_of!(EvalContext, cross_detectors_len), 272);
+        assert_eq!(size_of::<EvalContext>(), 280);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -975,6 +1042,8 @@ mod tests {
             slew_filters_len: 0,
             delay_buffers: std::ptr::null_mut(),
             delay_buffers_len: 0,
+            cross_detectors: std::ptr::null_mut(),
+            cross_detectors_len: 0,
         };
 
         assert_eq!(
@@ -1313,6 +1382,115 @@ mod tests {
     }
 
     #[test]
+    fn cross_native_helper_records_runtime_error_for_invalid_pointers() {
+        let operands = [1.0, 1.0];
+        clear_native_runtime_error();
+
+        let missing_operands =
+            unsafe { rspice_cross_state_native(std::ptr::null(), std::ptr::null(), 0) };
+
+        assert_eq!(missing_operands.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error()
+            .expect("invalid native cross operands must record an error");
+        assert!(
+            error.contains("cross") && error.contains("operands"),
+            "error must identify the invalid cross operands, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+
+        clear_native_runtime_error();
+        let missing_ctx =
+            unsafe { rspice_cross_state_native(operands.as_ptr(), std::ptr::null(), 0) };
+
+        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("invalid native cross context must record an error");
+        assert!(
+            error.contains("cross") && error.contains("EvalContext"),
+            "error must identify the invalid cross context, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn cross_native_helper_hard_fails_missing_detector_storage() {
+        let operands = [1.0, 1.0];
+        let ctx = empty_eval_context();
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) };
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing cross storage must hard-fail");
+        assert!(
+            error.contains("cross") && error.contains("detector storage"),
+            "error must identify missing cross storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn cross_native_helper_uses_vm_detector_state() {
+        let mut operands = [-1.0, 1.0];
+        let mut detectors = [CrossDetector::default()];
+        let mut ctx = empty_eval_context();
+        ctx.cross_detectors = detectors.as_mut_ptr();
+        ctx.cross_detectors_len = detectors.len();
+        clear_native_runtime_error();
+
+        ctx.time = 0.0;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits(),
+            "non-transient cross evaluation reports zero but still records history"
+        );
+
+        ctx.analysis_type = 2;
+        ctx.time = 0.5;
+        operands[0] = 1.0;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits(),
+            "rising edge should fire after non-transient history update"
+        );
+
+        ctx.time = 1.0;
+        operands[0] = 2.0;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits(),
+            "steady positive value should not fire repeatedly"
+        );
+
+        detectors[0] = CrossDetector::default();
+        std::hint::black_box(&detectors);
+        operands = [1.0, -1.0];
+        ctx.time = 0.0;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+
+        ctx.time = 0.5;
+        operands[0] = -1.0;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits(),
+            "falling edge should obey negative direction"
+        );
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
     fn dynamic_variable_helper_loads_rounded_index_and_reports_bounds_errors() {
         let values = [2.0, 4.0, 8.0];
         clear_native_runtime_error();
@@ -1403,6 +1581,8 @@ mod tests {
             slew_filters_len: 0,
             delay_buffers: std::ptr::null_mut(),
             delay_buffers_len: 0,
+            cross_detectors: std::ptr::null_mut(),
+            cross_detectors_len: 0,
         }
     }
 }
