@@ -4464,7 +4464,7 @@ impl Instance {
             if (s.v[335] == 0.0) {
                 s.store_scalar(336, 0.0);
             } else {
-                s.store_pow_ad(336, s.ad_value(335), A::offset(s.ad_value(658), (-1.0)));
+                s.store_pow_offset_rhs(336, 335, 658, (-1.0));
             }
         }
 
@@ -5514,7 +5514,7 @@ impl Instance {
             if (s.v[251] == 0.0) {
                 s.store_scalar(341, 0.0);
             } else {
-                s.store_pow_ad(341, s.ad_value(251), A::offset(s.ad_value(624), (-1.0)));
+                s.store_pow_offset_rhs(341, 251, 624, (-1.0));
             }
         }
 

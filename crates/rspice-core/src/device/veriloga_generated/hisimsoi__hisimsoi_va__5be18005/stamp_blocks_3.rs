@@ -842,7 +842,7 @@ impl Instance {
 
         if ((!s.b[737]) && s.b[1089]) {
             s.store_div(1090, 157, 1096);
-            s.store_pow_ad(1091, s.ad_value(1090), A::offset(s.ad_value(138), (-1.0)));
+            s.store_pow_offset_rhs(1091, 1090, 138, (-1.0));
             s.store_mul(1095, 1091, 1090);
             s.store_offset(1092, 1095, 1.0);
             s.store_pow_ad(1093, s.ad_value(1092), A::offset(A::div_from_scalar(1.0, s.ad_value(138)), (-1.0)));

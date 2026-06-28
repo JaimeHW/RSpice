@@ -2862,7 +2862,7 @@ impl Instance {
         }
 
         if (((s.b[3336] && (!s.b[3337])) && (!s.b[3340])) && (!s.b[3341])) {
-            s.store_pow_ad(337, s.ad_value(335), A::offset(s.ad_value(959), (-1.0)));
+            s.store_pow_offset_rhs(337, 335, 959, (-1.0));
         }
 
         if (s.b[3336] && (!s.b[3337])) {
@@ -3163,7 +3163,7 @@ impl Instance {
         }
 
         if (((s.b[3336] && (!s.b[3356])) && (!s.b[3367])) && (!s.b[3368])) {
-            s.store_pow_ad(337, s.ad_value(335), A::offset(s.ad_value(956), (-1.0)));
+            s.store_pow_offset_rhs(337, 335, 956, (-1.0));
         }
 
         if (s.b[3336] && (!s.b[3356])) {

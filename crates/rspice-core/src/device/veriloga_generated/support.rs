@@ -1136,6 +1136,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_pow_offset_rhs(&mut self, index: usize, left: usize, right: usize, exponent_offset: f64) {
+        let base = self.v[left];
+        let exponent = self.v[right] + exponent_offset;
+        let output = base.powf(exponent);
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left_dn[axis], right_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left_db[axis], right_db[axis]); }
+    }
+
+    #[inline]
     pub(crate) fn store_min_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let selected = if left.value <= right.value { left } else { right };
         self.v[index] = selected.value;
@@ -13797,6 +13811,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = output;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left.dn[axis], right.dn[axis]); }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left.db[axis], right.db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_pow_offset_rhs(&mut self, index: usize, left: usize, right: usize, exponent_offset: f64) {
+        let base = self.v[left];
+        let exponent = self.v[right] + exponent_offset;
+        let output = base.powf(exponent);
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left_dn[axis], right_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, left_db[axis], right_db[axis]); }
     }
 
     #[inline]
