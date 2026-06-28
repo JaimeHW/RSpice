@@ -348,6 +348,26 @@ fn native_device_stamps_multiple_flow_contributions_from_one_image() {
     assert!((currents[0] - 1.0).abs() < 1e-12, "currents: {currents:?}");
     assert!((currents[1] - 3.0).abs() < 1e-12, "currents: {currents:?}");
 
+    let jacobians = device
+        .try_compute_jacobian()
+        .expect("native multi-stamp jacobian evaluate");
+    assert!(
+        jacobians.iter().any(|entry| {
+            entry.program_idx == 0
+                && entry.jacobian_idx == 0
+                && (entry.value - 0.25).abs() < 1e-12
+        }),
+        "jacobians: {jacobians:?}"
+    );
+    assert!(
+        jacobians.iter().any(|entry| {
+            entry.program_idx == 1
+                && entry.jacobian_idx == 0
+                && (entry.value - 0.75).abs() < 1e-12
+        }),
+        "jacobians: {jacobians:?}"
+    );
+
     let (matrix, rhs) = stamp_device(&mut device, &[4.0]);
     assert!((matrix.get(&(0, 0)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
     assert!(
@@ -374,6 +394,10 @@ fn native_device_stamps_potential_branch_unknowns() {
     assert!((matrix.get(&(2, 1)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
     assert!((matrix.get(&(2, 2)).copied().unwrap_or_default() + 2000.0).abs() < 1e-9);
     assert!(rhs.get(&2).copied().unwrap_or_default().abs() < 1e-12, "rhs: {rhs:?}");
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
