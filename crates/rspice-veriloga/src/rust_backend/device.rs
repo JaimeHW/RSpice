@@ -4828,6 +4828,44 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_div_from_scalar_scaled_product_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_div_from_scalar_scaled_mul("),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(170, AdValue::div_from_scalar(params.scalar, AdValue::mul_scaled_lhs(scratch.ad_value(2), params.input_scale, scratch.ad_value(3))));
+    scratch.store_ad_value(171, AdValue::div_from_scalar(params.scalar, AdValue::mul_scaled_output(scratch.ad_value(4), scratch.ad_value(5), params.output_scale)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_scaled_mul(170, p.scalar, 2, 3, p.input_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_scaled_mul(171, p.scalar, 4, 5, p.output_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_div_from_scalar_ad("),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::mul_scaled_lhs("), "{compact}");
+        assert!(!compact.contains("A::mul_scaled_output("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_offset_lhs_mixed_add_sub_rvalue_stores_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
@@ -13332,6 +13370,14 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_div_from_scalar_scaled_mul(&mut self, index: usize, scalar: f64, left: usize, right: usize, scale: f64) {",
+        "        let raw = self.values[left] * scale * self.values[right];",
+        "        let reciprocal = 1.0 / raw;",
+        "        let quotient = scalar * reciprocal;",
+        "        self.store_unary_mul_scaled(index, left, right, quotient, -quotient * reciprocal * scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_scaled_div(&mut self, index: usize, left: usize, right: usize, scale: f64) {",
         "        let left_value = self.values[left];",
         "        let right_value = self.values[right];",
@@ -21672,6 +21718,38 @@ fn compact_sub_div_same_denominator_store_helper_call(
     ))
 }
 
+fn compact_div_from_scalar_scaled_product_store_helper_line(
+    target_index: usize,
+    scalar: &str,
+    denominator: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(denominator, "mul_scaled_lhs") {
+        if args.len() != 3 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0])?;
+        let right = compact_scratch_ad_value_index(args[2])?;
+        return Some(format!(
+            "scratch.store_div_from_scalar_scaled_mul({target_index}, {scalar}, {left}, {right}, {});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(denominator, "mul_scaled_output") {
+        if args.len() != 3 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0])?;
+        let right = compact_scratch_ad_value_index(args[1])?;
+        return Some(format!(
+            "scratch.store_div_from_scalar_scaled_mul({target_index}, {scalar}, {left}, {right}, {});",
+            args[2]
+        ));
+    }
+
+    None
+}
+
 fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Option<String> {
     if let Some(line) = compact_negated_binary_input_store_helper_line(target_index, value) {
         return Some(line);
@@ -21760,6 +21838,17 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
             "scratch.store_pow_from_scalar_ad({target_index}, {}, {value});",
             args[0]
         ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "div_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        if let Some(line) =
+            compact_div_from_scalar_scaled_product_store_helper_line(target_index, args[0], args[1])
+        {
+            return Some(line);
+        }
     }
 
     for (name, helper) in [
