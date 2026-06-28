@@ -12,9 +12,10 @@ mod target;
 pub mod x64;
 
 pub use abi::{
-    EvalContext, rspice_current_lookup, rspice_laplace_step, rspice_limexp, rspice_limit,
-    rspice_table_lookup,
+    EvalContext, rspice_current_lookup, rspice_laplace_step, rspice_laplace_step_native,
+    rspice_limexp, rspice_limit, rspice_table_lookup,
 };
+pub(crate) use abi::{clear_native_runtime_error, take_native_runtime_error};
 pub use error::{JitError, JitResult};
 pub use model::{NativeModel, PlanStats};
 pub use target::{Architecture, TargetSpec};
