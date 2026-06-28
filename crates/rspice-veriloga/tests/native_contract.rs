@@ -446,6 +446,27 @@ endmodule
     )
 }
 
+fn limit_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_limit_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    real explicit_limit;
+    real default_limit;
+    analog begin
+        x = V(p, n);
+        explicit_limit = $limit(x, 0.5);
+        default_limit = $limit(x);
+        I(p, n) <+ explicit_limit + default_limit;
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1308,6 +1329,52 @@ fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
             "jacobians: {jacobians:?}"
         );
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_limit_assignments_without_fallback() {
+    let model = limit_assignment_model();
+    let mut device = VerilogADevice::try_new("LIM1", model, &[1, 0])
+        .expect("limit assignment model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[0.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native first limit evaluation succeeds");
+    assert_eq!(device.variable("x"), Some(0.0));
+    assert_eq!(device.variable("explicit_limit"), Some(0.0));
+    assert_eq!(device.variable("default_limit"), Some(0.0));
+    assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
+
+    device.update_voltages(&[10.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native initialized upward limit evaluation succeeds");
+    assert_eq!(device.variable("x"), Some(10.0));
+    assert_eq!(device.variable("explicit_limit"), Some(0.5));
+    assert_eq!(device.variable("default_limit"), Some(0.7));
+    assert!((currents[0] - 1.2).abs() < 1e-12, "currents: {currents:?}");
+
+    let currents = device
+        .try_evaluate()
+        .expect("native repeated limit evaluation succeeds");
+    assert_eq!(device.variable("explicit_limit"), Some(1.0));
+    assert_eq!(device.variable("default_limit"), Some(1.4));
+    assert!((currents[0] - 2.4).abs() < 1e-12, "currents: {currents:?}");
+
+    device.update_voltages(&[-10.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native downward limit evaluation succeeds");
+    assert_eq!(device.variable("explicit_limit"), Some(0.5));
+    assert!(
+        (device.variable("default_limit").unwrap() - 0.7).abs() < 1e-12,
+        "default_limit={:?}",
+        device.variable("default_limit")
+    );
+    assert!((currents[0] - 1.2).abs() < 1e-12, "currents: {currents:?}");
 }
 
 #[cfg(target_arch = "x86_64")]

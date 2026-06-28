@@ -32,6 +32,10 @@ pub struct EvalContext {
     /// Current state values, written by ddt/idt operators (sized by the
     /// device's preallocation scan; null only when no program holds state)
     pub state_values: *mut f64,
+    /// Per-state initialized flags used by stateful operators such as $limit.
+    pub state_initialized: *mut u8,
+    /// Length of `state_initialized`.
+    pub state_initialized_len: usize,
     /// Lookup tables pointer (for $table_model)
     /// Points to a slice of LookupTable structs
     pub lookup_tables: *const crate::codegen::LookupTable,
@@ -120,24 +124,32 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
 /// This function is called from JIT-compiled code with valid pointers.
 #[unsafe(export_name = "rspice_limit")]
 pub unsafe extern "C" fn rspice_limit(
-    state_prev: *const f64,
+    state_values: *mut f64,
+    state_initialized: *mut u8,
+    state_initialized_len: usize,
     state_idx: usize,
     new_value: f64,
     step_limit: f64,
 ) -> f64 {
-    let prev_value = if state_prev.is_null() {
-        new_value
-    } else {
-        unsafe { *state_prev.add(state_idx) }
-    };
-
-    if prev_value == 0.0 && new_value != 0.0 {
+    if state_values.is_null() || state_initialized.is_null() || state_idx >= state_initialized_len {
         return new_value;
     }
 
-    let delta = new_value - prev_value;
-    let limited_delta = delta.clamp(-step_limit, step_limit);
-    prev_value + limited_delta
+    let initialized = unsafe { *state_initialized.add(state_idx) != 0 };
+    let limited = if initialized {
+        let prev_value = unsafe { *state_values.add(state_idx) };
+        let delta = new_value - prev_value;
+        let limited_delta = delta.clamp(-step_limit, step_limit);
+        prev_value + limited_delta
+    } else {
+        new_value
+    };
+
+    unsafe {
+        *state_values.add(state_idx) = limited;
+        *state_initialized.add(state_idx) = 1;
+    }
+    limited
 }
 
 /// External helper function for idtmod wrapping.
@@ -371,15 +383,17 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, timestep), 96);
         assert_eq!(offset_of!(EvalContext, state_prev), 104);
         assert_eq!(offset_of!(EvalContext, state_values), 112);
-        assert_eq!(offset_of!(EvalContext, lookup_tables), 120);
-        assert_eq!(offset_of!(EvalContext, lookup_tables_len), 128);
-        assert_eq!(offset_of!(EvalContext, laplace_filters), 136);
-        assert_eq!(offset_of!(EvalContext, laplace_filters_len), 144);
-        assert_eq!(offset_of!(EvalContext, param_given), 152);
-        assert_eq!(offset_of!(EvalContext, branch_unknowns), 160);
-        assert_eq!(offset_of!(EvalContext, analysis_type), 168);
-        assert_eq!(offset_of!(EvalContext, multiplicity), 176);
-        assert_eq!(size_of::<EvalContext>(), 184);
+        assert_eq!(offset_of!(EvalContext, state_initialized), 120);
+        assert_eq!(offset_of!(EvalContext, state_initialized_len), 128);
+        assert_eq!(offset_of!(EvalContext, lookup_tables), 136);
+        assert_eq!(offset_of!(EvalContext, lookup_tables_len), 144);
+        assert_eq!(offset_of!(EvalContext, laplace_filters), 152);
+        assert_eq!(offset_of!(EvalContext, laplace_filters_len), 160);
+        assert_eq!(offset_of!(EvalContext, param_given), 168);
+        assert_eq!(offset_of!(EvalContext, branch_unknowns), 176);
+        assert_eq!(offset_of!(EvalContext, analysis_type), 184);
+        assert_eq!(offset_of!(EvalContext, multiplicity), 192);
+        assert_eq!(size_of::<EvalContext>(), 200);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 }

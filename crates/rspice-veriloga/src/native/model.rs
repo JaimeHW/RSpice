@@ -393,6 +393,8 @@ mod tests {
             timestep: 0.0,
             state_prev: std::ptr::null(),
             state_values: std::ptr::null_mut(),
+            state_initialized: std::ptr::null_mut(),
+            state_initialized_len: 0,
             lookup_tables: std::ptr::null(),
             lookup_tables_len: 0,
             laplace_filters: std::ptr::null_mut(),
