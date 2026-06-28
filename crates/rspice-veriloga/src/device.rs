@@ -33,6 +33,7 @@ use crate::native::{NativeModel, clear_native_runtime_error, take_native_runtime
 #[cfg(feature = "native")]
 #[derive(Clone, Copy)]
 enum NativeValueEntry {
+    StaticCondition(usize),
     StampValue(usize),
     Jacobian { stamp: usize, entry: usize },
     ReactiveJacobian { stamp: usize, entry: usize },
@@ -358,6 +359,8 @@ impl VerilogADevice {
     pub fn set_multiplicity(&mut self, m: f64) {
         if m.is_finite() && m > 0.0 {
             self.context.multiplicity = m;
+            // Static guards may reference $mfactor.
+            self.refresh_static_conditions();
         } else {
             log::warn!(
                 "Verilog-A instance '{}': ignoring non-positive multiplicity {m}",
@@ -632,30 +635,61 @@ impl VerilogADevice {
     #[cfg(feature = "native")]
     fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
         let model = &self.model;
-        if model
+        let native = self.native_model.as_ref();
+        let mut program_active = vec![true; model.stamp_programs.len()];
+        let mut branch_active = vec![false; model.branch_sources.len()];
+        let has_static_conditions = model
             .stamp_programs
             .iter()
-            .any(|program| program.static_condition.is_some())
-        {
-            return Err(Self::native_unsupported_coverage(
-                model,
-                "StaticConditionPrograms",
-            ));
-        }
+            .any(|program| program.static_condition.is_some());
 
-        let program_active = vec![true; model.stamp_programs.len()];
-        let mut branch_active = vec![false; model.branch_sources.len()];
-        for program in &model.stamp_programs {
-            if let Some(ordinal) = program.branch_ordinal
-                && ordinal < branch_active.len()
-            {
-                branch_active[ordinal] = true;
+        if has_static_conditions {
+            let context = &mut self.context;
+            let mut vm = Vm::new(context);
+            Self::run_assignment_pass(&mut vm, model, native)?;
+
+            for (idx, program) in model.stamp_programs.iter().enumerate() {
+                let active = if program.static_condition.is_some() {
+                    Self::run_value_program(
+                        &mut vm,
+                        program
+                            .static_condition
+                            .as_ref()
+                            .expect("static condition checked above"),
+                        native,
+                        NativeValueEntry::StaticCondition(idx),
+                    )? != 0.0
+                } else {
+                    true
+                };
+                program_active[idx] = active;
+                if active
+                    && let Some(ordinal) = program.branch_ordinal
+                    && ordinal < branch_active.len()
+                {
+                    branch_active[ordinal] = true;
+                }
+            }
+        } else {
+            for program in &model.stamp_programs {
+                if let Some(ordinal) = program.branch_ordinal
+                    && ordinal < branch_active.len()
+                {
+                    branch_active[ordinal] = true;
+                }
             }
         }
 
         self.program_active = program_active;
         self.branch_active = branch_active;
         Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_static_condition_entry(index: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing static-condition entry for stamp {index}; no interpreter fallback"
+        ))
     }
 
     #[cfg(not(feature = "native"))]
@@ -1137,6 +1171,7 @@ impl VerilogADevice {
         entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
         let current_pairs = match entry {
+            NativeValueEntry::StaticCondition(_) => &[],
             NativeValueEntry::StampValue(index) => native.stamp_value_current_pairs(index),
             NativeValueEntry::Jacobian { stamp, entry } => {
                 native.jacobian_current_pairs(stamp, entry)
@@ -1151,6 +1186,9 @@ impl VerilogADevice {
         let vars_ptr = vm.context.variables.as_ptr();
         clear_native_runtime_error();
         let value = match entry {
+            NativeValueEntry::StaticCondition(index) => native
+                .run_static_condition(index, &ctx, vars_ptr)
+                .ok_or_else(|| Self::missing_native_static_condition_entry(index))?,
             NativeValueEntry::StampValue(index) => native.run_stamp_value(index, &ctx, vars_ptr),
             NativeValueEntry::Jacobian { stamp, entry } => {
                 native.run_jacobian(stamp, entry, &ctx, vars_ptr)
@@ -2060,16 +2098,18 @@ endmodule
     }
 
     #[test]
-    fn native_rejects_static_condition_programs_without_bytecode_execution() {
-        let model = compile(
+    fn native_static_condition_refresh_uses_native_entries_without_bytecode_execution() {
+        let mut model = compile(
             r#"
 `include "disciplines.vams"
 module static_condition(p, n);
     inout p, n;
     electrical p, n;
     parameter real enabled = 1.0;
+    real guard;
     analog begin
-        if (enabled)
+        guard = enabled;
+        if (guard)
             I(p, n) <+ V(p, n) * 1.0e-3;
     end
 endmodule
@@ -2082,13 +2122,30 @@ endmodule
                 .any(|program| program.static_condition.is_some()),
             "fixture must contain a static condition program"
         );
+        assert!(
+            !model.assignment_steps.is_empty(),
+            "fixture must contain assignment bytecode"
+        );
+        model.assignment_steps = vec![AssignmentStep::Assign(AssignmentProgram {
+            var_index: 0,
+            program: BytecodeProgram {
+                instructions: vec![Instruction::PushParam(999)],
+            },
+        })];
+        for program in &mut model.stamp_programs {
+            if program.static_condition.is_some() {
+                program.static_condition = Some(BytecodeProgram {
+                    instructions: vec![Instruction::PushParam(999)],
+                });
+            }
+        }
 
         let mut device = native_test_device(model);
-        let err = device
+        device
             .try_resolve_parameter_defaults()
-            .expect_err("native mode must reject static-condition bytecode");
+            .expect("native mode must refresh static conditions without bytecode fallback");
 
-        assert_native_hard_fail(err, "StaticConditionPrograms");
+        assert!(device.program_active.iter().all(|active| *active));
     }
 
     #[test]

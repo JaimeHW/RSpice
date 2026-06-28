@@ -5,6 +5,7 @@
 //! must return a native JIT error, not create a device that runs the VM.
 #![cfg(feature = "native")]
 
+use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::native::compile_native;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
@@ -557,6 +558,58 @@ module native_dyn_array_read(p, n);
         w[2] = 4.0;
         w[3] = 8.0;
         I(p, n) <+ w[sel] * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
+fn static_condition_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_static_condition(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real enabled = 1.0;
+    real guard;
+    analog begin
+        guard = enabled;
+        if (guard)
+            I(p, n) <+ V(p, n) * 2.0;
+    end
+endmodule
+"#,
+    )
+}
+
+fn static_condition_branch_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_static_branch(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer shorted = 0;
+    analog begin
+        if (shorted > 0)
+            V(p, n) <+ 0.0;
+    end
+endmodule
+"#,
+    )
+}
+
+fn static_condition_mfactor_branch_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_static_mfactor_branch(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        if ($mfactor > 1.5)
+            V(p, n) <+ 0.0;
     end
 endmodule
 "#,
@@ -1614,6 +1667,177 @@ fn native_device_executes_indexed_assignments_without_fallback() {
     assert!(
         msg.contains("array index 3 outside declared bounds [1:2]"),
         "error must preserve indexed assignment bounds diagnostic, got: {msg}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_static_conditions_without_fallback() {
+    let model = static_condition_model();
+    assert!(
+        model
+            .stamp_programs
+            .iter()
+            .any(|program| program.static_condition.is_some()),
+        "fixture must contain a static condition program"
+    );
+    assert!(
+        !model.assignment_steps.is_empty(),
+        "fixture must route the condition through native assignment state"
+    );
+
+    let mut enabled = VerilogADevice::try_new("STATIC1", model.clone(), &[1, 0])
+        .expect("static-condition model uses native JIT");
+    assert!(enabled.is_using_native());
+    enabled.update_voltages(&[2.0]);
+    let currents = enabled
+        .try_evaluate()
+        .expect("native static condition evaluates enabled stamp");
+    assert!(
+        (currents[0] - 4.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+    let (matrix, rhs) = stamp_device(&mut enabled, &[2.0]);
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 2.0).abs() < 1.0e-12,
+        "matrix: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1.0e-12,
+        "rhs: {rhs:?}"
+    );
+
+    let mut disabled = VerilogADevice::try_new("STATIC2", model, &[1, 0])
+        .expect("static-condition model uses native JIT");
+    assert!(disabled.set_parameter("enabled", 0.0));
+    disabled
+        .try_resolve_parameter_defaults()
+        .expect("native static condition refreshes after parameter update");
+    disabled.update_voltages(&[2.0]);
+    let currents = disabled
+        .try_evaluate()
+        .expect("native static condition skips disabled stamp");
+    assert!(
+        currents[0].abs() < 1.0e-12,
+        "disabled currents: {currents:?}"
+    );
+    let (matrix, rhs) = stamp_device(&mut disabled, &[2.0]);
+    assert!(matrix.is_empty(), "disabled matrix: {matrix:?}");
+    assert!(rhs.is_empty(), "disabled rhs: {rhs:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_static_conditions_control_potential_branch_activation() {
+    let model = static_condition_branch_model();
+    assert!(
+        model
+            .stamp_programs
+            .iter()
+            .any(|program| program.static_condition.is_some()),
+        "fixture must contain a static condition program"
+    );
+    assert_eq!(
+        model.branch_sources.len(),
+        1,
+        "fixture must allocate one branch-current unknown"
+    );
+
+    let mut disabled = VerilogADevice::try_new("STATICBR1", model.clone(), &[1, 2])
+        .expect("static branch model uses native JIT");
+    disabled.set_branch_current_indices(&[3]);
+    let (matrix, rhs) = stamp_device(&mut disabled, &[1.0, 0.0, 0.0]);
+    assert!(
+        (matrix.get(&(2, 2)).copied().unwrap_or_default() - 1.0).abs() < 1.0e-12,
+        "disabled matrix: {matrix:?}"
+    );
+    assert!(
+        !matrix.contains_key(&(0, 2)),
+        "disabled branch must stay open: {matrix:?}"
+    );
+    assert!(rhs.is_empty(), "disabled rhs: {rhs:?}");
+
+    let mut enabled = VerilogADevice::try_new("STATICBR2", model, &[1, 2])
+        .expect("static branch model uses native JIT");
+    enabled.set_branch_current_indices(&[3]);
+    assert!(enabled.set_parameter("shorted", 1.0));
+    enabled
+        .try_resolve_parameter_defaults()
+        .expect("native static branch refreshes after parameter update");
+    let (matrix, rhs) = stamp_device(&mut enabled, &[1.0, 0.0, 0.0]);
+    assert!(
+        (matrix.get(&(0, 2)).copied().unwrap_or_default() - 1.0).abs() < 1.0e-12,
+        "enabled matrix: {matrix:?}"
+    );
+    assert!(
+        (matrix.get(&(2, 0)).copied().unwrap_or_default() - 1.0).abs() < 1.0e-12,
+        "enabled matrix: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1.0e-12,
+        "enabled rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_static_condition_rejects_dynamic_guard_bytecode_without_fallback() {
+    let mut model = static_condition_model();
+    for program in &mut model.stamp_programs {
+        if program.static_condition.is_some() {
+            program.static_condition.as_mut().unwrap().instructions =
+                vec![Instruction::PushVoltage(0, 1)];
+        }
+    }
+
+    let err = compile_native(&model).expect_err("dynamic static-condition bytecode must hard-fail");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("StaticCondition"),
+        "error must identify static-condition entry, got: {msg}"
+    );
+    assert!(
+        msg.contains("PushVoltage"),
+        "error must identify rejected dynamic op, got: {msg}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_static_conditions_refresh_after_mfactor_update() {
+    let model = static_condition_mfactor_branch_model();
+    assert!(
+        model
+            .stamp_programs
+            .iter()
+            .any(|program| program.static_condition.is_some()),
+        "fixture must contain a static condition program"
+    );
+
+    let mut device = VerilogADevice::try_new("STATICM1", model, &[1, 2])
+        .expect("mfactor static branch model uses native JIT");
+    device.set_branch_current_indices(&[3]);
+    let (matrix, _) = stamp_device(&mut device, &[1.0, 0.0, 0.0]);
+    assert!(
+        !matrix.contains_key(&(0, 2)),
+        "default mfactor should leave branch open: {matrix:?}"
+    );
+
+    device.set_multiplicity(2.0);
+    let (matrix, rhs) = stamp_device(&mut device, &[1.0, 0.0, 0.0]);
+    assert!(
+        (matrix.get(&(0, 2)).copied().unwrap_or_default() - 2.0).abs() < 1.0e-12,
+        "mfactor-updated branch must activate and scale KCL coupling: {matrix:?}"
+    );
+    assert!(
+        (matrix.get(&(2, 0)).copied().unwrap_or_default() - 1.0).abs() < 1.0e-12,
+        "mfactor-updated branch row must activate: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1.0e-12,
+        "rhs: {rhs:?}"
     );
 }
 

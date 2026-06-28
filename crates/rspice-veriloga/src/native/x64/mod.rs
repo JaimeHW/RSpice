@@ -16,6 +16,7 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     let assignment = CodeOffset::new(image.len());
     append_assignment_entry(model, &mut image)?;
 
+    let mut static_conditions = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
@@ -25,6 +26,19 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     let mut available_current_pairs = Vec::new();
 
     for stamp in &model.stamp_programs {
+        let static_condition = if let Some(condition) = &stamp.static_condition {
+            let program = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::StaticCondition,
+                condition,
+                base_limits,
+            )?;
+            Some(append_value_entry(&mut image, &program)?)
+        } else {
+            None
+        };
+        static_conditions.push(static_condition);
+
         let value_limits = base_limits.with_available_current_pairs(&available_current_pairs);
         let program = NativeProgram::from_bytecode(
             model.name.clone(),
@@ -97,6 +111,7 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
         executable,
         NativeEntryOffsets {
             assignment,
+            static_conditions,
             stamp_values,
             jacobians,
             reactive_jacobians,
