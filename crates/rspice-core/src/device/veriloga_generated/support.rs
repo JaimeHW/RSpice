@@ -768,6 +768,28 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_sub_square_offset(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, sqrt_left: usize, sqrt_right: usize, sqrt_offset: f64, sqrt_scale: f64) {
+        let first_raw = self.v[first];
+        let second_raw = self.v[second];
+        let sqrt_left_raw = self.v[sqrt_left];
+        let sqrt_right_raw = self.v[sqrt_right];
+        let first_dn = self.dn[first];
+        let second_dn = self.dn[second];
+        let sqrt_left_dn = self.dn[sqrt_left];
+        let sqrt_right_dn = self.dn[sqrt_right];
+        let first_db = self.db[first];
+        let second_db = self.db[second];
+        let sqrt_left_db = self.db[sqrt_left];
+        let sqrt_right_db = self.db[sqrt_right];
+        let sqrt_delta = sqrt_left_raw - sqrt_right_raw;
+        let root = (sqrt_delta * sqrt_delta + sqrt_offset).sqrt();
+        let sqrt_derivative_scale = sqrt_delta * sqrt_scale / root;
+        self.v[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + (sqrt_left_dn[axis] - sqrt_right_dn[axis]) * sqrt_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + (sqrt_left_db[axis] - sqrt_right_db[axis]) * sqrt_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_add_scaled_inputs3_sqrt_first_components(&mut self, index: usize, sqrt_raw: f64, sqrt_dn: [f64; NODE_COUNT], sqrt_db: [f64; BRANCH_COUNT], sqrt_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, third_raw: f64, third_dn: [f64; NODE_COUNT], third_db: [f64; BRANCH_COUNT], third_scale: f64) {
         let root = sqrt_raw.sqrt();
         let sqrt_derivative_scale = sqrt_scale / (2.0 * root);
@@ -13346,6 +13368,28 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_add_scaled_inputs3_sqrt_third_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, sqrt_value: AdValue<NODE_COUNT, BRANCH_COUNT>, sqrt_scale: f64) {
         self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, sqrt_value.value, sqrt_value.dn, sqrt_value.db, sqrt_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_add_scaled_inputs3_sqrt_third_sub_square_offset(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, sqrt_left: usize, sqrt_right: usize, sqrt_offset: f64, sqrt_scale: f64) {
+        let first_raw = self.v[first];
+        let second_raw = self.v[second];
+        let sqrt_left_raw = self.v[sqrt_left];
+        let sqrt_right_raw = self.v[sqrt_right];
+        let first_dn = self.dn[first];
+        let second_dn = self.dn[second];
+        let sqrt_left_dn = self.dn[sqrt_left];
+        let sqrt_right_dn = self.dn[sqrt_right];
+        let first_db = self.db[first];
+        let second_db = self.db[second];
+        let sqrt_left_db = self.db[sqrt_left];
+        let sqrt_right_db = self.db[sqrt_right];
+        let sqrt_delta = sqrt_left_raw - sqrt_right_raw;
+        let root = (sqrt_delta * sqrt_delta + sqrt_offset).sqrt();
+        let sqrt_derivative_scale = sqrt_delta * sqrt_scale / root;
+        self.v[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + (sqrt_left_dn[axis] - sqrt_right_dn[axis]) * sqrt_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + (sqrt_left_db[axis] - sqrt_right_db[axis]) * sqrt_derivative_scale; }
     }
 
     #[inline]

@@ -495,8 +495,8 @@ impl Instance {
 
         if ((s.b[2665] && (!s.b[2666])) && s.b[2749]) {
             s.store_sub(2632, 683, 2631);
-            s.store_add_scaled_inputs3_sqrt_third_mixed_iia(2633, 833, 0.5, 2632, 0.5, A::offset(A::mul(A::sub(s.ad_value(833), s.ad_value(2632)), A::sub(s.ad_value(833), s.ad_value(2632))), ((4.0 * s.v[370]) * s.v[370])), (-0.5));
-            s.store_add_scaled_inputs3_sqrt_third_mixed_iia(2634, 833, 0.5, 686, 0.5, A::offset(A::mul(A::sub(s.ad_value(833), s.ad_value(686)), A::sub(s.ad_value(833), s.ad_value(686))), ((4.0 * s.v[368]) * s.v[368])), (-0.5));
+            s.store_add_scaled_inputs3_sqrt_third_sub_square_offset(2633, 833, 0.5, 2632, 0.5, 833, 2632, ((4.0 * s.v[370]) * s.v[370]), (-0.5));
+            s.store_add_scaled_inputs3_sqrt_third_sub_square_offset(2634, 833, 0.5, 686, 0.5, 833, 686, ((4.0 * s.v[368]) * s.v[368]), (-0.5));
             s.store_scaled_sub_sqrt_square_offset_rhs(2635, 833, 833, ((4.0 * 1e-6) * 1e-6), 0.5);
         }
 

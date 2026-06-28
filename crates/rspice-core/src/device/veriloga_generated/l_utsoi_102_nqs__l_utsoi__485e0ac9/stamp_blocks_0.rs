@@ -2181,7 +2181,7 @@ impl Instance {
             s.store_add_scaled_inputs3_offset_mixed_iai(899, 889, 1.0, A::div(s.ad_value(897), s.ad_value(895)), 1.0, 0, 1.0, (-0.6931471805599));
         }
 
-        s.store_add_scaled_inputs3_sqrt_third_mixed_iia(900, 899, 0.5, 254, 0.5, A::offset(A::mul(A::sub(s.ad_value(899), s.ad_value(254)), A::sub(s.ad_value(899), s.ad_value(254))), 4.0), (-0.5));
+        s.store_add_scaled_inputs3_sqrt_third_sub_square_offset(900, 899, 0.5, 254, 0.5, 899, 254, 4.0, (-0.5));
 
         s.store_offset_sqrt_ad(901, A::offset(A::div_scaled_inputs2(s.ad_value(254), 2.0, s.ad_value(900), (-2.0), s.ad_value(255), 1.0), 1.0), (-1.0));
 
