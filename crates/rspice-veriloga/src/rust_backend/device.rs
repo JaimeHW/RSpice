@@ -5571,6 +5571,22 @@ fn stamp() {
             ),
             "{sub_div_rhs_ad}"
         );
+
+        let sub_ad_lhs = helper_body(&support, "fn store_sub_ad_lhs(");
+        assert!(
+            !sub_ad_lhs.contains("_node_derivatives = self.node_derivatives"),
+            "{sub_ad_lhs}"
+        );
+        assert!(
+            !sub_ad_lhs.contains("_branch_derivatives = self.branch_derivatives"),
+            "{sub_ad_lhs}"
+        );
+        assert!(
+            sub_ad_lhs.contains(
+                "self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis];"
+            ),
+            "{sub_ad_lhs}"
+        );
     }
 
     #[test]
@@ -14377,11 +14393,9 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_sub_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
         "        let right_value = self.values[right];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
         "        self.values[index] = left.value - right_value;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - right_node_derivatives[axis]; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - right_branch_derivatives[axis]; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
