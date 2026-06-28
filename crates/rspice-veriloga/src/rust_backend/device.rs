@@ -1995,11 +1995,11 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        compact_div_from_scalar_offset_denominator, compact_generated_stamp_surface,
-        compact_limited_exp_div_scaled_inputs_expression, duplicate_hoistable_derivative_rhs,
-        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
-        render_runtime_support_module, reuse_duplicate_derivative_locals_in_helper_block,
-        should_cache_compact_condition,
+        compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
+        compact_generated_stamp_surface, compact_limited_exp_div_scaled_inputs_expression,
+        duplicate_hoistable_derivative_rhs, generate_scratch_operation_helpers,
+        is_hoistable_generated_derivative_rhs, render_runtime_support_module,
+        reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
     };
 
     #[test]
@@ -5123,6 +5123,25 @@ fn stamp() {
         );
         assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
         assert!(!compact.contains("s.store_exp_ad("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_exp_div_scaled_inputs_as_fused_expression() {
+        let support = render_runtime_support_module();
+        assert!(
+            support.contains("fn exp_div_scaled_inputs("),
+            "missing fused exp divided-input helper"
+        );
+
+        let compact = compact_exp_div_scaled_inputs_expression(
+            "AdValue::div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale)",
+        )
+        .expect("divided input should compact");
+
+        assert_eq!(
+            compact,
+            "AdValue::exp_div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale)"
+        );
     }
 
     #[test]
@@ -18538,6 +18557,21 @@ fn generate_ad_value_struct() -> String {
         "    #[inline]",
         "    fn exp(arg: Self) -> Self { let value = arg.value.exp(); Self::unary_intrinsic(arg, value, value) }",
         "    #[inline]",
+        "    fn exp_div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let output = quotient.exp();",
+        "        let left_derivative_scale = left_scale * reciprocal * output;",
+        "        let right_derivative_scale = -quotient * reciprocal * right_scale * output;",
+        "        value.value = output;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * left_derivative_scale + right.branch_derivatives[index] * right_derivative_scale; }",
+        "        value",
+        "    }",
+        "    #[inline]",
         "    fn exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) }",
         "    #[inline]",
         "    fn limexp(arg: Self) -> Self { let raw = arg.value; if raw < 80.0 { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } else { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX) } }",
@@ -30586,6 +30620,17 @@ fn compact_limited_exp_div_scaled_inputs_expression(value: &str) -> Option<Strin
     ))
 }
 
+fn compact_exp_div_scaled_inputs_expression(value: &str) -> Option<String> {
+    let args = compact_ad_call_args(value, "div_scaled_inputs")?;
+    if args.len() != 4 {
+        return None;
+    }
+    Some(format!(
+        "AdValue::exp_div_scaled_inputs({}, {}, {}, {})",
+        args[0], args[1], args[2], args[3]
+    ))
+}
+
 struct CompactAffineTerm<'a> {
     value: &'a str,
     scale: String,
@@ -34504,7 +34549,11 @@ impl CompactAdEmitter<'_> {
         Ok(match normalized.as_str() {
             "abs" | "fabs" => format!("AdValue::abs({})", lower_arg(0)?),
             "sqrt" => format!("AdValue::sqrt({})", lower_arg(0)?),
-            "exp" => format!("AdValue::exp({})", lower_arg(0)?),
+            "exp" => {
+                let value = lower_arg(0)?;
+                compact_exp_div_scaled_inputs_expression(&value)
+                    .unwrap_or_else(|| format!("AdValue::exp({value})"))
+            }
             "limexp" => format!("AdValue::limexp({})", lower_arg(0)?),
             "__rspice_limited_exp" => {
                 let value = lower_arg(0)?;
