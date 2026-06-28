@@ -1,8 +1,9 @@
 //! Canonical multi-level Verilog-A IR.
 //!
 //! This module is the new semantic compiler target for Verilog-A models.
-//! The existing bytecode and Cranelift paths remain legacy runtime paths
-//! while this IR is introduced and verified.
+//! The bytecode VM remains the non-native runtime path while native mode is
+//! owned by the RSpice native JIT contract/backend as this IR is introduced
+//! and verified.
 
 pub mod artifact;
 pub mod diagnostic;

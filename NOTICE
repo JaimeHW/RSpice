@@ -185,8 +185,6 @@ serde-wasm-bindgen). Dependencies under other permissive licenses:
   - numpy (rust-numpy)   — BSD-2-Clause
   - libloading           — ISC
   - winit                — Apache-2.0
-  - cranelift (codegen/jit/module/native, optional) — Apache-2.0 WITH
-                           LLVM-exception
   - wide, bytemuck, raw-window-handle — Zlib OR Apache-2.0 OR MIT
   - blake3 (optional)    — CC0-1.0 OR Apache-2.0
   - pollster             — Apache-2.0 OR MIT

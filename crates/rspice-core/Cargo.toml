@@ -25,7 +25,7 @@ veriloga = [
     "dep:blake3",
     "dep:dirs",
 ]
-# Cranelift JIT for Verilog-A devices (native targets only)
+# Native JIT for Verilog-A devices (native targets only). Native mode is full JIT or error.
 veriloga-native = ["veriloga", "rspice-veriloga/native"]
 # Build-time generated Verilog-A built-ins compiled into rspice-core.
 veriloga-builtins = []

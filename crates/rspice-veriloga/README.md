@@ -3,7 +3,7 @@
 A Verilog-A compiler written in Rust: it takes Verilog-A source (the analog
 subset of the Verilog-AMS LRM 2.4), compiles it through parser, semantic,
 device-IR, canonical-IR, and backend stages, and provides the runtime
-(`VerilogADevice` + bytecode VM, plus an optional Cranelift JIT) that lets the
+(`VerilogADevice` + bytecode VM, plus the RSpice-owned native JIT contract) that lets the
 compiled model behave as a device inside the rspice-core simulator —
 evaluating currents and charges, producing an analytic Jacobian via automatic
 differentiation, and contributing noise sources. It is the backend of the
@@ -19,7 +19,7 @@ source text ──▶ preprocessor ──▶ lexer ──▶ parser ──▶ se
                                                        resolution     + derivatives       / generated Rust
                                                                                               │
                                             runtime:  vm (interpreter)  ◀─────────────────────┤
-                                                      native/ (Cranelift JIT, feature "native")
+                                                      native/ (RSpice native JIT contract, feature "native")
                                                       rust_backend (feature-gated built-ins)
                                                       device (VerilogADevice instance)
 ```
@@ -38,7 +38,7 @@ source text ──▶ preprocessor ──▶ lexer ──▶ parser ──▶ se
 | `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
 | `laplace` / `zfilter` | State-space runtime for the `laplace_*` (s-domain) and `zi_*` (sampled-data) filter operators |
 | `device` | `VerilogADevice`: the per-instance object the simulator drives — see below |
-| `native/` | Cranelift JIT (feature `native`): compiles bytecode programs to machine code with a hybrid execution plan — chunks that compile run native, anything unsupported falls back to the interpreter per-step, and loop conditions always interpret |
+| `native/` | RSpice-owned native JIT backend foundation (feature `native`): full native JIT or typed construction error; no bytecode fallback |
 | `disciplines` / `stdlib` / `types` | Discipline database, the built-in `disciplines.vams`/`constants.vams` headers (LRM 2.4 physical constants), the type system, function registry, and parameter-range types |
 | `source` / `error` | Source maps/spans and the `CompileError`/`CompileResult` types |
 
@@ -117,11 +117,12 @@ locals and `output`/`inout` arguments in analog functions.
 
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
-| `native` | off | Native-only Cranelift JIT performance backend for supported model fragments; without it models run on the bytecode interpreter only, and unsupported JIT fragments fall back to the interpreter |
+| `native` | off | RSpice-owned native JIT contract for Verilog-A devices; requested native mode is full native JIT or typed construction error, with no bytecode fallback |
 | `ams` | off | Declared for Verilog-AMS mixed-signal support; currently gates no code in the crate |
 
 `rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
-(JIT) and adds a blake3-keyed on-disk cache for compiled models on top.
+(RSpice-owned native JIT contract) and adds a blake3-keyed on-disk cache for
+compiled models on top.
 
 ## Building and testing
 
