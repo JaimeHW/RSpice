@@ -41,6 +41,7 @@ pub(crate) enum NativeOp {
     Abs,
     Sqrt,
     Compare(CompareOp),
+    Logical(LogicalOp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,13 @@ pub(crate) enum CompareOp {
     Le,
     Eq,
     Ne,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LogicalOp {
+    And,
+    Or,
+    Not,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -310,6 +318,26 @@ impl NativeProgram {
                     depth -= 1;
                     ops.push(NativeOp::Compare(compare_op(instruction)));
                 }
+                Instruction::And | Instruction::Or => {
+                    pop_binary_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::Logical(logical_op(instruction)));
+                }
+                Instruction::Not => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::Logical(LogicalOp::Not));
+                }
                 Instruction::PushCurrent(pos, neg) => {
                     let pair_index =
                         current_pair_index(model.clone(), *pos, *neg, limits.terminal_count)?;
@@ -551,6 +579,14 @@ fn compare_op(instruction: &Instruction) -> CompareOp {
     }
 }
 
+fn logical_op(instruction: &Instruction) -> LogicalOp {
+    match instruction {
+        Instruction::And => LogicalOp::And,
+        Instruction::Or => LogicalOp::Or,
+        _ => unreachable!("logical lowering only accepts binary logical instructions"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,6 +743,56 @@ mod tests {
             );
             assert_eq!(lowered.max_stack_depth(), 2);
         }
+    }
+
+    #[test]
+    fn lowers_logical_ops_as_native_ops() {
+        let cases = [
+            (Instruction::And, LogicalOp::And),
+            (Instruction::Or, LogicalOp::Or),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(300.0),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "logic",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("logical binary op has a direct native x64 lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::Const(300.0),
+                    NativeOp::Logical(expected),
+                ]
+            );
+            assert_eq!(lowered.max_stack_depth(), 2);
+        }
+
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushTemperature, Instruction::Not],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("not", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("logical not has a direct native x64 lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[NativeOp::LoadTemperature, NativeOp::Logical(LogicalOp::Not)]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
     }
 
     #[test]
