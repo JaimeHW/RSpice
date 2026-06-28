@@ -472,6 +472,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_mul_product3_helper_calls(source);
     source = compact_mul_powf_helper_calls(source);
     source = compact_mul_pow_helper_calls(source);
+    source = compact_mul_add_sub_helper_calls(source);
     source = compact_sqrt_mul_sub_operand_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
@@ -2021,6 +2022,95 @@ fn compact_mul_pow_helper_call_replacement(
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
     Some((statement_end, replacement))
+}
+
+fn compact_mul_add_sub_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_add_sub_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_add_sub_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = compact_mul_sub_by_sub_helper_line(target_index, left, right)
+        .or_else(|| compact_mul_add_sub_helper_line(target_index, left, right))
+        .or_else(|| compact_mul_add_sub_helper_line(target_index, right, left))?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_sub_by_sub_helper_line(
+    target_index: usize,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    let left_args = compact_ad_call_args(left, "sub")?;
+    let right_args = compact_ad_call_args(right, "sub")?;
+    if left_args.len() != 2 || right_args.len() != 2 {
+        return None;
+    }
+    let left_left = compact_scratch_ad_value_index(left_args[0])?;
+    let left_right = compact_scratch_ad_value_index(left_args[1])?;
+    let right_left = compact_scratch_ad_value_index(right_args[0])?;
+    let right_right = compact_scratch_ad_value_index(right_args[1])?;
+    Some(format!(
+        "scratch.store_mul_sub_by_sub({target_index}, {left_left}, {left_right}, {right_left}, {right_right});"
+    ))
+}
+
+fn compact_mul_add_sub_helper_line(
+    target_index: usize,
+    value: &str,
+    factor: &str,
+) -> Option<String> {
+    let (helper, left, right) = compact_add_sub_args(value)?;
+    compact_index_or_mixed_mul_add_sub_helper_line(target_index, helper, factor, left, right)
 }
 
 fn compact_sqrt_mul_sub_operand_helper_calls(source: String) -> String {
@@ -5130,6 +5220,47 @@ fn stamp() {
         assert!(
             compact.contains(
                 "s.store_mul_pow_mixed_aai(154, A::pow(s.ad_value(10), A::sqrt(s.ad_value(11))), A::div(s.ad_value(7), s.ad_value(8)), 9);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_add_sub_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_mul_add_components",
+            "fn store_mul_sub_components",
+            "fn store_mul_sub_by_sub",
+            "fn store_mul_sub_mixed_aii",
+            "fn store_mul_add_mixed_aai",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(200, AdValue::sub(scratch.ad_value(2), scratch.ad_value(3)), AdValue::sub(scratch.ad_value(4), scratch.ad_value(5)));
+    scratch.store_mul_ad(201, AdValue::sqrt(scratch.ad_value(6)), AdValue::sub(scratch.ad_value(7), scratch.ad_value(8)));
+    scratch.store_mul_ad(202, AdValue::add(AdValue::exp(scratch.ad_value(9)), scratch.ad_value(10)), AdValue::ln(scratch.ad_value(11)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_sub_by_sub(200, 2, 3, 4, 5);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_mul_sub_mixed_aii(201, A::sqrt(s.ad_value(6)), 7, 8);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_add_mixed_aai(202, A::ln(s.ad_value(11)), A::exp(s.ad_value(9)), 10);"
             ),
             "{compact}"
         );
@@ -13948,6 +14079,53 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_mul_add_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
+    "        let add_value = left_value + right_value;",
+    "        self.values[index] = factor_value * add_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor_node_derivatives[axis] * add_value + factor_value * (left_node_derivatives[axis] + right_node_derivatives[axis]); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * add_value + factor_value * (left_branch_derivatives[axis] + right_branch_derivatives[axis]); }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_add(&mut self, index: usize, factor: AdValue, left: AdValue, right: AdValue) {",
+    "        self.store_mul_add_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, left.value, left.node_derivatives, left.branch_derivatives, right.value, right.node_derivatives, right.branch_derivatives);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_by_sub(&mut self, index: usize, left_left: usize, left_right: usize, right_left: usize, right_right: usize) {",
+    "        let left_left_value = self.values[left_left];",
+    "        let left_right_value = self.values[left_right];",
+    "        let right_left_value = self.values[right_left];",
+    "        let right_right_value = self.values[right_right];",
+    "        let left_left_node_derivatives = self.node_derivatives[left_left];",
+    "        let left_right_node_derivatives = self.node_derivatives[left_right];",
+    "        let right_left_node_derivatives = self.node_derivatives[right_left];",
+    "        let right_right_node_derivatives = self.node_derivatives[right_right];",
+    "        let left_left_branch_derivatives = self.branch_derivatives[left_left];",
+    "        let left_right_branch_derivatives = self.branch_derivatives[left_right];",
+    "        let right_left_branch_derivatives = self.branch_derivatives[right_left];",
+    "        let right_right_branch_derivatives = self.branch_derivatives[right_right];",
+    "        let left_delta = left_left_value - left_right_value;",
+    "        let right_delta = right_left_value - right_right_value;",
+    "        self.values[index] = left_delta * right_delta;",
+    "        for axis in 0..Instance::NODE_COUNT { let left_derivative = left_left_node_derivatives[axis] - left_right_node_derivatives[axis]; let right_derivative = right_left_node_derivatives[axis] - right_right_node_derivatives[axis]; self.node_derivatives[index][axis] = left_derivative * right_delta + left_delta * right_derivative; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let left_derivative = left_left_branch_derivatives[axis] - left_right_branch_derivatives[axis]; let right_derivative = right_left_branch_derivatives[axis] - right_right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = left_derivative * right_delta + left_delta * right_derivative; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub_components(&mut self, index: usize, factor_value: f64, factor_node_derivatives: [f64; Instance::NODE_COUNT], factor_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT]) {",
+    "        let sub_value = left_value - right_value;",
+    "        self.values[index] = factor_value * sub_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor_node_derivatives[axis] * sub_value + factor_value * (left_node_derivatives[axis] - right_node_derivatives[axis]); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * sub_value + factor_value * (left_branch_derivatives[axis] - right_branch_derivatives[axis]); }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sub(&mut self, index: usize, factor: AdValue, left: AdValue, right: AdValue) {",
+    "        self.store_mul_sub_components(index, factor.value, factor.node_derivatives, factor.branch_derivatives, left.value, left.node_derivatives, left.branch_derivatives, right.value, right.node_derivatives, right.branch_derivatives);",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_mul_add_lhs(&mut self, index: usize, left: usize, middle: usize, right: usize) {",
     "        let left_value = self.values[left];",
     "        let middle_value = self.values[middle];",
@@ -17297,6 +17475,16 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     for mask in index_or_mixed_masks(3) {
         out.push_str(&generate_index_or_mixed_mul_pow_helper(&mask));
     }
+    for mask in index_or_mixed_masks(3) {
+        out.push_str(&generate_index_or_mixed_mul_add_sub_helper(
+            &mask,
+            "store_mul_add",
+        ));
+        out.push_str(&generate_index_or_mixed_mul_add_sub_helper(
+            &mask,
+            "store_mul_sub",
+        ));
+    }
     for mask in index_or_mixed_masks(2) {
         out.push_str(
             &generate_index_or_mixed_div_scaled_product_add_scaled_denominator_helper(&mask),
@@ -18251,6 +18439,28 @@ fn generate_index_or_mixed_mul_pow_helper(mask: &str) -> String {
         factor_ty = mixed_helper_type(mask, 0),
         base_ty = mixed_helper_type(mask, 1),
         exponent_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_index_or_mixed_mul_add_sub_helper(mask: &str, base: &str) -> String {
+    let operands = ["factor", "left", "right"];
+    let helper = index_or_mixed_helper_name(base, mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let factor = mixed_helper_component_args(mask, 0, "factor");
+    let left = mixed_helper_component_args(mask, 1, "left");
+    let right = mixed_helper_component_args(mask, 2, "right");
+    let components = format!("{base}_components");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, factor: {factor_ty}, left: {left_ty}, right: {right_ty}) {{
+{locals}        self.{components}(index, {factor}, {left}, {right});
+    }}
+"#,
+        factor_ty = mixed_helper_type(mask, 0),
+        left_ty = mixed_helper_type(mask, 1),
+        right_ty = mixed_helper_type(mask, 2),
     )
 }
 
@@ -27362,6 +27572,20 @@ fn compact_index_or_mixed_mul_pow_helper_line(
 ) -> Option<String> {
     let (helper, value_args) =
         compact_index_or_mixed_value_args("store_mul_pow", &[factor, base, exponent])?;
+    let mut call_args = Vec::with_capacity(4);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_mul_add_sub_helper_line(
+    target_index: usize,
+    base: &str,
+    factor: &str,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(base, &[factor, left, right])?;
     let mut call_args = Vec::with_capacity(4);
     call_args.push(target_index.to_string());
     call_args.extend(value_args);

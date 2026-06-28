@@ -7500,7 +7500,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_mul_ad(2, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_mul_add_mixed_aii(2, A::sub(s.ad_value(0), s.ad_value(1)), 0, 1);"),
         "{stamp}"
     );
     assert!(
