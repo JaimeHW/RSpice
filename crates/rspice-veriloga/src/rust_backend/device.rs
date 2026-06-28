@@ -5269,6 +5269,22 @@ fn stamp() {
             ),
             "{mul3_lhs}"
         );
+
+        let offset_scaled_div = helper_body(&support, "fn store_offset_scaled_div(");
+        assert!(
+            !offset_scaled_div.contains("_node_derivatives = self.node_derivatives"),
+            "{offset_scaled_div}"
+        );
+        assert!(
+            !offset_scaled_div.contains("_branch_derivatives = self.branch_derivatives"),
+            "{offset_scaled_div}"
+        );
+        assert!(
+            offset_scaled_div.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[left][axis] * reciprocal + self.node_derivatives[right][axis] * right_scale) * scale;"
+            ),
+            "{offset_scaled_div}"
+        );
     }
 
     #[test]
@@ -16697,16 +16713,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_offset_scaled_div(&mut self, index: usize, left: usize, right: usize, scale: f64, offset: f64) {",
         "        let left_value = self.values[left];",
         "        let right_value = self.values[right];",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
         "        let reciprocal = 1.0 / right_value;",
         "        let quotient = left_value * reciprocal;",
         "        let right_scale = -quotient * reciprocal;",
         "        self.values[index] = quotient * scale + offset;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale) * scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale) * scale; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (self.node_derivatives[left][axis] * reciprocal + self.node_derivatives[right][axis] * right_scale) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (self.branch_derivatives[left][axis] * reciprocal + self.branch_derivatives[right][axis] * right_scale) * scale; }",
         "    }",
         "",
         "    #[inline]",
