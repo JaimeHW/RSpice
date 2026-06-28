@@ -6,7 +6,7 @@ use crate::native::abi::{
     rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod,
     rspice_native_loop_limit_error, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
     rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
-    rspice_zi_step_native,
+    rspice_timer_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -254,6 +254,7 @@ impl FunctionCompiler {
                 NativeOp::LimitState(index) => self.emit_limit_state(index)?,
                 NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
                 NativeOp::ZiState(filter_id) => self.emit_zi_state(filter_id)?,
+                NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
                 NativeOp::WhiteNoise => self.emit_white_noise()?,
                 NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
@@ -989,6 +990,21 @@ impl FunctionCompiler {
         self.emit_context_filter_helper_call(target, filter_id, rspice_zi_step_native)
     }
 
+    fn emit_timer_state(&mut self, _timer_id: usize) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("timer state requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let start = XMM_STACK[self.depth - 2];
+        let period = XMM_STACK[self.depth - 1];
+        self.emit_timer_helper_call(start, period, rspice_timer_state_native);
+        self.depth -= 1;
+        Ok(())
+    }
+
     fn emit_ddt_state(&mut self, state_index: usize) -> JitResult<()> {
         if self.depth == 0 {
             return Err(JitError::Encoding {
@@ -1249,6 +1265,43 @@ impl FunctionCompiler {
         }
         self.encoder
             .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+    }
+
+    fn emit_timer_helper_call(&mut self, start: Xmm, period: Xmm, helper: TimerHelper) {
+        debug_assert!(self.uses_helper_calls);
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != start && register != period {
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+            }
+        }
+
+        if start != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, start);
+        }
+        if period != Xmm::Xmm1 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm1, period);
+        }
+        self.encoder
+            .mov_r64_r64(timer_ctx_arg_reg(), self.ctx_arg_reg());
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != start && register != period {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(start, Gpr::R11, call_result_disp());
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -1633,6 +1686,7 @@ type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
 type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
+type TimerHelper = unsafe extern "C" fn(f64, f64, *const crate::native::EvalContext) -> f64;
 type DynamicVariableHelper = unsafe extern "C" fn(f64, *const f64, usize, i64) -> f64;
 type DynamicVariableSlotHelper = unsafe extern "C" fn(f64, *mut f64, usize, i64) -> *mut f64;
 
@@ -1729,6 +1783,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::LoadVariableDyn { .. }
                 | NativeOp::LaplaceState(_)
                 | NativeOp::ZiState(_)
+                | NativeOp::TimerState(_)
                 | NativeOp::IdtModState(_)
         )
     })
@@ -1845,6 +1900,16 @@ fn context_filter_ctx_arg_reg() -> Gpr {
 #[cfg(not(windows))]
 fn context_filter_id_arg_reg() -> Gpr {
     Gpr::Rsi
+}
+
+#[cfg(windows)]
+fn timer_ctx_arg_reg() -> Gpr {
+    Gpr::R8
+}
+
+#[cfg(not(windows))]
+fn timer_ctx_arg_reg() -> Gpr {
+    Gpr::Rdi
 }
 
 #[cfg(windows)]
@@ -3321,6 +3386,35 @@ mod tests {
                 "analysis_type: {analysis_type}"
             );
         }
+    }
+
+    #[test]
+    fn generated_value_leaf_executes_timer_state_and_preserves_stack() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.5),
+                Instruction::TimerState(0),
+                Instruction::Add,
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile timer leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate timer leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 310.0;
+        ctx.timestep = 0.01;
+
+        ctx.time = 1.25;
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 310.0_f64.to_bits());
+
+        ctx.time = 1.5;
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 311.0_f64.to_bits());
     }
 
     #[test]

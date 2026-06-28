@@ -458,6 +458,46 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     filters[filter_id].eval(input, ctx.time, ctx.analysis_type == 2)
 }
 
+/// External helper function for native x64 periodic timer events.
+///
+/// Argument order matches x64 helper-call codegen: scalar start/period in XMM0
+/// and XMM1, followed by the context pointer in the platform's integer
+/// argument register for the third C ABI argument.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid EvalContext
+/// pointer. Invalid pointers are reported through the native runtime error
+/// channel; native mode never dispatches the bytecode interpreter for recovery.
+#[unsafe(export_name = "rspice_timer_state_native")]
+pub unsafe extern "C" fn rspice_timer_state_native(
+    start_time: f64,
+    period: f64,
+    ctx: *const EvalContext,
+) -> f64 {
+    if ctx.is_null() {
+        set_native_runtime_error(
+            "native timer helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+
+    let ctx = unsafe { &*ctx };
+    let current_time = ctx.time;
+    if current_time >= start_time && period > 0.0 {
+        let elapsed = current_time - start_time;
+        let cycles = (elapsed / period).floor();
+        let next_fire = start_time + cycles * period;
+        let tolerance = ctx.timestep.max(1e-15);
+        if (current_time - next_fire).abs() < tolerance {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    }
+}
+
 /// External helper function for native x64 runtime-indexed variable reads.
 ///
 /// `base_ptr` points at the first element of the array variable run. The helper
@@ -585,8 +625,8 @@ pub unsafe extern "C" fn rspice_current_lookup(
 mod tests {
     use super::{
         EvalContext, clear_native_runtime_error, rspice_dynamic_variable_load_native,
-        rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_zi_step_native,
-        take_native_runtime_error,
+        rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_timer_state_native,
+        rspice_zi_step_native, take_native_runtime_error,
     };
     use std::mem::{align_of, offset_of, size_of};
 
@@ -662,6 +702,89 @@ mod tests {
         assert!(
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn timer_native_helper_matches_vm_tolerance_and_reports_invalid_context() {
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_timer_state_native(1.0, 0.5, std::ptr::null()) };
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("invalid native timer context must record an error");
+        assert!(
+            error.contains("timer") && error.contains("EvalContext"),
+            "error must identify the invalid timer context, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+
+        let mut ctx = EvalContext {
+            voltages: std::ptr::null(),
+            internal_voltages: std::ptr::null(),
+            params: std::ptr::null(),
+            branch_currents: std::ptr::null(),
+            branch_currents_len: 0,
+            currents: std::ptr::null(),
+            currents_len: 0,
+            num_terminals: 0,
+            port_connected: std::ptr::null(),
+            port_connected_len: 0,
+            temperature: 0.0,
+            time: 1.5,
+            timestep: 0.01,
+            state_prev: std::ptr::null(),
+            state_values: std::ptr::null_mut(),
+            state_initialized: std::ptr::null_mut(),
+            state_initialized_len: 0,
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+            param_given: std::ptr::null(),
+            branch_unknowns: std::ptr::null(),
+            analysis_type: 2,
+            multiplicity: 1.0,
+            zi_filters: std::ptr::null_mut(),
+            zi_filters_len: 0,
+        };
+
+        assert_eq!(
+            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
+            1.0_f64.to_bits()
+        );
+
+        ctx.timestep = 0.001;
+        ctx.time = 1.0005;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
+            1.0_f64.to_bits(),
+            "timer should fire within timestep tolerance"
+        );
+
+        ctx.time = 1.0015;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
+            0.0_f64.to_bits(),
+            "timer should not fire outside timestep tolerance"
+        );
+
+        ctx.time = 0.75;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
+            0.0_f64.to_bits(),
+            "timer should not fire before start time"
+        );
+
+        ctx.time = 1.0;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(1.0, 0.0, &ctx) }.to_bits(),
+            0.0_f64.to_bits(),
+            "non-positive timer period should never fire"
         );
     }
 
