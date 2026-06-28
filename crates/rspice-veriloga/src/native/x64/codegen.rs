@@ -148,6 +148,7 @@ impl FunctionCompiler {
                 NativeOp::Mul => self.emit_binary_op(BinaryOp::Mul)?,
                 NativeOp::Div => self.emit_binary_op(BinaryOp::Div)?,
                 NativeOp::Neg => self.emit_neg()?,
+                NativeOp::Abs => self.emit_abs()?,
                 NativeOp::Sqrt => self.emit_sqrt()?,
             }
         }
@@ -253,6 +254,21 @@ impl FunctionCompiler {
         let scratch = self.scratch_register()?;
         self.emit_literal_load(scratch, SIGN_MASK);
         self.encoder.xorpd_xmm_xmm(target, scratch);
+        Ok(())
+    }
+
+    fn emit_abs(&mut self) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "abs requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.encoder.movq_r64_xmm(Gpr::Rax, target);
+        self.encoder.btr_r64_imm8(Gpr::Rax, 63);
+        self.encoder.movq_xmm_r64(target, Gpr::Rax);
         Ok(())
     }
 
@@ -658,6 +674,23 @@ mod tests {
         let ctx = eval_context(&[], &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()), 7.0);
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_abs_in_place() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushConst(-7.5), Instruction::Abs],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile abs leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate abs leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()), 7.5);
     }
 
     #[test]
