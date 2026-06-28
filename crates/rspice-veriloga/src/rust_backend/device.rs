@@ -5285,6 +5285,22 @@ fn stamp() {
             ),
             "{offset_scaled_div}"
         );
+
+        let mul3_affine_lhs = helper_body(&support, "fn store_mul3_affine_lhs(");
+        assert!(
+            !mul3_affine_lhs.contains("_node_derivatives = self.node_derivatives"),
+            "{mul3_affine_lhs}"
+        );
+        assert!(
+            !mul3_affine_lhs.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul3_affine_lhs}"
+        );
+        assert!(
+            mul3_affine_lhs.contains(
+                "let product_derivative = self.node_derivatives[left][axis] * middle_value + left_value * self.node_derivatives[middle][axis]; let affine_derivative = product_derivative * scale; self.node_derivatives[index][axis] = affine_derivative * right_value + affine_value * self.node_derivatives[right][axis];"
+            ),
+            "{mul3_affine_lhs}"
+        );
     }
 
     #[test]
@@ -14804,22 +14820,16 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul3_affine_lhs(&mut self, index: usize, left: usize, middle: usize, scale: f64, offset: f64, right: usize) {",
-    "        let left_value = self.values[left];",
-    "        let middle_value = self.values[middle];",
-    "        let right_value = self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let middle_node_derivatives = self.node_derivatives[middle];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let middle_branch_derivatives = self.branch_derivatives[middle];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        let product_value = left_value * middle_value;",
-    "        let affine_value = product_value * scale + offset;",
-    "        self.values[index] = affine_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left_node_derivatives[axis] * middle_value + left_value * middle_node_derivatives[axis]; let affine_derivative = product_derivative * scale; self.node_derivatives[index][axis] = affine_derivative * right_value + affine_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left_branch_derivatives[axis] * middle_value + left_value * middle_branch_derivatives[axis]; let affine_derivative = product_derivative * scale; self.branch_derivatives[index][axis] = affine_derivative * right_value + affine_value * right_branch_derivatives[axis]; }",
-    "    }",
+        "    fn store_mul3_affine_lhs(&mut self, index: usize, left: usize, middle: usize, scale: f64, offset: f64, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let middle_value = self.values[middle];",
+        "        let right_value = self.values[right];",
+        "        let product_value = left_value * middle_value;",
+        "        let affine_value = product_value * scale + offset;",
+        "        self.values[index] = affine_value * right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { let product_derivative = self.node_derivatives[left][axis] * middle_value + left_value * self.node_derivatives[middle][axis]; let affine_derivative = product_derivative * scale; self.node_derivatives[index][axis] = affine_derivative * right_value + affine_value * self.node_derivatives[right][axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = self.branch_derivatives[left][axis] * middle_value + left_value * self.branch_derivatives[middle][axis]; let affine_derivative = product_derivative * scale; self.branch_derivatives[index][axis] = affine_derivative * right_value + affine_value * self.branch_derivatives[right][axis]; }",
+        "    }",
     "",
     "    #[inline]",
     "    fn store_mul3_affine_rhs(&mut self, index: usize, left: usize, middle: usize, right: usize, scale: f64, offset: f64) {",
