@@ -5382,6 +5382,27 @@ fn stamp() {
             ),
             "{mul_neg_lhs}"
         );
+
+        let div_scaled_product3_indices =
+            helper_body(&support, "fn store_div_scaled_product3_indices(");
+        assert!(
+            !div_scaled_product3_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{div_scaled_product3_indices}"
+        );
+        assert!(
+            !div_scaled_product3_indices.contains("_branch_derivatives = self.branch_derivatives"),
+            "{div_scaled_product3_indices}"
+        );
+        assert!(
+            !div_scaled_product3_indices.contains("store_div_scaled_product3_components"),
+            "{div_scaled_product3_indices}"
+        );
+        assert!(
+            div_scaled_product3_indices.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[product_left][axis] * middle_right_value + self.node_derivatives[product_middle][axis] * left_right_value + self.node_derivatives[product_right][axis] * left_middle_value) * product_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale;"
+            ),
+            "{div_scaled_product3_indices}"
+        );
     }
 
     #[test]
@@ -19570,6 +19591,32 @@ fn generate_index_or_mixed_div_scaled_product3_helper(mask: &str) -> String {
         "denominator",
     ];
     let helper = index_or_mixed_helper_name("store_div_scaled_product3", mask);
+    if mask == "iiii" {
+        return format!(
+            r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, product_left: usize, product_middle: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64) {{
+        let product_left_value = self.values[product_left];
+        let product_middle_value = self.values[product_middle];
+        let product_right_value = self.values[product_right];
+        let denominator_raw = self.values[denominator];
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let left_middle_value = product_left_value * product_middle_value;
+        let left_right_value = product_left_value * product_right_value;
+        let middle_right_value = product_middle_value * product_right_value;
+        let scaled_product_value = left_middle_value * product_right_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = (self.node_derivatives[product_left][axis] * middle_right_value + self.node_derivatives[product_middle][axis] * left_right_value + self.node_derivatives[product_right][axis] * left_middle_value) * product_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = (self.branch_derivatives[product_left][axis] * middle_right_value + self.branch_derivatives[product_middle][axis] * left_right_value + self.branch_derivatives[product_right][axis] * left_middle_value) * product_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }}
+    }}
+"#,
+        );
+    }
     let locals = mixed_helper_component_locals(mask, &operands);
     let product_left = mixed_helper_component_args(mask, 0, "product_left");
     let product_middle = mixed_helper_component_args(mask, 1, "product_middle");
