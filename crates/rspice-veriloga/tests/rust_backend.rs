@@ -10054,6 +10054,103 @@ fn rust_backend_keeps_noncompact_conditional_branches_lazy() {
 }
 
 #[test]
+fn rust_backend_scopes_repeated_compact_condition_cache_to_branches() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(branch_scoped_repeated_compact_predicate_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile branch-scoped repeated compact predicate");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_allocates_distinct_cached_compact_condition_names() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(distinct_cached_compact_conditions_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile distinct compact conditions");
+    let stamp = generated
+        .files
+        .iter()
+        .filter(|file| {
+            file.relative_path == "stamp.rs" || file.relative_path.starts_with("stamp_blocks_")
+        })
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_bool_condition_locals_are_not_reused_for_different_expressions(&stamp);
+    assert_bool_condition_locals_are_not_self_contradictory(&stamp);
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_keeps_cheap_repeated_compact_conditions_inline() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(cheap_repeated_compact_conditions_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile cheap compact conditions");
+    let stamp = generated
+        .files
+        .iter()
+        .filter(|file| {
+            file.relative_path == "stamp.rs" || file.relative_path.starts_with("stamp_blocks_")
+        })
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !stamp.contains(": bool ="),
+        "cheap scalar threshold predicates should stay inline to preserve direct store fusion:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_keeps_parameter_division_compact_conditions_inline() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(parameter_division_compact_conditions_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile parameter-division compact conditions");
+    let stamp = generated
+        .files
+        .iter()
+        .filter(|file| {
+            file.relative_path == "stamp.rs" || file.relative_path.starts_with("stamp_blocks_")
+        })
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !stamp.contains(": bool ="),
+        "parameter/division predicates should stay inline to avoid disrupting direct store fusion:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn generated_conditional_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(conditional_device_source())
@@ -10872,6 +10969,43 @@ fn generated_compact_parameter_state_rust_compiles_with_runtime_stub() {
     .expect("transpile compact parameter-state device");
 
     assert_generated_rust_compiles(&generated);
+}
+
+fn assert_bool_condition_locals_are_not_reused_for_different_expressions(stamp: &str) {
+    let mut seen = std::collections::HashMap::new();
+    for line in stamp.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("let ") else {
+            continue;
+        };
+        let Some((name, value)) = rest.split_once(": bool = ") else {
+            continue;
+        };
+        let value = value.trim_end_matches(';');
+        if let Some(previous) = seen.insert(name.to_string(), value.to_string()) {
+            assert_eq!(
+                previous, value,
+                "condition local {name} was reused for different expressions:\n{stamp}"
+            );
+        }
+    }
+}
+
+fn assert_bool_condition_locals_are_not_self_contradictory(stamp: &str) {
+    for line in stamp.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("let ") else {
+            continue;
+        };
+        let Some((name, _)) = rest.split_once(": bool = ") else {
+            continue;
+        };
+        let contradiction = format!("(!{name}) && {name}");
+        assert!(
+            !stamp.contains(&contradiction),
+            "distinct compact predicates should not collapse to the same bool local:\n{stamp}"
+        );
+    }
 }
 
 fn assert_generated_rust_compiles(generated: &GeneratedRustDevice) {
@@ -17627,6 +17761,85 @@ module noncompact_lazy_conditional(p, n);
     electrical p, n;
     parameter real use_bad = 0.0;
     analog I(p, n) <+ (use_bad > 0.0) ? sqrt(-1.0) : V(p, n);
+endmodule
+"#
+}
+
+fn branch_scoped_repeated_compact_predicate_source() -> &'static str {
+    r#"
+module branch_scoped_repeated_compact_predicate(p, n);
+    inout p, n;
+    electrical p, n;
+    real v;
+    real selected;
+    analog begin
+        v = V(p, n);
+        selected = (((v + 1.0) * (v + 2.0)) > 0.0)
+            ? ((((v + 1.0) * (v + 2.0)) > 0.0) ? sqrt(v + 3.0) : exp(v))
+            : ((((v + 1.0) * (v + 2.0)) > 0.0) ? ln(v + 4.0) : (v * v));
+        I(p, n) <+ selected;
+    end
+endmodule
+"#
+}
+
+fn distinct_cached_compact_conditions_source() -> &'static str {
+    r#"
+module distinct_cached_compact_conditions(p, n);
+    inout p, n;
+    electrical p, n;
+    real v;
+    real selected;
+    analog begin
+        v = V(p, n);
+        selected = ((!(((v + 1.0) * (v + 2.0)) > 37.0))
+                && (!(((v + 3.0) * (v + 4.0)) < -37.0)))
+            ? sqrt(v + 1.0)
+            : (((!(((v + 1.0) * (v + 2.0)) > 37.0))
+                    && (((v + 3.0) * (v + 4.0)) < -37.0))
+                ? exp(v)
+                : ((((v + 1.0) * (v + 2.0)) > 37.0) ? v : 0.0));
+        I(p, n) <+ selected;
+    end
+endmodule
+"#
+}
+
+fn cheap_repeated_compact_conditions_source() -> &'static str {
+    r#"
+module cheap_repeated_compact_conditions(p, n);
+    inout p, n;
+    electrical p, n;
+    real v;
+    real selected;
+    analog begin
+        v = V(p, n);
+        selected = ((!(v > 37.0)) && (!(v < -37.0)))
+            ? sqrt(v + 1.0)
+            : (((!(v > 37.0)) && (v < -37.0))
+                ? exp(v)
+                : ((v > 37.0) ? v : 0.0));
+        I(p, n) <+ selected;
+    end
+endmodule
+"#
+}
+
+fn parameter_division_compact_conditions_source() -> &'static str {
+    r#"
+module parameter_division_compact_conditions(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real scale = 1.0;
+    real v;
+    real selected;
+    analog begin
+        v = V(p, n);
+        selected = (((scale + (0.5 * v)) / scale) > 1e-38)
+            ? sqrt(v + 1.0)
+            : ((((scale + (0.5 * v)) / scale) > 1e-38) ? exp(v) : (v * v));
+        I(p, n) <+ selected;
+    end
 endmodule
 "#
 }

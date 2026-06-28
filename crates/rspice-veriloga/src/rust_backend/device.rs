@@ -1917,8 +1917,22 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 mod compact_generated_stamp_surface_tests {
     use super::{
         compact_generated_stamp_surface, generate_scratch_operation_helpers,
-        render_runtime_support_module,
+        render_runtime_support_module, should_cache_compact_condition,
     };
+
+    #[test]
+    fn caches_only_expensive_compact_condition_shapes() {
+        assert!(should_cache_compact_condition(
+            "((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)"
+        ));
+        assert!(!should_cache_compact_condition("(s.v[933] > 37.0)"));
+        assert!(!should_cache_compact_condition(
+            "(((p.p0 + (0.5 * s.v[0])) / p.p0) > 1e-38)"
+        ));
+        assert!(should_cache_compact_condition(
+            "((!assign10_cond0) && assign10_cond1)"
+        ));
+    }
 
     #[test]
     fn rewrites_conditional_ad_rvalue_store_as_direct_branch_stores() {
@@ -18911,6 +18925,8 @@ fn emit_compact_equation_stamp(
         ddt_slots,
         branch_current_unknowns: potential_branch_slots.current_slots(),
         emitted: HashMap::new(),
+        condition_values: HashMap::new(),
+        condition_counter: 0,
         lines: Vec::new(),
     };
     let lowered = emitter.lower(equation.expression.id)?;
@@ -19967,6 +19983,8 @@ fn emit_compact_assignment_statement(
         ddt_slots,
         branch_current_unknowns,
         emitted: HashMap::new(),
+        condition_values: HashMap::new(),
+        condition_counter: 0,
         lines: Vec::new(),
     };
 
@@ -20085,6 +20103,8 @@ fn assignment_rhs_has_boolean_condition(
         ddt_slots,
         branch_current_unknowns,
         emitted: HashMap::new(),
+        condition_values: HashMap::new(),
+        condition_counter: 0,
         lines: Vec::new(),
     };
     Ok(emitter
@@ -20231,6 +20251,7 @@ fn push_compact_conditional_assignment_expr(
 
     out.push_str(&format!("{indent}if {condition} {{\n"));
     let branch_indent = format!("{indent}    ");
+    let parent_condition_values = emitter.condition_values.clone();
     push_compact_conditional_assignment_expr(
         emitter,
         then_expr,
@@ -20239,6 +20260,7 @@ fn push_compact_conditional_assignment_expr(
         &branch_indent,
     )?;
     out.push_str(&format!("{indent}}} else {{\n"));
+    emitter.condition_values = parent_condition_values.clone();
     push_compact_conditional_assignment_expr(
         emitter,
         else_expr,
@@ -20246,6 +20268,7 @@ fn push_compact_conditional_assignment_expr(
         out,
         &branch_indent,
     )?;
+    emitter.condition_values = parent_condition_values;
     out.push_str(&format!("{indent}}}\n"));
 
     Ok(())
@@ -30792,8 +30815,12 @@ struct CompactAdEmitter<'a> {
     ddt_slots: &'a DdtSlots,
     branch_current_unknowns: &'a HashMap<String, BranchCurrentSlot>,
     emitted: HashMap<ExprId, String>,
+    condition_values: HashMap<String, Option<String>>,
+    condition_counter: usize,
     lines: Vec<String>,
 }
+
+const COMPACT_INLINE_RHS_MAX_LEN: usize = 2048;
 
 impl CompactAdEmitter<'_> {
     fn lower(&mut self, id: ExprId) -> Result<String, RustBackendError> {
@@ -31093,7 +31120,7 @@ impl CompactAdEmitter<'_> {
             } => format!("AdValue::limexp({})", self.lower(*expr)?),
             other => return Err(self.unsupported(format!("expression kind {other:?}"))),
         };
-        if rhs.len() <= 512 && !compact_kind_has_side_effect(&kind) {
+        if rhs.len() <= COMPACT_INLINE_RHS_MAX_LEN && !compact_kind_has_side_effect(&kind) {
             return Ok(rhs);
         }
         self.lines.push(format!("let {base}: AdValue = {rhs};"));
@@ -31119,7 +31146,7 @@ impl CompactAdEmitter<'_> {
         ))
     }
 
-    fn lower_isolated_branch(&self, expr: ExprId) -> Result<CompactBranch, RustBackendError> {
+    fn lower_isolated_branch(&mut self, expr: ExprId) -> Result<CompactBranch, RustBackendError> {
         let mut branch = CompactAdEmitter {
             artifact: self.artifact,
             prefix: self.prefix,
@@ -31128,9 +31155,12 @@ impl CompactAdEmitter<'_> {
             ddt_slots: self.ddt_slots,
             branch_current_unknowns: self.branch_current_unknowns,
             emitted: self.emitted.clone(),
+            condition_values: self.condition_values.clone(),
+            condition_counter: self.condition_counter,
             lines: Vec::new(),
         };
         let value = branch.lower(expr)?;
+        self.condition_counter = branch.condition_counter;
         Ok(CompactBranch {
             lines: branch.lines,
             value,
@@ -31668,7 +31698,7 @@ impl CompactAdEmitter<'_> {
         }
         let left = self.comparison_operand_value(left)?;
         let right = self.comparison_operand_value(right)?;
-        Ok(format!("({left} {operator} {right})"))
+        Ok(self.cache_condition(format!("({left} {operator} {right})")))
     }
 
     fn comparison_operand_value(&mut self, id: ExprId) -> Result<String, RustBackendError> {
@@ -31845,26 +31875,45 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
                 let left = self.lower_condition(*left)?;
                 let right = self.lower_condition(*right)?;
-                Ok(format!("({left} && {right})"))
+                Ok(self.cache_condition(format!("({left} && {right})")))
             }
             HirExprKind::Binary { op, left, right } if op.as_str() == "Or" => {
                 let left = self.lower_condition(*left)?;
                 let right = self.lower_condition(*right)?;
-                Ok(format!("({left} || {right})"))
+                Ok(self.cache_condition(format!("({left} || {right})")))
             }
             HirExprKind::Unary { op, operand } if op.as_str() == "Not" => {
                 let operand = self.lower_condition(*operand)?;
-                Ok(negate_condition(&operand))
+                Ok(self.cache_condition(negate_condition(&operand)))
             }
             _ => {
                 if let Some(value) = self.value_expr(id)? {
-                    Ok(format!("({value} != 0.0)"))
+                    Ok(self.cache_condition(format!("({value} != 0.0)")))
                 } else {
                     let value = self.lower(id)?;
-                    Ok(format!("({value}.value != 0.0)"))
+                    Ok(self.cache_condition(format!("({value}.value != 0.0)")))
                 }
             }
         }
+    }
+
+    fn cache_condition(&mut self, condition: String) -> String {
+        let condition = condition.trim().to_string();
+        if !should_cache_compact_condition(&condition) {
+            return condition;
+        }
+        if let Some(cached) = self.condition_values.get(&condition) {
+            if let Some(name) = cached {
+                return name.clone();
+            }
+            let name = format!("{}_cond{}", self.prefix, self.condition_counter);
+            self.condition_counter += 1;
+            self.lines.push(format!("let {name}: bool = {condition};"));
+            self.condition_values.insert(condition, Some(name.clone()));
+            return name;
+        }
+        self.condition_values.insert(condition.clone(), None);
+        condition
     }
 
     fn direct_boolean_condition_expr(
@@ -33017,6 +33066,50 @@ fn rust_bool_literal(value: bool) -> String {
     } else {
         "false".to_string()
     }
+}
+
+fn should_cache_compact_condition(condition: &str) -> bool {
+    if condition == "true" || condition == "false" {
+        return false;
+    }
+    if condition.starts_with("scratch.bool_values[") || condition.starts_with("self.param_given[") {
+        return false;
+    }
+    if compact_condition_is_cheap_scalar_threshold(condition) {
+        return false;
+    }
+    if condition.contains("p.") || condition.contains('/') {
+        return false;
+    }
+    let uses_cached_condition = condition.contains("_cond");
+    if (condition.contains("&&") || condition.contains("||")) && uses_cached_condition {
+        return condition.len() >= 32;
+    }
+    if condition.contains("&&") || condition.contains("||") {
+        return false;
+    }
+    let uses_ad_value = condition.contains(".value");
+    let uses_multiple_voltage_reads = condition.matches("s.v[").count() > 1;
+    let uses_arithmetic = condition.contains('+') || condition.contains('*');
+    condition.len() >= 32 && uses_multiple_voltage_reads && (uses_ad_value || uses_arithmetic)
+}
+
+fn compact_condition_is_cheap_scalar_threshold(condition: &str) -> bool {
+    let mut condition = condition.trim();
+    if let Some(inner) = condition
+        .strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+    {
+        condition = inner.trim();
+    }
+    if condition.contains("&&") || condition.contains("||") || condition.contains(".value") {
+        return false;
+    }
+    let voltage_reads = condition.matches("s.v[").count();
+    voltage_reads == 1
+        && !condition.contains('+')
+        && !condition.contains('*')
+        && !condition.contains('/')
 }
 
 fn negate_condition(condition: &str) -> String {
