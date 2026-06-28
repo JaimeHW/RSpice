@@ -5535,6 +5535,55 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_mul_div_scaled_inputs_product_lhs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_mul_div_scaled_inputs_product_lhs("),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(150, AdValue::mul(
+        AdValue::mul(
+            AdValue::div_scaled_inputs(scratch.ad_value(2), params.numerator_scale, scratch.ad_value(3), params.denominator_scale),
+            scratch.ad_value(4)
+        ),
+        scratch.ad_value(5)
+    ));
+    scratch.store_ad_value(151, AdValue::mul(
+        AdValue::mul(
+            scratch.ad_value(6),
+            AdValue::div_scaled_inputs(scratch.ad_value(7), params.numerator_scale, scratch.ad_value(8), params.denominator_scale)
+        ),
+        scratch.ad_value(9)
+    ));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_mul_div_scaled_inputs_product_lhs(150, 2, p.numerator_scale, 3, p.denominator_scale, 4, 5);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_div_scaled_inputs_product_lhs(151, 7, p.numerator_scale, 8, p.denominator_scale, 6, 9);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_ad_product_lhs("),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sub_from_scalar_multiply_ad_rvalue_stores_as_direct_stores() {
         let source = r#"
 fn stamp() {
@@ -12738,13 +12787,39 @@ fn generate_scratch_operation_helpers() -> String {
     "        let product_value = left.value * right.value;",
     "        self.values[index] = product_value * source_value;",
     "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left.node_derivatives[axis] * right.value + left.value * right.node_derivatives[axis]; self.node_derivatives[index][axis] = product_derivative * source_value + product_value * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * right.value + left.value * right.branch_derivatives[axis]; self.branch_derivatives[index][axis] = product_derivative * source_value + product_value * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_ad_product_rhs(&mut self, index: usize, source: usize, left: AdValue, right: AdValue) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
+        "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * right.value + left.value * right.branch_derivatives[axis]; self.branch_derivatives[index][axis] = product_derivative * source_value + product_value * source_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_div_scaled_inputs_product_lhs(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, factor: usize, source: usize) {",
+        "        let numerator_value = self.values[numerator];",
+        "        let denominator_value = self.values[denominator] * denominator_scale;",
+        "        let factor_value = self.values[factor];",
+        "        let source_value = self.values[source];",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let div_value = numerator_value * numerator_scale * reciprocal;",
+        "        let product_value = div_value * factor_value;",
+        "        let numerator_derivative_scale = numerator_scale * reciprocal * factor_value * source_value;",
+        "        let denominator_derivative_scale = -div_value * reciprocal * denominator_scale * factor_value * source_value;",
+        "        let factor_derivative_scale = div_value * source_value;",
+        "        let source_derivative_scale = product_value;",
+        "        self.values[index] = product_value * source_value;",
+        "        let numerator_node_derivatives = self.node_derivatives[numerator];",
+        "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+        "        let factor_node_derivatives = self.node_derivatives[factor];",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let numerator_branch_derivatives = self.branch_derivatives[numerator];",
+        "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+        "        let factor_branch_derivatives = self.branch_derivatives[factor];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = numerator_node_derivatives[axis] * numerator_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale + factor_node_derivatives[axis] * factor_derivative_scale + source_node_derivatives[axis] * source_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = numerator_branch_derivatives[axis] * numerator_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale + factor_branch_derivatives[axis] * factor_derivative_scale + source_branch_derivatives[axis] * source_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_ad_product_rhs(&mut self, index: usize, source: usize, left: AdValue, right: AdValue) {",
+        "        let source_value = self.values[source];",
+        "        let source_node_derivatives = self.node_derivatives[source];",
     "        let source_branch_derivatives = self.branch_derivatives[source];",
     "        let product_value = left.value * right.value;",
     "        self.values[index] = source_value * product_value;",
@@ -26760,6 +26835,25 @@ fn compact_nested_multiply_lhs_helper_line(
         return Some(format!(
             "scratch.store_mul3_lhs({target_index}, {left}, {right}, {source});"
         ));
+    }
+
+    if !product.affine {
+        if let Some((numerator, numerator_scale, denominator, denominator_scale)) =
+            compact_div_scaled_inputs_scratch_args(product.left)
+            && let Some(factor) = right
+        {
+            return Some(format!(
+                "scratch.store_mul_div_scaled_inputs_product_lhs({target_index}, {numerator}, {numerator_scale}, {denominator}, {denominator_scale}, {factor}, {source});"
+            ));
+        }
+        if let Some((numerator, numerator_scale, denominator, denominator_scale)) =
+            compact_div_scaled_inputs_scratch_args(product.right)
+            && let Some(factor) = left
+        {
+            return Some(format!(
+                "scratch.store_mul_div_scaled_inputs_product_lhs({target_index}, {numerator}, {numerator_scale}, {denominator}, {denominator_scale}, {factor}, {source});"
+            ));
+        }
     }
 
     let left = compact_scratch_or_non_atomic_ad_arg(product.left)?;
