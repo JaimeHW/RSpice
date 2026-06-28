@@ -3686,7 +3686,7 @@ impl Instance {
     ) {
         s.copy_ad(396, 51);
 
-        s.store_div_ad_rhs(280, 472, A::square(s.ad_value(270)));
+        s.store_div_square_rhs(280, 472, 270);
 
         s.store_sub(278, 76, 122);
 

@@ -562,7 +562,7 @@ impl Instance {
         if ((!s.b[1441]) && s.b[2428]) {
             s.store_mul(127, 238, 186);
             s.copy_ad(349, 790);
-            s.store_div_ad_rhs(336, 636, A::square(s.ad_value(185)));
+            s.store_div_square_rhs(336, 636, 185);
             s.store_add_scaled_inputs3_indices(334, 85, 1.0, 155, (-1.0), 1436, -1.0);
             s.store_offset_mul_ad(335, A::div_from_scalar(2.0, s.ad_value(336)), s.ad_value(334), 1.0);
             s.store_sqrt_square_offset(782, 335, ((4.0 * 0.001) * 0.001));

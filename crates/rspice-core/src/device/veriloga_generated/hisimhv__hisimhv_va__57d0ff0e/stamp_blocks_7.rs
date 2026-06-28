@@ -4499,7 +4499,7 @@ impl Instance {
         s.v[1686] = if s.b[1686] { 1.0 } else { 0.0 };
 
         if ((s.b[1443] && s.b[1444]) && s.b[1686]) {
-            s.store_div_ad_rhs(336, 1502, A::square(s.ad_value(185)));
+            s.store_div_square_rhs(336, 1502, 185);
             s.store_add_scaled_inputs3_offset_indices(334, 85, 1.0, 155, (-1.0), 1438, -1.0, 2.0);
             s.store_offset_mul_ad(338, A::div_from_scalar(2.0, s.ad_value(336)), s.ad_value(334), 1.0);
         }

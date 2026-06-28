@@ -1845,7 +1845,7 @@ impl Instance {
         s.v[1806] = if s.b[1806] { 1.0 } else { 0.0 };
 
         if ((s.b[1441] && s.b[1442]) && s.b[1806]) {
-            s.store_div_ad_rhs(336, 1500, A::square(s.ad_value(185)));
+            s.store_div_square_rhs(336, 1500, 185);
             s.store_add_scaled_inputs4_indices(334, 85, 1.0, 974, 1.0, 155, -1.0, 1436, -1.0);
             s.store_offset_mul_ad(338, A::div_from_scalar(2.0, s.ad_value(336)), s.ad_value(334), 1.0);
         }
@@ -2375,7 +2375,7 @@ impl Instance {
             s.store_div_from_scalar(1907, (2.0 * 1.034943e-10), 1902);
             s.store_div(1900, 964, 622);
             s.store_div_from_scalar_offset_input(1899, 1.0, 1900, 1.0);
-            s.store_div_ad_rhs(1904, 1882, A::square(s.ad_value(185)));
+            s.store_div_square_rhs(1904, 1882, 185);
             s.store_div_from_scalar(1905, 2.0, 1904);
             s.store_scalar(1908, 4.0);
             s.store_scalar(1909, 0.1);

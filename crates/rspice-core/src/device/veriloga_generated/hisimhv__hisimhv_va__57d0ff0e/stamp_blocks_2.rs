@@ -4106,7 +4106,7 @@ impl Instance {
             s.store_div_from_scalar(2136, (2.0 * 1.034943e-10), 2133);
             s.store_div(2130, 964, 622);
             s.store_div_from_scalar_offset_input(2129, 1.0, 2130, 1.0);
-            s.store_div_ad_rhs(2134, 2114, A::square(s.ad_value(185)));
+            s.store_div_square_rhs(2134, 2114, 185);
             s.store_div_from_scalar(2135, 2.0, 2134);
             s.store_scalar(2143, 2.0);
         }
