@@ -199,6 +199,13 @@ impl X64Encoder {
         self.emit_modrm(0b11, dst.code(), src.code());
     }
 
+    pub(crate) fn cmp_r32_imm8(&mut self, reg: Gpr, value: u8) {
+        self.emit_rex(false, 0, 0, reg.code());
+        self.emit_u8(0x83);
+        self.emit_modrm(0b11, 0b111, reg.code());
+        self.emit_u8(value);
+    }
+
     pub(crate) fn movsd_m64_base_disp32_xmm(&mut self, base: Gpr, disp: i32, src: Xmm) {
         self.emit_u8(0xF2);
         self.emit_rex(false, src.code(), 0, base.code());
@@ -531,12 +538,16 @@ mod tests {
     fn encodes_u8_flag_load_and_f64_conversion() {
         let mut encoder = X64Encoder::new();
         encoder.movzx_r32_m8_base_disp32(Gpr::R10, Gpr::Rax, 8);
+        encoder.cmp_r32_imm8(Gpr::R10, 5);
+        encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+        encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
         encoder.cvtsi2sd_xmm_r32(Xmm::Xmm0, Gpr::R10);
 
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x44, 0x0F, 0xB6, 0x90, 8, 0, 0, 0, 0xF2, 0x41, 0x0F, 0x2A, 0xC2,
+                0x44, 0x0F, 0xB6, 0x90, 8, 0, 0, 0, 0x41, 0x83, 0xFA, 5, 0x41, 0x0F, 0x94, 0xC2,
+                0x45, 0x0F, 0xB6, 0xD2, 0xF2, 0x41, 0x0F, 0x2A, 0xC2,
             ]
         );
     }

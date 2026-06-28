@@ -142,6 +142,25 @@ endmodule
     )
 }
 
+fn analysis_guard_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_analysis_guard(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = analysis("dc") ? 1.0 : 10.0;
+        gain = gain + (analysis("tran") ? 2.0 : 0.0);
+        gain = gain + (analysis("static") ? 4.0 : 0.0);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -805,6 +824,44 @@ fn native_device_executes_scalar_simulator_context_reads() {
         "currents: {currents:?}"
     );
     assert!((device.variable("gain").unwrap() - 13.01).abs() < 1e-12);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_analysis_guards_without_fallback() {
+    let model = analysis_guard_model();
+    let mut device =
+        VerilogADevice::try_new("ANG1", model, &[1, 0]).expect("analysis model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[2.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native dc analysis guard succeeds")[0]
+            .to_bits(),
+        10.0_f64.to_bits()
+    );
+
+    device.set_analysis_type(2);
+    device.update_voltages(&[2.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native transient analysis guard succeeds")[0]
+            .to_bits(),
+        24.0_f64.to_bits()
+    );
+
+    device.set_analysis_type(4);
+    device.update_voltages(&[2.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native static analysis guard succeeds")[0]
+            .to_bits(),
+        28.0_f64.to_bits()
+    );
 }
 
 #[cfg(target_arch = "x86_64")]

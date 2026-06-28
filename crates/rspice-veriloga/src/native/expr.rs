@@ -33,6 +33,7 @@ pub(crate) enum NativeOp {
     LoadTemperature,
     LoadThermalVoltage,
     LoadTime,
+    Analysis(u8),
     LoadMfactor,
     Add,
     Sub,
@@ -266,6 +267,10 @@ impl NativeProgram {
                 }
                 Instruction::PushTime => {
                     ops.push(NativeOp::LoadTime);
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::Analysis(analysis_id) => {
+                    ops.push(NativeOp::Analysis(*analysis_id));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushMfactor => {

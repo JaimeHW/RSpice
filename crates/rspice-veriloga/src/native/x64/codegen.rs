@@ -21,6 +21,7 @@ const STATE_PREV_OFFSET: i32 = 104;
 const STATE_VALUES_OFFSET: i32 = 112;
 const PARAM_GIVEN_OFFSET: i32 = 152;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 160;
+const ANALYSIS_TYPE_OFFSET: i32 = 168;
 const MFACTOR_OFFSET: i32 = 176;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
@@ -167,6 +168,9 @@ impl FunctionCompiler {
                 }
                 NativeOp::LoadTime => {
                     self.emit_context_f64_load(TIME_OFFSET)?;
+                }
+                NativeOp::Analysis(analysis_id) => {
+                    self.emit_analysis_check(analysis_id)?;
                 }
                 NativeOp::LoadMfactor => {
                     self.emit_context_f64_load(MFACTOR_OFFSET)?;
@@ -938,6 +942,30 @@ impl FunctionCompiler {
         self.emit_context_pointer_load(ctx_pointer_field_offset);
         self.encoder
             .movzx_r32_m8_base_disp32(Gpr::R10, Gpr::Rax, byte_disp_u8(index)?);
+        self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
+        Ok(())
+    }
+
+    fn emit_analysis_check(&mut self, analysis_id: u8) -> JitResult<()> {
+        let dst = self.push_register()?;
+        if analysis_id > 5 {
+            self.encoder.xorpd_xmm_xmm(dst, dst);
+            return Ok(());
+        }
+
+        self.encoder
+            .movzx_r32_m8_base_disp32(Gpr::R10, self.ctx_arg_reg(), ANALYSIS_TYPE_OFFSET);
+        if analysis_id == 5 {
+            self.encoder.cmp_r32_imm8(Gpr::R10, 0);
+            self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R11);
+            self.encoder.cmp_r32_imm8(Gpr::R10, 4);
+            self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+            self.encoder.or_r8_r8(Gpr::R10, Gpr::R11);
+        } else {
+            self.encoder.cmp_r32_imm8(Gpr::R10, analysis_id);
+            self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+        }
+        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
         self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
         Ok(())
     }
@@ -1815,6 +1843,50 @@ mod tests {
             let ctx = eval_context(&[], &[], &[], &[]);
 
             assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected_bits, "{name}");
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_analysis_checks() {
+        let program = native_program(EntryKind::StampValue, vec![Instruction::Analysis(2)], 0);
+        let bytes = compile_value_function(&program).expect("compile analysis leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate analysis leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+
+        ctx.analysis_type = 2;
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 1.0_f64.to_bits());
+
+        ctx.analysis_type = 0;
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+
+        let static_program =
+            native_program(EntryKind::StampValue, vec![Instruction::Analysis(5)], 0);
+        let static_bytes =
+            compile_value_function(&static_program).expect("compile static analysis leaf");
+        let static_memory =
+            ExecutableMemory::allocate(&static_bytes).expect("allocate static analysis leaf");
+        let static_entry = static_memory.ptr_at(0).expect("entry point inside image");
+        let static_check: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(static_entry) };
+
+        for analysis_type in [0, 4] {
+            ctx.analysis_type = analysis_type;
+            assert_eq!(
+                static_check(&ctx, std::ptr::null()).to_bits(),
+                1.0_f64.to_bits(),
+                "analysis_type: {analysis_type}"
+            );
+        }
+        for analysis_type in [1, 2, 3, 5] {
+            ctx.analysis_type = analysis_type;
+            assert_eq!(
+                static_check(&ctx, std::ptr::null()).to_bits(),
+                0.0_f64.to_bits(),
+                "analysis_type: {analysis_type}"
+            );
         }
     }
 
