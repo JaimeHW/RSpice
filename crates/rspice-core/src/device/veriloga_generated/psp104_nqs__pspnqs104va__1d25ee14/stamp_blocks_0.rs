@@ -433,11 +433,11 @@ impl Instance {
 
         s.store_div_from_scalar(616, 1.0, 542);
 
-        s.store_mul_product3_rhs(617, 614, A::square(s.ad_value(611)), A::pow_from_scalar(s.v[444], A::offset(s.ad_value(543), (-1.0))), s.ad_value(543), -1.0);
+        s.store_mul_product3_mixed_iaai(617, 614, A::square(s.ad_value(611)), A::pow_from_scalar(s.v[444], A::offset(s.ad_value(543), (-1.0))), 543, -1.0);
 
-        s.store_mul_product3_rhs(618, 615, A::square(s.ad_value(612)), A::pow_from_scalar(s.v[444], A::offset(s.ad_value(544), (-1.0))), s.ad_value(544), -1.0);
+        s.store_mul_product3_mixed_iaai(618, 615, A::square(s.ad_value(612)), A::pow_from_scalar(s.v[444], A::offset(s.ad_value(544), (-1.0))), 544, -1.0);
 
-        s.store_mul_product3_rhs(619, 616, A::square(s.ad_value(613)), A::pow_from_scalar(s.v[444], A::offset(s.ad_value(545), (-1.0))), s.ad_value(545), -1.0);
+        s.store_mul_product3_mixed_iaai(619, 616, A::square(s.ad_value(613)), A::pow_from_scalar(s.v[444], A::offset(s.ad_value(545), (-1.0))), 545, -1.0);
 
         s.b[1000] = ((((s.v[546] != 1.0) || (s.v[547] != 1.0)) || (s.v[548] != 1.0)) || (s.v[549] != 1.0));
         s.v[1000] = if s.b[1000] { 1.0 } else { 0.0 };
@@ -1530,7 +1530,7 @@ impl Instance {
             s.store_scale(142, 326, p.p388);
             s.store_sub_from_scalar_ad(1012, 1.0, A::div_from_scalar((2.0 * p.p395), s.ad_value(312)));
             s.store_scalar(143, p.p389);
-            s.store_mul_product3_rhs(144, 316, s.ad_value(69), s.ad_value(69), s.ad_value(316), p.p390);
+            s.store_mul_product3_indices(144, 316, 69, 69, 316, p.p390);
             s.store_offset_scaled(344, 313, p.p398, (2.0 * p.p397));
             s.store_scalar(149, p.p399);
             s.store_add_scaled_inputs3_offset_indices(150, 314, p.p401, 316, p.p402, 318, p.p403, p.p400);

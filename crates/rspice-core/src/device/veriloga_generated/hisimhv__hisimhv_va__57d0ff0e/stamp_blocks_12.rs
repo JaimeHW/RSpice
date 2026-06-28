@@ -2490,7 +2490,7 @@ impl Instance {
             s.store_scalar(346, p.p270);
             s.store_scalar(344, p.p271);
             s.copy_ad(337, 170);
-            s.store_mul_product3_rhs(335, 337, s.ad_value(346), s.ad_value(344), s.ad_value(337), 1.0);
+            s.store_mul_product3_indices(335, 337, 346, 344, 337, 1.0);
             s.store_offset_add_ad(336, A::mul3(s.ad_value(253), s.ad_value(127), s.ad_value(346)), A::mul3(s.ad_value(344), s.ad_value(337), s.ad_value(337)), 1e-25);
         }
 
@@ -2896,7 +2896,7 @@ impl Instance {
             s.copy_ad(611, 605);
             s.copy_ad(612, 614);
             s.store_div_from_scalar(335, 1.6021918e-19, 604);
-            s.store_mul_product3_rhs(613, 611, s.ad_value(335), s.ad_value(612), s.ad_value(610), 1.0);
+            s.store_mul_product3_indices(613, 611, 335, 612, 610, 1.0);
         }
 
         s.b[3344] = ((s.v[613] < 1e-25) && (1e-25 >= 0.0));
@@ -3418,7 +3418,7 @@ impl Instance {
 
         if (s.b[3336] && (!s.b[3356])) {
             s.store_div_from_scalar_offset_input(335, 1.6021918e-19, 785, p.p422);
-            s.store_mul_product3_rhs(739, 597, s.ad_value(335), s.ad_value(596), s.ad_value(3354), 1.0);
+            s.store_mul_product3_indices(739, 597, 335, 596, 3354, 1.0);
         }
 
         s.b[3381] = ((s.v[739] < 1e-25) && (1e-25 >= 0.0));

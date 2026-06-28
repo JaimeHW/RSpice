@@ -2742,7 +2742,7 @@ impl Instance {
         }
 
         if (((!s.b[1733]) && s.b[1751]) && (!s.b[1774])) {
-            s.store_mul_product3_rhs(1271, 737, s.ad_value(723), s.ad_value(1168), s.ad_value(737), 1.0);
+            s.store_mul_product3_indices(1271, 737, 723, 1168, 737, 1.0);
             s.store_mul(1179, 737, 700);
         }
 

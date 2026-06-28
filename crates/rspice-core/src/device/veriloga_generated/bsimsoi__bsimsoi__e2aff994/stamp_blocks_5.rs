@@ -1960,7 +1960,7 @@ impl Instance {
             s.store_scaled_add_offset_sqrt_square_offset(167, 255, 1.0, (-1.0), ((0.25 * 2.0) * 2.0), 0.5);
             s.store_sqrt(169, 167);
             s.store_offset_div_ad(959, s.ad_value(954), A::add(s.ad_value(259), s.ad_value(169)), 1.0);
-            s.store_mul_product3_rhs(939, 363, A::mul3_scaled_output(s.ad_value(959), s.ad_value(337), s.ad_value(269), ((2.0 * p.p2) * ((p.p1147 * 1.0 / (s.v[184])) * s.v[199]))), s.ad_value(269), A::mul(A::sub(s.ad_value(961), s.ad_value(960)), A::add(A::offset(s.ad_value(961), 1.0), s.ad_value(960))), 1.0);
+            s.store_mul_product3_mixed_iaia(939, 363, A::mul3_scaled_output(s.ad_value(959), s.ad_value(337), s.ad_value(269), ((2.0 * p.p2) * ((p.p1147 * 1.0 / (s.v[184])) * s.v[199]))), 269, A::mul(A::sub(s.ad_value(961), s.ad_value(960)), A::add(A::offset(s.ad_value(961), 1.0), s.ad_value(960))), 1.0);
             s.store_add(380, 939, 380);
             s.store_scalar(964, (p.p1012 * p.p1316));
             s.store_scalar(965, (p.p1013 * p.p1316));

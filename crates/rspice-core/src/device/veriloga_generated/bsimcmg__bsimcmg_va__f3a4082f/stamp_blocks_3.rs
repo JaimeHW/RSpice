@@ -75,7 +75,7 @@ impl Instance {
         s.v[1440] = if s.b[1440] { 1.0 } else { 0.0 };
 
         if (s.b[1431] && s.b[1440]) {
-            s.store_mul_product3_rhs(168, 199, s.ad_value(158), s.ad_value(336), s.ad_value(163), 1.0);
+            s.store_mul_product3_indices(168, 199, 158, 336, 163, 1.0);
             s.store_scale(225, 168, 2.0);
             s.store_add_scaled_inputs_product_indices(226, 175, 1.0, 223, 1.0, 175, 168, 3.0);
             s.store_mul_add_scaled_product_rhs(227, 175, s.ad_value(223), 1.0, s.ad_value(175), s.ad_value(168), 2.0);
@@ -1484,7 +1484,7 @@ impl Instance {
 
         if s.b[1501] {
             s.store_offset_mul(170, 740, 482, 1.0);
-            s.store_mul_product3_rhs(171, 170, s.ad_value(485), s.ad_value(742), s.ad_value(169), (-p.p1109));
+            s.store_mul_product3_indices(171, 170, 485, 742, 169, (-p.p1109));
             s.store_limited_exp(172, 171);
             s.store_sub(168, 136, 479);
             s.store_sqrt_square_offset(483, 168, 0.0001);
@@ -1518,7 +1518,7 @@ impl Instance {
 
         if s.b[1501] {
             s.store_offset_mul(170, 746, 483, 1.0);
-            s.store_mul_product3_rhs(171, 170, s.ad_value(485), s.ad_value(742), s.ad_value(169), (-p.p1109));
+            s.store_mul_product3_indices(171, 170, 485, 742, 169, (-p.p1109));
             s.store_limited_exp(172, 171);
         }
 
@@ -3430,7 +3430,7 @@ impl Instance {
             s.store_square_ad(178, A::add(s.ad_value(584), s.ad_value(585)));
             s.store_add_scaled_product(586, A::div_scaled_product3_by_product(s.ad_value(175), s.ad_value(582), s.ad_value(177), 1.0, s.ad_value(176), s.ad_value(178), 1.0), 1.0, A::div(s.ad_value(169), s.ad_value(170)), A::add_scaled_inputs3(s.ad_value(171), 1.0, s.ad_value(172), 1.0, s.ad_value(174), 1.0), 1.0);
             s.store_scaled_mul(340, 573, 179, 1.60219e-19);
-            s.store_mul_product3_rhs(341, 585, s.ad_value(158), s.ad_value(580), s.ad_value(585), (s.v[115] * 10000000000.0));
+            s.store_mul_product3_indices(341, 585, 158, 580, 585, (s.v[115] * 10000000000.0));
             s.store_mul_ad_product_lhs(587, A::div(s.ad_value(340), s.ad_value(341)), s.ad_value(124), 124);
             s.store_add(169, 587, 586);
         }

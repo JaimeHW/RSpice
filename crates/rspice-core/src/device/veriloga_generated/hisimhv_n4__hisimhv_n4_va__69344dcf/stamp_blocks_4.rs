@@ -1268,7 +1268,7 @@ impl Instance {
             s.store_div(339, 662, 958);
             s.store_mul(340, 663, 958);
             s.store_ad_value(336, A::exp_div_scaled_inputs(s.ad_value(340), -1.0, s.ad_value(283), 1.0));
-            s.store_mul_product3_rhs(280, 336, s.ad_value(339), s.ad_value(283), s.ad_value(134), 1.0);
+            s.store_mul_product3_indices(280, 336, 339, 283, 134, 1.0);
             s.store_mul3_lhs(288, 339, 283, 336);
         }
 
@@ -1335,8 +1335,8 @@ impl Instance {
             s.store_div_from_scalar_mul_ad(338, 1.0, s.ad_value(334), s.ad_value(335));
             s.store_scalar(341, (s.v[165] * s.v[554]));
             s.store_exp_mul_scaled_lhs_indices(336, 341, -1.0, 338);
-            s.store_mul_product3_rhs(340, 338, s.ad_value(341), s.ad_value(336), s.ad_value(338), 1.0);
-            s.store_mul_product3_rhs(281, 336, s.ad_value(664), s.ad_value(134), s.ad_value(334), 1.0);
+            s.store_mul_product3_indices(340, 338, 341, 336, 338, 1.0);
+            s.store_mul_product3_indices(281, 336, 664, 134, 334, 1.0);
         }
 
         s.b[2589] = (p.p45 == 0.0);
@@ -1688,7 +1688,7 @@ impl Instance {
         if (s.b[2599] && (!s.b[2607])) {
             s.store_mul_div_from_scalar_ad_lhs(337, s.v[520], A::square(s.ad_value(195)), 336);
             s.store_scale(337, 162, (s.v[519] * s.v[632]));
-            s.store_mul_product3_rhs(202, 336, s.ad_value(337), s.ad_value(195), s.ad_value(195), 1.0);
+            s.store_mul_product3_indices(202, 336, 337, 195, 195, 1.0);
         }
 
         if s.b[2599] {
@@ -1778,7 +1778,7 @@ impl Instance {
         if ((!s.b[2611]) && (!s.b[2613])) {
             s.store_exp(335, 334);
             s.store_scale_ad(336, A::div_from_scalar(s.v[511], s.ad_value(192)), (1.6021918e-19 * s.v[632]));
-            s.store_mul_product3_rhs(203, 335, s.ad_value(336), s.ad_value(197), s.ad_value(197), 1.0);
+            s.store_mul_product3_indices(203, 335, 336, 197, 197, 1.0);
         }
 
         if (!s.b[2611]) {
@@ -1841,7 +1841,7 @@ impl Instance {
             s.store_exp(335, 334);
             s.store_div_from_scalar(337, 1.0, 192);
             s.store_scale(336, 337, (s.v[511] * (1.6021918e-19 * s.v[632])));
-            s.store_mul_product3_rhs(204, 335, s.ad_value(336), s.ad_value(198), s.ad_value(198), 1.0);
+            s.store_mul_product3_indices(204, 335, 336, 198, 198, 1.0);
         }
 
         if (!s.b[2615]) {

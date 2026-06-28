@@ -4284,7 +4284,7 @@ impl Instance {
 
         s.store_scaled_add(1009, 932, 1001, 0.5);
 
-        s.store_mul_product3_rhs(1010, 995, s.ad_value(1002), s.ad_value(187), A::exp(A::mul(s.ad_value(40), s.ad_value(291))), 1.0);
+        s.store_mul_product3_mixed_iiia(1010, 995, 1002, 187, A::exp(A::mul(s.ad_value(40), s.ad_value(291))), 1.0);
 
         s.store_mul_ad_product_rhs(1011, 1003, s.ad_value(188), A::exp(A::mul(s.ad_value(40), s.ad_value(291))));
 
