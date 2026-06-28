@@ -1,66 +1,54 @@
-//! Native Code Generation for Verilog-A
+//! Native JIT backend for Verilog-A models.
 //!
-//! Provides JIT compilation of Verilog-A models to native machine code
-//! using Cranelift. This gives near-C performance without requiring
-//! external compilers.
+//! Native mode is full JIT or error. The bytecode interpreter is not a
+//! fallback path when this module is asked to compile a model.
 
-#[cfg(feature = "native")]
-pub mod cranelift_jit;
+mod abi;
+mod error;
+mod model;
+mod runtime;
+mod target;
+pub mod x64;
 
-#[cfg(feature = "native")]
-pub use cranelift_jit::{
-    EvalContext, JitCompiler, JitError, JitResult, NativeModel, PlanStats, PlanStep, StampFn,
+pub use abi::{
+    rspice_current_lookup, rspice_laplace_step, rspice_limexp, rspice_limit, rspice_table_lookup,
+    EvalContext,
 };
+pub use error::{JitError, JitResult};
+pub use model::{AssignmentFn, NativeModel, PlanStats, PlanStep, StampFn};
+pub use runtime::ExecutableMemory;
+pub use target::{Architecture, TargetSpec};
 
 use crate::codegen::CompiledModel;
 
-/// Try to compile a model to native code
-///
-/// Returns `Some(NativeModel)` if compilation succeeds, `None` otherwise.
-/// The caller should fall back to bytecode interpretation if this returns `None`.
-#[cfg(feature = "native")]
-pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
-    log::debug!("[JIT] Compiling model '{}' with Cranelift...", model.name);
+pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
+    let target = TargetSpec::host().ok_or_else(|| JitError::UnsupportedTarget {
+        target: "unknown".into(),
+        reason: "host architecture is not supported".into(),
+    })?;
 
-    // A compiler panic (e.g. a register-allocator limit on a pathological
-    // function) must degrade to the interpreter, never kill a simulation
-    let compiled =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match JitCompiler::new() {
-            Ok(compiler) => match compiler.compile(model) {
-                Ok(native_model) => {
-                    log::info!(
-                        "[JIT] Compiled '{}': {} assignment chunks, {}/{} native stamps",
-                        model.name,
-                        native_model.chunk_count(),
-                        native_model.native_stamp_count(),
-                        model.stamp_programs.len()
-                    );
-                    Some(native_model)
-                }
-                Err(e) => {
-                    log::warn!("[JIT] Compilation failed for '{}': {}", model.name, e);
-                    None
-                }
-            },
-            Err(e) => {
-                log::warn!("[JIT] Failed to create compiler: {}", e);
-                None
-            }
-        }));
-    match compiled {
-        Ok(result) => result,
-        Err(_) => {
-            log::warn!(
-                "[JIT] Compiler panicked on '{}'; falling back to the interpreter",
-                model.name
+    match target.arch {
+        Architecture::X64 => Err(JitError::unsupported_current_optir(model.name.clone())),
+        Architecture::AArch64 => Err(JitError::UnsupportedTarget {
+            target: target.display_name().into(),
+            reason: "AArch64 backend boundary exists but is not enabled".into(),
+        }),
+    }
+}
+
+/// Compatibility shim for the pre-foundation device integration. New native
+/// callers must use [`compile_native`] so unsupported coverage is surfaced as
+/// a typed hard-fail error.
+pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
+    match compile_native(model) {
+        Ok(native) => Some(native),
+        Err(error) => {
+            log::debug!(
+                "[JIT] Native compilation failed for '{}': {}",
+                model.name,
+                error
             );
             None
         }
     }
-}
-
-/// Stub for when native feature is disabled
-#[cfg(not(feature = "native"))]
-pub fn try_compile_native(_model: &CompiledModel) -> Option<()> {
-    None
 }
