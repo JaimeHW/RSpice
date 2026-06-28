@@ -202,6 +202,8 @@ impl FunctionCompiler {
                     self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
                 }
                 NativeOp::LimitState(index) => self.emit_limit_state(index)?,
+                NativeOp::WhiteNoise => self.emit_white_noise()?,
+                NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
                 NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
                 NativeOp::IdtState(index) => self.emit_idt_state(index)?,
@@ -582,6 +584,34 @@ impl FunctionCompiler {
         self.patch_rel32_to_current(initialized_flags_out_of_range)?;
         self.patch_rel32_to_current(no_state)?;
         self.patch_rel32_to_current(done_after_initialized_store)?;
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_white_noise(&mut self) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "white noise requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.encoder.xorpd_xmm_xmm(target, target);
+        Ok(())
+    }
+
+    fn emit_flicker_noise(&mut self) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("flicker noise requires stack depth 2, found {}", self.depth)
+                    .into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 2];
+        self.encoder.xorpd_xmm_xmm(target, target);
         self.depth -= 1;
         Ok(())
     }
@@ -1923,6 +1953,76 @@ mod tests {
         let ctx = eval_context(&[], &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()), 7.5);
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_large_signal_noise_as_zero() {
+        let cases = [
+            (
+                "white-standalone",
+                vec![Instruction::PushConst(5.0), Instruction::WhiteNoise],
+                0.0_f64,
+            ),
+            (
+                "flicker-standalone",
+                vec![
+                    Instruction::PushConst(5.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::FlickerNoise,
+                ],
+                0.0_f64,
+            ),
+            (
+                "white-composed",
+                vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(5.0),
+                    Instruction::WhiteNoise,
+                    Instruction::Add,
+                ],
+                2.0_f64,
+            ),
+            (
+                "flicker-composed",
+                vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(5.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::FlickerNoise,
+                    Instruction::Add,
+                ],
+                2.0_f64,
+            ),
+            (
+                "flicker-overwrite-dead-register",
+                vec![
+                    Instruction::PushConst(7.0),
+                    Instruction::PushConst(5.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::FlickerNoise,
+                    Instruction::PushConst(3.0),
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                10.0_f64,
+            ),
+        ];
+
+        for (name, instructions, expected) in cases {
+            let program = native_program(EntryKind::StampValue, instructions, 0);
+            let bytes = compile_value_function(&program).expect("compile noise leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate noise leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
     }
 
     #[test]
