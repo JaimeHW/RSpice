@@ -2127,6 +2127,42 @@ mod compact_generated_stamp_surface_tests {
     }
 
     #[test]
+    fn reduces_repeated_division_denominators_inside_guarded_helper_scope() {
+        let block = "\
+        let (eq0_d_n0, eq0_d_n1,) = {\n\
+    if s.b[0] {\n\
+        let eq0_e5_d_n0: f64 = (s.dn[0][0] / s.v[1]);\n\
+        let eq0_e5_d_n1: f64 = (s.dn[0][1] / s.v[1]);\n\
+        (eq0_e5_d_n0, eq0_e5_d_n1,)\n\
+    } else {\n\
+        (0.0, 0.0,)\n\
+    }\n\
+};\n";
+        let rewritten = reuse_duplicate_derivative_locals_in_helper_block(block);
+
+        let if_offset = rewritten.find("if s.b[0]").expect("guarded scope");
+        let alias = "let __rspice_inv_cse_0: f64 = 1.0 / s.v[1];";
+        let alias_offset = rewritten.find(alias).expect("reciprocal CSE alias");
+        assert!(
+            if_offset < alias_offset,
+            "reciprocal aliases must stay inside the guarded scope that originally performed the division:\n{rewritten}"
+        );
+        assert!(
+            rewritten.contains("let eq0_e5_d_n0: f64 = (s.dn[0][0] * __rspice_inv_cse_0);"),
+            "{rewritten}"
+        );
+        assert!(
+            rewritten.contains("let eq0_e5_d_n1: f64 = (s.dn[0][1] * __rspice_inv_cse_0);"),
+            "{rewritten}"
+        );
+        assert_eq!(
+            rewritten.matches("/ s.v[1]").count(),
+            1,
+            "only the reciprocal alias should divide by the repeated denominator:\n{rewritten}"
+        );
+    }
+
+    #[test]
     fn caches_only_expensive_compact_condition_shapes() {
         assert!(should_cache_compact_condition(
             "((((s.v[33] - s.v[41]) + s.v[30]) - s.v[20]) <= 0.0)"
@@ -19754,11 +19790,11 @@ fn reuse_duplicate_derivative_locals_in_helper_block(block: &str) -> String {
     for _ in 0..64 {
         let next = reuse_duplicate_derivative_locals_in_helper_block_once(&rewritten);
         if next == rewritten {
-            return rewritten;
+            return reuse_repeated_division_denominators_in_helper_block(&rewritten);
         }
         rewritten = next;
     }
-    rewritten
+    reuse_repeated_division_denominators_in_helper_block(&rewritten)
 }
 
 fn reuse_duplicate_derivative_locals_in_helper_block_once(block: &str) -> String {
@@ -19874,6 +19910,165 @@ fn next_generated_derivative_cse_alias_index(block: &str) -> usize {
 
 fn generated_derivative_cse_alias_index(local: &str) -> Option<usize> {
     let suffix = local.strip_prefix("__rspice_deriv_cse_")?;
+    suffix.parse().ok()
+}
+
+#[derive(Clone, Debug)]
+struct GeneratedDivisionLocal {
+    indent: String,
+    local: String,
+    numerator: String,
+    denominator: String,
+    original_line: String,
+}
+
+fn reuse_repeated_division_denominators_in_helper_block(block: &str) -> String {
+    let mut rewritten = String::with_capacity(block.len());
+    let mut run = Vec::<GeneratedDivisionLocal>::new();
+    let mut next_alias_index = next_generated_reciprocal_cse_alias_index(block);
+
+    for line in block.lines() {
+        let division = parse_generated_f64_division_assignment(line);
+        match (run.last(), division) {
+            (Some(previous), Some(current)) if previous.denominator == current.denominator => {
+                run.push(current);
+            }
+            (_, Some(current)) => {
+                flush_generated_division_run(&mut rewritten, &mut run, &mut next_alias_index);
+                run.push(current);
+            }
+            (_, None) => {
+                flush_generated_division_run(&mut rewritten, &mut run, &mut next_alias_index);
+                rewritten.push_str(line);
+                rewritten.push('\n');
+            }
+        }
+    }
+
+    flush_generated_division_run(&mut rewritten, &mut run, &mut next_alias_index);
+    rewritten
+}
+
+fn flush_generated_division_run(
+    out: &mut String,
+    run: &mut Vec<GeneratedDivisionLocal>,
+    next_alias_index: &mut usize,
+) {
+    if run.is_empty() {
+        return;
+    }
+
+    if run.len() == 1 {
+        out.push_str(&run[0].original_line);
+        out.push('\n');
+        run.clear();
+        return;
+    }
+
+    let alias = format!("__rspice_inv_cse_{}", *next_alias_index);
+    *next_alias_index += 1;
+    let indent = &run[0].indent;
+    let denominator = &run[0].denominator;
+    out.push_str(&format!(
+        "{indent}let {alias}: f64 = 1.0 / {denominator};\n"
+    ));
+    for division in run.iter() {
+        let numerator = generated_product_operand(&division.numerator);
+        out.push_str(&format!(
+            "{}let {}: f64 = ({} * {});\n",
+            division.indent, division.local, numerator, alias
+        ));
+    }
+    run.clear();
+}
+
+fn parse_generated_f64_division_assignment(line: &str) -> Option<GeneratedDivisionLocal> {
+    let indent_len = line.len() - line.trim_start().len();
+    let indent = &line[..indent_len];
+    let (local, rhs) = parse_generated_f64_local_assignment(line)?;
+    let (numerator, denominator) = split_generated_top_level_division_rhs(rhs)?;
+    if !is_reusable_generated_reciprocal_denominator(denominator) {
+        return None;
+    }
+    Some(GeneratedDivisionLocal {
+        indent: indent.to_string(),
+        local: local.to_string(),
+        numerator: numerator.to_string(),
+        denominator: denominator.to_string(),
+        original_line: line.to_string(),
+    })
+}
+
+fn split_generated_top_level_division_rhs(rhs: &str) -> Option<(&str, &str)> {
+    let rhs = strip_generated_outer_parens(rhs.trim());
+    let slash = find_top_level_ascii_byte(rhs, b'/')?;
+    Some((rhs[..slash].trim(), rhs[(slash + 1)..].trim()))
+}
+
+fn strip_generated_outer_parens(mut value: &str) -> &str {
+    loop {
+        let trimmed = value.trim();
+        if !trimmed.starts_with('(') {
+            return trimmed;
+        }
+        let Some(close) = find_matching_ascii_delimiter(trimmed, 0, b'(', b')') else {
+            return trimmed;
+        };
+        if close != trimmed.len() - 1 {
+            return trimmed;
+        }
+        value = &trimmed[1..close];
+    }
+}
+
+fn is_reusable_generated_reciprocal_denominator(denominator: &str) -> bool {
+    let denominator = denominator.trim();
+    !denominator.is_empty()
+        && !denominator.contains('{')
+        && !denominator.contains('}')
+        && !denominator.contains(';')
+        && !denominator.contains(',')
+        && find_top_level_ascii_byte(strip_generated_outer_parens(denominator), b'/').is_none()
+        && !denominator.contains("stamper")
+}
+
+fn generated_product_operand(value: &str) -> String {
+    let value = value.trim();
+    if is_simple_generated_product_operand(value) || generated_outer_parens_cover(value) {
+        value.to_string()
+    } else {
+        format!("({value})")
+    }
+}
+
+fn is_simple_generated_product_operand(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'[' | b']'))
+}
+
+fn generated_outer_parens_cover(value: &str) -> bool {
+    let value = value.trim();
+    value.starts_with('(')
+        && find_matching_ascii_delimiter(value, 0, b'(', b')')
+            .is_some_and(|close| close == value.len() - 1)
+}
+
+fn next_generated_reciprocal_cse_alias_index(block: &str) -> usize {
+    block
+        .lines()
+        .filter_map(|line| {
+            let (local, _) = parse_generated_f64_local_assignment(line)?;
+            generated_reciprocal_cse_alias_index(local)
+        })
+        .max()
+        .map(|index| index + 1)
+        .unwrap_or(0)
+}
+
+fn generated_reciprocal_cse_alias_index(local: &str) -> Option<usize> {
+    let suffix = local.strip_prefix("__rspice_inv_cse_")?;
     suffix.parse().ok()
 }
 
