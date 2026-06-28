@@ -49,6 +49,8 @@ pub(crate) enum CompareOp {
     Lt,
     Ge,
     Le,
+    Eq,
+    Ne,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -293,7 +295,12 @@ impl NativeProgram {
                     )?;
                     ops.push(NativeOp::Sqrt);
                 }
-                Instruction::Gt | Instruction::Lt | Instruction::Ge | Instruction::Le => {
+                Instruction::Gt
+                | Instruction::Lt
+                | Instruction::Ge
+                | Instruction::Le
+                | Instruction::Eq
+                | Instruction::Ne => {
                     pop_binary_stack(
                         model.clone(),
                         entry_kind,
@@ -538,6 +545,8 @@ fn compare_op(instruction: &Instruction) -> CompareOp {
         Instruction::Lt => CompareOp::Lt,
         Instruction::Ge => CompareOp::Ge,
         Instruction::Le => CompareOp::Le,
+        Instruction::Eq => CompareOp::Eq,
+        Instruction::Ne => CompareOp::Ne,
         _ => unreachable!("comparison lowering only accepts ordered comparison instructions"),
     }
 }
@@ -655,6 +664,38 @@ mod tests {
             let lowered =
                 NativeProgram::from_bytecode("cmp", EntryKind::Assignment, &program, limits(0, 0))
                     .expect("ordered comparison has a direct native x64 lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::Const(300.0),
+                    NativeOp::Compare(expected),
+                ]
+            );
+            assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_equality_comparisons_as_native_binary_ops() {
+        let cases = [
+            (Instruction::Eq, CompareOp::Eq),
+            (Instruction::Ne, CompareOp::Ne),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(300.0),
+                    instruction,
+                ],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode("eq", EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("equality comparison has a direct native x64 lowering");
 
             assert_eq!(
                 lowered.ops(),

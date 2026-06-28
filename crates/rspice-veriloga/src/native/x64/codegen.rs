@@ -16,6 +16,7 @@ const MFACTOR_OFFSET: i32 = 176;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
+const BOOLEAN_EPSILON: f64 = 1.0e-15;
 const XMM_STACK: [Xmm; 6] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
@@ -267,10 +268,14 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
+        self.emit_abs_register(target);
+        Ok(())
+    }
+
+    fn emit_abs_register(&mut self, target: Xmm) {
         self.encoder.movq_r64_xmm(Gpr::Rax, target);
         self.encoder.btr_r64_imm8(Gpr::Rax, 63);
         self.encoder.movq_xmm_r64(target, Gpr::Rax);
-        Ok(())
     }
 
     fn emit_sqrt(&mut self) -> JitResult<()> {
@@ -311,6 +316,20 @@ impl FunctionCompiler {
             }
             CompareOp::Le => {
                 self.encoder.ucomisd_xmm_xmm(right, left);
+                ConditionCode::AboveOrEqual
+            }
+            CompareOp::Eq => {
+                self.encoder.subsd_xmm_xmm(left, right);
+                self.emit_abs_register(left);
+                self.emit_literal_load(right, BOOLEAN_EPSILON);
+                self.encoder.ucomisd_xmm_xmm(right, left);
+                ConditionCode::Above
+            }
+            CompareOp::Ne => {
+                self.encoder.subsd_xmm_xmm(left, right);
+                self.emit_abs_register(left);
+                self.emit_literal_load(right, BOOLEAN_EPSILON);
+                self.encoder.ucomisd_xmm_xmm(left, right);
                 ConditionCode::AboveOrEqual
             }
         };
@@ -764,6 +783,44 @@ mod tests {
             );
             let bytes = compile_value_function(&program).expect("compile comparison leaf");
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate comparison leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_equality_comparisons() {
+        let cases = [
+            ("eq-exact", Instruction::Eq, 1.0, 1.0, 1.0),
+            ("eq-within-epsilon", Instruction::Eq, 0.0, 0.5e-15, 1.0),
+            ("eq-at-epsilon", Instruction::Eq, 0.0, 1.0e-15, 0.0),
+            ("eq-outside-epsilon", Instruction::Eq, 0.0, 1.5e-15, 0.0),
+            ("ne-exact", Instruction::Ne, 1.0, 1.0, 0.0),
+            ("ne-within-epsilon", Instruction::Ne, 0.0, 0.5e-15, 0.0),
+            ("ne-at-epsilon", Instruction::Ne, 0.0, 1.0e-15, 1.0),
+            ("ne-outside-epsilon", Instruction::Ne, 0.0, 1.5e-15, 1.0),
+            ("eq-left-unordered", Instruction::Eq, f64::NAN, 1.0, 0.0),
+            ("eq-right-unordered", Instruction::Eq, 1.0, f64::NAN, 0.0),
+            ("ne-left-unordered", Instruction::Ne, f64::NAN, 1.0, 0.0),
+            ("ne-right-unordered", Instruction::Ne, 1.0, f64::NAN, 0.0),
+        ];
+
+        for (name, op, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    op,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile equality leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate equality leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
