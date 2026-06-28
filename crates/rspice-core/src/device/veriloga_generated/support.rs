@@ -4198,6 +4198,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_pow_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], base_value: f64, base_dn: [f64; NODE_COUNT], base_db: [f64; BRANCH_COUNT], exponent_value: f64, exponent_dn: [f64; NODE_COUNT], exponent_db: [f64; BRANCH_COUNT]) {
+        let output = base_value.powf(exponent_value);
+        self.v[index] = factor_value * output;
+        for axis in 0..NODE_COUNT { let derivative = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base_value, exponent_value, base_dn[axis], exponent_dn[axis]); self.dn[index][axis] = factor_dn[axis] * output + factor_value * derivative; }
+        for axis in 0..BRANCH_COUNT { let derivative = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base_value, exponent_value, base_db[axis], exponent_db[axis]); self.db[index][axis] = factor_db[axis] * output + factor_value * derivative; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_pow(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base.value, base.dn, base.db, exponent.value, exponent.dn, exponent.db);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_pow_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, source: usize) {
         let source_value = self.v[source];
         let source_dn = self.dn[source];
@@ -12326,6 +12339,84 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let base_dn = self.dn[base];
         let base_db = self.db[base];
         self.store_mul_powf_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: usize) {
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base.value, base.dn, base.db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: usize, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base_value, base_dn, base_db, exponent.value, exponent.dn, exponent.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: usize, exponent: usize) {
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base_value, base_dn, base_db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_iaa(&mut self, index: usize, factor: usize, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base.value, base.dn, base.db, exponent.value, exponent.dn, exponent.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_iai(&mut self, index: usize, factor: usize, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base.value, base.dn, base.db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_iia(&mut self, index: usize, factor: usize, base: usize, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent.value, exponent.dn, exponent.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_indices(&mut self, index: usize, factor: usize, base: usize, exponent: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent_value, exponent_dn, exponent_db);
     }
 
 
@@ -17956,6 +18047,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_pow_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], base_value: f64, base_dn: [f64; NODE_COUNT], base_db: [f64; BRANCH_COUNT], exponent_value: f64, exponent_dn: [f64; NODE_COUNT], exponent_db: [f64; BRANCH_COUNT]) {
+        let output = base_value.powf(exponent_value);
+        self.v[index] = factor_value * output;
+        for axis in 0..NODE_COUNT { let derivative = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base_value, exponent_value, base_dn[axis], exponent_dn[axis]); self.dn[index][axis] = factor_dn[axis] * output + factor_value * derivative; }
+        for axis in 0..BRANCH_COUNT { let derivative = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base_value, exponent_value, base_db[axis], exponent_db[axis]); self.db[index][axis] = factor_db[axis] * output + factor_value * derivative; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_pow(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base.value, base.dn, base.db, exponent.value, exponent.dn, exponent.db);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_pow_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, source: usize) {
         let source_value = self.v[source];
         let source_dn = self.dn[source];
@@ -26084,6 +26188,84 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let base_dn = self.dn[base];
         let base_db = self.db[base];
         self.store_mul_powf_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: usize) {
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base.value, base.dn, base.db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: usize, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base_value, base_dn, base_db, exponent.value, exponent.dn, exponent.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, base: usize, exponent: usize) {
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor.value, factor.dn, factor.db, base_value, base_dn, base_db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_iaa(&mut self, index: usize, factor: usize, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base.value, base.dn, base.db, exponent.value, exponent.dn, exponent.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_iai(&mut self, index: usize, factor: usize, base: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base.value, base.dn, base.db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_mixed_iia(&mut self, index: usize, factor: usize, base: usize, exponent: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent.value, exponent.dn, exponent.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_pow_indices(&mut self, index: usize, factor: usize, base: usize, exponent: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let base_value = self.v[base];
+        let base_dn = self.dn[base];
+        let base_db = self.db[base];
+        let exponent_value = self.v[exponent];
+        let exponent_dn = self.dn[exponent];
+        let exponent_db = self.db[exponent];
+        self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent_value, exponent_dn, exponent_db);
     }
 
 
