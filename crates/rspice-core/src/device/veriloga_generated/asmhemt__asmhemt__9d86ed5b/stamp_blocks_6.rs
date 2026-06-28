@@ -4313,8 +4313,9 @@ impl Instance {
         );
         let (eq222_e2764, eq222_e2764_d_n4,) = {
     if s.b[610] {
-        let eq222_e2762: f64 = ((nv4 - 0.0) / p.p32);
-        let eq222_e2762_d_n4: f64 = (1.0 / p.p32);
+        let __rspice_inv_cse_0: f64 = 1.0 / p.p32;
+        let eq222_e2762: f64 = ((nv4 - 0.0) * __rspice_inv_cse_0);
+        let eq222_e2762_d_n4: f64 = (1.0 * __rspice_inv_cse_0);
         (eq222_e2762, eq222_e2762_d_n4,)
     } else {
         (0.0, 0.0,)

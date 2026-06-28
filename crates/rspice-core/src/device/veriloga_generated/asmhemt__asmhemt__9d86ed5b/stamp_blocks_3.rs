@@ -2342,9 +2342,10 @@ impl Instance {
         let nv14 = ctx.node_voltage(nodes[14]);
         let (eq8_e345, eq8_e345_d_n5, eq8_e345_d_n6,) = {
     if (s.b[388] && (!s.b[387])) {
-        let eq8_e339: f64 = ((nv6 - nv5) / 10.0);
-        let eq8_e339_d_n5: f64 = (-1.0 / 10.0);
-        let eq8_e339_d_n6: f64 = (1.0 / 10.0);
+        let __rspice_inv_cse_0: f64 = 1.0 / 10.0;
+        let eq8_e339: f64 = ((nv6 - nv5) * __rspice_inv_cse_0);
+        let eq8_e339_d_n5: f64 = ((-1.0) * __rspice_inv_cse_0);
+        let eq8_e339_d_n6: f64 = (1.0 * __rspice_inv_cse_0);
         let eq8_e340: f64 = { let limited_exp_arg = eq8_e339; if limited_exp_arg > 80.0 { LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) } else if limited_exp_arg < -80.0 { 1.804851387e-35 } else { limited_exp_arg.exp() } };
         let eq8_e340_d_n5: f64 = ({ let limited_exp_arg = eq8_e339; if limited_exp_arg > 80.0 { LIMEXP_MAX } else if limited_exp_arg < -80.0 { 0.0 } else { limited_exp_arg.exp() } } * eq8_e339_d_n5);
         let eq8_e340_d_n6: f64 = ({ let limited_exp_arg = eq8_e339; if limited_exp_arg > 80.0 { LIMEXP_MAX } else if limited_exp_arg < -80.0 { 0.0 } else { limited_exp_arg.exp() } } * eq8_e339_d_n6);
