@@ -541,6 +541,26 @@ endmodule
     )
 }
 
+fn dynamic_array_read_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_dyn_array_read(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer sel = 2;
+    real w[1:3];
+    analog begin
+        w[1] = 2.0;
+        w[2] = 4.0;
+        w[3] = 8.0;
+        I(p, n) <+ w[sel] * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn internal_node_divider_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1562,6 +1582,72 @@ fn native_compile_rejects_indexed_assignments_without_fallback() {
     assert!(
         msg.contains("AssignIndexed") || msg.contains("PushVariableDyn"),
         "error must name indexed assignment coverage, got: {msg}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_dynamic_array_reads_without_fallback() {
+    let model = dynamic_array_read_model();
+    assert!(
+        model
+            .assignment_steps
+            .iter()
+            .all(|step| matches!(step, rspice_veriloga::codegen::AssignmentStep::Assign(_))),
+        "fixture must use direct assignments only"
+    );
+    assert!(
+        model.stamp_programs.iter().any(|program| {
+            program
+                .value_program
+                .instructions
+                .iter()
+                .any(|instruction| {
+                    matches!(
+                        instruction,
+                        rspice_veriloga::codegen::Instruction::PushVariableDyn { .. }
+                    )
+                })
+        }),
+        "fixture must contain a dynamic array read in a stamp expression"
+    );
+
+    let mut default_sel = VerilogADevice::try_new("DYNARR1", model.clone(), &[1, 0])
+        .expect("dynamic array read model uses native JIT");
+    assert!(default_sel.is_using_native());
+    default_sel.update_voltages(&[2.0]);
+    let currents = default_sel
+        .try_evaluate()
+        .expect("native dynamic array read succeeds");
+    assert!(
+        (currents[0] - 8.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut third = VerilogADevice::try_new("DYNARR2", model.clone(), &[1, 0])
+        .expect("dynamic array read model uses native JIT");
+    assert!(third.set_parameter("sel", 3.0));
+    third.update_voltages(&[2.0]);
+    let currents = third
+        .try_evaluate()
+        .expect("native dynamic array read with rounded index succeeds");
+    assert!(
+        (currents[0] - 16.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut out_of_range = VerilogADevice::try_new("DYNARR3", model, &[1, 0])
+        .expect("dynamic array read model uses native JIT");
+    assert!(out_of_range.set_parameter("sel", 4.0));
+    out_of_range.update_voltages(&[2.0]);
+    let err = out_of_range
+        .try_evaluate()
+        .expect_err("dynamic array index outside bounds must hard-fail");
+    let msg = err.to_string();
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("array index 4 outside declared bounds [1:3]"),
+        "error must preserve array bounds diagnostic, got: {msg}"
     );
 }
 

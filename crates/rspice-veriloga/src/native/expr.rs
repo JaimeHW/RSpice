@@ -29,6 +29,7 @@ pub(crate) enum NativeOp {
     LoadCurrent(usize),
     LoadInternalVoltage(usize),
     LoadVariable(usize),
+    LoadVariableDyn { base: usize, len: usize, lower: i64 },
     LoadBranchUnknown(usize),
     LoadTemperature,
     LoadThermalVoltage,
@@ -299,6 +300,27 @@ impl NativeProgram {
                     )?;
                     ops.push(NativeOp::LoadVariable(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushVariableDyn { base, len, lower } => {
+                    validate_range(
+                        model.clone(),
+                        "PushVariableDyn variable range",
+                        *base,
+                        *len,
+                        limits.variable_count,
+                    )?;
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::LoadVariableDyn {
+                        base: *base,
+                        len: *len,
+                        lower: *lower,
+                    });
                 }
                 Instruction::PushBranchCurrent(index) => {
                     validate_index(
@@ -751,6 +773,29 @@ fn validate_index(model: SmolStr, op: &'static str, index: usize, len: usize) ->
         return Err(JitError::unsupported_program_op(
             model,
             format!("{op} {index}"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_range(
+    model: SmolStr,
+    op: &'static str,
+    base: usize,
+    len: usize,
+    limit: usize,
+) -> JitResult<()> {
+    let Some(end) = base.checked_add(len) else {
+        return Err(JitError::unsupported_program_op(
+            model,
+            format!("{op} base {base} length {len} overflows"),
+        ));
+    };
+    if len == 0 || end > limit {
+        return Err(JitError::unsupported_program_op(
+            model,
+            format!("{op} {base}..{end} outside storage length {limit}"),
         ));
     }
 
@@ -1822,6 +1867,69 @@ mod tests {
             assert!(msg.contains(expected), "{name}: {msg}");
             assert!(msg.contains("no interpreter fallback"), "{name}: {msg}");
         }
+    }
+
+    #[test]
+    fn lowers_dynamic_variable_read_when_range_is_known() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushParam(0),
+                Instruction::PushVariableDyn {
+                    base: 2,
+                    len: 3,
+                    lower: 1,
+                },
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "dyn-read",
+            EntryKind::StampValue,
+            &program,
+            NativeLoweringLimits::new(0, 0, 1, 5, 0),
+        )
+        .expect("dynamic variable reads inside known storage have native lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadParam(0),
+                NativeOp::LoadVariableDyn {
+                    base: 2,
+                    len: 3,
+                    lower: 1
+                }
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowering_rejects_dynamic_variable_read_outside_known_storage() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushParam(0),
+                Instruction::PushVariableDyn {
+                    base: 3,
+                    len: 3,
+                    lower: 1,
+                },
+            ],
+        };
+
+        let error = NativeProgram::from_bytecode(
+            "bad-dyn-read",
+            EntryKind::StampValue,
+            &program,
+            NativeLoweringLimits::new(0, 0, 1, 5, 0),
+        )
+        .expect_err("dynamic variable range outside storage must fail closed");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("PushVariableDyn variable range 3..6 outside storage length 5"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
     }
 
     #[test]
