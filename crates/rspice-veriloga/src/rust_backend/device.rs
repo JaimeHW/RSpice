@@ -5419,6 +5419,22 @@ fn stamp() {
             ),
             "{sub_scaled_inputs}"
         );
+
+        let mul_add_rhs = helper_body(&support, "fn store_mul_add_rhs(");
+        assert!(
+            !mul_add_rhs.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_add_rhs}"
+        );
+        assert!(
+            !mul_add_rhs.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_add_rhs}"
+        );
+        assert!(
+            mul_add_rhs.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * sum + left_value * (self.node_derivatives[middle][axis] + self.node_derivatives[right][axis]);"
+            ),
+            "{mul_add_rhs}"
+        );
     }
 
     #[test]
@@ -15060,16 +15076,10 @@ fn generate_scratch_operation_helpers() -> String {
     "        let left_value = self.values[left];",
     "        let middle_value = self.values[middle];",
     "        let right_value = self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let middle_node_derivatives = self.node_derivatives[middle];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let middle_branch_derivatives = self.branch_derivatives[middle];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
     "        let sum = middle_value + right_value;",
     "        self.values[index] = left_value * sum;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * sum + left_value * (middle_node_derivatives[axis] + right_node_derivatives[axis]); }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * sum + left_value * (middle_branch_derivatives[axis] + right_branch_derivatives[axis]); }",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * sum + left_value * (self.node_derivatives[middle][axis] + self.node_derivatives[right][axis]); }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * sum + left_value * (self.branch_derivatives[middle][axis] + self.branch_derivatives[right][axis]); }",
     "    }",
     "",
     "    #[inline]",
