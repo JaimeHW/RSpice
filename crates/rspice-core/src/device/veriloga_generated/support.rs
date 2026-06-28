@@ -5888,6 +5888,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_scaled_sqrt_mul(&mut self, index: usize, left: usize, right: usize, output_scale: f64) {
+        let raw = self.v[left] * self.v[right];
+        let value = raw.sqrt();
+        self.store_unary_mul_scaled(index, left, right, value * output_scale, output_scale / (2.0 * value));
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_sqrt_mul_scaled_lhs(&mut self, index: usize, left: usize, input_scale: f64, right: usize, output_scale: f64) {
+        let raw = self.v[left] * input_scale * self.v[right];
+        let value = raw.sqrt();
+        self.store_unary_mul_scaled(index, left, right, value * output_scale, output_scale * input_scale / (2.0 * value));
+    }
+
+    #[inline]
     pub(crate) fn store_sqrt_div(&mut self, index: usize, left: usize, right: usize) {
         let raw = self.v[left] / self.v[right];
         let value = raw.sqrt();
@@ -18452,6 +18466,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let raw = self.v[left] * scale * self.v[right];
         let value = raw.sqrt();
         self.store_unary_mul_scaled(index, left, right, value, scale / (2.0 * value));
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_sqrt_mul(&mut self, index: usize, left: usize, right: usize, output_scale: f64) {
+        let raw = self.v[left] * self.v[right];
+        let value = raw.sqrt();
+        self.store_unary_mul_scaled(index, left, right, value * output_scale, output_scale / (2.0 * value));
+    }
+
+    #[inline]
+    pub(crate) fn store_scaled_sqrt_mul_scaled_lhs(&mut self, index: usize, left: usize, input_scale: f64, right: usize, output_scale: f64) {
+        let raw = self.v[left] * input_scale * self.v[right];
+        let value = raw.sqrt();
+        self.store_unary_mul_scaled(index, left, right, value * output_scale, output_scale * input_scale / (2.0 * value));
     }
 
     #[inline]

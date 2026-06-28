@@ -3175,7 +3175,7 @@ impl Instance {
         if ((s.b[1439] && (s.b[1441] && (!s.b[1440]))) && (!s.b[2026])) {
             s.store_neg(983, 983);
             s.store_mul3_affine_lhs(2022, 1901, 1830, (0.5 * 9662367879.197212), 0.0, 1830);
-            s.store_scaled_sqrt_ad(334, A::mul_scaled_lhs(s.ad_value(154), 2.0, s.ad_value(2022)), p.p394);
+            s.store_scaled_sqrt_mul_scaled_lhs(334, 154, 2.0, 2022, p.p394);
             s.store_scaled_add_ad(335, A::exp(s.ad_value(334)), A::exp_scaled_input(s.ad_value(334), -1.0), 0.5);
             s.store_div_ln_lhs(2023, 335, 2022);
             s.store_mul(332, 2023, 983);
