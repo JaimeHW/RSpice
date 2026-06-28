@@ -15,8 +15,7 @@ pub use abi::{
     rspice_table_lookup,
 };
 pub use error::{JitError, JitResult};
-pub use model::{AssignmentFn, NativeModel, PlanStats, StampFn};
-pub use runtime::ExecutableMemory;
+pub use model::{NativeModel, PlanStats};
 pub use target::{Architecture, TargetSpec};
 
 use crate::codegen::CompiledModel;

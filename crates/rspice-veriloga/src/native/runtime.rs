@@ -1,32 +1,43 @@
 use super::{JitError, JitResult};
 use std::ptr;
 
-pub struct ExecutableMemory {
+pub(crate) struct ExecutableMemory {
     ptr: *mut u8,
     len: usize,
 }
 
 impl ExecutableMemory {
-    pub fn as_ptr(&self) -> *const u8 {
-        self.ptr as *const u8
-    }
-
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    pub(crate) fn ptr_at(&self, offset: usize) -> JitResult<*const u8> {
+        if offset >= self.len {
+            return Err(JitError::ExecutableMemory {
+                detail: format!(
+                    "entry offset {offset} outside executable image length {}",
+                    self.len
+                )
+                .into(),
+            });
+        }
+        Ok(unsafe { self.ptr.add(offset) as *const u8 })
     }
 }
 
 #[cfg(windows)]
 impl ExecutableMemory {
-    pub fn allocate(bytes: &[u8]) -> JitResult<Self> {
+    #[allow(dead_code)]
+    pub(crate) fn allocate(bytes: &[u8]) -> JitResult<Self> {
         use windows_sys::Win32::Foundation::GetLastError;
         use windows_sys::Win32::System::Memory::{
-            VirtualAlloc, VirtualFree, VirtualProtect, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
-            PAGE_EXECUTE_READ, PAGE_READWRITE,
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_READWRITE, VirtualAlloc,
+            VirtualFree, VirtualProtect,
         };
 
         if bytes.is_empty() {
@@ -85,10 +96,11 @@ impl ExecutableMemory {
 
 #[cfg(unix)]
 impl ExecutableMemory {
-    pub fn allocate(bytes: &[u8]) -> JitResult<Self> {
+    #[allow(dead_code)]
+    pub(crate) fn allocate(bytes: &[u8]) -> JitResult<Self> {
         use libc::{
-            mmap, mprotect, munmap, MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ,
-            PROT_WRITE,
+            MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, mmap, mprotect,
+            munmap,
         };
 
         if bytes.is_empty() {
@@ -143,7 +155,8 @@ impl ExecutableMemory {
 
 #[cfg(not(any(windows, unix)))]
 impl ExecutableMemory {
-    pub fn allocate(_bytes: &[u8]) -> JitResult<Self> {
+    #[allow(dead_code)]
+    pub(crate) fn allocate(_bytes: &[u8]) -> JitResult<Self> {
         Err(JitError::UnsupportedTarget {
             target: std::env::consts::OS.into(),
             reason: "native executable memory allocation is not implemented for this OS".into(),
@@ -152,6 +165,7 @@ impl ExecutableMemory {
 }
 
 #[cfg(windows)]
+#[allow(dead_code)]
 fn sync_instruction_cache(ptr: *const u8, len: usize) -> JitResult<()> {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::Diagnostics::Debug::FlushInstructionCache;
@@ -172,12 +186,14 @@ fn sync_instruction_cache(ptr: *const u8, len: usize) -> JitResult<()> {
 }
 
 #[cfg(all(unix, target_arch = "x86_64"))]
+#[allow(dead_code)]
 fn sync_instruction_cache(_ptr: *const u8, _len: usize) -> JitResult<()> {
     // x86_64 has coherent instruction and data caches for this generated-code path.
     Ok(())
 }
 
 #[cfg(all(unix, not(target_arch = "x86_64")))]
+#[allow(dead_code)]
 fn sync_instruction_cache(_ptr: *const u8, _len: usize) -> JitResult<()> {
     Err(JitError::ExecutableMemory {
         detail: format!(
@@ -196,7 +212,7 @@ impl Drop for ExecutableMemory {
 
         #[cfg(windows)]
         unsafe {
-            use windows_sys::Win32::System::Memory::{VirtualFree, MEM_RELEASE};
+            use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree};
 
             VirtualFree(self.ptr.cast(), 0, MEM_RELEASE);
         }
@@ -213,9 +229,9 @@ unsafe impl Sync for ExecutableMemory {}
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::{sync_instruction_cache, ExecutableMemory};
-    use crate::native::x64::encoder::X64Encoder;
+    use super::{ExecutableMemory, sync_instruction_cache};
     use crate::native::JitError;
+    use crate::native::x64::encoder::X64Encoder;
 
     #[test]
     fn executable_memory_rejects_empty_image() {
@@ -241,7 +257,8 @@ mod tests {
             ExecutableMemory::allocate(&enc.into_bytes()).expect("allocate executable memory");
         assert!(!memory.is_empty());
 
-        let f: extern "C" fn() -> u32 = unsafe { std::mem::transmute(memory.as_ptr()) };
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn() -> u32 = unsafe { std::mem::transmute(entry) };
         assert_eq!(f(), 42);
     }
 
@@ -253,7 +270,8 @@ mod tests {
         let memory =
             ExecutableMemory::allocate(&enc.into_bytes()).expect("allocate executable memory");
 
-        sync_instruction_cache(memory.as_ptr(), memory.len())
+        let ptr = memory.ptr_at(0).expect("entry point inside image");
+        sync_instruction_cache(ptr, memory.len())
             .expect("sync instruction cache for executable memory");
     }
 }
