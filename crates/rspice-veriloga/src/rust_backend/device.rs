@@ -3857,6 +3857,36 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_negated_scaled_sqrt_input_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_scaled_sqrt_scaled_input"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(130, AdValue::neg(AdValue::sqrt_scaled_input(scratch.ad_value(2), params.scale)));
+    scratch.store_ad_value(131, AdValue::neg(AdValue::sqrt_scaled_input(scratch.ad_value(3), -1.0)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_scaled_sqrt_scaled_input(130, 2, p.scale, -1.0);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_scaled_sqrt_scaled_input(131, 3, -1.0, -1.0);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_neg_ad("), "{compact}");
+        assert!(!compact.contains("A::sqrt_scaled_input("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sqrt_shifted_square_offset_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -21803,6 +21833,17 @@ fn compact_negated_binary_input_store_helper_line(
 
     if let Some(line) = compact_negated_scaled_sum_store_helper_line(target_index, args[0]) {
         return Some(line);
+    }
+
+    if let Some(sqrt_args) = compact_ad_call_args(args[0], "sqrt_scaled_input") {
+        if sqrt_args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(sqrt_args[0])?;
+        return Some(format!(
+            "scratch.store_scaled_sqrt_scaled_input({target_index}, {source}, {}, -1.0);",
+            sqrt_args[1]
+        ));
     }
 
     if let Some((left, right)) = compact_binary_scratch_ad_indices(args[0], "add") {
