@@ -17,7 +17,7 @@ fn compile(source: &str) -> rspice_veriloga::CompiledModel {
         .expect("Verilog-A source must compile")
 }
 
-fn dependent_default_failure_model() -> rspice_veriloga::CompiledModel {
+fn dependent_default_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
 `include "disciplines.vams"
@@ -27,6 +27,70 @@ module native_dependent_default(p, n);
     parameter real base = 2.0;
     parameter real derived = base * 3.0;
     analog I(p, n) <+ V(p, n) * derived;
+endmodule
+"#,
+    )
+}
+
+fn dependent_default_chain_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_dependent_default_chain(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real a = 2.0;
+    parameter real b = a * 2.0;
+    parameter real c = b + 1.0;
+    analog I(p, n) <+ V(p, n) * c;
+endmodule
+"#,
+    )
+}
+
+fn dependent_default_clamp_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_dependent_default_clamp(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real base = 4.0;
+    parameter real limited = base * 3.0 from [1.0:10.0];
+    analog I(p, n) <+ V(p, n) * limited;
+endmodule
+"#,
+    )
+}
+
+fn dependent_default_param_given_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_dependent_default_param_given(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real base = 2.0;
+    parameter real scale = $param_given(base) ? 5.0 : 3.0;
+    parameter real derived = $param_given(scale) ? scale : scale + 2.0;
+    analog I(p, n) <+ V(p, n) * derived;
+endmodule
+"#,
+    )
+}
+
+fn dependent_default_binary_math_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_dependent_default_binary_math(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real base = 3.0;
+    parameter real squared = pow(base, 2.0);
+    parameter real angle = atan2(squared, squared);
+    parameter real gain = squared + angle;
+    analog I(p, n) <+ V(p, n) * gain;
 endmodule
 "#,
     )
@@ -870,6 +934,200 @@ fn native_compile_accepts_simple_resistor_subset() {
             .iter()
             .map(|stamp| stamp.jacobian_programs.len())
             .sum::<usize>()
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_dependent_parameter_defaults_without_fallback() {
+    let model = dependent_default_model();
+    assert!(
+        model
+            .parameters
+            .iter()
+            .any(|parameter| parameter.default_program.is_some()),
+        "fixture must contain a dependent parameter default program"
+    );
+
+    let mut default_base = VerilogADevice::try_new("DEPDEFAULT1", model.clone(), &[1, 0])
+        .expect("dependent default model uses native JIT");
+    assert!(default_base.is_using_native());
+    default_base.update_voltages(&[2.0]);
+    let currents = default_base
+        .try_evaluate()
+        .expect("native dependent default evaluates from constant base");
+    assert!(
+        (currents[0] - 12.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut overridden_base = VerilogADevice::try_new("DEPDEFAULT2", model.clone(), &[1, 0])
+        .expect("dependent default model uses native JIT");
+    assert!(overridden_base.set_parameter("base", 4.0));
+    overridden_base
+        .try_resolve_parameter_defaults()
+        .expect("native dependent default refresh succeeds");
+    overridden_base.update_voltages(&[2.0]);
+    let currents = overridden_base
+        .try_evaluate()
+        .expect("native dependent default re-evaluates after base override");
+    assert!(
+        (currents[0] - 24.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut overridden_derived = VerilogADevice::try_new("DEPDEFAULT3", model, &[1, 0])
+        .expect("dependent default model uses native JIT");
+    assert!(overridden_derived.set_parameter("base", 4.0));
+    assert!(overridden_derived.set_parameter("derived", 9.0));
+    overridden_derived
+        .try_resolve_parameter_defaults()
+        .expect("native dependent default refresh skips explicit derived parameter");
+    overridden_derived.update_voltages(&[2.0]);
+    let currents = overridden_derived
+        .try_evaluate()
+        .expect("native dependent default skips param-given target");
+    assert!(
+        (currents[0] - 18.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_dependent_parameter_defaults_resolve_in_declaration_order() {
+    let model = dependent_default_chain_model();
+    assert_eq!(
+        model
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.default_program.is_some())
+            .count(),
+        2,
+        "fixture must contain a dependent default chain"
+    );
+
+    let mut device = VerilogADevice::try_new("DEPCHAIN1", model, &[1, 0])
+        .expect("dependent default chain model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[2.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native dependent default chain evaluates");
+
+    assert!(
+        (currents[0] - 10.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_dependent_parameter_defaults_apply_declared_bounds() {
+    let model = dependent_default_clamp_model();
+    assert!(
+        model
+            .parameters
+            .iter()
+            .any(|parameter| parameter.default_program.is_some() && parameter.max == Some(10.0)),
+        "fixture must contain a bounded dependent default"
+    );
+
+    let mut device = VerilogADevice::try_new("DEPCLAMP1", model, &[1, 0])
+        .expect("bounded dependent default model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[2.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native dependent default clamp evaluates");
+
+    assert!(
+        (currents[0] - 20.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_dependent_parameter_defaults_preserve_param_given_semantics() {
+    let model = dependent_default_param_given_model();
+    assert!(
+        model
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.default_program.is_some())
+            .count()
+            >= 2,
+        "fixture must contain param-given dependent defaults"
+    );
+
+    let mut defaults = VerilogADevice::try_new("DEPGIVEN1", model.clone(), &[1, 0])
+        .expect("param-given dependent default model uses native JIT");
+    defaults.update_voltages(&[2.0]);
+    let currents = defaults
+        .try_evaluate()
+        .expect("native default defaults preserve param_given false");
+    assert!(
+        (currents[0] - 10.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut base_given = VerilogADevice::try_new("DEPGIVEN2", model.clone(), &[1, 0])
+        .expect("param-given dependent default model uses native JIT");
+    assert!(base_given.set_parameter("base", 4.0));
+    base_given
+        .try_resolve_parameter_defaults()
+        .expect("native param-given default refresh succeeds");
+    base_given.update_voltages(&[2.0]);
+    let currents = base_given
+        .try_evaluate()
+        .expect("native default observes explicit base");
+    assert!(
+        (currents[0] - 14.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut scale_given = VerilogADevice::try_new("DEPGIVEN3", model, &[1, 0])
+        .expect("param-given dependent default model uses native JIT");
+    assert!(scale_given.set_parameter("scale", 11.0));
+    scale_given
+        .try_resolve_parameter_defaults()
+        .expect("native param-given default refresh skips explicit scale");
+    scale_given.update_voltages(&[2.0]);
+    let currents = scale_given
+        .try_evaluate()
+        .expect("native default observes explicit scale without marking computed defaults given");
+    assert!(
+        (currents[0] - 22.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_dependent_parameter_defaults_support_binary_math_functions() {
+    let model = dependent_default_binary_math_model();
+    assert!(
+        model
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.default_program.is_some())
+            .count()
+            >= 3,
+        "fixture must contain binary-math dependent defaults"
+    );
+
+    let mut device = VerilogADevice::try_new("DEPBINMATH1", model, &[1, 0])
+        .expect("binary-math dependent default model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[2.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native binary-math dependent defaults evaluate");
+
+    assert!(
+        (currents[0] - (18.0 + std::f64::consts::FRAC_PI_2)).abs() < 1.0e-12,
+        "currents: {currents:?}"
     );
 }
 
@@ -2367,7 +2625,7 @@ fn native_evaluate_rejects_nonfinite_terminal_pair_current_probes_without_fallba
 
 #[test]
 fn native_compile_failure_is_not_interpreter_fallback() {
-    let model = dependent_default_failure_model();
+    let model = unavailable_current_probe_model();
 
     let err = VerilogADevice::try_new("H1", model, &[1, 0])
         .expect_err("native mode must fail until a complete native image exists");
@@ -2378,7 +2636,7 @@ fn native_compile_failure_is_not_interpreter_fallback() {
 
 #[test]
 fn native_new_panics_instead_of_falling_back() {
-    let model = dependent_default_failure_model();
+    let model = unavailable_current_probe_model();
 
     let panic = std::panic::catch_unwind(|| {
         let _ = VerilogADevice::new("H2", model, &[1, 0]);

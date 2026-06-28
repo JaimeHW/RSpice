@@ -16,6 +16,22 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     let assignment = CodeOffset::new(image.len());
     append_assignment_entry(model, &mut image)?;
 
+    let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
+    for parameter in &model.parameters {
+        let default_entry = if let Some(program) = &parameter.default_program {
+            let program = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::ParameterDefault,
+                program,
+                base_limits,
+            )?;
+            Some(append_value_entry(&mut image, &program)?)
+        } else {
+            None
+        };
+        parameter_defaults.push(default_entry);
+    }
+
     let mut static_conditions = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
@@ -108,9 +124,11 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     let executable = ExecutableMemory::allocate(&image)?;
     NativeModel::from_executable_image_with_dependencies(
         model.num_variables,
+        model.parameters.len(),
         executable,
         NativeEntryOffsets {
             assignment,
+            parameter_defaults,
             static_conditions,
             stamp_values,
             jacobians,

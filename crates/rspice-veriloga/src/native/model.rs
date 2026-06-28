@@ -17,6 +17,7 @@ impl CodeOffset {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeEntryOffsets {
     pub assignment: CodeOffset,
+    pub parameter_defaults: Vec<Option<CodeOffset>>,
     pub static_conditions: Vec<Option<CodeOffset>>,
     pub stamp_values: Vec<CodeOffset>,
     pub jacobians: Vec<Vec<CodeOffset>>,
@@ -33,6 +34,7 @@ pub(crate) struct NativeCurrentDependencies {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PlanStats {
     pub assignment_entry_points: usize,
+    pub parameter_default_entry_points: usize,
     pub static_condition_entry_points: usize,
     pub stamp_value_entry_points: usize,
     pub jacobian_entry_points: usize,
@@ -41,6 +43,7 @@ pub struct PlanStats {
 
 pub struct NativeModel {
     pub num_variables: usize,
+    pub num_parameters: usize,
     image: ExecutableMemory,
     entries: NativeEntryOffsets,
     current_dependencies: NativeCurrentDependencies,
@@ -51,6 +54,7 @@ impl std::fmt::Debug for NativeModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeModel")
             .field("num_variables", &self.num_variables)
+            .field("num_parameters", &self.num_parameters)
             .field("image_len", &self.image.len())
             .field("stats", &self.stats)
             .finish()
@@ -66,12 +70,14 @@ impl NativeModel {
     #[allow(dead_code)]
     pub(crate) fn from_executable_image(
         num_variables: usize,
+        num_parameters: usize,
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
     ) -> JitResult<Self> {
         let current_dependencies = Self::empty_current_dependencies(&entries);
         Self::from_executable_image_with_dependencies(
             num_variables,
+            num_parameters,
             image,
             entries,
             current_dependencies,
@@ -80,18 +86,21 @@ impl NativeModel {
 
     pub(crate) fn from_executable_image_with_dependencies(
         num_variables: usize,
+        num_parameters: usize,
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
         current_dependencies: NativeCurrentDependencies,
     ) -> JitResult<Self> {
-        Self::validate_entry_offsets(&entries, image.len())?;
+        Self::validate_entry_offsets(&entries, image.len(), num_parameters)?;
         Self::validate_current_dependencies(&entries, &current_dependencies)?;
 
         let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
         let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
+        let parameter_default_entry_points = entries.parameter_defaults.iter().flatten().count();
         let static_condition_entry_points = entries.static_conditions.iter().flatten().count();
         let stats = PlanStats {
             assignment_entry_points: 1,
+            parameter_default_entry_points,
             static_condition_entry_points,
             stamp_value_entry_points: entries.stamp_values.len(),
             jacobian_entry_points,
@@ -100,6 +109,7 @@ impl NativeModel {
 
         Ok(Self {
             num_variables,
+            num_parameters,
             image,
             entries,
             current_dependencies,
@@ -121,6 +131,7 @@ impl NativeModel {
         let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            parameter_defaults: vec![],
             static_conditions: vec![Some(stamp_entry); stamp_value_entry_points],
             stamp_values: vec![stamp_entry; stamp_value_entry_points],
             jacobians: jacobian_entry_points
@@ -133,12 +144,27 @@ impl NativeModel {
                 .collect(),
         };
 
-        Self::from_executable_image(num_variables, image, entries)
+        Self::from_executable_image(num_variables, 0, image, entries)
             .expect("publish native test model")
     }
 
     #[allow(dead_code)]
-    fn validate_entry_offsets(entries: &NativeEntryOffsets, image_len: usize) -> JitResult<()> {
+    fn validate_entry_offsets(
+        entries: &NativeEntryOffsets,
+        image_len: usize,
+        num_parameters: usize,
+    ) -> JitResult<()> {
+        if entries.parameter_defaults.len() != num_parameters {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: format!(
+                    "parameter-default entry shape {} does not match parameter count {}",
+                    entries.parameter_defaults.len(),
+                    num_parameters
+                )
+                .into(),
+            });
+        }
         if entries.static_conditions.len() != entries.stamp_values.len() {
             return Err(JitError::InternalCompilerError {
                 model: "native-model".into(),
@@ -147,6 +173,9 @@ impl NativeModel {
         }
 
         Self::validate_entry_offset(entries.assignment, image_len)?;
+        for offset in entries.parameter_defaults.iter().flatten() {
+            Self::validate_entry_offset(*offset, image_len)?;
+        }
         for offset in entries.static_conditions.iter().flatten() {
             Self::validate_entry_offset(*offset, image_len)?;
         }
@@ -239,6 +268,18 @@ impl NativeModel {
         unsafe { entry(ctx as *const EvalContext, vars) };
     }
 
+    pub(crate) fn run_parameter_default(
+        &self,
+        index: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> Option<f64> {
+        self.entries
+            .parameter_defaults
+            .get(index)
+            .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
+    }
+
     pub(crate) fn run_stamp_value(&self, index: usize, ctx: &EvalContext, vars: *const f64) -> f64 {
         self.run_value_entry(self.entries.stamp_values[index], ctx, vars)
     }
@@ -328,6 +369,7 @@ mod tests {
     fn native_model_entry_points_are_not_optional() {
         let model = NativeModel::new_for_test(2, 1, vec![1], vec![]);
         assert_eq!(model.chunk_count(), 1);
+        assert_eq!(model.plan_stats().parameter_default_entry_points, 0);
         assert_eq!(model.plan_stats().static_condition_entry_points, 1);
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
@@ -362,9 +404,11 @@ mod tests {
         let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
         let model = NativeModel::from_executable_image(
             0,
+            0,
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                parameter_defaults: vec![],
                 static_conditions: vec![Some(stamp_entry)],
                 stamp_values: vec![stamp_entry],
                 jacobians: vec![vec![jacobian_entry]],
@@ -395,9 +439,11 @@ mod tests {
         let image = ExecutableMemory::allocate(&[0xC3]).expect("allocate native test image");
         let error = NativeModel::from_executable_image(
             0,
+            0,
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(1),
+                parameter_defaults: vec![],
                 static_conditions: vec![],
                 stamp_values: vec![],
                 jacobians: vec![],
@@ -407,6 +453,28 @@ mod tests {
         .expect_err("entry at image length must be rejected");
 
         assert!(error.to_string().contains("entry offset"));
+        assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn native_model_rejects_parameter_default_shape_mismatch() {
+        let image = ExecutableMemory::allocate(&[0xC3]).expect("allocate native test image");
+        let error = NativeModel::from_executable_image(
+            0,
+            1,
+            image,
+            NativeEntryOffsets {
+                assignment: CodeOffset::new(0),
+                parameter_defaults: vec![],
+                static_conditions: vec![],
+                stamp_values: vec![],
+                jacobians: vec![],
+                reactive_jacobians: vec![],
+            },
+        )
+        .expect_err("missing parameter-default slot must be rejected");
+
+        assert!(error.to_string().contains("parameter-default entry shape"));
         assert!(error.to_string().contains("no interpreter fallback"));
     }
 

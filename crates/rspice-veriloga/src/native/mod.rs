@@ -40,17 +40,6 @@ pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
 }
 
 fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
-    if model
-        .parameters
-        .iter()
-        .any(|parameter| parameter.default_program.is_some())
-    {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "DependentParameterDefaults",
-        ));
-    }
-
     for step in &model.assignment_steps {
         validate_assignment_coverage(model, step)?;
     }

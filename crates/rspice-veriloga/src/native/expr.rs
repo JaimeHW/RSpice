@@ -7,6 +7,7 @@ use smol_str::SmolStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
     Assignment,
+    ParameterDefault,
     StaticCondition,
     StampValue,
     Jacobian,
@@ -757,7 +758,68 @@ fn validate_entry_instruction(
         ));
     }
 
+    if matches!(entry_kind, EntryKind::ParameterDefault)
+        && !is_parameter_default_instruction(instruction)
+    {
+        return Err(JitError::unsupported_program_op(
+            model,
+            format!("ParameterDefault {}", instruction_name(instruction)),
+        ));
+    }
+
     Ok(())
+}
+
+fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
+    matches!(
+        instruction,
+        Instruction::PushConst(_)
+            | Instruction::PushParam(_)
+            | Instruction::PushParamGiven(_)
+            | Instruction::Add
+            | Instruction::Sub
+            | Instruction::Mul
+            | Instruction::Div
+            | Instruction::Pow
+            | Instruction::FnPow
+            | Instruction::Atan2
+            | Instruction::Mod
+            | Instruction::Shl
+            | Instruction::Shr
+            | Instruction::BitAnd
+            | Instruction::BitOr
+            | Instruction::BitXor
+            | Instruction::Neg
+            | Instruction::Abs
+            | Instruction::Sqrt
+            | Instruction::Gt
+            | Instruction::Lt
+            | Instruction::Ge
+            | Instruction::Le
+            | Instruction::Eq
+            | Instruction::Ne
+            | Instruction::And
+            | Instruction::Or
+            | Instruction::Not
+            | Instruction::IfElse
+            | Instruction::Min
+            | Instruction::Max
+            | Instruction::Exp
+            | Instruction::Log
+            | Instruction::Log10
+            | Instruction::Sin
+            | Instruction::Cos
+            | Instruction::Tan
+            | Instruction::Sinh
+            | Instruction::Cosh
+            | Instruction::Tanh
+            | Instruction::Limexp
+            | Instruction::Asin
+            | Instruction::Acos
+            | Instruction::Atan
+            | Instruction::Floor
+            | Instruction::Ceil
+    )
 }
 
 fn is_static_condition_instruction(instruction: &Instruction) -> bool {
