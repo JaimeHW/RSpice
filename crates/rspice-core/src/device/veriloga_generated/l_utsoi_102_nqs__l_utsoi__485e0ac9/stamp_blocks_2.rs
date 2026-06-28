@@ -4719,7 +4719,7 @@ impl Instance {
             s.store_neg(683, 704);
             s.store_scaled_mul(684, 683, 712, 1.25);
             s.store_scaled_sub_offset_sqrt_square_offset(685, 684, 10.0, (-6.0), 64.0, 0.5);
-            s.store_add_scaled_products_mixed_aaia(686, A::sub(s.ad_value(683), s.ad_value(685)), A::sub(s.ad_value(683), s.ad_value(685)), 1.0, 709, A::offset(s.ad_value(685), 1.0), 1.0);
+            s.store_add_scaled_sub_square_product_mixed_ia(686, 683, 685, 1.0, 709, A::offset(s.ad_value(685), 1.0), 1.0);
             s.store_add_scaled_inputs3_indices(687, 683, 2.0, 685, (-2.0), 709, -1.0);
             s.store_sub_ln_div_lhs(688, 686, 709, 685);
             s.store_add(689, 686, 687);
@@ -4804,7 +4804,7 @@ impl Instance {
 
         if ((s.b[1213] && (!s.b[1214])) && (!s.b[1215])) {
             s.store_add_scaled_inputs3_mixed_iia(694, 704, 2.0, 700, (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(709), 1.0, s.ad_value(693)), 1.0);
-            s.store_add_scaled_products_mixed_aaia(695, A::sub(s.ad_value(704), s.ad_value(700)), A::sub(s.ad_value(704), s.ad_value(700)), 1.0, 709, A::add(A::offset(s.ad_value(700), (-1.0)), s.ad_value(693)), (-1.0));
+            s.store_add_scaled_sub_square_product_mixed_ia(695, 704, 700, 1.0, 709, A::add(A::offset(s.ad_value(700), (-1.0)), s.ad_value(693)), (-1.0));
             s.store_sub_from_scalar_scaled_mul(696, 1.0, 709, 693, 0.5);
             s.store_add_scaled_square_product_indices(691, 694, 1.0, 696, 695, (-4.0));
             s.store_div_scaled_inputs_mixed_ia(701, 695, 2.0, A::add(s.ad_value(694), A::sqrt(s.ad_value(691))), 1.0);
@@ -4832,7 +4832,7 @@ impl Instance {
             s.store_neg(683, 706);
             s.store_scaled_mul(684, 683, 712, 1.25);
             s.store_scaled_sub_offset_sqrt_square_offset(685, 684, 10.0, (-6.0), 64.0, 0.5);
-            s.store_add_scaled_products_mixed_aaia(686, A::sub(s.ad_value(683), s.ad_value(685)), A::sub(s.ad_value(683), s.ad_value(685)), 1.0, 709, A::offset(s.ad_value(685), 1.0), 1.0);
+            s.store_add_scaled_sub_square_product_mixed_ia(686, 683, 685, 1.0, 709, A::offset(s.ad_value(685), 1.0), 1.0);
             s.store_add_scaled_inputs3_indices(687, 683, 2.0, 685, (-2.0), 709, -1.0);
             s.store_sub_ln_div_lhs(688, 686, 709, 685);
             s.store_add(689, 686, 687);
