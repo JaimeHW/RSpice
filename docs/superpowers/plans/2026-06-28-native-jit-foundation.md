@@ -243,7 +243,9 @@ Expected: one commit containing the new error variant and unit test.
 - Create: `crates/rspice-veriloga/src/native/abi.rs`
 - Create: `crates/rspice-veriloga/src/native/model.rs`
 - Create: `crates/rspice-veriloga/src/native/target.rs`
+- Create: `crates/rspice-veriloga/src/native/runtime.rs`
 - Create: `crates/rspice-veriloga/src/native/x64/mod.rs`
+- Create: `crates/rspice-veriloga/src/native/x64/encoder.rs`
 
 - [ ] **Step 1: Write native error tests**
 
@@ -622,7 +624,38 @@ Create `crates/rspice-veriloga/src/native/x64/mod.rs`:
 pub mod encoder;
 ```
 
-- [ ] **Step 8: Remove the Cranelift directory**
+- [ ] **Step 8: Add temporary runtime and encoder placeholders required by module wiring**
+
+Create `crates/rspice-veriloga/src/native/runtime.rs`:
+
+```rust
+pub struct ExecutableMemory;
+```
+
+Create `crates/rspice-veriloga/src/native/x64/encoder.rs`:
+
+```rust
+#[derive(Debug, Default, Clone)]
+pub struct X64Encoder {
+    bytes: Vec<u8>,
+}
+
+impl X64Encoder {
+    pub fn new() -> Self {
+        Self { bytes: Vec::new() }
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+```
+
+These are wiring placeholders only. Task 4 replaces `encoder.rs` with tested
+x64 byte emitters, and Task 5 replaces `runtime.rs` with tested executable
+memory allocation.
+
+- [ ] **Step 9: Remove the Cranelift directory**
 
 Before deleting, verify the resolved path is inside the worktree:
 
@@ -635,7 +668,7 @@ Remove-Item -LiteralPath $target.Path -Recurse
 
 Expected: `crates/rspice-veriloga/src/native/cranelift_jit/` no longer exists.
 
-- [ ] **Step 9: Run native module tests**
+- [ ] **Step 10: Run native module tests**
 
 Run:
 
@@ -645,7 +678,7 @@ cargo test -p rspice-veriloga --features native native::
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 Run:
 
