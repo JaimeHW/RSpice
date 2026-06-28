@@ -5384,6 +5384,25 @@ fn stamp() {
             "{add_scaled_product_right_sub}"
         );
 
+        let offset_scaled_nested_sub = helper_body(
+            &support,
+            "fn store_offset_scaled_mul_sub_from_scalar_scaled_sub_rhs_scaled_output(",
+        );
+        assert!(
+            !offset_scaled_nested_sub.contains("_node_derivatives = self.node_derivatives"),
+            "{offset_scaled_nested_sub}"
+        );
+        assert!(
+            !offset_scaled_nested_sub.contains("_branch_derivatives = self.branch_derivatives"),
+            "{offset_scaled_nested_sub}"
+        );
+        assert!(
+            offset_scaled_nested_sub.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * scaled_right_value - scaled_left_value * (self.node_derivatives[value_left][axis] * value_left_derivative_scale - self.node_derivatives[value][axis] * value_derivative_scale);"
+            ),
+            "{offset_scaled_nested_sub}"
+        );
+
         let square_mul_double_sub_rhs = helper_body(
             &support,
             "fn store_square_mul_sub_from_scalar_double_scaled_sub_rhs_scaled_output(",
@@ -15477,19 +15496,13 @@ fn generate_scratch_operation_helpers() -> String {
         "        let nested_right_value = value_scalar - value_value * value_scale;",
         "        let nested_value = value_left_value * nested_right_value * value_output_scale;",
         "        let right_value = scalar - nested_value;",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let value_left_node_derivatives = self.node_derivatives[value_left];",
-        "        let value_node_derivatives = self.node_derivatives[value];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        let value_left_branch_derivatives = self.branch_derivatives[value_left];",
-        "        let value_branch_derivatives = self.branch_derivatives[value];",
         "        let scaled_left_value = left_value * output_scale;",
         "        let scaled_right_value = right_value * output_scale;",
         "        let value_left_derivative_scale = nested_right_value * value_output_scale;",
         "        let value_derivative_scale = value_left_value * value_scale * value_output_scale;",
         "        self.values[index] = left_value * scaled_right_value + offset;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * scaled_right_value - scaled_left_value * (value_left_node_derivatives[axis] * value_left_derivative_scale - value_node_derivatives[axis] * value_derivative_scale); }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * scaled_right_value - scaled_left_value * (value_left_branch_derivatives[axis] * value_left_derivative_scale - value_branch_derivatives[axis] * value_derivative_scale); }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * scaled_right_value - scaled_left_value * (self.node_derivatives[value_left][axis] * value_left_derivative_scale - self.node_derivatives[value][axis] * value_derivative_scale); }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * scaled_right_value - scaled_left_value * (self.branch_derivatives[value_left][axis] * value_left_derivative_scale - self.branch_derivatives[value][axis] * value_derivative_scale); }",
         "    }",
         "",
         "    #[inline]",
