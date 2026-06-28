@@ -3733,6 +3733,31 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_sqrt_mul_scaled_lhs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sqrt_mul_scaled_lhs"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(90, AdValue::sqrt(AdValue::mul_scaled_lhs(scratch.ad_value(2), params.scale, scratch.ad_value(3))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_sqrt_mul_scaled_lhs(90, 2, p.scale, 3);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_sqrt_ad("), "{compact}");
+        assert!(!compact.contains("A::mul_scaled_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_powf_affine_inputs_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
@@ -14082,6 +14107,13 @@ fn generate_scratch_operation_helpers() -> String {
         "        let raw = self.values[left] * self.values[right];",
         "        let value = raw.sqrt();",
         "        self.store_unary_mul_scaled(index, left, right, value, 1.0 / (2.0 * value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt_mul_scaled_lhs(&mut self, index: usize, left: usize, scale: f64, right: usize) {",
+        "        let raw = self.values[left] * scale * self.values[right];",
+        "        let value = raw.sqrt();",
+        "        self.store_unary_mul_scaled(index, left, right, value, scale / (2.0 * value));",
         "    }",
         "",
         "    #[inline]",
@@ -25924,6 +25956,18 @@ fn compact_sqrt_general_ad_store_helper_call(target_index: usize, value: &str) -
                 inner_args[1]
             ));
         }
+    }
+
+    if let Some(mul_scaled_args) = compact_ad_call_args(inner, "mul_scaled_lhs") {
+        if mul_scaled_args.len() != 3 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(mul_scaled_args[0])?;
+        let right = compact_scratch_ad_value_index(mul_scaled_args[2])?;
+        return Some(format!(
+            "scratch.store_sqrt_mul_scaled_lhs({target_index}, {left}, {}, {right});",
+            mul_scaled_args[1]
+        ));
     }
 
     for (name, helper) in [
