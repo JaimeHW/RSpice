@@ -871,7 +871,7 @@ impl Instance {
         s.v[398] = if s.b[398] { 1.0 } else { 0.0 };
 
         if (s.b[397] && s.b[398]) {
-            s.store_div_ad(354, A::powf(A::sub(s.ad_value(141), s.ad_value(336)), 1.0), A::mul(s.ad_value(335), s.ad_value(36)));
+            s.store_div_scaled_inputs2_mixed_iia(354, 141, 1.0, 336, (-1.0), A::mul(s.ad_value(335), s.ad_value(36)), 1.0);
         }
 
         s.b[399] = (s.v[354] > 80.0);

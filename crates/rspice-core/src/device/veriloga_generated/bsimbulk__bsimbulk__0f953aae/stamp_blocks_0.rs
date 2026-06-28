@@ -5839,7 +5839,7 @@ impl Instance {
         s.v[1400] = if s.b[1400] { 1.0 } else { 0.0 };
 
         if s.b[1400] {
-            s.store_mul_ln_ad_rhs(753, 108, A::div_scaled_inputs(s.ad_value(481), p.p1117, A::powf(s.ad_value(28), 2.0), 1.0));
+            s.store_mul_ln_ad_rhs(753, 108, A::div_scaled_inputs(s.ad_value(481), p.p1117, A::square(s.ad_value(28)), 1.0));
         }
 
         s.b[1401] = (((p.p49 != 0.0) && (p.p909 > 0.0)) && (s.v[38] > 0.0));

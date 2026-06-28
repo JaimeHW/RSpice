@@ -3410,7 +3410,7 @@ impl Instance {
         s.v[560] = if s.b[560] { 1.0 } else { 0.0 };
 
         if (s.b[559] && s.b[560]) {
-            s.store_div_ad(354, A::powf(s.ad_value(371), 1.0), A::mul(s.ad_value(374), s.ad_value(36)));
+            s.store_div_ad_rhs(354, 371, A::mul(s.ad_value(374), s.ad_value(36)));
         }
 
         s.b[561] = (s.v[354] > 80.0);
@@ -3466,7 +3466,7 @@ impl Instance {
         s.v[564] = if s.b[564] { 1.0 } else { 0.0 };
 
         if (s.b[563] && s.b[564]) {
-            s.store_div_ad(354, A::powf(s.ad_value(372), 1.0), A::mul(s.ad_value(373), s.ad_value(36)));
+            s.store_div_ad_rhs(354, 372, A::mul(s.ad_value(373), s.ad_value(36)));
         }
 
         s.b[565] = (s.v[354] > 80.0);

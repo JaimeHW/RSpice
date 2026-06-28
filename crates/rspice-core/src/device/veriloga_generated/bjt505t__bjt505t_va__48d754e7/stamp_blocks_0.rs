@@ -1062,7 +1062,7 @@ impl Instance {
             s.store_sub_from_scalar_ad(306, p.p158, A::scale(A::ln_one_plus_exp(A::neg(s.ad_value(285))), 0.001));
         }
 
-        s.store_mul_scaled_powf_ad_rhs(359, 306, p.p159, A::sub_from_scalar(p.p158, s.ad_value(306)), 2.0);
+        s.store_mul_scaled_ad_rhs(359, 306, p.p159, A::square(A::sub_from_scalar(p.p158, s.ad_value(306))));
 
         s.b[545] = (((s.v[252] * s.v[8]) / p.p17) < p.p151);
         s.v[545] = if s.b[545] { 1.0 } else { 0.0 };

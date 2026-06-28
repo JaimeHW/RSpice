@@ -284,7 +284,7 @@ impl Instance {
             s.store_cosh(89, 35);
             s.store_ln(90, 89);
             s.store_scalar(31, 0.5);
-            s.store_scaled_mul_ad(33, A::offset(s.ad_value(96), p.p40), A::pow(A::offset(A::powf(A::scale_offset(s.ad_value(96), 1.0 / (p.p40), (-1.0)), 2.0), p.p41), A::neg(s.ad_value(31))), p.p39);
+            s.store_scaled_mul_ad(33, A::offset(s.ad_value(96), p.p40), A::pow(A::offset(A::square(A::scale_offset(s.ad_value(96), 1.0 / (p.p40), (-1.0))), p.p41), A::neg(s.ad_value(31))), p.p39);
             s.store_scale_ad(34, A::pow_from_scalar((p.p41 + 1.0), A::neg(s.ad_value(31))), (p.p39 * p.p40));
             s.store_add_scaled_inputs3_indices(94, 55, 1.0, 5, p.p38, 91, 1.0);
             s.store_add_scaled_product_right_ad(26, 96, p.p25, 44, A::add_scaled_offset_product_rhs(s.ad_value(96), (2.0 * p.p38), A::sub(A::add_scaled_inputs4(s.ad_value(35), 1.0, s.ad_value(90), 1.0, s.ad_value(94), -1.0, s.ad_value(33), 1.0), s.ad_value(34)), A::tanh(s.ad_value(36)), (1.0 - p.p38), 1.0 / (p.p31)), 1.0);
@@ -715,7 +715,7 @@ impl Instance {
             s.store_cosh(89, 35);
             s.store_ln(90, 89);
             s.store_scalar(31, 0.5);
-            s.store_scaled_mul_ad(33, A::offset(s.ad_value(96), p.p40), A::pow(A::offset(A::powf(A::scale_offset(s.ad_value(96), 1.0 / (p.p40), (-1.0)), 2.0), p.p41), A::neg(s.ad_value(31))), p.p39);
+            s.store_scaled_mul_ad(33, A::offset(s.ad_value(96), p.p40), A::pow(A::offset(A::square(A::scale_offset(s.ad_value(96), 1.0 / (p.p40), (-1.0))), p.p41), A::neg(s.ad_value(31))), p.p39);
             s.store_scale_ad(34, A::pow_from_scalar((p.p41 + 1.0), A::neg(s.ad_value(31))), (p.p39 * p.p40));
             s.store_add_scaled_inputs3_indices(94, 55, 1.0, 5, p.p38, 91, 1.0);
             s.store_add_scaled_product_right_ad(26, 96, p.p25, 44, A::add_scaled_offset_product_rhs(s.ad_value(96), (2.0 * p.p38), A::sub(A::add_scaled_inputs4(s.ad_value(35), 1.0, s.ad_value(90), 1.0, s.ad_value(94), -1.0, s.ad_value(33), 1.0), s.ad_value(34)), A::tanh(s.ad_value(36)), (1.0 - p.p38), 1.0 / (p.p31)), 1.0);

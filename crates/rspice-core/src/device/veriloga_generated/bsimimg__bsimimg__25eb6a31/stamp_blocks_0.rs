@@ -2184,7 +2184,7 @@ impl Instance {
 
         s.store_scale(48, 290, (1.60219e-19 * (p.p49 * 1.0 / (s.v[17]))));
 
-        s.store_scale_ad(34, A::powf(s.ad_value(113), 2.0), 1600.0);
+        s.store_scaled_square(34, 113, 1600.0);
 
         s.b[622] = (p.p162 != 0.0);
         s.v[622] = if s.b[622] { 1.0 } else { 0.0 };
@@ -4926,7 +4926,7 @@ impl Instance {
 
         s.store_scale(48, 290, (1.60219e-19 * (p.p49 * 1.0 / (s.v[17]))));
 
-        s.store_scale_ad(34, A::powf(s.ad_value(113), 2.0), 1600.0);
+        s.store_scaled_square(34, 113, 1600.0);
 
         s.b[622] = (p.p162 != 0.0);
         s.v[622] = if s.b[622] { 1.0 } else { 0.0 };

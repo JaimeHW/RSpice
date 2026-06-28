@@ -2594,6 +2594,16 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: i32) {
+        let base = value.value;
+        let output = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_add(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
@@ -6269,6 +6279,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi(&mut self, index: usize, source: usize, exponent: i32) {
+        let base = self.v[source];
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_neg_add(&mut self, index: usize, left: usize, right: usize) {
         let value = -(self.v[left] + self.v[right]);
         self.store_unary_add_scaled(index, left, right, value, -1.0);
@@ -6291,6 +6309,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: i32) {
+        let base = self.v[source] * input_scale;
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) * input_scale };
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_powf_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: f64) {
         let base = self.v[source] + offset;
         let value = base.powf(exponent);
@@ -6299,10 +6325,26 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: i32) {
+        let base = self.v[source] + offset;
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_powf_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: f64) {
         let base = self.v[source] * input_scale + offset;
         let value = base.powf(exponent);
         let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, input_scale, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_powi_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: i32) {
+        let base = self.v[source] * input_scale + offset;
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) * input_scale };
         self.store_unary_scaled(index, source, value, derivative_scale);
     }
 
@@ -15284,6 +15326,16 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi_ad(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, exponent: i32) {
+        let base = value.value;
+        let output = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };
+        self.v[index] = output;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_add(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
@@ -18959,6 +19011,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi(&mut self, index: usize, source: usize, exponent: i32) {
+        let base = self.v[source];
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_neg_add(&mut self, index: usize, left: usize, right: usize) {
         let value = -(self.v[left] + self.v[right]);
         self.store_unary_add_scaled(index, left, right, value, -1.0);
@@ -18981,6 +19041,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: i32) {
+        let base = self.v[source] * input_scale;
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) * input_scale };
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_powf_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: f64) {
         let base = self.v[source] + offset;
         let value = base.powf(exponent);
@@ -18989,10 +19057,26 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_powi_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: i32) {
+        let base = self.v[source] + offset;
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_powf_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: f64) {
         let base = self.v[source] * input_scale + offset;
         let value = base.powf(exponent);
         let derivative_scale = AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(value, base, exponent, input_scale, 0.0);
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
+    pub(crate) fn store_powi_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: i32) {
+        let base = self.v[source] * input_scale + offset;
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) * input_scale };
         self.store_unary_scaled(index, source, value, derivative_scale);
     }
 
@@ -26437,6 +26521,17 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
         result.value = value;
         for index in 0..NODE_COUNT { result.dn[index] = Self::pow_derivative(value, base, exponent, result.dn[index], 0.0); }
         for index in 0..BRANCH_COUNT { result.db[index] = Self::pow_derivative(value, base, exponent, result.db[index], 0.0); }
+        result
+    }
+    #[inline]
+    pub(crate) fn powi(left: Self, exponent: i32) -> Self {
+        let base = left.value;
+        let value = base.powi(exponent);
+        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };
+        let mut result = left;
+        result.value = value;
+        for derivative in &mut result.dn { *derivative *= derivative_scale; }
+        for derivative in &mut result.db { *derivative *= derivative_scale; }
         result
     }
     #[inline]

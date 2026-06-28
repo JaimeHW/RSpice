@@ -3402,7 +3402,7 @@ impl Instance {
             s.store_div_scaled_inputs2_indices(1546, 1467, 0.5, 1532, 0.5, 1460, 1.0);
             s.store_scaled_add_offset_sqrt_square_offset(1546, 1546, 1e-5, (-1e-5), 1.0, 0.5);
             s.store_sub_scaled_ad_lhs(1, A::sqrt(A::add_scaled_product(A::div(s.ad_value(1546), s.ad_value(227)), 1.0, s.ad_value(250), s.ad_value(250), 0.25)), 250, 0.5);
-            s.store_mul_powf_ad_lhs(1547, s.ad_value(1), 2.0, 227);
+            s.store_mul_square_lhs(1547, 1, 227);
             s.store_sub_from_scalar_div_indices(1548, 1.0, 1547, 1546);
         }
 
