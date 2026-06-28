@@ -24,12 +24,13 @@ nom.workspace = true
 indexmap = "2.7"
 smol_str = { version = "0.3", features = ["serde"] }
 
-# Native compilation support (optional) - Cranelift JIT
-cranelift = { version = "0.115", optional = true }
-cranelift-jit = { version = "0.115", optional = true }
-cranelift-module = { version = "0.115", optional = true }
-cranelift-codegen = { version = "0.115", optional = true }
-cranelift-native = { version = "0.115", optional = true }
+# Native JIT executable memory support.
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", optional = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
 
 [build-dependencies]
 
@@ -37,5 +38,5 @@ cranelift-native = { version = "0.115", optional = true }
 default = []
 # Enable Verilog-AMS mixed-signal support
 ams = []
-# Enable native JIT compilation via Cranelift
-native = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-codegen", "cranelift-native"]
+# Enable RSpice native JIT compilation. Native mode is full JIT or error.
+native = ["dep:windows-sys", "dep:libc"]
