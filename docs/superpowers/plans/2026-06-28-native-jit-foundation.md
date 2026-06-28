@@ -239,6 +239,7 @@ Expected: one commit containing the new error variant and unit test.
 **Files:**
 - Delete: `crates/rspice-veriloga/src/native/cranelift_jit/`
 - Replace: `crates/rspice-veriloga/src/native/mod.rs`
+- Modify: `crates/rspice-veriloga/src/device.rs`
 - Create: `crates/rspice-veriloga/src/native/error.rs`
 - Create: `crates/rspice-veriloga/src/native/abi.rs`
 - Create: `crates/rspice-veriloga/src/native/model.rs`
@@ -655,7 +656,35 @@ These are wiring placeholders only. Task 4 replaces `encoder.rs` with tested
 x64 byte emitters, and Task 5 replaces `runtime.rs` with tested executable
 memory allocation.
 
-- [ ] **Step 9: Remove the Cranelift directory**
+- [ ] **Step 9: Rewire device construction to the hard-fail native API**
+
+In `crates/rspice-veriloga/src/device.rs`, perform the no-fallback integration
+from Task 6 now so the native module does not need compatibility shims:
+
+- Change `native_model: Option<std::sync::Arc<NativeModel>>` to
+  `native_model: std::sync::Arc<NativeModel>` under `#[cfg(feature = "native")]`.
+- Change the constructor to call `Self::try_native_compile(&model)?`.
+- Replace `try_native_compile` with the result-returning cache that calls
+  `crate::native::compile_native`, stores `Result<Arc<NativeModel>, String>`,
+  and maps failures to `VmError::NativeJit`.
+- Remove `force_interpreter`.
+- Make native `is_using_native()` return `true`.
+- Make native `native_chunk_count()` and `native_plan_stats()` read directly
+  from the required `NativeModel`.
+- Make native `run_value_program` require `crate::native::StampFn` and make the
+  non-native version execute bytecode.
+- Make native `run_assignment_pass` require `&NativeModel` and call
+  `native.run_assignments`.
+- Delete `execute_assignment_plan`; native mode must not walk interpreted plan
+  steps.
+- Replace native call sites so they pass required `StampFn` values:
+  `native.stamp_value_fn(idx)` and `native.jacobian_fn(stamp, entry)`.
+
+The native module must not export `try_compile_native`, `PlanStep`,
+`PlanStep::Interpret`, `NativeFnAccessor`, `Option<StampFn>` accessors, `plan`,
+or `run_chunk`.
+
+- [ ] **Step 10: Remove the Cranelift directory**
 
 Before deleting, verify the resolved path is inside the worktree:
 
@@ -668,22 +697,24 @@ Remove-Item -LiteralPath $target.Path -Recurse
 
 Expected: `crates/rspice-veriloga/src/native/cranelift_jit/` no longer exists.
 
-- [ ] **Step 10: Run native module tests**
+- [ ] **Step 11: Run native module and contract tests**
 
 Run:
 
 ```powershell
 cargo test -p rspice-veriloga --features native native::
+cargo test -p rspice-veriloga --features native --test native_contract -- --nocapture
 ```
 
-Expected: PASS.
+Expected: both PASS. `native_contract` passes because native construction now
+propagates a typed native JIT error instead of falling back to the interpreter.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 Run:
 
 ```powershell
-git add crates/rspice-veriloga/src/native
+git add crates/rspice-veriloga/src/native crates/rspice-veriloga/src/device.rs
 git commit -m "feat: replace cranelift facade with native jit contract"
 ```
 
@@ -1059,53 +1090,39 @@ git commit -m "feat: add native executable memory foundation"
 
 Expected: one commit containing dependency changes and executable memory implementation.
 
-## Task 6: Enforce No-Fallback Device Integration
+## Task 6: Verify No-Fallback Device Integration
 
 **Files:**
 - Modify: `crates/rspice-veriloga/src/device.rs`
 
-- [ ] **Step 1: Change the native model field from optional to required under native mode**
+- [ ] **Step 1: Verify the native model field is required under native mode**
 
-In `VerilogADevice`, replace:
-
-```rust
-#[cfg(feature = "native")]
-native_model: Option<std::sync::Arc<NativeModel>>,
-```
-
-with:
+Confirm `VerilogADevice` contains:
 
 ```rust
 #[cfg(feature = "native")]
 native_model: std::sync::Arc<NativeModel>,
 ```
 
-Update the surrounding comments to say:
+and the surrounding comments say:
 
 ```rust
 /// Native compiled model. In native mode this is required: construction fails
 /// if a complete native image cannot be produced.
 ```
 
-- [ ] **Step 2: Propagate native compile errors from `try_new`**
+- [ ] **Step 2: Verify native compile errors propagate from `try_new`**
 
-Replace:
-
-```rust
-#[cfg(feature = "native")]
-let native_model = Self::try_native_compile(&model);
-```
-
-with:
+Confirm constructor code calls:
 
 ```rust
 #[cfg(feature = "native")]
 let native_model = Self::try_native_compile(&model)?;
 ```
 
-- [ ] **Step 3: Replace `try_native_compile` with a result-returning cache**
+- [ ] **Step 3: Verify `try_native_compile` uses a result-returning cache**
 
-Replace the full `try_native_compile` function with:
+Confirm the full `try_native_compile` function is:
 
 ```rust
 #[cfg(feature = "native")]
@@ -1141,22 +1158,14 @@ fn try_native_compile(
 }
 ```
 
-- [ ] **Step 4: Remove `force_interpreter`**
+- [ ] **Step 4: Verify `force_interpreter` is removed**
 
-Delete this method:
+No production method may disable native execution after construction in native
+mode.
 
-```rust
-#[cfg(feature = "native")]
-pub fn force_interpreter(&mut self) {
-    self.native_model = None;
-}
-```
+- [ ] **Step 5: Verify native status and stats methods**
 
-No production method may disable native execution after construction in native mode.
-
-- [ ] **Step 5: Update native status and stats methods**
-
-Use these native implementations:
+Confirm these native implementations:
 
 ```rust
 #[cfg(feature = "native")]
@@ -1177,9 +1186,10 @@ pub fn native_plan_stats(&self) -> crate::native::PlanStats {
 
 Keep the existing non-native `is_using_native` implementation returning `false`.
 
-- [ ] **Step 6: Remove optional native function parameters from runtime paths**
+- [ ] **Step 6: Verify optional native function parameters are removed from runtime paths**
 
-Change `run_value_program` to use a required native function when the `native` feature is active:
+Confirm `run_value_program` uses a required native function when the `native`
+feature is active:
 
 ```rust
 #[cfg(feature = "native")]
@@ -1202,7 +1212,7 @@ fn run_value_program(
 }
 ```
 
-Change `run_assignment_pass` to:
+Confirm `run_assignment_pass` is:
 
 ```rust
 #[cfg(feature = "native")]
@@ -1229,11 +1239,12 @@ fn run_assignment_pass(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmE
 }
 ```
 
-Delete `execute_assignment_plan`; the native plan cannot contain interpreted steps.
+Confirm `execute_assignment_plan` is absent; the native plan cannot contain
+interpreted steps.
 
-- [ ] **Step 7: Update call sites**
+- [ ] **Step 7: Verify call sites**
 
-For each native call site, replace:
+For each native call site, confirm:
 
 ```rust
 #[cfg(feature = "native")]
@@ -1286,7 +1297,8 @@ with:
 native.jacobian_fn(program_idx, jacobian_entry.jacobian_idx),
 ```
 
-Apply the same required-function change to every `run_value_program` call reported by:
+Confirm the required-function change applies to every `run_value_program` call
+reported by:
 
 ```powershell
 rg -n "run_value_program|stamp_value_fn|jacobian_fn|and_then\\(\\|n\\|" crates/rspice-veriloga/src/device.rs
