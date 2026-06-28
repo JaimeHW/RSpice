@@ -75,6 +75,24 @@ endmodule
     )
 }
 
+fn chained_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module assign_chain_native(p, n);
+    inout p, n;
+    electrical p, n;
+    real a, b;
+    analog begin
+        a = 0.25;
+        b = a * 2.0;
+        I(p, n) <+ b * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn runtime_loop_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -226,6 +244,31 @@ fn native_device_executes_scalar_assignment_pass() {
 
     assert!(
         (matrix.get(&(0, 0)).copied().unwrap_or_default() - 0.25).abs() < 1e-12,
+        "matrix: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_scalar_assignments_in_source_order() {
+    let model = chained_assignment_model();
+    assert!(
+        model.assignment_steps.len() >= 2,
+        "fixture must contain multiple scalar assignment steps"
+    );
+    let mut device = VerilogADevice::try_new("ACHAIN1", model, &[1, 0])
+        .expect("assignment-chain model uses native JIT");
+    assert!(device.is_using_native());
+    assert_eq!(device.native_plan_stats().assignment_entry_points, 1);
+
+    let (matrix, rhs) = stamp_device(&mut device, &[8.0]);
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 0.5).abs() < 1e-12,
         "matrix: {matrix:?}"
     );
     assert!(

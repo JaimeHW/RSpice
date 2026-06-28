@@ -4,11 +4,11 @@ pub mod encoder;
 use super::expr::{EntryKind, NativeProgram};
 use super::model::{CodeOffset, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
-use super::{JitError, JitResult};
+use super::JitResult;
 use crate::codegen::{AssignmentStep, CompiledModel};
 
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
-    validate_model_coverage(model)?;
+    super::validate_native_coverage(model)?;
 
     let mut image = Vec::new();
     let assignment = CodeOffset::new(image.len());
@@ -50,68 +50,6 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
             reactive_jacobians: vec![Vec::new(); model.stamp_programs.len()],
         },
     )
-}
-
-fn validate_model_coverage(model: &CompiledModel) -> JitResult<()> {
-    if model
-        .parameters
-        .iter()
-        .any(|parameter| parameter.default_program.is_some())
-    {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "DependentParameterDefaults",
-        ));
-    }
-
-    if model
-        .stamp_programs
-        .iter()
-        .any(|stamp| stamp.static_condition.is_some())
-    {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "StaticConditionPrograms",
-        ));
-    }
-
-    if !model.noise_sources.is_empty() {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "NoiseSources",
-        ));
-    }
-
-    if model
-        .stamp_programs
-        .iter()
-        .any(|stamp| !stamp.reactive_jacobians.is_empty())
-    {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "ReactiveJacobians",
-        ));
-    }
-
-    for step in &model.assignment_steps {
-        validate_assignment_step(model, step)?;
-    }
-
-    Ok(())
-}
-
-fn validate_assignment_step(model: &CompiledModel, step: &AssignmentStep) -> JitResult<()> {
-    match step {
-        AssignmentStep::Assign(_) => Ok(()),
-        AssignmentStep::AssignIndexed { .. } => Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "AssignIndexed",
-        )),
-        AssignmentStep::Loop { .. } => Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "Loop",
-        )),
-    }
 }
 
 fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitResult<()> {

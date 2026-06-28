@@ -19,9 +19,11 @@ pub use error::{JitError, JitResult};
 pub use model::{NativeModel, PlanStats};
 pub use target::{Architecture, TargetSpec};
 
-use crate::codegen::CompiledModel;
+use crate::codegen::{AssignmentStep, CompiledModel};
 
 pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
+    validate_native_coverage(model)?;
+
     let target = TargetSpec::host().ok_or_else(|| JitError::UnsupportedTarget {
         target: "unknown".into(),
         reason: "host architecture is not supported".into(),
@@ -32,5 +34,67 @@ pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
             target: target.display_name().into(),
             reason: "AArch64 backend boundary exists but is not enabled".into(),
         }),
+    }
+}
+
+fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
+    if model
+        .parameters
+        .iter()
+        .any(|parameter| parameter.default_program.is_some())
+    {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "DependentParameterDefaults",
+        ));
+    }
+
+    if model
+        .stamp_programs
+        .iter()
+        .any(|stamp| stamp.static_condition.is_some())
+    {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "StaticConditionPrograms",
+        ));
+    }
+
+    if !model.noise_sources.is_empty() {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "NoiseSources",
+        ));
+    }
+
+    if model
+        .stamp_programs
+        .iter()
+        .any(|stamp| !stamp.reactive_jacobians.is_empty())
+    {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "ReactiveJacobians",
+        ));
+    }
+
+    for step in &model.assignment_steps {
+        validate_assignment_coverage(model, step)?;
+    }
+
+    Ok(())
+}
+
+fn validate_assignment_coverage(model: &CompiledModel, step: &AssignmentStep) -> JitResult<()> {
+    match step {
+        AssignmentStep::Assign(_) => Ok(()),
+        AssignmentStep::AssignIndexed { .. } => Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "AssignIndexed",
+        )),
+        AssignmentStep::Loop { .. } => Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "Loop",
+        )),
     }
 }
