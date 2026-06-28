@@ -470,6 +470,19 @@ fn stamp_device(
     (matrix, rhs)
 }
 
+fn stamp_reactive_device(
+    device: &mut VerilogADevice,
+    voltages: &[f64],
+) -> HashMap<(usize, usize), f64> {
+    let mut matrix = HashMap::new();
+
+    device.stamp_reactive(voltages, |row, col, value| {
+        *matrix.entry((row, col)).or_insert(0.0) += value;
+    });
+
+    matrix
+}
+
 fn noise_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -495,6 +508,22 @@ module capjit(p, n);
     parameter real c = 1.0e-12;
     analog begin
         I(p, n) <+ ddt(c * V(p, n));
+    end
+endmodule
+"#,
+    )
+}
+
+fn reactive_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module reactive_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n);
+        I(p, n) <+ ddt(I(p, n) * V(p, n));
     end
 endmodule
 "#,
@@ -1186,7 +1215,7 @@ fn native_compile_rejects_noise_sources_without_fallback() {
 }
 
 #[test]
-fn native_compile_rejects_reactive_jacobians_without_fallback() {
+fn native_compile_accepts_reactive_ddt_jacobians_without_fallback() {
     let model = reactive_model();
     assert!(
         model
@@ -1196,14 +1225,42 @@ fn native_compile_rejects_reactive_jacobians_without_fallback() {
         "fixture must contain compiled reactive Jacobians"
     );
 
-    let err =
-        compile_native(&model).expect_err("native JIT must reject unsupported reactive coverage");
+    let native = compile_native(&model).expect("native JIT must compile ddt reactive coverage");
+
+    assert!(
+        native.plan_stats().reactive_jacobian_entry_points > 0,
+        "reactive Jacobian entry points must be published"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_stamps_reactive_ddt_capacitance_without_fallback() {
+    let model = reactive_model();
+    let mut device =
+        VerilogADevice::try_new("C1", model, &[1, 0]).expect("capacitor model uses native JIT");
+    assert!(device.is_using_native());
+
+    let matrix = stamp_reactive_device(&mut device, &[2.0]);
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 1.0e-12).abs() < 1e-24,
+        "matrix: {matrix:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_compile_rejects_reactive_current_probes_without_fallback() {
+    let model = reactive_current_probe_model();
+
+    let err = compile_native(&model).expect_err("reactive current probes must not compile native");
     let msg = err.to_string();
 
     assert_native_hard_fail_message(&msg);
     assert!(
-        msg.contains("ReactiveJacobians"),
-        "error must name unsupported reactive coverage, got: {msg}"
+        msg.contains("PushCurrent terminal pair 0,1 unavailable"),
+        "error must name unavailable reactive current dependency, got: {msg}"
     );
 }
 

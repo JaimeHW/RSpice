@@ -80,6 +80,17 @@ impl ConditionCode {
             Self::Parity => 0x9A,
         }
     }
+
+    fn jump_opcode(self) -> u8 {
+        match self {
+            Self::Above => 0x87,
+            Self::AboveOrEqual => 0x83,
+            Self::Below => 0x82,
+            Self::Equal => 0x84,
+            Self::NotParity => 0x8B,
+            Self::Parity => 0x8A,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -280,6 +291,20 @@ impl X64Encoder {
         self.emit_rex(true, dst.code(), 0, src.code());
         self.emit_all(&[0x0F, 0x45]);
         self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
+    pub(crate) fn jcc_rel32_placeholder(&mut self, condition: ConditionCode) -> usize {
+        self.emit_all(&[0x0F, condition.jump_opcode()]);
+        let offset = self.position();
+        self.emit_i32(0);
+        offset
+    }
+
+    pub(crate) fn jmp_rel32_placeholder(&mut self) -> usize {
+        self.emit_u8(0xE9);
+        let offset = self.position();
+        self.emit_i32(0);
+        offset
     }
 
     pub(crate) fn addsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {

@@ -9,6 +9,7 @@ pub(crate) enum EntryKind {
     Assignment,
     StampValue,
     Jacobian,
+    ReactiveJacobian,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -46,6 +47,8 @@ pub(crate) enum NativeOp {
     Extremum(ExtremumOp),
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
+    DdtState(usize),
+    DdtJacobian,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,6 +370,26 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::UnaryMath(unary_math_op(instruction)));
+                }
+                Instruction::DdtState(index) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::DdtState(*index));
+                }
+                Instruction::DdtJacobian => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::DdtJacobian);
                 }
                 Instruction::Gt
                 | Instruction::Lt

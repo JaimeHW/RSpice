@@ -16,6 +16,9 @@ const BRANCH_CURRENTS_OFFSET: i32 = 24;
 const PORT_CONNECTED_OFFSET: i32 = 64;
 const TEMPERATURE_OFFSET: i32 = 80;
 const TIME_OFFSET: i32 = 88;
+const TIMESTEP_OFFSET: i32 = 96;
+const STATE_PREV_OFFSET: i32 = 104;
+const STATE_VALUES_OFFSET: i32 = 112;
 const PARAM_GIVEN_OFFSET: i32 = 152;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 160;
 const MFACTOR_OFFSET: i32 = 176;
@@ -23,6 +26,7 @@ const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
+const DDT_DC_EPSILON: f64 = 1.0e-20;
 const CALL_SPILL_SLOT_COUNT: usize = 7;
 const CALL_RESULT_SLOT: usize = 6;
 const CALL_FRAME_BYTES: i32 = CALL_SHADOW_BYTES + (CALL_SPILL_SLOT_COUNT * WORD_BYTES) as i32;
@@ -180,6 +184,8 @@ impl FunctionCompiler {
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                 NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
+                NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
+                NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
             }
         }
 
@@ -410,6 +416,68 @@ impl FunctionCompiler {
         self.emit_binary_helper_call(left, right, binary_math_helper(op));
         self.depth -= 1;
         Ok(())
+    }
+
+    fn emit_ddt_state(&mut self, state_index: usize) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "ddt state requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        let scratch = self.scratch_register()?;
+        let state_disp = byte_disp(state_index)?;
+
+        self.emit_context_pointer_load(STATE_VALUES_OFFSET);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let skip_store = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, target);
+        self.patch_rel32_to_current(skip_store)?;
+
+        self.encoder.movsd_xmm_xmm(scratch, target);
+        self.emit_context_pointer_load(STATE_PREV_OFFSET);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let skip_previous_load = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.encoder
+            .movsd_xmm_m64_base_disp32(scratch, Gpr::Rax, state_disp);
+        self.patch_rel32_to_current(skip_previous_load)?;
+
+        self.encoder.subsd_xmm_xmm(target, scratch);
+        self.emit_ddt_timestep_scale(target, scratch)
+    }
+
+    fn emit_ddt_jacobian(&mut self) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "ddt jacobian requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        let scratch = self.scratch_register()?;
+        self.emit_ddt_timestep_scale(target, scratch)
+    }
+
+    fn emit_ddt_timestep_scale(&mut self, target: Xmm, scratch: Xmm) -> JitResult<()> {
+        self.encoder
+            .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
+        self.encoder.movq_r64_xmm(Gpr::R11, scratch);
+        self.emit_abs_register(scratch);
+        self.emit_literal_compare(scratch, DDT_DC_EPSILON);
+
+        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+        self.encoder.xorpd_xmm_xmm(target, target);
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(non_dc_path)?;
+        self.encoder.movq_xmm_r64(scratch, Gpr::R11);
+        self.encoder.divsd_xmm_xmm(target, scratch);
+
+        self.patch_rel32_to_current(done)
     }
 
     fn emit_binary_helper_call(&mut self, left: Xmm, right: Xmm, helper: BinaryHelper) {
@@ -754,6 +822,18 @@ impl FunctionCompiler {
 
         Ok(bytes)
     }
+
+    fn patch_rel32_to_current(&mut self, displacement_offset: usize) -> JitResult<()> {
+        let target_offset = self.encoder.position();
+        let next_instruction_offset = displacement_offset + std::mem::size_of::<i32>();
+        let displacement = i32::try_from(target_offset as isize - next_instruction_offset as isize)
+            .map_err(|_| JitError::Relocation {
+                model: MODEL.into(),
+                detail: "branch displacement does not fit in i32".into(),
+            })?;
+        self.encoder.patch_i32(displacement_offset, displacement);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1078,6 +1158,64 @@ mod tests {
             f(&ctx, std::ptr::null()).to_bits(),
             thermal_voltage(315.0).to_bits()
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_ddt_state_and_records_operand() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushVariable(0), Instruction::DdtState(1)],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile ddt state leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate ddt state leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+
+        let previous_state = [0.0_f64, 1.5_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_values = state_values.as_mut_ptr();
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.0;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.25;
+        ctx.state_prev = std::ptr::null();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_ddt_jacobian_from_timestep() {
+        let program = native_program(
+            EntryKind::Jacobian,
+            vec![Instruction::PushVariable(0), Instruction::DdtJacobian],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile ddt jacobian leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate ddt jacobian leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+
+        ctx.timestep = 0.25;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 8.0_f64.to_bits());
+
+        ctx.timestep = 0.0;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
+    let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
+    let mut reactive_jacobian_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut available_current_pairs = Vec::new();
 
     for stamp in &model.stamp_programs {
@@ -60,6 +62,23 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
         jacobians.push(stamp_jacobians);
         jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
 
+        let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
+        let mut stamp_reactive_jacobian_current_dependencies =
+            Vec::with_capacity(stamp.reactive_jacobians.len());
+        for reactive_jacobian in &stamp.reactive_jacobians {
+            let program = NativeProgram::from_bytecode(
+                model.name.clone(),
+                EntryKind::ReactiveJacobian,
+                &reactive_jacobian.program,
+                base_limits,
+            )?;
+            stamp_reactive_jacobian_current_dependencies
+                .push(program.current_pair_dependencies().to_vec());
+            stamp_reactive_jacobians.push(append_value_entry(&mut image, &program)?);
+        }
+        reactive_jacobians.push(stamp_reactive_jacobians);
+        reactive_jacobian_current_dependencies.push(stamp_reactive_jacobian_current_dependencies);
+
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
             push_current_pair_indices(
                 model,
@@ -79,12 +98,12 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
             assignment,
             stamp_values,
             jacobians,
-            reactive_jacobians: vec![Vec::new(); model.stamp_programs.len()],
+            reactive_jacobians,
         },
         NativeCurrentDependencies {
             stamp_values: stamp_value_current_dependencies,
             jacobians: jacobian_current_dependencies,
-            reactive_jacobians: vec![Vec::new(); model.stamp_programs.len()],
+            reactive_jacobians: reactive_jacobian_current_dependencies,
         },
     )
 }
