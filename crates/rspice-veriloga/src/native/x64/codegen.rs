@@ -237,6 +237,18 @@ impl FunctionCompiler {
                 NativeOp::Sub => self.emit_binary_op(BinaryOp::Sub)?,
                 NativeOp::Mul => self.emit_binary_op(BinaryOp::Mul)?,
                 NativeOp::Div => self.emit_binary_op(BinaryOp::Div)?,
+                NativeOp::AddConst(value) => {
+                    self.emit_literal_rhs_binary_op(value, BinaryOp::Add)?
+                }
+                NativeOp::SubConst(value) => {
+                    self.emit_literal_rhs_binary_op(value, BinaryOp::Sub)?
+                }
+                NativeOp::MulConst(value) => {
+                    self.emit_literal_rhs_binary_op(value, BinaryOp::Mul)?
+                }
+                NativeOp::DivConst(value) => {
+                    self.emit_literal_rhs_binary_op(value, BinaryOp::Div)?
+                }
                 NativeOp::Neg => self.emit_neg()?,
                 NativeOp::Abs => self.emit_abs()?,
                 NativeOp::Square => self.emit_square()?,
@@ -524,6 +536,19 @@ impl FunctionCompiler {
             BinaryOp::Div => self.encoder.divsd_xmm_xmm(left, right),
         }
         self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_literal_rhs_binary_op(&mut self, value: f64, op: BinaryOp) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "literal RHS binary op requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_literal_binary_op(target, value, op);
         Ok(())
     }
 
@@ -2192,6 +2217,52 @@ mod tests {
             bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-call native leaves must preserve context and vars pointers"
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_applies_constant_rhs_arithmetic_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Add, 12.0_f64),
+            (Instruction::Sub, 4.0_f64),
+            (Instruction::Mul, 32.0_f64),
+            (Instruction::Div, 2.0_f64),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(4.0),
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{instruction_name} should use a literal RHS instruction, not a second stack slot"
+            );
+
+            let bytes =
+                compile_value_function(&program).expect("compile literal RHS arithmetic leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant RHS arithmetic should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate literal RHS arithmetic leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = 8.0;
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
     }
 
     #[test]
