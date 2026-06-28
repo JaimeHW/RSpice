@@ -3789,6 +3789,55 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_scaled_sqrt_product_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_scaled_sqrt_mul"), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(91, AdValue::scale(AdValue::sqrt(AdValue::mul(scratch.ad_value(4), scratch.ad_value(5))), params.scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_scaled_sqrt_mul(91, 4, 5, p.scale);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_scaled_sqrt_ad("), "{compact}");
+        assert!(!compact.contains("A::mul("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_scaled_sqrt_mul_scaled_lhs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_scaled_sqrt_mul_scaled_lhs"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(92, AdValue::scale(AdValue::sqrt(AdValue::mul_scaled_lhs(scratch.ad_value(6), params.input_scale, scratch.ad_value(7))), params.output_scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_scaled_sqrt_mul_scaled_lhs(92, 6, p.input_scale, 7, p.output_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_scaled_sqrt_ad("), "{compact}");
+        assert!(!compact.contains("A::mul_scaled_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_powf_affine_inputs_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
@@ -14241,6 +14290,20 @@ fn generate_scratch_operation_helpers() -> String {
         "        let raw = self.values[left] * scale * self.values[right];",
         "        let value = raw.sqrt();",
         "        self.store_unary_mul_scaled(index, left, right, value, scale / (2.0 * value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_sqrt_mul(&mut self, index: usize, left: usize, right: usize, output_scale: f64) {",
+        "        let raw = self.values[left] * self.values[right];",
+        "        let value = raw.sqrt();",
+        "        self.store_unary_mul_scaled(index, left, right, value * output_scale, output_scale / (2.0 * value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_sqrt_mul_scaled_lhs(&mut self, index: usize, left: usize, input_scale: f64, right: usize, output_scale: f64) {",
+        "        let raw = self.values[left] * input_scale * self.values[right];",
+        "        let value = raw.sqrt();",
+        "        self.store_unary_mul_scaled(index, left, right, value * output_scale, output_scale * input_scale / (2.0 * value));",
         "    }",
         "",
         "    #[inline]",
@@ -26966,6 +27029,39 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
             "scratch.store_scaled_offset({target_index}, {source}, {}, {scale});",
             inner_args[1]
         ));
+    }
+
+    if let Some(inner_args) = compact_ad_call_args(inner, "sqrt") {
+        if inner_args.len() != 1 {
+            return None;
+        }
+        if let Some(mul_args) = compact_ad_call_args(inner_args[0], "mul") {
+            if mul_args.len() != 2 {
+                return None;
+            }
+            if let (Some(left), Some(right)) = (
+                compact_scratch_ad_value_index(mul_args[0]),
+                compact_scratch_ad_value_index(mul_args[1]),
+            ) {
+                return Some(format!(
+                    "scratch.store_scaled_sqrt_mul({target_index}, {left}, {right}, {scale});"
+                ));
+            }
+        }
+        if let Some(mul_args) = compact_ad_call_args(inner_args[0], "mul_scaled_lhs") {
+            if mul_args.len() != 3 {
+                return None;
+            }
+            if let (Some(left), Some(right)) = (
+                compact_scratch_ad_value_index(mul_args[0]),
+                compact_scratch_ad_value_index(mul_args[2]),
+            ) {
+                return Some(format!(
+                    "scratch.store_scaled_sqrt_mul_scaled_lhs({target_index}, {left}, {}, {right}, {scale});",
+                    mul_args[1]
+                ));
+            }
+        }
     }
 
     for (name, fused_name, helper) in [
