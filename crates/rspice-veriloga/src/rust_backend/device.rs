@@ -473,6 +473,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_mul_powf_helper_calls(source);
     source = compact_mul_pow_helper_calls(source);
     source = compact_mul_add_sub_helper_calls(source);
+    source = compact_mul_square_exp_scaled_input_helper_calls(source);
     source = compact_sqrt_mul_sub_operand_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
@@ -2111,6 +2112,86 @@ fn compact_mul_add_sub_helper_line(
 ) -> Option<String> {
     let (helper, left, right) = compact_add_sub_args(value)?;
     compact_index_or_mixed_mul_add_sub_helper_line(target_index, helper, factor, left, right)
+}
+
+fn compact_mul_square_exp_scaled_input_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_square_exp_scaled_input_helper_call_replacement(
+                &source, call_start, indent,
+            )
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_square_exp_scaled_input_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = compact_mul_square_exp_scaled_input_helper_line(target_index, left, right)
+        .or_else(|| compact_mul_square_exp_scaled_input_helper_line(target_index, right, left))?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_square_exp_scaled_input_helper_line(
+    target_index: usize,
+    square: &str,
+    exp_scaled_input: &str,
+) -> Option<String> {
+    let square_args = compact_ad_call_args(square, "square")?;
+    let exp_args = compact_ad_call_args(exp_scaled_input, "exp_scaled_input")?;
+    if square_args.len() != 1 || exp_args.len() != 2 {
+        return None;
+    }
+    let square_source = compact_scratch_ad_value_index(square_args[0])?;
+    let exp_source = compact_scratch_ad_value_index(exp_args[0])?;
+    Some(format!(
+        "scratch.store_mul_square_exp_scaled_input({target_index}, {square_source}, {exp_source}, {});",
+        exp_args[1]
+    ))
 }
 
 fn compact_sqrt_mul_sub_operand_helper_calls(source: String) -> String {
@@ -5262,6 +5343,35 @@ fn stamp() {
             compact.contains(
                 "s.store_mul_add_mixed_aai(202, A::ln(s.ad_value(11)), A::exp(s.ad_value(9)), 10);"
             ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_square_exp_scaled_input_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_mul_square_exp_scaled_input"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(210, AdValue::square(scratch.ad_value(2)), AdValue::exp_scaled_input(scratch.ad_value(3), params.scale));
+    scratch.store_mul_ad(211, AdValue::exp_scaled_input(scratch.ad_value(4), -1.0), AdValue::square(scratch.ad_value(5)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_square_exp_scaled_input(210, 2, 3, p.scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_mul_square_exp_scaled_input(211, 5, 4, -1.0);"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
@@ -14753,6 +14863,23 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = source_value * quotient;",
     "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = left.node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * denominator_scale; self.node_derivatives[index][axis] = source_node_derivatives[axis] * quotient + source_value * quotient_derivative; }",
     "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = left.branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * denominator_scale; self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * quotient + source_value * quotient_derivative; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_square_exp_scaled_input(&mut self, index: usize, square_source: usize, exp_source: usize, exp_scale: f64) {",
+    "        let square_raw = self.values[square_source];",
+    "        let square_value = square_raw * square_raw;",
+    "        let exp_raw = self.values[exp_source] * exp_scale;",
+    "        let exp_value = exp_raw.exp();",
+    "        let square_node_derivatives = self.node_derivatives[square_source];",
+    "        let exp_node_derivatives = self.node_derivatives[exp_source];",
+    "        let square_branch_derivatives = self.branch_derivatives[square_source];",
+    "        let exp_branch_derivatives = self.branch_derivatives[exp_source];",
+    "        let square_derivative_scale = 2.0 * square_raw * exp_value;",
+    "        let exp_derivative_scale = square_value * exp_value * exp_scale;",
+    "        self.values[index] = square_value * exp_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_derivative_scale + exp_node_derivatives[axis] * exp_derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_derivative_scale + exp_branch_derivatives[axis] * exp_derivative_scale; }",
     "    }",
     "",
     "    #[inline]",
