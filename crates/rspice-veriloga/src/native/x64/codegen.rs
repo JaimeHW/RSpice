@@ -1,11 +1,11 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
     rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_bitand, rspice_bitor,
-    rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_exp, rspice_floor,
-    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
-    rspice_mod, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
-    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
-    rspice_zi_step_native,
+    rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_dynamic_variable_load_native,
+    rspice_exp, rspice_floor, rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp,
+    rspice_log, rspice_log10, rspice_mod, rspice_pow, rspice_shl, rspice_shr, rspice_sin,
+    rspice_sinh, rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan,
+    rspice_tanh, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -160,6 +160,9 @@ impl FunctionCompiler {
                         self.vars_arg_reg(),
                         byte_disp(index)?,
                     );
+                }
+                NativeOp::LoadVariableDyn { base, len, lower } => {
+                    self.emit_dynamic_variable_load(base, len, lower)?;
                 }
                 NativeOp::LoadBranchUnknown(index) => {
                     let dst = self.push_register()?;
@@ -427,6 +430,77 @@ impl FunctionCompiler {
         self.encoder
             .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+    }
+
+    fn emit_dynamic_variable_load(&mut self, base: usize, len: usize, lower: i64) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "dynamic variable load requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_dynamic_variable_helper_call(
+            target,
+            base,
+            len,
+            lower,
+            rspice_dynamic_variable_load_native,
+        )
+    }
+
+    fn emit_dynamic_variable_helper_call(
+        &mut self,
+        target: Xmm,
+        base: usize,
+        len: usize,
+        lower: i64,
+        helper: DynamicVariableHelper,
+    ) -> JitResult<()> {
+        debug_assert!(self.uses_helper_calls);
+        debug_assert!(xmm_stack_slot(target) < self.depth);
+        let base_disp = byte_disp(base)?;
+
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+            }
+        }
+
+        if target != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
+        }
+        self.encoder
+            .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
+        if base_disp != 0 {
+            self.encoder
+                .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
+        }
+        self.encoder
+            .movabs_r64_imm64(dynamic_variable_len_arg_reg(), len as u64);
+        self.encoder
+            .movabs_r64_imm64(dynamic_variable_lower_arg_reg(), lower as u64);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        Ok(())
     }
 
     fn emit_binary_math(&mut self, op: BinaryMathOp) -> JitResult<()> {
@@ -1309,6 +1383,7 @@ type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
 type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
+type DynamicVariableHelper = unsafe extern "C" fn(f64, *const f64, usize, i64) -> f64;
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
@@ -1365,6 +1440,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::IntegerBinary(_)
                 | NativeOp::TableLookup(_)
                 | NativeOp::TableDerivative(_)
+                | NativeOp::LoadVariableDyn { .. }
                 | NativeOp::LaplaceState(_)
                 | NativeOp::ZiState(_)
                 | NativeOp::IdtModState(_)
@@ -1485,14 +1561,44 @@ fn context_filter_id_arg_reg() -> Gpr {
     Gpr::Rsi
 }
 
+#[cfg(windows)]
+fn dynamic_variable_base_arg_reg() -> Gpr {
+    Gpr::Rdx
+}
+
+#[cfg(windows)]
+fn dynamic_variable_len_arg_reg() -> Gpr {
+    Gpr::R8
+}
+
+#[cfg(windows)]
+fn dynamic_variable_lower_arg_reg() -> Gpr {
+    Gpr::R9
+}
+
+#[cfg(not(windows))]
+fn dynamic_variable_base_arg_reg() -> Gpr {
+    Gpr::Rdi
+}
+
+#[cfg(not(windows))]
+fn dynamic_variable_len_arg_reg() -> Gpr {
+    Gpr::Rsi
+}
+
+#[cfg(not(windows))]
+fn dynamic_variable_lower_arg_reg() -> Gpr {
+    Gpr::Rdx
+}
+
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{K_BOLTZMANN, Q_ELECTRON, compile_assignment_function, compile_value_function};
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
-    use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
+    use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
     use crate::zfilter::ZiFilter;
 
     #[test]
@@ -1549,6 +1655,77 @@ mod tests {
         assert!(
             bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-call native leaves must preserve context and vars pointers"
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_loads_dynamic_variable_and_preserves_stack() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.49),
+                Instruction::PushVariableDyn {
+                    base: 1,
+                    len: 3,
+                    lower: 1,
+                },
+                Instruction::Add,
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile dynamic variable leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let vars = [99.0_f64, 2.0, 4.0, 8.0];
+        let ctx = eval_context(&[], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        let loaded = f(&ctx, vars.as_ptr());
+
+        assert_eq!(loaded.to_bits(), 5.0_f64.to_bits());
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn generated_value_leaf_hard_fails_dynamic_variable_bounds_errors() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(4.0),
+                Instruction::PushVariableDyn {
+                    base: 1,
+                    len: 3,
+                    lower: 1,
+                },
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile dynamic variable leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let vars = [99.0_f64, 2.0, 4.0, 8.0];
+        let ctx = eval_context(&[], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        let loaded = f(&ctx, vars.as_ptr());
+
+        assert_eq!(loaded.to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("out-of-range native array read must hard-fail");
+        assert!(
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "error must preserve bounds diagnostic, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
         );
     }
 

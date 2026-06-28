@@ -451,6 +451,55 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     filters[filter_id].eval(input, ctx.time, ctx.analysis_type == 2)
 }
 
+/// External helper function for native x64 runtime-indexed variable reads.
+///
+/// `base_ptr` points at the first element of the array variable run. The helper
+/// preserves VM `array_slot` semantics: round the floating index, apply the
+/// declared lower bound, and hard-fail through the native runtime error channel
+/// when the index is out of range.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid pointer to the
+/// first array element and a compile-time-validated element count.
+#[unsafe(export_name = "rspice_dynamic_variable_load_native")]
+pub unsafe extern "C" fn rspice_dynamic_variable_load_native(
+    raw_index: f64,
+    base_ptr: *const f64,
+    len: usize,
+    lower: i64,
+) -> f64 {
+    if base_ptr.is_null() {
+        set_native_runtime_error(
+            "native dynamic array read missing variable storage; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    if len == 0 {
+        set_native_runtime_error(
+            "native dynamic array read has zero-length storage; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let Ok(len_i64) = i64::try_from(len) else {
+        set_native_runtime_error(
+            "native dynamic array read length exceeds native bounds range; no interpreter fallback",
+        );
+        return 0.0;
+    };
+
+    let index = raw_index.round() as i64;
+    let offset = index - lower;
+    if offset < 0 || offset >= len_i64 {
+        let upper = lower.saturating_add(len_i64).saturating_sub(1);
+        set_native_runtime_error(format!(
+            "native dynamic array read: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+
+    unsafe { *base_ptr.add(offset as usize) }
+}
+
 /// External helper function for PushCurrent terminal-pair lookup.
 ///
 /// # Safety
@@ -481,8 +530,8 @@ pub unsafe extern "C" fn rspice_current_lookup(
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        EvalContext, clear_native_runtime_error, rspice_laplace_step_native, rspice_zi_step_native,
-        take_native_runtime_error,
+        EvalContext, clear_native_runtime_error, rspice_dynamic_variable_load_native,
+        rspice_laplace_step_native, rspice_zi_step_native, take_native_runtime_error,
     };
     use std::mem::{align_of, offset_of, size_of};
 
@@ -554,6 +603,33 @@ mod tests {
         assert!(
             error.contains("zi") && error.contains("EvalContext"),
             "error must identify the invalid zi context, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn dynamic_variable_helper_loads_rounded_index_and_reports_bounds_errors() {
+        let values = [2.0, 4.0, 8.0];
+        clear_native_runtime_error();
+
+        let loaded =
+            unsafe { rspice_dynamic_variable_load_native(2.49, values.as_ptr(), values.len(), 1) };
+
+        assert_eq!(loaded.to_bits(), 4.0_f64.to_bits());
+        assert!(take_native_runtime_error().is_none());
+
+        let out_of_range =
+            unsafe { rspice_dynamic_variable_load_native(4.0, values.as_ptr(), values.len(), 1) };
+
+        assert_eq!(out_of_range.to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("out-of-range native array read must hard-fail");
+        assert!(
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "error must preserve array bounds diagnostic, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
