@@ -5143,6 +5143,30 @@ fn stamp() {
             ),
             "{div_product}"
         );
+
+        for signature in [
+            "fn store_div_scaled_inputs2_indices(",
+            "fn store_offset_div_scaled_inputs2_indices(",
+            "fn store_div_scaled_inputs2_mixed_aii(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+        }
+
+        let div_inputs2 = helper_body(&support, "fn store_div_scaled_inputs2_indices(");
+        assert!(
+            div_inputs2.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale;"
+            ),
+            "{div_inputs2}"
+        );
     }
 
     #[test]
@@ -18390,39 +18414,50 @@ fn generate_index_or_mixed_div_scaled_inputs_body(
 }
 
 fn generate_index_or_mixed_div_scaled_inputs2_helper(mask: &str) -> String {
-    let operands = ["first", "second", "denominator"];
     let helper = index_or_mixed_helper_name("store_div_scaled_inputs2", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let first = mixed_helper_component_args(mask, 0, "first");
-    let second = mixed_helper_component_args(mask, 1, "second");
-    let denominator = mixed_helper_component_args(mask, 2, "denominator");
-    format!(
-        r#"
-
-    #[inline]
-    fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, denominator: {denominator_ty}, denominator_scale: f64) {{
-{locals}        self.store_div_scaled_inputs2_components(index, {first}, first_scale, {second}, second_scale, {denominator}, denominator_scale);
-    }}
-"#,
-        first_ty = mixed_helper_type(mask, 0),
-        second_ty = mixed_helper_type(mask, 1),
-        denominator_ty = mixed_helper_type(mask, 2),
-    )
+    generate_index_or_mixed_div_scaled_inputs2_body(mask, &helper, &[])
 }
 
 fn generate_index_or_mixed_offset_div_scaled_inputs2_helper(mask: &str) -> String {
-    let operands = ["first", "second", "denominator"];
     let helper = index_or_mixed_helper_name("store_offset_div_scaled_inputs2", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let first = mixed_helper_component_args(mask, 0, "first");
-    let second = mixed_helper_component_args(mask, 1, "second");
-    let denominator = mixed_helper_component_args(mask, 2, "denominator");
+    generate_index_or_mixed_div_scaled_inputs2_body(mask, &helper, &["offset: f64"])
+}
+
+fn generate_index_or_mixed_div_scaled_inputs2_body(
+    mask: &str,
+    helper: &str,
+    offsets: &[&str],
+) -> String {
+    let first_value = index_or_mixed_value_expr(mask, 0, "first");
+    let first_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "first");
+    let first_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "first");
+    let second_value = index_or_mixed_value_expr(mask, 1, "second");
+    let second_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "second");
+    let second_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "second");
+    let denominator_value = index_or_mixed_value_expr(mask, 2, "denominator");
+    let denominator_node_derivative = index_or_mixed_node_derivative_expr(mask, 2, "denominator");
+    let denominator_branch_derivative =
+        index_or_mixed_branch_derivative_expr(mask, 2, "denominator");
+    let offset_args = offset_helper_args(offsets);
+    let offset_sum = offset_helper_sum(offsets);
     format!(
         r#"
 
     #[inline]
-    fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, denominator: {denominator_ty}, denominator_scale: f64, offset: f64) {{
-{locals}        self.store_offset_div_scaled_inputs2_components(index, {first}, first_scale, {second}, second_scale, {denominator}, denominator_scale, offset);
+    fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, denominator: {denominator_ty}, denominator_scale: f64{offset_args}) {{
+        let first_raw = {first_value};
+        let second_raw = {second_value};
+        let denominator_raw = {denominator_value};
+        let numerator_value = first_raw * first_scale + second_raw * second_scale;
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient{offset_sum};
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {first_node_derivative} * first_derivative_scale + {second_node_derivative} * second_derivative_scale + {denominator_node_derivative} * denominator_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {first_branch_derivative} * first_derivative_scale + {second_branch_derivative} * second_derivative_scale + {denominator_branch_derivative} * denominator_derivative_scale; }}
     }}
 "#,
         first_ty = mixed_helper_type(mask, 0),
