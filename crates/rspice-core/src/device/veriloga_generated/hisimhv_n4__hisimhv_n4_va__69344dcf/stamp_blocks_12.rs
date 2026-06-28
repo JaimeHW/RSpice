@@ -2505,7 +2505,7 @@ impl Instance {
             s.store_scalar(309, s.v[522]);
             s.store_scalar(311, s.v[563]);
             s.store_scale(335, 238, 6.241449993689894e18);
-            s.store_sqrt_offset_ad(782, A::mul(A::sub(s.ad_value(87), s.ad_value(1431)), A::sub(s.ad_value(87), s.ad_value(1431))), ((4.0 * 0.001) * 0.001));
+            s.store_sqrt_offset_ad(782, A::square(A::sub(s.ad_value(87), s.ad_value(1431))), ((4.0 * 0.001) * 0.001));
             s.store_scaled_offset_ad(334, A::div_scaled_inputs2(s.ad_value(87), 1.0, s.ad_value(1431), (-1.0), s.ad_value(782), 1.0), 1.0, 0.5);
             s.store_add_scaled_inputs3_indices(339, 87, 0.5, 1431, ((-1.0) * 0.5), 782, 0.5);
         }

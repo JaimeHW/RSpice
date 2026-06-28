@@ -3059,7 +3059,7 @@ impl Instance {
         if (((s.b[1443] && (s.b[1446] && (!(s.b[1444] || s.b[1445])))) && (!s.b[2297])) && s.b[2304]) {
             s.store_sub_offset_ad_lhs(781, A::sub_from_scalar(0.8, s.ad_value(2117)), 0.2, 342);
             s.store_square(722, 781);
-            s.store_mul_sub_from_scalar_lhs_ad_rhs(723, 0.8, 2117, A::sub_from_scalar(0.8, s.ad_value(2117)));
+            s.store_square_ad(723, A::sub_from_scalar(0.8, s.ad_value(2117)));
             s.store_scalar(724, 1.0);
             s.store_scalar(725, 1.0);
             s.store_scalar(719, 0.0);

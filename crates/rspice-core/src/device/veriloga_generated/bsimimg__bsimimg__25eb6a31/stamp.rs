@@ -177,7 +177,7 @@ impl Instance {
         Self::stamp_transient_block_3(s, p);
         Self::stamp_transient_block_4(s);
         Self::stamp_transient_block_5(ctx, s, p, nodes);
-        Self::stamp_transient_block_6(s, p);
+        Self::stamp_transient_block_6(ctx, s, p, nodes);
         Self::stamp_transient_block_7(s, p);
 
         Self::stamp_transient_equations_block_0(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);

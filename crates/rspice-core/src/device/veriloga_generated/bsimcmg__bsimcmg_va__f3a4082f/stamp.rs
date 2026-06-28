@@ -354,6 +354,7 @@ impl Instance {
         Self::stamp_transient_block_26(s, p);
         Self::stamp_transient_block_27(ctx, s, p, nodes);
         Self::stamp_transient_block_28(ctx, s, p, nodes);
+        Self::stamp_transient_block_29(s, p);
 
         stamper.stamp_potential_branch_local(
             Some(9),

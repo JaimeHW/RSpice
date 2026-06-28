@@ -1232,7 +1232,7 @@ impl Instance {
         if (((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && (!s.b[2295])) && s.b[2302]) {
             s.store_sub_offset_ad_lhs(781, A::sub_from_scalar(0.8, s.ad_value(2115)), 0.2, 342);
             s.store_square(722, 781);
-            s.store_mul_sub_from_scalar_lhs_ad_rhs(723, 0.8, 2115, A::sub_from_scalar(0.8, s.ad_value(2115)));
+            s.store_square_ad(723, A::sub_from_scalar(0.8, s.ad_value(2115)));
             s.store_scalar(724, 1.0);
             s.store_scalar(725, 1.0);
         }

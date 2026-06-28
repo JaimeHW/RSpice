@@ -277,7 +277,7 @@ impl Instance {
 
         s.store_sqrt_square_add(81, 10, 78);
 
-        s.store_sqrt_ad(82, A::add_scaled_product(s.ad_value(78), 1.0, A::sub(s.ad_value(77), s.ad_value(10)), A::sub(s.ad_value(77), s.ad_value(10)), 1.0));
+        s.store_sqrt_add_ad(82, A::square(A::sub(s.ad_value(77), s.ad_value(10))), s.ad_value(78));
 
         s.store_sub(79, 81, 82);
 
@@ -379,7 +379,7 @@ impl Instance {
 
         s.store_sqrt(94, 96);
 
-        s.store_mul_ad(99, A::add(s.ad_value(93), s.ad_value(94)), A::add(s.ad_value(93), s.ad_value(94)));
+        s.store_square_ad(99, A::add(s.ad_value(93), s.ad_value(94)));
 
         s.store_offset_add(107, 5, 61, 1e-6);
 
@@ -952,7 +952,7 @@ impl Instance {
 
         s.store_sqrt_square_add(81, 10, 78);
 
-        s.store_sqrt_ad(82, A::add_scaled_product(s.ad_value(78), 1.0, A::sub(s.ad_value(77), s.ad_value(10)), A::sub(s.ad_value(77), s.ad_value(10)), 1.0));
+        s.store_sqrt_add_ad(82, A::square(A::sub(s.ad_value(77), s.ad_value(10))), s.ad_value(78));
 
         s.store_sub(79, 81, 82);
 
@@ -1054,7 +1054,7 @@ impl Instance {
 
         s.store_sqrt(94, 96);
 
-        s.store_mul_ad(99, A::add(s.ad_value(93), s.ad_value(94)), A::add(s.ad_value(93), s.ad_value(94)));
+        s.store_square_ad(99, A::add(s.ad_value(93), s.ad_value(94)));
 
         s.store_offset_add(107, 5, 61, 1e-6);
 

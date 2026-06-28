@@ -101,7 +101,11 @@ impl Instance {
         s.v[1392] = if s.b[1392] { 1.0 } else { 0.0 };
 
         if (s.b[1391] && s.b[1392]) {
-            s.store_mul_ad(810, A::exp(s.ad_value(809)), A::exp(s.ad_value(809)));
+            let assign26000_ad_e23337: A = A::exp(s.ad_value(809));
+            s.store_square_ad(810, assign26000_ad_e23337);
+        }
+
+        if (s.b[1391] && s.b[1392]) {
             s.store_mul_ad_rhs(810, 810, A::exp_scaled_input(A::div(s.ad_value(324), s.ad_value(1016)), -1.0));
         }
 

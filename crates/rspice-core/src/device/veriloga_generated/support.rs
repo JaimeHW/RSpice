@@ -25378,6 +25378,7 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 }
 
 
+#[derive(Clone, Copy)]
 pub(crate) struct AdValue<const NODE_COUNT: usize, const BRANCH_COUNT: usize> {
     pub(crate) value: f64,
     pub(crate) dn: [f64; NODE_COUNT],

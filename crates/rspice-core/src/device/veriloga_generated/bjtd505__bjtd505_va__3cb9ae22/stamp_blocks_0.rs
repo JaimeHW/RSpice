@@ -1347,7 +1347,7 @@ impl Instance {
             s.store_offset_scaled(192, 115, ((2.0) * ((2.0 * p.p46))), (((2.0 * p.p46)) + (1.0)));
             s.store_scalar(193, ((1.0 + p.p46) / (1.0 + (2.0 * p.p46))));
             s.store_sub_ad_rhs(194, 189, A::mul3_scaled_output(s.ad_value(188), s.ad_value(185), A::sub(s.ad_value(193), A::div_scaled_inputs(s.ad_value(149), 1.0, s.ad_value(192), p.p61)), 0.5));
-            s.store_add_scaled_product(260, A::mul3_scaled_output(s.ad_value(189), s.ad_value(189), s.ad_value(127), (0.1 * 1.0 / (p.p61))), 1.0, A::sub(s.ad_value(194), s.ad_value(190)), A::sub(s.ad_value(194), s.ad_value(190)), 1.0);
+            s.store_add_ad(260, A::square(A::sub(s.ad_value(194), s.ad_value(190))), A::mul3_scaled_output(s.ad_value(189), s.ad_value(189), s.ad_value(127), (0.1 * 1.0 / (p.p61))));
             s.store_add_scaled_inputs3_sqrt_third_indices(191, 194, 0.5, 190, 0.5, 260, 0.5);
         }
 
@@ -1612,7 +1612,8 @@ impl Instance {
         }
 
         if (s.b[550] && (!s.b[551])) {
-            s.store_div_ad(180, A::exp_scaled_input(s.ad_value(268), -1.0), A::offset(A::exp_scaled_input(s.ad_value(268), -1.0), 1.0));
+            let assign6200_ad_e6307: A = A::exp_scaled_input(s.ad_value(268), -1.0);
+            s.store_div_ad(180, assign6200_ad_e6307, A::offset(assign6200_ad_e6307, 1.0));
         }
 
         if s.b[550] {
@@ -2827,7 +2828,7 @@ impl Instance {
             s.store_offset_scaled(192, 115, ((2.0) * ((2.0 * p.p46))), (((2.0 * p.p46)) + (1.0)));
             s.store_scalar(193, ((1.0 + p.p46) / (1.0 + (2.0 * p.p46))));
             s.store_sub_ad_rhs(194, 189, A::mul3_scaled_output(s.ad_value(188), s.ad_value(185), A::sub(s.ad_value(193), A::div_scaled_inputs(s.ad_value(149), 1.0, s.ad_value(192), p.p61)), 0.5));
-            s.store_add_scaled_product(260, A::mul3_scaled_output(s.ad_value(189), s.ad_value(189), s.ad_value(127), (0.1 * 1.0 / (p.p61))), 1.0, A::sub(s.ad_value(194), s.ad_value(190)), A::sub(s.ad_value(194), s.ad_value(190)), 1.0);
+            s.store_add_ad(260, A::square(A::sub(s.ad_value(194), s.ad_value(190))), A::mul3_scaled_output(s.ad_value(189), s.ad_value(189), s.ad_value(127), (0.1 * 1.0 / (p.p61))));
             s.store_add_scaled_inputs3_sqrt_third_indices(191, 194, 0.5, 190, 0.5, 260, 0.5);
         }
 
@@ -3092,7 +3093,8 @@ impl Instance {
         }
 
         if (s.b[550] && (!s.b[551])) {
-            s.store_div_ad(180, A::exp_scaled_input(s.ad_value(268), -1.0), A::offset(A::exp_scaled_input(s.ad_value(268), -1.0), 1.0));
+            let assign6200_ad_e6307: A = A::exp_scaled_input(s.ad_value(268), -1.0);
+            s.store_div_ad(180, assign6200_ad_e6307, A::offset(assign6200_ad_e6307, 1.0));
         }
 
         if s.b[550] {

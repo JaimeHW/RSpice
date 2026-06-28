@@ -2066,7 +2066,11 @@ impl Instance {
         s.v[1723] = if s.b[1723] { 1.0 } else { 0.0 };
 
         if (s.b[1722] && s.b[1723]) {
-            s.store_mul_ad(1146, A::exp(s.ad_value(1145)), A::exp(s.ad_value(1145)));
+            let assign29060_ad_e22527: A = A::exp(s.ad_value(1145));
+            s.store_square_ad(1146, assign29060_ad_e22527);
+        }
+
+        if (s.b[1722] && s.b[1723]) {
             s.store_mul_ad_rhs(1146, 1146, A::exp_scaled_input(A::div(s.ad_value(685), s.ad_value(1351)), -1.0));
         }
 
@@ -2270,16 +2274,16 @@ impl Instance {
         s.b[1737] = (s.v[1460] <= 0.0);
         s.v[1737] = if s.b[1737] { 1.0 } else { 0.0 };
 
-        if (((s.b[1733] && (!s.b[1734])) && s.b[1736]) && s.b[1737]) {
-            s.store_sqrt_add_scaled_square_product(1179, 1149, 1.0, 1472, 1460, (-100.0));
-        }
-
     }
 
     pub(super) fn stamp_reactive_block_17(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
+        if (((s.b[1733] && (!s.b[1734])) && s.b[1736]) && s.b[1737]) {
+            s.store_sqrt_add_scaled_square_product(1179, 1149, 1.0, 1472, 1460, (-100.0));
+        }
+
         if (((s.b[1733] && (!s.b[1734])) && s.b[1736]) && (!s.b[1737])) {
             s.store_sqrt_add_scaled_square_product(1179, 1149, 1.0, 1472, 1460, 100.0);
         }
@@ -2629,16 +2633,13 @@ impl Instance {
             s.store_scalar(1464, 1e-15);
         }
 
-        if (((!s.b[1733]) && s.b[1751]) && (!s.b[1754])) {
-            s.store_div(1336, 778, 1334);
-        }
-
     }
 
     pub(super) fn stamp_reactive_block_18(
         s: &mut ReactiveScratch,
     ) {
         if (((!s.b[1733]) && s.b[1751]) && (!s.b[1754])) {
+            s.store_div(1336, 778, 1334);
             s.store_div_add_scaled_inputs_rhs_indices(1181, 1332, 1332, 1.0, 1336, 1.0);
             s.store_mul(1337, 1181, 1336);
         }
@@ -2949,7 +2950,6 @@ impl Instance {
             s.store_scalar(1272, 0.0);
             s.store_scalar(1255, 0.0);
             s.store_scalar(1252, 0.0);
-            s.store_scalar(1254, 0.0);
         }
 
     }
@@ -2959,6 +2959,7 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((!s.b[1733]) && (!s.b[1751])) {
+            s.store_scalar(1254, 0.0);
             s.store_scalar(1253, 0.0);
             s.store_scalar(1251, 0.0);
         }

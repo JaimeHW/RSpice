@@ -309,7 +309,7 @@ impl Instance {
         s.v[2526] = assign64540_e99510;
 
         if ((!s.b[1443]) && s.b[2519]) {
-            s.store_sqrt_offset_ad(781, A::mul(A::sub(s.ad_value(960), s.ad_value(1435)), A::sub(s.ad_value(960), s.ad_value(1435))), ((4.0 * 0.01) * 0.01));
+            s.store_sqrt_offset_ad(781, A::square(A::sub(s.ad_value(960), s.ad_value(1435))), ((4.0 * 0.01) * 0.01));
             s.store_add_scaled_inputs3_indices(2536, 960, 0.5, 1435, ((-1.0) * 0.5), 781, 0.5);
             s.store_sqrt_ad(2520, A::div_scaled_product_offset_denominator(s.ad_value(2536), s.ad_value(586), (((2.0 * 1.6021918e-19) * 1.0 / (1.034943e-10)) * s.v[489]), s.ad_value(586), s.v[489], 1.0));
             s.store_mul(2522, 2520, 162);
