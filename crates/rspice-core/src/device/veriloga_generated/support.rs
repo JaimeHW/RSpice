@@ -4264,6 +4264,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_scaled_square_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw * raw, 2.0 * raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_square_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw * raw, 2.0 * raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_square_sub_from_scalar_rhs(&mut self, index: usize, source: usize, output_scale: f64, scalar: f64, value_source: usize) {
+        let raw = scalar - self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw * raw, -2.0 * raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_square_sub_from_scalar_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = scalar - value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw * raw, -2.0 * raw);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_scaled_powf_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, exponent: f64) {
         let base = self.v[value_source];
         let output = base.powf(exponent);
@@ -16993,6 +17017,30 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = scaled_source_value * unary_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[source][axis] * output_scale * unary_value + scaled_source_value * value.dn[axis] * derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[source][axis] * output_scale * unary_value + scaled_source_value * value.db[axis] * derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_square_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {
+        let raw = self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw * raw, 2.0 * raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_square_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw * raw, 2.0 * raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_square_sub_from_scalar_rhs(&mut self, index: usize, source: usize, output_scale: f64, scalar: f64, value_source: usize) {
+        let raw = scalar - self.v[value_source];
+        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw * raw, -2.0 * raw);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scaled_square_sub_from_scalar_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let raw = scalar - value.value;
+        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw * raw, -2.0 * raw);
     }
 
     #[inline]

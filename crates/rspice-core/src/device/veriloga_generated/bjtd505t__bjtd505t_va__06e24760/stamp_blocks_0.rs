@@ -984,7 +984,7 @@ impl Instance {
             s.store_sub_from_scalar_ad(286, p.p145, A::scale(A::ln_one_plus_exp(A::neg(s.ad_value(265))), 0.001));
         }
 
-        s.store_mul_scaled_ad_rhs(334, 286, p.p146, A::square(A::sub_from_scalar(p.p145, s.ad_value(286))));
+        s.store_mul_scaled_square_sub_from_scalar_rhs(334, 286, p.p146, p.p145, 286);
 
         s.b[503] = (((s.v[238] * s.v[8]) / p.p16) < p.p138);
         s.v[503] = if s.b[503] { 1.0 } else { 0.0 };
