@@ -58,6 +58,38 @@ endmodule
     )
 }
 
+fn multi_stamp_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_multi_stamp(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g1 = 0.25;
+    parameter real g2 = 0.75;
+    analog begin
+        I(p, n) <+ g1 * V(p, n);
+        I(p, n) <+ g2 * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
+fn potential_branch_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_zres(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2000.0 from (0:inf);
+    analog V(p, n) <+ I(p, n) * r;
+endmodule
+"#,
+    )
+}
+
 fn assignment_fed_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -247,6 +279,22 @@ endmodule
     )
 }
 
+fn current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n);
+        I(p, n) <+ I(p, n) * 0.1;
+    end
+endmodule
+"#,
+    )
+}
+
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_compile_accepts_simple_resistor_subset() {
@@ -263,6 +311,69 @@ fn native_compile_accepts_simple_resistor_subset() {
             .map(|stamp| stamp.jacobian_programs.len())
             .sum::<usize>()
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_model_image_publishes_multiple_stamp_and_jacobian_entries() {
+    let model = multi_stamp_model();
+    assert_eq!(model.stamp_programs.len(), 2);
+
+    let native = compile_native(&model).expect("multi-stamp model compiles native");
+
+    assert_eq!(native.native_stamp_count(), 2);
+    assert_eq!(native.plan_stats().stamp_value_entry_points, 2);
+    assert_eq!(
+        native.plan_stats().jacobian_entry_points,
+        model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum::<usize>()
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_stamps_multiple_flow_contributions_from_one_image() {
+    let model = multi_stamp_model();
+    let mut device =
+        VerilogADevice::try_new("MS1", model, &[1, 0]).expect("multi-stamp model uses native JIT");
+
+    let currents = {
+        device.update_voltages(&[4.0]);
+        device.try_evaluate().expect("native multi-stamp evaluate")
+    };
+    assert_eq!(currents.len(), 2);
+    assert!((currents[0] - 1.0).abs() < 1e-12, "currents: {currents:?}");
+    assert!((currents[1] - 3.0).abs() < 1e-12, "currents: {currents:?}");
+
+    let (matrix, rhs) = stamp_device(&mut device, &[4.0]);
+    assert!((matrix.get(&(0, 0)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_stamps_potential_branch_unknowns() {
+    let model = potential_branch_model();
+    assert_eq!(model.branch_sources.len(), 1);
+
+    let mut device =
+        VerilogADevice::try_new("Z1", model, &[1, 2]).expect("potential branch uses native JIT");
+    device.set_branch_current_indices(&[3]);
+
+    let (matrix, rhs) = stamp_device(&mut device, &[1.0, 0.5, 1.0e-3]);
+
+    assert!((matrix.get(&(0, 2)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(1, 2)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(2, 0)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(2, 1)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(2, 2)).copied().unwrap_or_default() + 2000.0).abs() < 1e-9);
+    assert!(rhs.get(&2).copied().unwrap_or_default().abs() < 1e-12, "rhs: {rhs:?}");
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -492,6 +603,17 @@ fn native_compile_rejects_reactive_jacobians_without_fallback() {
         msg.contains("ReactiveJacobians"),
         "error must name unsupported reactive coverage, got: {msg}"
     );
+}
+
+#[test]
+fn native_compile_rejects_terminal_pair_current_probes_without_fallback() {
+    let model = current_probe_model();
+
+    let err = compile_native(&model).expect_err("PushCurrent remains outside this native slice");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(msg.contains("PushCurrent"), "error must name PushCurrent, got: {msg}");
 }
 
 #[test]
