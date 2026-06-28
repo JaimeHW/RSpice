@@ -132,6 +132,24 @@ endmodule
     )
 }
 
+fn internal_node_divider_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_divider(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical mid;
+    parameter real r = 1.0 from (0:inf);
+    analog begin
+        I(p, mid) <+ (V(p) - V(mid)) / r;
+        I(mid, n) <+ V(mid, n) / r;
+    end
+endmodule
+"#,
+    )
+}
+
 fn assert_native_hard_fail_message(msg: &str) {
     assert!(
         msg.contains("native JIT"),
@@ -271,6 +289,47 @@ fn native_device_executes_scalar_assignments_in_source_order() {
         (matrix.get(&(0, 0)).copied().unwrap_or_default() - 0.5).abs() < 1e-12,
         "matrix: {matrix:?}"
     );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_evaluates_internal_node_voltage_contributions() {
+    let model = internal_node_divider_model();
+    assert_eq!(model.internal_nodes, 1);
+    assert_eq!(model.stamp_programs.len(), 2);
+
+    let mut device =
+        VerilogADevice::try_new("DIV1", model, &[1, 0]).expect("divider uses native JIT");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[2.0, 0.5]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native internal-node evaluation succeeds");
+
+    assert!((currents[0] - 1.5).abs() < 1e-12, "currents: {currents:?}");
+    assert!((currents[1] - 0.5).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_stamps_internal_node_jacobians() {
+    let model = internal_node_divider_model();
+    let mut device =
+        VerilogADevice::try_new("DIV2", model, &[1, 0]).expect("divider uses native JIT");
+    device.set_internal_node_indices(&[2]);
+
+    let (matrix, rhs) = stamp_device(&mut device, &[2.0, 0.5]);
+
+    assert!((matrix.get(&(0, 0)).copied().unwrap_or_default() - 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(0, 1)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(1, 0)).copied().unwrap_or_default() + 1.0).abs() < 1e-12);
+    assert!((matrix.get(&(1, 1)).copied().unwrap_or_default() - 2.0).abs() < 1e-12);
     assert!(
         rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
         "rhs: {rhs:?}"

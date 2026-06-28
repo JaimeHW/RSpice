@@ -1,10 +1,10 @@
 pub(crate) mod codegen;
 pub mod encoder;
 
+use super::JitResult;
 use super::expr::{EntryKind, NativeProgram};
 use super::model::{CodeOffset, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
-use super::JitResult;
 use crate::codegen::{AssignmentStep, CompiledModel};
 
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
@@ -23,6 +23,7 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
             EntryKind::StampValue,
             &stamp.value_program,
             model.num_terminals,
+            model.internal_nodes,
         )?;
         stamp_values.push(append_value_entry(&mut image, &program)?);
 
@@ -33,6 +34,7 @@ pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
                 EntryKind::Jacobian,
                 &jacobian.program,
                 model.num_terminals,
+                model.internal_nodes,
             )?;
             stamp_jacobians.push(append_value_entry(&mut image, &program)?);
         }
@@ -65,6 +67,7 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
                 EntryKind::Assignment,
                 &assignment.program,
                 model.num_terminals,
+                model.internal_nodes,
             )?;
             Ok((assignment.var_index, program))
         })

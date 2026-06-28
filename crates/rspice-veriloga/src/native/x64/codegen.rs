@@ -232,20 +232,19 @@ impl FunctionCompiler {
             (VoltageNode::Ground, VoltageNode::Ground) => {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
             }
-            (VoltageNode::Terminal(pos), VoltageNode::Ground) => {
-                self.emit_terminal_voltage_load(dst, pos)?;
+            (pos, VoltageNode::Ground) => {
+                self.emit_node_voltage_load(dst, pos)?;
             }
-            (VoltageNode::Ground, VoltageNode::Terminal(neg)) => {
+            (VoltageNode::Ground, neg) => {
                 let scratch = self.scratch_register()?;
-                self.emit_terminal_voltage_load(dst, neg)?;
-                self.encoder.xorpd_xmm_xmm(scratch, scratch);
-                self.encoder.subsd_xmm_xmm(scratch, dst);
-                self.encoder.movsd_xmm_xmm(dst, scratch);
+                self.encoder.xorpd_xmm_xmm(dst, dst);
+                self.emit_node_voltage_load(scratch, neg)?;
+                self.encoder.subsd_xmm_xmm(dst, scratch);
             }
-            (VoltageNode::Terminal(pos), VoltageNode::Terminal(neg)) => {
+            (pos, neg) => {
                 let scratch = self.scratch_register()?;
-                self.emit_terminal_voltage_load(dst, pos)?;
-                self.emit_terminal_voltage_load(scratch, neg)?;
+                self.emit_node_voltage_load(dst, pos)?;
+                self.emit_node_voltage_load(scratch, neg)?;
                 self.encoder.subsd_xmm_xmm(dst, scratch);
             }
         }
@@ -253,8 +252,26 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_node_voltage_load(&mut self, dst: Xmm, node: VoltageNode) -> JitResult<()> {
+        match node {
+            VoltageNode::Terminal(index) => self.emit_terminal_voltage_load(dst, index),
+            VoltageNode::Internal(index) => self.emit_internal_voltage_load(dst, index),
+            VoltageNode::Ground => {
+                self.encoder.xorpd_xmm_xmm(dst, dst);
+                Ok(())
+            }
+        }
+    }
+
     fn emit_terminal_voltage_load(&mut self, dst: Xmm, index: usize) -> JitResult<()> {
         self.emit_context_pointer_load(VOLTAGES_OFFSET);
+        self.encoder
+            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+        Ok(())
+    }
+
+    fn emit_internal_voltage_load(&mut self, dst: Xmm, index: usize) -> JitResult<()> {
+        self.emit_context_pointer_load(INTERNAL_VOLTAGES_OFFSET);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
         Ok(())
@@ -535,6 +552,7 @@ mod tests {
             entry_kind,
             &BytecodeProgram { instructions },
             terminal_count,
+            0,
         )
         .expect("lower bytecode to native program")
     }
