@@ -5,6 +5,7 @@ use crate::native::abi::{
     rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
     rspice_mod, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
     rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
+    rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -203,6 +204,7 @@ impl FunctionCompiler {
                 }
                 NativeOp::LimitState(index) => self.emit_limit_state(index)?,
                 NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
+                NativeOp::ZiState(filter_id) => self.emit_zi_state(filter_id)?,
                 NativeOp::WhiteNoise => self.emit_white_noise()?,
                 NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
@@ -514,11 +516,11 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_laplace_helper_call(
+    fn emit_context_filter_helper_call(
         &mut self,
         target: Xmm,
         filter_id: usize,
-        helper: LaplaceHelper,
+        helper: ContextFilterHelper,
     ) -> JitResult<()> {
         debug_assert!(self.uses_helper_calls);
         debug_assert!(xmm_stack_slot(target) < self.depth);
@@ -535,9 +537,9 @@ impl FunctionCompiler {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
         }
         self.encoder
-            .mov_r64_r64(laplace_ctx_arg_reg(), self.ctx_arg_reg());
+            .mov_r64_r64(context_filter_ctx_arg_reg(), self.ctx_arg_reg());
         self.encoder
-            .movabs_r64_imm64(laplace_id_arg_reg(), filter_id as u64);
+            .movabs_r64_imm64(context_filter_id_arg_reg(), filter_id as u64);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -669,7 +671,19 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        self.emit_laplace_helper_call(target, filter_id, rspice_laplace_step_native)
+        self.emit_context_filter_helper_call(target, filter_id, rspice_laplace_step_native)
+    }
+
+    fn emit_zi_state(&mut self, filter_id: usize) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "zi state requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_context_filter_helper_call(target, filter_id, rspice_zi_step_native)
     }
 
     fn emit_ddt_state(&mut self, state_index: usize) -> JitResult<()> {
@@ -1293,7 +1307,8 @@ type BinaryHelper = extern "C" fn(f64, f64) -> f64;
 type TernaryHelper = extern "C" fn(f64, f64, f64) -> f64;
 type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
-type LaplaceHelper = unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
+type ContextFilterHelper =
+    unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
@@ -1351,6 +1366,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::TableLookup(_)
                 | NativeOp::TableDerivative(_)
                 | NativeOp::LaplaceState(_)
+                | NativeOp::ZiState(_)
                 | NativeOp::IdtModState(_)
         )
     })
@@ -1450,22 +1466,22 @@ fn table_id_arg_reg() -> Gpr {
 }
 
 #[cfg(windows)]
-fn laplace_ctx_arg_reg() -> Gpr {
+fn context_filter_ctx_arg_reg() -> Gpr {
     Gpr::Rdx
 }
 
 #[cfg(windows)]
-fn laplace_id_arg_reg() -> Gpr {
+fn context_filter_id_arg_reg() -> Gpr {
     Gpr::R8
 }
 
 #[cfg(not(windows))]
-fn laplace_ctx_arg_reg() -> Gpr {
+fn context_filter_ctx_arg_reg() -> Gpr {
     Gpr::Rdi
 }
 
 #[cfg(not(windows))]
-fn laplace_id_arg_reg() -> Gpr {
+fn context_filter_id_arg_reg() -> Gpr {
     Gpr::Rsi
 }
 
@@ -1477,6 +1493,7 @@ mod tests {
     use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
+    use crate::zfilter::ZiFilter;
 
     #[test]
     fn generated_value_leaf_evaluates_native_expression() {
@@ -2147,6 +2164,61 @@ mod tests {
             (transient - (2.0 + 4.0 / 3.0)).abs() < 1.0e-12,
             "transient Laplace value: {transient}"
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_calls_zi_helper_and_preserves_stack() {
+        let program = NativeProgram::from_bytecode(
+            "x64-codegen-test",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::ZiState(0),
+                    Instruction::Add,
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 0, 0).with_zi_filter_count(1),
+        )
+        .expect("lower zi helper program");
+        let bytes = compile_value_function(&program).expect("compile zi helper leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate zi helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut filters = [ZiFilter::new(vec![0.25], vec![1.0, -0.75], 1.0e-6)];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.zi_filters = filters.as_mut_ptr();
+        ctx.zi_filters_len = filters.len();
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            3.0_f64.to_bits(),
+            "non-transient zi evaluation uses DC steady state"
+        );
+
+        ctx.analysis_type = 2;
+        ctx.time = 0.0;
+        let first = f(&ctx, std::ptr::null());
+        let repeated = f(&ctx, std::ptr::null());
+        assert_eq!(
+            first.to_bits(),
+            repeated.to_bits(),
+            "native zi helper must preserve Newton re-evaluation idempotence"
+        );
+        assert!((first - 2.25).abs() < 1.0e-12, "first zi sample: {first}");
+        filters[0].commit(ctx.time);
+
+        ctx.time = 0.5e-6;
+        let held = f(&ctx, std::ptr::null());
+        assert!((held - 2.25).abs() < 1.0e-12, "held zi output: {held}");
+        filters[0].commit(ctx.time);
+
+        ctx.time = 1.0e-6;
+        let next = f(&ctx, std::ptr::null());
+        assert!((next - 2.4375).abs() < 1.0e-12, "second zi sample: {next}");
     }
 
     #[test]
@@ -2979,6 +3051,8 @@ mod tests {
             branch_unknowns: branch_unknowns.as_ptr(),
             analysis_type: 0,
             multiplicity: 1.0,
+            zi_filters: std::ptr::null_mut(),
+            zi_filters_len: 0,
         }
     }
 

@@ -691,6 +691,23 @@ endmodule
     )
 }
 
+fn zi_current_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_zi_current(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6);
+        I(p, n) <+ y;
+    end
+endmodule
+"#,
+    )
+}
+
 fn current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1769,6 +1786,62 @@ fn native_device_executes_laplace_current_without_fallback() {
         (currents[0] - (4.0 / 3.0)).abs() < 1.0e-12,
         "currents: {currents:?}"
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_zi_current_without_fallback() {
+    let model = zi_current_model();
+    assert_eq!(
+        model.zi_filters.len(),
+        1,
+        "fixture must contain one compiled zi filter"
+    );
+
+    let mut device =
+        VerilogADevice::try_new("ZI1", model, &[1, 0]).expect("zi model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.set_analysis_type(0);
+    device.update_voltages(&[2.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native zi DC evaluation succeeds");
+    assert!(
+        (currents[0] - 2.0).abs() < 1.0e-12,
+        "DC currents: {currents:?}"
+    );
+    assert_eq!(device.variable("y"), Some(2.0));
+
+    device.set_analysis_type(2);
+    device.set_timestep(0.5e-6);
+
+    device.set_time(0.0);
+    device.update_voltages(&[1.0]);
+    let first = device
+        .try_evaluate()
+        .expect("native zi first sample succeeds")[0];
+    let repeated = device
+        .try_evaluate()
+        .expect("native zi repeated sample succeeds")[0];
+    assert_eq!(first.to_bits(), repeated.to_bits());
+    assert!((first - 0.25).abs() < 1.0e-12, "first sample: {first}");
+    device.advance_state();
+
+    device.set_time(0.5e-6);
+    device.update_voltages(&[1.0]);
+    let held = device
+        .try_evaluate()
+        .expect("native zi hold evaluation succeeds")[0];
+    assert!((held - 0.25).abs() < 1.0e-12, "held output: {held}");
+    device.advance_state();
+
+    device.set_time(1.0e-6);
+    device.update_voltages(&[1.0]);
+    let next = device
+        .try_evaluate()
+        .expect("native zi second sample succeeds")[0];
+    assert!((next - 0.4375).abs() < 1.0e-12, "second sample: {next}");
 }
 
 #[cfg(target_arch = "x86_64")]

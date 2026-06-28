@@ -403,6 +403,8 @@ mod tests {
             branch_unknowns: std::ptr::null(),
             analysis_type: 0,
             multiplicity: 1.0,
+            zi_filters: std::ptr::null_mut(),
+            zi_filters_len: 0,
         }
     }
 }
