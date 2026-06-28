@@ -2936,12 +2936,11 @@ impl Instance {
         let eq2_e99: f64 = (p.p83 * (nv9 - 0.0));
         let eq2_e99_d_n9: f64 = p.p83;
         let eq2_e99_q: f64 = (p.p83 * eq2_e98_q);
-        let eq2_e99_q_d_n9: f64 = p.p83;
         stamper.stamp_current_reactive_node1(
             Some(nodes[9]),
             None,
             nodes[9],
-            multiplicity * (eq2_e99_q_d_n9),
+            multiplicity * (eq2_e99_d_n9),
         );
         let (eq5_e121, eq5_e121_d_n0, eq5_e121_d_n1, eq5_e121_d_n2, eq5_e121_d_n3, eq5_e121_d_n4, eq5_e121_d_n5, eq5_e121_d_n6, eq5_e121_d_n7, eq5_e121_d_n8, eq5_e121_d_n9, eq5_e121_d_b0, eq5_e121_d_b1, eq5_e121_d_b2, eq5_e121_d_b3, eq5_e121_d_b4, eq5_e121_d_b5, eq5_e121_d_b6, eq5_e121_d_b7, eq5_e121_q, eq5_e121_q_d_n0, eq5_e121_q_d_n1, eq5_e121_q_d_n2, eq5_e121_q_d_n3, eq5_e121_q_d_n4, eq5_e121_q_d_n5, eq5_e121_q_d_n6, eq5_e121_q_d_n7, eq5_e121_q_d_n8, eq5_e121_q_d_n9, eq5_e121_q_d_b0, eq5_e121_q_d_b1, eq5_e121_q_d_b2, eq5_e121_q_d_b3, eq5_e121_q_d_b4, eq5_e121_q_d_b5, eq5_e121_q_d_b6, eq5_e121_q_d_b7,) = {
     if s.b[115] {
@@ -3000,53 +2999,53 @@ impl Instance {
             &eq5_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq9_e154, eq9_e154_d_n3, eq9_e154_q, eq9_e154_q_d_n3,) = {
+        let (eq9_e154, eq9_e154_d_n3, eq9_e154_q,) = {
     if s.b[122] {
         let eq9_e151: f64 = ((nv3 - 0.0) * p.p34);
         let eq9_e151_d_n3: f64 = p.p34;
         let eq9_e152_q: f64 = eq9_e151;
-        (eq9_e151, eq9_e151_d_n3, eq9_e152_q, eq9_e151_d_n3,)
+        (eq9_e151, eq9_e151_d_n3, eq9_e152_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node1(
             Some(nodes[3]),
             None,
             nodes[3],
-            multiplicity * (eq9_e154_q_d_n3),
+            multiplicity * (eq9_e154_d_n3),
         );
-        let (eq13_e195, eq13_e195_d_n3, eq13_e195_q, eq13_e195_q_d_n3,) = {
+        let (eq13_e195, eq13_e195_d_n3, eq13_e195_q,) = {
     if ((!s.b[122]) && s.b[123]) {
         let eq13_e192: f64 = (p.p34 * (nv3 - 0.0));
         let eq13_e192_d_n3: f64 = p.p34;
         let eq13_e193_q: f64 = eq13_e192;
-        (eq13_e192, eq13_e192_d_n3, eq13_e193_q, eq13_e192_d_n3,)
+        (eq13_e192, eq13_e192_d_n3, eq13_e193_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node1(
             Some(nodes[3]),
             None,
             nodes[3],
-            multiplicity * (eq13_e195_q_d_n3),
+            multiplicity * (eq13_e195_d_n3),
         );
-        let (eq15_e214, eq15_e214_d_n7, eq15_e214_q, eq15_e214_q_d_n7,) = {
+        let (eq15_e214, eq15_e214_d_n7, eq15_e214_q,) = {
     if ((!s.b[122]) && s.b[123]) {
         let eq15_e211: f64 = (p.p36 * (nv7 - 0.0));
         let eq15_e211_d_n7: f64 = p.p36;
         let eq15_e212_q: f64 = eq15_e211;
-        (eq15_e211, eq15_e211_d_n7, eq15_e212_q, eq15_e211_d_n7,)
+        (eq15_e211, eq15_e211_d_n7, eq15_e212_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node1(
             Some(nodes[7]),
             None,
             nodes[7],
-            multiplicity * (eq15_e214_q_d_n7),
+            multiplicity * (eq15_e214_d_n7),
         );
         let eq36_e384: f64 = (s.v[9] * s.v[58]);
         let eq36_e384_d_n0: f64 = (s.v[9] * s.dn[58][0]);

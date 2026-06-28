@@ -378,23 +378,23 @@ impl Instance {
 
         s.store_mul(45, 42, 9);
 
-        let (eq4_e72, eq4_e72_d_n0, eq4_e72_d_n1, eq4_e72_d_n2, eq4_e72_q, eq4_e72_q_d_n0, eq4_e72_q_d_n1, eq4_e72_q_d_n2,) = {
+        let (eq4_e72, eq4_e72_d_n0, eq4_e72_d_n1, eq4_e72_d_n2, eq4_e72_q,) = {
     if (p.p7 != 0.0) {
         let eq4_e70_q: f64 = s.v[45];
-        (s.v[45], s.dn[45][0], s.dn[45][1], s.dn[45][2], eq4_e70_q, s.dn[45][0], s.dn[45][1], s.dn[45][2],)
+        (s.v[45], s.dn[45][0], s.dn[45][1], s.dn[45][2], eq4_e70_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node3(
             Some(nodes[2]),
             None,
             nodes[0],
-            multiplicity * (eq4_e72_q_d_n0),
+            multiplicity * (eq4_e72_d_n0),
             nodes[1],
-            multiplicity * (eq4_e72_q_d_n1),
+            multiplicity * (eq4_e72_d_n1),
             nodes[2],
-            multiplicity * (eq4_e72_q_d_n2),
+            multiplicity * (eq4_e72_d_n2),
         );
     }
 }

@@ -4863,6 +4863,7 @@ impl Instance {
         multiplicity: f64,
     ) {
         let nv3 = ctx.node_voltage(nodes[3]);
+        let nv9 = ctx.node_voltage(nodes[9]);
         let nv10 = ctx.node_voltage(nodes[10]);
         let eq30_e1299_q: f64 = s.v[446];
         let eq30_reactive_node_derivatives: [f64; 13] = [s.dn[446][0], s.dn[446][1], s.dn[446][2], s.dn[446][3], s.dn[446][4], s.dn[446][5], s.dn[446][6], s.dn[446][7], s.dn[446][8], s.dn[446][9], s.dn[446][10], s.dn[446][11], s.dn[446][12]];
@@ -4913,30 +4914,8 @@ impl Instance {
         let eq32_e1305_d_b7: f64 = (s.v[36] * s.db[1251][7]);
         let eq32_e1305_d_b8: f64 = (s.v[36] * s.db[1251][8]);
         let eq32_e1305_q: f64 = (s.v[36] * eq32_e1304_q);
-        let eq32_e1305_q_d_n0: f64 = (s.v[36] * s.dn[1251][0]);
-        let eq32_e1305_q_d_n1: f64 = (s.v[36] * s.dn[1251][1]);
-        let eq32_e1305_q_d_n2: f64 = (s.v[36] * s.dn[1251][2]);
-        let eq32_e1305_q_d_n3: f64 = (s.v[36] * s.dn[1251][3]);
-        let eq32_e1305_q_d_n4: f64 = (s.v[36] * s.dn[1251][4]);
-        let eq32_e1305_q_d_n5: f64 = (s.v[36] * s.dn[1251][5]);
-        let eq32_e1305_q_d_n6: f64 = (s.v[36] * s.dn[1251][6]);
-        let eq32_e1305_q_d_n7: f64 = (s.v[36] * s.dn[1251][7]);
-        let eq32_e1305_q_d_n8: f64 = (s.v[36] * s.dn[1251][8]);
-        let eq32_e1305_q_d_n9: f64 = (s.v[36] * s.dn[1251][9]);
-        let eq32_e1305_q_d_n10: f64 = (s.v[36] * s.dn[1251][10]);
-        let eq32_e1305_q_d_n11: f64 = (s.v[36] * s.dn[1251][11]);
-        let eq32_e1305_q_d_n12: f64 = (s.v[36] * s.dn[1251][12]);
-        let eq32_e1305_q_d_b0: f64 = (s.v[36] * s.db[1251][0]);
-        let eq32_e1305_q_d_b1: f64 = (s.v[36] * s.db[1251][1]);
-        let eq32_e1305_q_d_b2: f64 = (s.v[36] * s.db[1251][2]);
-        let eq32_e1305_q_d_b3: f64 = (s.v[36] * s.db[1251][3]);
-        let eq32_e1305_q_d_b4: f64 = (s.v[36] * s.db[1251][4]);
-        let eq32_e1305_q_d_b5: f64 = (s.v[36] * s.db[1251][5]);
-        let eq32_e1305_q_d_b6: f64 = (s.v[36] * s.db[1251][6]);
-        let eq32_e1305_q_d_b7: f64 = (s.v[36] * s.db[1251][7]);
-        let eq32_e1305_q_d_b8: f64 = (s.v[36] * s.db[1251][8]);
-        let eq32_reactive_node_derivatives: [f64; 13] = [eq32_e1305_q_d_n0, eq32_e1305_q_d_n1, eq32_e1305_q_d_n2, eq32_e1305_q_d_n3, eq32_e1305_q_d_n4, eq32_e1305_q_d_n5, eq32_e1305_q_d_n6, eq32_e1305_q_d_n7, eq32_e1305_q_d_n8, eq32_e1305_q_d_n9, eq32_e1305_q_d_n10, eq32_e1305_q_d_n11, eq32_e1305_q_d_n12];
-        let eq32_reactive_branch_derivatives: [f64; 9] = [eq32_e1305_q_d_b0, eq32_e1305_q_d_b1, eq32_e1305_q_d_b2, eq32_e1305_q_d_b3, eq32_e1305_q_d_b4, eq32_e1305_q_d_b5, eq32_e1305_q_d_b6, eq32_e1305_q_d_b7, eq32_e1305_q_d_b8];
+        let eq32_reactive_node_derivatives: [f64; 13] = [eq32_e1305_d_n0, eq32_e1305_d_n1, eq32_e1305_d_n2, eq32_e1305_d_n3, eq32_e1305_d_n4, eq32_e1305_d_n5, eq32_e1305_d_n6, eq32_e1305_d_n7, eq32_e1305_d_n8, eq32_e1305_d_n9, eq32_e1305_d_n10, eq32_e1305_d_n11, eq32_e1305_d_n12];
+        let eq32_reactive_branch_derivatives: [f64; 9] = [eq32_e1305_d_b0, eq32_e1305_d_b1, eq32_e1305_d_b2, eq32_e1305_d_b3, eq32_e1305_d_b4, eq32_e1305_d_b5, eq32_e1305_d_b6, eq32_e1305_d_b7, eq32_e1305_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[9]),
             Some(nodes[5]),
@@ -4971,30 +4950,8 @@ impl Instance {
         let eq33_e1309_d_b7: f64 = (s.v[36] * s.db[1255][7]);
         let eq33_e1309_d_b8: f64 = (s.v[36] * s.db[1255][8]);
         let eq33_e1309_q: f64 = (s.v[36] * eq33_e1308_q);
-        let eq33_e1309_q_d_n0: f64 = (s.v[36] * s.dn[1255][0]);
-        let eq33_e1309_q_d_n1: f64 = (s.v[36] * s.dn[1255][1]);
-        let eq33_e1309_q_d_n2: f64 = (s.v[36] * s.dn[1255][2]);
-        let eq33_e1309_q_d_n3: f64 = (s.v[36] * s.dn[1255][3]);
-        let eq33_e1309_q_d_n4: f64 = (s.v[36] * s.dn[1255][4]);
-        let eq33_e1309_q_d_n5: f64 = (s.v[36] * s.dn[1255][5]);
-        let eq33_e1309_q_d_n6: f64 = (s.v[36] * s.dn[1255][6]);
-        let eq33_e1309_q_d_n7: f64 = (s.v[36] * s.dn[1255][7]);
-        let eq33_e1309_q_d_n8: f64 = (s.v[36] * s.dn[1255][8]);
-        let eq33_e1309_q_d_n9: f64 = (s.v[36] * s.dn[1255][9]);
-        let eq33_e1309_q_d_n10: f64 = (s.v[36] * s.dn[1255][10]);
-        let eq33_e1309_q_d_n11: f64 = (s.v[36] * s.dn[1255][11]);
-        let eq33_e1309_q_d_n12: f64 = (s.v[36] * s.dn[1255][12]);
-        let eq33_e1309_q_d_b0: f64 = (s.v[36] * s.db[1255][0]);
-        let eq33_e1309_q_d_b1: f64 = (s.v[36] * s.db[1255][1]);
-        let eq33_e1309_q_d_b2: f64 = (s.v[36] * s.db[1255][2]);
-        let eq33_e1309_q_d_b3: f64 = (s.v[36] * s.db[1255][3]);
-        let eq33_e1309_q_d_b4: f64 = (s.v[36] * s.db[1255][4]);
-        let eq33_e1309_q_d_b5: f64 = (s.v[36] * s.db[1255][5]);
-        let eq33_e1309_q_d_b6: f64 = (s.v[36] * s.db[1255][6]);
-        let eq33_e1309_q_d_b7: f64 = (s.v[36] * s.db[1255][7]);
-        let eq33_e1309_q_d_b8: f64 = (s.v[36] * s.db[1255][8]);
-        let eq33_reactive_node_derivatives: [f64; 13] = [eq33_e1309_q_d_n0, eq33_e1309_q_d_n1, eq33_e1309_q_d_n2, eq33_e1309_q_d_n3, eq33_e1309_q_d_n4, eq33_e1309_q_d_n5, eq33_e1309_q_d_n6, eq33_e1309_q_d_n7, eq33_e1309_q_d_n8, eq33_e1309_q_d_n9, eq33_e1309_q_d_n10, eq33_e1309_q_d_n11, eq33_e1309_q_d_n12];
-        let eq33_reactive_branch_derivatives: [f64; 9] = [eq33_e1309_q_d_b0, eq33_e1309_q_d_b1, eq33_e1309_q_d_b2, eq33_e1309_q_d_b3, eq33_e1309_q_d_b4, eq33_e1309_q_d_b5, eq33_e1309_q_d_b6, eq33_e1309_q_d_b7, eq33_e1309_q_d_b8];
+        let eq33_reactive_node_derivatives: [f64; 13] = [eq33_e1309_d_n0, eq33_e1309_d_n1, eq33_e1309_d_n2, eq33_e1309_d_n3, eq33_e1309_d_n4, eq33_e1309_d_n5, eq33_e1309_d_n6, eq33_e1309_d_n7, eq33_e1309_d_n8, eq33_e1309_d_n9, eq33_e1309_d_n10, eq33_e1309_d_n11, eq33_e1309_d_n12];
+        let eq33_reactive_branch_derivatives: [f64; 9] = [eq33_e1309_d_b0, eq33_e1309_d_b1, eq33_e1309_d_b2, eq33_e1309_d_b3, eq33_e1309_d_b4, eq33_e1309_d_b5, eq33_e1309_d_b6, eq33_e1309_d_b7, eq33_e1309_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[3]),
             Some(nodes[5]),
@@ -5029,30 +4986,8 @@ impl Instance {
         let eq34_e1313_d_b7: f64 = (s.v[36] * s.db[1244][7]);
         let eq34_e1313_d_b8: f64 = (s.v[36] * s.db[1244][8]);
         let eq34_e1313_q: f64 = (s.v[36] * eq34_e1312_q);
-        let eq34_e1313_q_d_n0: f64 = (s.v[36] * s.dn[1244][0]);
-        let eq34_e1313_q_d_n1: f64 = (s.v[36] * s.dn[1244][1]);
-        let eq34_e1313_q_d_n2: f64 = (s.v[36] * s.dn[1244][2]);
-        let eq34_e1313_q_d_n3: f64 = (s.v[36] * s.dn[1244][3]);
-        let eq34_e1313_q_d_n4: f64 = (s.v[36] * s.dn[1244][4]);
-        let eq34_e1313_q_d_n5: f64 = (s.v[36] * s.dn[1244][5]);
-        let eq34_e1313_q_d_n6: f64 = (s.v[36] * s.dn[1244][6]);
-        let eq34_e1313_q_d_n7: f64 = (s.v[36] * s.dn[1244][7]);
-        let eq34_e1313_q_d_n8: f64 = (s.v[36] * s.dn[1244][8]);
-        let eq34_e1313_q_d_n9: f64 = (s.v[36] * s.dn[1244][9]);
-        let eq34_e1313_q_d_n10: f64 = (s.v[36] * s.dn[1244][10]);
-        let eq34_e1313_q_d_n11: f64 = (s.v[36] * s.dn[1244][11]);
-        let eq34_e1313_q_d_n12: f64 = (s.v[36] * s.dn[1244][12]);
-        let eq34_e1313_q_d_b0: f64 = (s.v[36] * s.db[1244][0]);
-        let eq34_e1313_q_d_b1: f64 = (s.v[36] * s.db[1244][1]);
-        let eq34_e1313_q_d_b2: f64 = (s.v[36] * s.db[1244][2]);
-        let eq34_e1313_q_d_b3: f64 = (s.v[36] * s.db[1244][3]);
-        let eq34_e1313_q_d_b4: f64 = (s.v[36] * s.db[1244][4]);
-        let eq34_e1313_q_d_b5: f64 = (s.v[36] * s.db[1244][5]);
-        let eq34_e1313_q_d_b6: f64 = (s.v[36] * s.db[1244][6]);
-        let eq34_e1313_q_d_b7: f64 = (s.v[36] * s.db[1244][7]);
-        let eq34_e1313_q_d_b8: f64 = (s.v[36] * s.db[1244][8]);
-        let eq34_reactive_node_derivatives: [f64; 13] = [eq34_e1313_q_d_n0, eq34_e1313_q_d_n1, eq34_e1313_q_d_n2, eq34_e1313_q_d_n3, eq34_e1313_q_d_n4, eq34_e1313_q_d_n5, eq34_e1313_q_d_n6, eq34_e1313_q_d_n7, eq34_e1313_q_d_n8, eq34_e1313_q_d_n9, eq34_e1313_q_d_n10, eq34_e1313_q_d_n11, eq34_e1313_q_d_n12];
-        let eq34_reactive_branch_derivatives: [f64; 9] = [eq34_e1313_q_d_b0, eq34_e1313_q_d_b1, eq34_e1313_q_d_b2, eq34_e1313_q_d_b3, eq34_e1313_q_d_b4, eq34_e1313_q_d_b5, eq34_e1313_q_d_b6, eq34_e1313_q_d_b7, eq34_e1313_q_d_b8];
+        let eq34_reactive_node_derivatives: [f64; 13] = [eq34_e1313_d_n0, eq34_e1313_d_n1, eq34_e1313_d_n2, eq34_e1313_d_n3, eq34_e1313_d_n4, eq34_e1313_d_n5, eq34_e1313_d_n6, eq34_e1313_d_n7, eq34_e1313_d_n8, eq34_e1313_d_n9, eq34_e1313_d_n10, eq34_e1313_d_n11, eq34_e1313_d_n12];
+        let eq34_reactive_branch_derivatives: [f64; 9] = [eq34_e1313_d_b0, eq34_e1313_d_b1, eq34_e1313_d_b2, eq34_e1313_d_b3, eq34_e1313_d_b4, eq34_e1313_d_b5, eq34_e1313_d_b6, eq34_e1313_d_b7, eq34_e1313_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[12]),
             Some(nodes[7]),
@@ -5087,30 +5022,8 @@ impl Instance {
         let eq35_e1317_d_b7: f64 = (s.v[36] * s.db[1245][7]);
         let eq35_e1317_d_b8: f64 = (s.v[36] * s.db[1245][8]);
         let eq35_e1317_q: f64 = (s.v[36] * eq35_e1316_q);
-        let eq35_e1317_q_d_n0: f64 = (s.v[36] * s.dn[1245][0]);
-        let eq35_e1317_q_d_n1: f64 = (s.v[36] * s.dn[1245][1]);
-        let eq35_e1317_q_d_n2: f64 = (s.v[36] * s.dn[1245][2]);
-        let eq35_e1317_q_d_n3: f64 = (s.v[36] * s.dn[1245][3]);
-        let eq35_e1317_q_d_n4: f64 = (s.v[36] * s.dn[1245][4]);
-        let eq35_e1317_q_d_n5: f64 = (s.v[36] * s.dn[1245][5]);
-        let eq35_e1317_q_d_n6: f64 = (s.v[36] * s.dn[1245][6]);
-        let eq35_e1317_q_d_n7: f64 = (s.v[36] * s.dn[1245][7]);
-        let eq35_e1317_q_d_n8: f64 = (s.v[36] * s.dn[1245][8]);
-        let eq35_e1317_q_d_n9: f64 = (s.v[36] * s.dn[1245][9]);
-        let eq35_e1317_q_d_n10: f64 = (s.v[36] * s.dn[1245][10]);
-        let eq35_e1317_q_d_n11: f64 = (s.v[36] * s.dn[1245][11]);
-        let eq35_e1317_q_d_n12: f64 = (s.v[36] * s.dn[1245][12]);
-        let eq35_e1317_q_d_b0: f64 = (s.v[36] * s.db[1245][0]);
-        let eq35_e1317_q_d_b1: f64 = (s.v[36] * s.db[1245][1]);
-        let eq35_e1317_q_d_b2: f64 = (s.v[36] * s.db[1245][2]);
-        let eq35_e1317_q_d_b3: f64 = (s.v[36] * s.db[1245][3]);
-        let eq35_e1317_q_d_b4: f64 = (s.v[36] * s.db[1245][4]);
-        let eq35_e1317_q_d_b5: f64 = (s.v[36] * s.db[1245][5]);
-        let eq35_e1317_q_d_b6: f64 = (s.v[36] * s.db[1245][6]);
-        let eq35_e1317_q_d_b7: f64 = (s.v[36] * s.db[1245][7]);
-        let eq35_e1317_q_d_b8: f64 = (s.v[36] * s.db[1245][8]);
-        let eq35_reactive_node_derivatives: [f64; 13] = [eq35_e1317_q_d_n0, eq35_e1317_q_d_n1, eq35_e1317_q_d_n2, eq35_e1317_q_d_n3, eq35_e1317_q_d_n4, eq35_e1317_q_d_n5, eq35_e1317_q_d_n6, eq35_e1317_q_d_n7, eq35_e1317_q_d_n8, eq35_e1317_q_d_n9, eq35_e1317_q_d_n10, eq35_e1317_q_d_n11, eq35_e1317_q_d_n12];
-        let eq35_reactive_branch_derivatives: [f64; 9] = [eq35_e1317_q_d_b0, eq35_e1317_q_d_b1, eq35_e1317_q_d_b2, eq35_e1317_q_d_b3, eq35_e1317_q_d_b4, eq35_e1317_q_d_b5, eq35_e1317_q_d_b6, eq35_e1317_q_d_b7, eq35_e1317_q_d_b8];
+        let eq35_reactive_node_derivatives: [f64; 13] = [eq35_e1317_d_n0, eq35_e1317_d_n1, eq35_e1317_d_n2, eq35_e1317_d_n3, eq35_e1317_d_n4, eq35_e1317_d_n5, eq35_e1317_d_n6, eq35_e1317_d_n7, eq35_e1317_d_n8, eq35_e1317_d_n9, eq35_e1317_d_n10, eq35_e1317_d_n11, eq35_e1317_d_n12];
+        let eq35_reactive_branch_derivatives: [f64; 9] = [eq35_e1317_d_b0, eq35_e1317_d_b1, eq35_e1317_d_b2, eq35_e1317_d_b3, eq35_e1317_d_b4, eq35_e1317_d_b5, eq35_e1317_d_b6, eq35_e1317_d_b7, eq35_e1317_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[11]),
             Some(nodes[8]),
@@ -5120,7 +5033,7 @@ impl Instance {
             &eq35_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq36_e1324, eq36_e1324_d_n0, eq36_e1324_d_n1, eq36_e1324_d_n2, eq36_e1324_d_n3, eq36_e1324_d_n4, eq36_e1324_d_n5, eq36_e1324_d_n6, eq36_e1324_d_n7, eq36_e1324_d_n8, eq36_e1324_d_n9, eq36_e1324_d_n10, eq36_e1324_d_n11, eq36_e1324_d_n12, eq36_e1324_d_b0, eq36_e1324_d_b1, eq36_e1324_d_b2, eq36_e1324_d_b3, eq36_e1324_d_b4, eq36_e1324_d_b5, eq36_e1324_d_b6, eq36_e1324_d_b7, eq36_e1324_d_b8, eq36_e1324_q, eq36_e1324_q_d_n0, eq36_e1324_q_d_n1, eq36_e1324_q_d_n2, eq36_e1324_q_d_n3, eq36_e1324_q_d_n4, eq36_e1324_q_d_n5, eq36_e1324_q_d_n6, eq36_e1324_q_d_n7, eq36_e1324_q_d_n8, eq36_e1324_q_d_n9, eq36_e1324_q_d_n10, eq36_e1324_q_d_n11, eq36_e1324_q_d_n12, eq36_e1324_q_d_b0, eq36_e1324_q_d_b1, eq36_e1324_q_d_b2, eq36_e1324_q_d_b3, eq36_e1324_q_d_b4, eq36_e1324_q_d_b5, eq36_e1324_q_d_b6, eq36_e1324_q_d_b7, eq36_e1324_q_d_b8,) = {
+        let (eq36_e1324, eq36_e1324_d_n0, eq36_e1324_d_n1, eq36_e1324_d_n2, eq36_e1324_d_n3, eq36_e1324_d_n4, eq36_e1324_d_n5, eq36_e1324_d_n6, eq36_e1324_d_n7, eq36_e1324_d_n8, eq36_e1324_d_n9, eq36_e1324_d_n10, eq36_e1324_d_n11, eq36_e1324_d_n12, eq36_e1324_d_b0, eq36_e1324_d_b1, eq36_e1324_d_b2, eq36_e1324_d_b3, eq36_e1324_d_b4, eq36_e1324_d_b5, eq36_e1324_d_b6, eq36_e1324_d_b7, eq36_e1324_d_b8, eq36_e1324_q,) = {
     if s.b[1863] {
         let eq36_e1321_q: f64 = s.v[1230];
         let eq36_e1322: f64 = (s.v[36] * s.v[1230]);
@@ -5147,35 +5060,13 @@ impl Instance {
         let eq36_e1322_d_b7: f64 = (s.v[36] * s.db[1230][7]);
         let eq36_e1322_d_b8: f64 = (s.v[36] * s.db[1230][8]);
         let eq36_e1322_q: f64 = (s.v[36] * eq36_e1321_q);
-        let eq36_e1322_q_d_n0: f64 = (s.v[36] * s.dn[1230][0]);
-        let eq36_e1322_q_d_n1: f64 = (s.v[36] * s.dn[1230][1]);
-        let eq36_e1322_q_d_n2: f64 = (s.v[36] * s.dn[1230][2]);
-        let eq36_e1322_q_d_n3: f64 = (s.v[36] * s.dn[1230][3]);
-        let eq36_e1322_q_d_n4: f64 = (s.v[36] * s.dn[1230][4]);
-        let eq36_e1322_q_d_n5: f64 = (s.v[36] * s.dn[1230][5]);
-        let eq36_e1322_q_d_n6: f64 = (s.v[36] * s.dn[1230][6]);
-        let eq36_e1322_q_d_n7: f64 = (s.v[36] * s.dn[1230][7]);
-        let eq36_e1322_q_d_n8: f64 = (s.v[36] * s.dn[1230][8]);
-        let eq36_e1322_q_d_n9: f64 = (s.v[36] * s.dn[1230][9]);
-        let eq36_e1322_q_d_n10: f64 = (s.v[36] * s.dn[1230][10]);
-        let eq36_e1322_q_d_n11: f64 = (s.v[36] * s.dn[1230][11]);
-        let eq36_e1322_q_d_n12: f64 = (s.v[36] * s.dn[1230][12]);
-        let eq36_e1322_q_d_b0: f64 = (s.v[36] * s.db[1230][0]);
-        let eq36_e1322_q_d_b1: f64 = (s.v[36] * s.db[1230][1]);
-        let eq36_e1322_q_d_b2: f64 = (s.v[36] * s.db[1230][2]);
-        let eq36_e1322_q_d_b3: f64 = (s.v[36] * s.db[1230][3]);
-        let eq36_e1322_q_d_b4: f64 = (s.v[36] * s.db[1230][4]);
-        let eq36_e1322_q_d_b5: f64 = (s.v[36] * s.db[1230][5]);
-        let eq36_e1322_q_d_b6: f64 = (s.v[36] * s.db[1230][6]);
-        let eq36_e1322_q_d_b7: f64 = (s.v[36] * s.db[1230][7]);
-        let eq36_e1322_q_d_b8: f64 = (s.v[36] * s.db[1230][8]);
-        (eq36_e1322, eq36_e1322_d_n0, eq36_e1322_d_n1, eq36_e1322_d_n2, eq36_e1322_d_n3, eq36_e1322_d_n4, eq36_e1322_d_n5, eq36_e1322_d_n6, eq36_e1322_d_n7, eq36_e1322_d_n8, eq36_e1322_d_n9, eq36_e1322_d_n10, eq36_e1322_d_n11, eq36_e1322_d_n12, eq36_e1322_d_b0, eq36_e1322_d_b1, eq36_e1322_d_b2, eq36_e1322_d_b3, eq36_e1322_d_b4, eq36_e1322_d_b5, eq36_e1322_d_b6, eq36_e1322_d_b7, eq36_e1322_d_b8, eq36_e1322_q, eq36_e1322_q_d_n0, eq36_e1322_q_d_n1, eq36_e1322_q_d_n2, eq36_e1322_q_d_n3, eq36_e1322_q_d_n4, eq36_e1322_q_d_n5, eq36_e1322_q_d_n6, eq36_e1322_q_d_n7, eq36_e1322_q_d_n8, eq36_e1322_q_d_n9, eq36_e1322_q_d_n10, eq36_e1322_q_d_n11, eq36_e1322_q_d_n12, eq36_e1322_q_d_b0, eq36_e1322_q_d_b1, eq36_e1322_q_d_b2, eq36_e1322_q_d_b3, eq36_e1322_q_d_b4, eq36_e1322_q_d_b5, eq36_e1322_q_d_b6, eq36_e1322_q_d_b7, eq36_e1322_q_d_b8,)
+        (eq36_e1322, eq36_e1322_d_n0, eq36_e1322_d_n1, eq36_e1322_d_n2, eq36_e1322_d_n3, eq36_e1322_d_n4, eq36_e1322_d_n5, eq36_e1322_d_n6, eq36_e1322_d_n7, eq36_e1322_d_n8, eq36_e1322_d_n9, eq36_e1322_d_n10, eq36_e1322_d_n11, eq36_e1322_d_n12, eq36_e1322_d_b0, eq36_e1322_d_b1, eq36_e1322_d_b2, eq36_e1322_d_b3, eq36_e1322_d_b4, eq36_e1322_d_b5, eq36_e1322_d_b6, eq36_e1322_d_b7, eq36_e1322_d_b8, eq36_e1322_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq36_reactive_node_derivatives: [f64; 13] = [eq36_e1324_q_d_n0, eq36_e1324_q_d_n1, eq36_e1324_q_d_n2, eq36_e1324_q_d_n3, eq36_e1324_q_d_n4, eq36_e1324_q_d_n5, eq36_e1324_q_d_n6, eq36_e1324_q_d_n7, eq36_e1324_q_d_n8, eq36_e1324_q_d_n9, eq36_e1324_q_d_n10, eq36_e1324_q_d_n11, eq36_e1324_q_d_n12];
-        let eq36_reactive_branch_derivatives: [f64; 9] = [eq36_e1324_q_d_b0, eq36_e1324_q_d_b1, eq36_e1324_q_d_b2, eq36_e1324_q_d_b3, eq36_e1324_q_d_b4, eq36_e1324_q_d_b5, eq36_e1324_q_d_b6, eq36_e1324_q_d_b7, eq36_e1324_q_d_b8];
+        let eq36_reactive_node_derivatives: [f64; 13] = [eq36_e1324_d_n0, eq36_e1324_d_n1, eq36_e1324_d_n2, eq36_e1324_d_n3, eq36_e1324_d_n4, eq36_e1324_d_n5, eq36_e1324_d_n6, eq36_e1324_d_n7, eq36_e1324_d_n8, eq36_e1324_d_n9, eq36_e1324_d_n10, eq36_e1324_d_n11, eq36_e1324_d_n12];
+        let eq36_reactive_branch_derivatives: [f64; 9] = [eq36_e1324_d_b0, eq36_e1324_d_b1, eq36_e1324_d_b2, eq36_e1324_d_b3, eq36_e1324_d_b4, eq36_e1324_d_b5, eq36_e1324_d_b6, eq36_e1324_d_b7, eq36_e1324_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[10]),
             Some(nodes[7]),
@@ -5185,7 +5076,7 @@ impl Instance {
             &eq36_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq37_e1331, eq37_e1331_d_n0, eq37_e1331_d_n1, eq37_e1331_d_n2, eq37_e1331_d_n3, eq37_e1331_d_n4, eq37_e1331_d_n5, eq37_e1331_d_n6, eq37_e1331_d_n7, eq37_e1331_d_n8, eq37_e1331_d_n9, eq37_e1331_d_n10, eq37_e1331_d_n11, eq37_e1331_d_n12, eq37_e1331_d_b0, eq37_e1331_d_b1, eq37_e1331_d_b2, eq37_e1331_d_b3, eq37_e1331_d_b4, eq37_e1331_d_b5, eq37_e1331_d_b6, eq37_e1331_d_b7, eq37_e1331_d_b8, eq37_e1331_q, eq37_e1331_q_d_n0, eq37_e1331_q_d_n1, eq37_e1331_q_d_n2, eq37_e1331_q_d_n3, eq37_e1331_q_d_n4, eq37_e1331_q_d_n5, eq37_e1331_q_d_n6, eq37_e1331_q_d_n7, eq37_e1331_q_d_n8, eq37_e1331_q_d_n9, eq37_e1331_q_d_n10, eq37_e1331_q_d_n11, eq37_e1331_q_d_n12, eq37_e1331_q_d_b0, eq37_e1331_q_d_b1, eq37_e1331_q_d_b2, eq37_e1331_q_d_b3, eq37_e1331_q_d_b4, eq37_e1331_q_d_b5, eq37_e1331_q_d_b6, eq37_e1331_q_d_b7, eq37_e1331_q_d_b8,) = {
+        let (eq37_e1331, eq37_e1331_d_n0, eq37_e1331_d_n1, eq37_e1331_d_n2, eq37_e1331_d_n3, eq37_e1331_d_n4, eq37_e1331_d_n5, eq37_e1331_d_n6, eq37_e1331_d_n7, eq37_e1331_d_n8, eq37_e1331_d_n9, eq37_e1331_d_n10, eq37_e1331_d_n11, eq37_e1331_d_n12, eq37_e1331_d_b0, eq37_e1331_d_b1, eq37_e1331_d_b2, eq37_e1331_d_b3, eq37_e1331_d_b4, eq37_e1331_d_b5, eq37_e1331_d_b6, eq37_e1331_d_b7, eq37_e1331_d_b8, eq37_e1331_q,) = {
     if s.b[1863] {
         let eq37_e1328_q: f64 = s.v[1231];
         let eq37_e1329: f64 = (s.v[36] * s.v[1231]);
@@ -5212,35 +5103,13 @@ impl Instance {
         let eq37_e1329_d_b7: f64 = (s.v[36] * s.db[1231][7]);
         let eq37_e1329_d_b8: f64 = (s.v[36] * s.db[1231][8]);
         let eq37_e1329_q: f64 = (s.v[36] * eq37_e1328_q);
-        let eq37_e1329_q_d_n0: f64 = (s.v[36] * s.dn[1231][0]);
-        let eq37_e1329_q_d_n1: f64 = (s.v[36] * s.dn[1231][1]);
-        let eq37_e1329_q_d_n2: f64 = (s.v[36] * s.dn[1231][2]);
-        let eq37_e1329_q_d_n3: f64 = (s.v[36] * s.dn[1231][3]);
-        let eq37_e1329_q_d_n4: f64 = (s.v[36] * s.dn[1231][4]);
-        let eq37_e1329_q_d_n5: f64 = (s.v[36] * s.dn[1231][5]);
-        let eq37_e1329_q_d_n6: f64 = (s.v[36] * s.dn[1231][6]);
-        let eq37_e1329_q_d_n7: f64 = (s.v[36] * s.dn[1231][7]);
-        let eq37_e1329_q_d_n8: f64 = (s.v[36] * s.dn[1231][8]);
-        let eq37_e1329_q_d_n9: f64 = (s.v[36] * s.dn[1231][9]);
-        let eq37_e1329_q_d_n10: f64 = (s.v[36] * s.dn[1231][10]);
-        let eq37_e1329_q_d_n11: f64 = (s.v[36] * s.dn[1231][11]);
-        let eq37_e1329_q_d_n12: f64 = (s.v[36] * s.dn[1231][12]);
-        let eq37_e1329_q_d_b0: f64 = (s.v[36] * s.db[1231][0]);
-        let eq37_e1329_q_d_b1: f64 = (s.v[36] * s.db[1231][1]);
-        let eq37_e1329_q_d_b2: f64 = (s.v[36] * s.db[1231][2]);
-        let eq37_e1329_q_d_b3: f64 = (s.v[36] * s.db[1231][3]);
-        let eq37_e1329_q_d_b4: f64 = (s.v[36] * s.db[1231][4]);
-        let eq37_e1329_q_d_b5: f64 = (s.v[36] * s.db[1231][5]);
-        let eq37_e1329_q_d_b6: f64 = (s.v[36] * s.db[1231][6]);
-        let eq37_e1329_q_d_b7: f64 = (s.v[36] * s.db[1231][7]);
-        let eq37_e1329_q_d_b8: f64 = (s.v[36] * s.db[1231][8]);
-        (eq37_e1329, eq37_e1329_d_n0, eq37_e1329_d_n1, eq37_e1329_d_n2, eq37_e1329_d_n3, eq37_e1329_d_n4, eq37_e1329_d_n5, eq37_e1329_d_n6, eq37_e1329_d_n7, eq37_e1329_d_n8, eq37_e1329_d_n9, eq37_e1329_d_n10, eq37_e1329_d_n11, eq37_e1329_d_n12, eq37_e1329_d_b0, eq37_e1329_d_b1, eq37_e1329_d_b2, eq37_e1329_d_b3, eq37_e1329_d_b4, eq37_e1329_d_b5, eq37_e1329_d_b6, eq37_e1329_d_b7, eq37_e1329_d_b8, eq37_e1329_q, eq37_e1329_q_d_n0, eq37_e1329_q_d_n1, eq37_e1329_q_d_n2, eq37_e1329_q_d_n3, eq37_e1329_q_d_n4, eq37_e1329_q_d_n5, eq37_e1329_q_d_n6, eq37_e1329_q_d_n7, eq37_e1329_q_d_n8, eq37_e1329_q_d_n9, eq37_e1329_q_d_n10, eq37_e1329_q_d_n11, eq37_e1329_q_d_n12, eq37_e1329_q_d_b0, eq37_e1329_q_d_b1, eq37_e1329_q_d_b2, eq37_e1329_q_d_b3, eq37_e1329_q_d_b4, eq37_e1329_q_d_b5, eq37_e1329_q_d_b6, eq37_e1329_q_d_b7, eq37_e1329_q_d_b8,)
+        (eq37_e1329, eq37_e1329_d_n0, eq37_e1329_d_n1, eq37_e1329_d_n2, eq37_e1329_d_n3, eq37_e1329_d_n4, eq37_e1329_d_n5, eq37_e1329_d_n6, eq37_e1329_d_n7, eq37_e1329_d_n8, eq37_e1329_d_n9, eq37_e1329_d_n10, eq37_e1329_d_n11, eq37_e1329_d_n12, eq37_e1329_d_b0, eq37_e1329_d_b1, eq37_e1329_d_b2, eq37_e1329_d_b3, eq37_e1329_d_b4, eq37_e1329_d_b5, eq37_e1329_d_b6, eq37_e1329_d_b7, eq37_e1329_d_b8, eq37_e1329_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq37_reactive_node_derivatives: [f64; 13] = [eq37_e1331_q_d_n0, eq37_e1331_q_d_n1, eq37_e1331_q_d_n2, eq37_e1331_q_d_n3, eq37_e1331_q_d_n4, eq37_e1331_q_d_n5, eq37_e1331_q_d_n6, eq37_e1331_q_d_n7, eq37_e1331_q_d_n8, eq37_e1331_q_d_n9, eq37_e1331_q_d_n10, eq37_e1331_q_d_n11, eq37_e1331_q_d_n12];
-        let eq37_reactive_branch_derivatives: [f64; 9] = [eq37_e1331_q_d_b0, eq37_e1331_q_d_b1, eq37_e1331_q_d_b2, eq37_e1331_q_d_b3, eq37_e1331_q_d_b4, eq37_e1331_q_d_b5, eq37_e1331_q_d_b6, eq37_e1331_q_d_b7, eq37_e1331_q_d_b8];
+        let eq37_reactive_node_derivatives: [f64; 13] = [eq37_e1331_d_n0, eq37_e1331_d_n1, eq37_e1331_d_n2, eq37_e1331_d_n3, eq37_e1331_d_n4, eq37_e1331_d_n5, eq37_e1331_d_n6, eq37_e1331_d_n7, eq37_e1331_d_n8, eq37_e1331_d_n9, eq37_e1331_d_n10, eq37_e1331_d_n11, eq37_e1331_d_n12];
+        let eq37_reactive_branch_derivatives: [f64; 9] = [eq37_e1331_d_b0, eq37_e1331_d_b1, eq37_e1331_d_b2, eq37_e1331_d_b3, eq37_e1331_d_b4, eq37_e1331_d_b5, eq37_e1331_d_b6, eq37_e1331_d_b7, eq37_e1331_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[10]),
             Some(nodes[8]),
@@ -5250,7 +5119,7 @@ impl Instance {
             &eq37_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq38_e1338, eq38_e1338_d_n0, eq38_e1338_d_n1, eq38_e1338_d_n2, eq38_e1338_d_n3, eq38_e1338_d_n4, eq38_e1338_d_n5, eq38_e1338_d_n6, eq38_e1338_d_n7, eq38_e1338_d_n8, eq38_e1338_d_n9, eq38_e1338_d_n10, eq38_e1338_d_n11, eq38_e1338_d_n12, eq38_e1338_d_b0, eq38_e1338_d_b1, eq38_e1338_d_b2, eq38_e1338_d_b3, eq38_e1338_d_b4, eq38_e1338_d_b5, eq38_e1338_d_b6, eq38_e1338_d_b7, eq38_e1338_d_b8, eq38_e1338_q, eq38_e1338_q_d_n0, eq38_e1338_q_d_n1, eq38_e1338_q_d_n2, eq38_e1338_q_d_n3, eq38_e1338_q_d_n4, eq38_e1338_q_d_n5, eq38_e1338_q_d_n6, eq38_e1338_q_d_n7, eq38_e1338_q_d_n8, eq38_e1338_q_d_n9, eq38_e1338_q_d_n10, eq38_e1338_q_d_n11, eq38_e1338_q_d_n12, eq38_e1338_q_d_b0, eq38_e1338_q_d_b1, eq38_e1338_q_d_b2, eq38_e1338_q_d_b3, eq38_e1338_q_d_b4, eq38_e1338_q_d_b5, eq38_e1338_q_d_b6, eq38_e1338_q_d_b7, eq38_e1338_q_d_b8,) = {
+        let (eq38_e1338, eq38_e1338_d_n0, eq38_e1338_d_n1, eq38_e1338_d_n2, eq38_e1338_d_n3, eq38_e1338_d_n4, eq38_e1338_d_n5, eq38_e1338_d_n6, eq38_e1338_d_n7, eq38_e1338_d_n8, eq38_e1338_d_n9, eq38_e1338_d_n10, eq38_e1338_d_n11, eq38_e1338_d_n12, eq38_e1338_d_b0, eq38_e1338_d_b1, eq38_e1338_d_b2, eq38_e1338_d_b3, eq38_e1338_d_b4, eq38_e1338_d_b5, eq38_e1338_d_b6, eq38_e1338_d_b7, eq38_e1338_d_b8, eq38_e1338_q,) = {
     if s.b[1863] {
         let eq38_e1335: f64 = ((nv10 - nv3) * s.v[697]);
         let eq38_e1335_d_n0: f64 = ((nv10 - nv3) * s.dn[697][0]);
@@ -5276,13 +5145,13 @@ impl Instance {
         let eq38_e1335_d_b7: f64 = ((nv10 - nv3) * s.db[697][7]);
         let eq38_e1335_d_b8: f64 = ((nv10 - nv3) * s.db[697][8]);
         let eq38_e1336_q: f64 = eq38_e1335;
-        (eq38_e1335, eq38_e1335_d_n0, eq38_e1335_d_n1, eq38_e1335_d_n2, eq38_e1335_d_n3, eq38_e1335_d_n4, eq38_e1335_d_n5, eq38_e1335_d_n6, eq38_e1335_d_n7, eq38_e1335_d_n8, eq38_e1335_d_n9, eq38_e1335_d_n10, eq38_e1335_d_n11, eq38_e1335_d_n12, eq38_e1335_d_b0, eq38_e1335_d_b1, eq38_e1335_d_b2, eq38_e1335_d_b3, eq38_e1335_d_b4, eq38_e1335_d_b5, eq38_e1335_d_b6, eq38_e1335_d_b7, eq38_e1335_d_b8, eq38_e1336_q, eq38_e1335_d_n0, eq38_e1335_d_n1, eq38_e1335_d_n2, eq38_e1335_d_n3, eq38_e1335_d_n4, eq38_e1335_d_n5, eq38_e1335_d_n6, eq38_e1335_d_n7, eq38_e1335_d_n8, eq38_e1335_d_n9, eq38_e1335_d_n10, eq38_e1335_d_n11, eq38_e1335_d_n12, eq38_e1335_d_b0, eq38_e1335_d_b1, eq38_e1335_d_b2, eq38_e1335_d_b3, eq38_e1335_d_b4, eq38_e1335_d_b5, eq38_e1335_d_b6, eq38_e1335_d_b7, eq38_e1335_d_b8,)
+        (eq38_e1335, eq38_e1335_d_n0, eq38_e1335_d_n1, eq38_e1335_d_n2, eq38_e1335_d_n3, eq38_e1335_d_n4, eq38_e1335_d_n5, eq38_e1335_d_n6, eq38_e1335_d_n7, eq38_e1335_d_n8, eq38_e1335_d_n9, eq38_e1335_d_n10, eq38_e1335_d_n11, eq38_e1335_d_n12, eq38_e1335_d_b0, eq38_e1335_d_b1, eq38_e1335_d_b2, eq38_e1335_d_b3, eq38_e1335_d_b4, eq38_e1335_d_b5, eq38_e1335_d_b6, eq38_e1335_d_b7, eq38_e1335_d_b8, eq38_e1336_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq38_reactive_node_derivatives: [f64; 13] = [eq38_e1338_q_d_n0, eq38_e1338_q_d_n1, eq38_e1338_q_d_n2, eq38_e1338_q_d_n3, eq38_e1338_q_d_n4, eq38_e1338_q_d_n5, eq38_e1338_q_d_n6, eq38_e1338_q_d_n7, eq38_e1338_q_d_n8, eq38_e1338_q_d_n9, eq38_e1338_q_d_n10, eq38_e1338_q_d_n11, eq38_e1338_q_d_n12];
-        let eq38_reactive_branch_derivatives: [f64; 9] = [eq38_e1338_q_d_b0, eq38_e1338_q_d_b1, eq38_e1338_q_d_b2, eq38_e1338_q_d_b3, eq38_e1338_q_d_b4, eq38_e1338_q_d_b5, eq38_e1338_q_d_b6, eq38_e1338_q_d_b7, eq38_e1338_q_d_b8];
+        let eq38_reactive_node_derivatives: [f64; 13] = [eq38_e1338_d_n0, eq38_e1338_d_n1, eq38_e1338_d_n2, eq38_e1338_d_n3, eq38_e1338_d_n4, eq38_e1338_d_n5, eq38_e1338_d_n6, eq38_e1338_d_n7, eq38_e1338_d_n8, eq38_e1338_d_n9, eq38_e1338_d_n10, eq38_e1338_d_n11, eq38_e1338_d_n12];
+        let eq38_reactive_branch_derivatives: [f64; 9] = [eq38_e1338_d_b0, eq38_e1338_d_b1, eq38_e1338_d_b2, eq38_e1338_d_b3, eq38_e1338_d_b4, eq38_e1338_d_b5, eq38_e1338_d_b6, eq38_e1338_d_b7, eq38_e1338_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[10]),
             Some(nodes[3]),
@@ -5292,7 +5161,7 @@ impl Instance {
             &eq38_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq39_e1346, eq39_e1346_d_n0, eq39_e1346_d_n1, eq39_e1346_d_n2, eq39_e1346_d_n3, eq39_e1346_d_n4, eq39_e1346_d_n5, eq39_e1346_d_n6, eq39_e1346_d_n7, eq39_e1346_d_n8, eq39_e1346_d_n9, eq39_e1346_d_n10, eq39_e1346_d_n11, eq39_e1346_d_n12, eq39_e1346_d_b0, eq39_e1346_d_b1, eq39_e1346_d_b2, eq39_e1346_d_b3, eq39_e1346_d_b4, eq39_e1346_d_b5, eq39_e1346_d_b6, eq39_e1346_d_b7, eq39_e1346_d_b8, eq39_e1346_q, eq39_e1346_q_d_n0, eq39_e1346_q_d_n1, eq39_e1346_q_d_n2, eq39_e1346_q_d_n3, eq39_e1346_q_d_n4, eq39_e1346_q_d_n5, eq39_e1346_q_d_n6, eq39_e1346_q_d_n7, eq39_e1346_q_d_n8, eq39_e1346_q_d_n9, eq39_e1346_q_d_n10, eq39_e1346_q_d_n11, eq39_e1346_q_d_n12, eq39_e1346_q_d_b0, eq39_e1346_q_d_b1, eq39_e1346_q_d_b2, eq39_e1346_q_d_b3, eq39_e1346_q_d_b4, eq39_e1346_q_d_b5, eq39_e1346_q_d_b6, eq39_e1346_q_d_b7, eq39_e1346_q_d_b8,) = {
+        let (eq39_e1346, eq39_e1346_d_n0, eq39_e1346_d_n1, eq39_e1346_d_n2, eq39_e1346_d_n3, eq39_e1346_d_n4, eq39_e1346_d_n5, eq39_e1346_d_n6, eq39_e1346_d_n7, eq39_e1346_d_n8, eq39_e1346_d_n9, eq39_e1346_d_n10, eq39_e1346_d_n11, eq39_e1346_d_n12, eq39_e1346_d_b0, eq39_e1346_d_b1, eq39_e1346_d_b2, eq39_e1346_d_b3, eq39_e1346_d_b4, eq39_e1346_d_b5, eq39_e1346_d_b6, eq39_e1346_d_b7, eq39_e1346_d_b8, eq39_e1346_q,) = {
     if (!s.b[1863]) {
         let eq39_e1343_q: f64 = s.v[1230];
         let eq39_e1344: f64 = (s.v[36] * s.v[1230]);
@@ -5319,35 +5188,13 @@ impl Instance {
         let eq39_e1344_d_b7: f64 = (s.v[36] * s.db[1230][7]);
         let eq39_e1344_d_b8: f64 = (s.v[36] * s.db[1230][8]);
         let eq39_e1344_q: f64 = (s.v[36] * eq39_e1343_q);
-        let eq39_e1344_q_d_n0: f64 = (s.v[36] * s.dn[1230][0]);
-        let eq39_e1344_q_d_n1: f64 = (s.v[36] * s.dn[1230][1]);
-        let eq39_e1344_q_d_n2: f64 = (s.v[36] * s.dn[1230][2]);
-        let eq39_e1344_q_d_n3: f64 = (s.v[36] * s.dn[1230][3]);
-        let eq39_e1344_q_d_n4: f64 = (s.v[36] * s.dn[1230][4]);
-        let eq39_e1344_q_d_n5: f64 = (s.v[36] * s.dn[1230][5]);
-        let eq39_e1344_q_d_n6: f64 = (s.v[36] * s.dn[1230][6]);
-        let eq39_e1344_q_d_n7: f64 = (s.v[36] * s.dn[1230][7]);
-        let eq39_e1344_q_d_n8: f64 = (s.v[36] * s.dn[1230][8]);
-        let eq39_e1344_q_d_n9: f64 = (s.v[36] * s.dn[1230][9]);
-        let eq39_e1344_q_d_n10: f64 = (s.v[36] * s.dn[1230][10]);
-        let eq39_e1344_q_d_n11: f64 = (s.v[36] * s.dn[1230][11]);
-        let eq39_e1344_q_d_n12: f64 = (s.v[36] * s.dn[1230][12]);
-        let eq39_e1344_q_d_b0: f64 = (s.v[36] * s.db[1230][0]);
-        let eq39_e1344_q_d_b1: f64 = (s.v[36] * s.db[1230][1]);
-        let eq39_e1344_q_d_b2: f64 = (s.v[36] * s.db[1230][2]);
-        let eq39_e1344_q_d_b3: f64 = (s.v[36] * s.db[1230][3]);
-        let eq39_e1344_q_d_b4: f64 = (s.v[36] * s.db[1230][4]);
-        let eq39_e1344_q_d_b5: f64 = (s.v[36] * s.db[1230][5]);
-        let eq39_e1344_q_d_b6: f64 = (s.v[36] * s.db[1230][6]);
-        let eq39_e1344_q_d_b7: f64 = (s.v[36] * s.db[1230][7]);
-        let eq39_e1344_q_d_b8: f64 = (s.v[36] * s.db[1230][8]);
-        (eq39_e1344, eq39_e1344_d_n0, eq39_e1344_d_n1, eq39_e1344_d_n2, eq39_e1344_d_n3, eq39_e1344_d_n4, eq39_e1344_d_n5, eq39_e1344_d_n6, eq39_e1344_d_n7, eq39_e1344_d_n8, eq39_e1344_d_n9, eq39_e1344_d_n10, eq39_e1344_d_n11, eq39_e1344_d_n12, eq39_e1344_d_b0, eq39_e1344_d_b1, eq39_e1344_d_b2, eq39_e1344_d_b3, eq39_e1344_d_b4, eq39_e1344_d_b5, eq39_e1344_d_b6, eq39_e1344_d_b7, eq39_e1344_d_b8, eq39_e1344_q, eq39_e1344_q_d_n0, eq39_e1344_q_d_n1, eq39_e1344_q_d_n2, eq39_e1344_q_d_n3, eq39_e1344_q_d_n4, eq39_e1344_q_d_n5, eq39_e1344_q_d_n6, eq39_e1344_q_d_n7, eq39_e1344_q_d_n8, eq39_e1344_q_d_n9, eq39_e1344_q_d_n10, eq39_e1344_q_d_n11, eq39_e1344_q_d_n12, eq39_e1344_q_d_b0, eq39_e1344_q_d_b1, eq39_e1344_q_d_b2, eq39_e1344_q_d_b3, eq39_e1344_q_d_b4, eq39_e1344_q_d_b5, eq39_e1344_q_d_b6, eq39_e1344_q_d_b7, eq39_e1344_q_d_b8,)
+        (eq39_e1344, eq39_e1344_d_n0, eq39_e1344_d_n1, eq39_e1344_d_n2, eq39_e1344_d_n3, eq39_e1344_d_n4, eq39_e1344_d_n5, eq39_e1344_d_n6, eq39_e1344_d_n7, eq39_e1344_d_n8, eq39_e1344_d_n9, eq39_e1344_d_n10, eq39_e1344_d_n11, eq39_e1344_d_n12, eq39_e1344_d_b0, eq39_e1344_d_b1, eq39_e1344_d_b2, eq39_e1344_d_b3, eq39_e1344_d_b4, eq39_e1344_d_b5, eq39_e1344_d_b6, eq39_e1344_d_b7, eq39_e1344_d_b8, eq39_e1344_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq39_reactive_node_derivatives: [f64; 13] = [eq39_e1346_q_d_n0, eq39_e1346_q_d_n1, eq39_e1346_q_d_n2, eq39_e1346_q_d_n3, eq39_e1346_q_d_n4, eq39_e1346_q_d_n5, eq39_e1346_q_d_n6, eq39_e1346_q_d_n7, eq39_e1346_q_d_n8, eq39_e1346_q_d_n9, eq39_e1346_q_d_n10, eq39_e1346_q_d_n11, eq39_e1346_q_d_n12];
-        let eq39_reactive_branch_derivatives: [f64; 9] = [eq39_e1346_q_d_b0, eq39_e1346_q_d_b1, eq39_e1346_q_d_b2, eq39_e1346_q_d_b3, eq39_e1346_q_d_b4, eq39_e1346_q_d_b5, eq39_e1346_q_d_b6, eq39_e1346_q_d_b7, eq39_e1346_q_d_b8];
+        let eq39_reactive_node_derivatives: [f64; 13] = [eq39_e1346_d_n0, eq39_e1346_d_n1, eq39_e1346_d_n2, eq39_e1346_d_n3, eq39_e1346_d_n4, eq39_e1346_d_n5, eq39_e1346_d_n6, eq39_e1346_d_n7, eq39_e1346_d_n8, eq39_e1346_d_n9, eq39_e1346_d_n10, eq39_e1346_d_n11, eq39_e1346_d_n12];
+        let eq39_reactive_branch_derivatives: [f64; 9] = [eq39_e1346_d_b0, eq39_e1346_d_b1, eq39_e1346_d_b2, eq39_e1346_d_b3, eq39_e1346_d_b4, eq39_e1346_d_b5, eq39_e1346_d_b6, eq39_e1346_d_b7, eq39_e1346_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[9]),
             Some(nodes[7]),
@@ -5357,19 +5204,7 @@ impl Instance {
             &eq39_reactive_branch_derivatives,
             multiplicity,
         );
-    }
-
-    pub(super) fn stamp_reactive_equations_block_1(
-        ctx: &GeneratedEvalContext<'_>,
-        stamper: &mut GeneratedReactiveStamper<'_>,
-        s: &mut ReactiveScratch,
-        nodes: &[usize; Instance::NODE_COUNT],
-        branches: &[usize; Instance::BRANCH_COUNT],
-        multiplicity: f64,
-    ) {
-        let nv3 = ctx.node_voltage(nodes[3]);
-        let nv9 = ctx.node_voltage(nodes[9]);
-        let (eq40_e1354, eq40_e1354_d_n0, eq40_e1354_d_n1, eq40_e1354_d_n2, eq40_e1354_d_n3, eq40_e1354_d_n4, eq40_e1354_d_n5, eq40_e1354_d_n6, eq40_e1354_d_n7, eq40_e1354_d_n8, eq40_e1354_d_n9, eq40_e1354_d_n10, eq40_e1354_d_n11, eq40_e1354_d_n12, eq40_e1354_d_b0, eq40_e1354_d_b1, eq40_e1354_d_b2, eq40_e1354_d_b3, eq40_e1354_d_b4, eq40_e1354_d_b5, eq40_e1354_d_b6, eq40_e1354_d_b7, eq40_e1354_d_b8, eq40_e1354_q, eq40_e1354_q_d_n0, eq40_e1354_q_d_n1, eq40_e1354_q_d_n2, eq40_e1354_q_d_n3, eq40_e1354_q_d_n4, eq40_e1354_q_d_n5, eq40_e1354_q_d_n6, eq40_e1354_q_d_n7, eq40_e1354_q_d_n8, eq40_e1354_q_d_n9, eq40_e1354_q_d_n10, eq40_e1354_q_d_n11, eq40_e1354_q_d_n12, eq40_e1354_q_d_b0, eq40_e1354_q_d_b1, eq40_e1354_q_d_b2, eq40_e1354_q_d_b3, eq40_e1354_q_d_b4, eq40_e1354_q_d_b5, eq40_e1354_q_d_b6, eq40_e1354_q_d_b7, eq40_e1354_q_d_b8,) = {
+        let (eq40_e1354, eq40_e1354_d_n0, eq40_e1354_d_n1, eq40_e1354_d_n2, eq40_e1354_d_n3, eq40_e1354_d_n4, eq40_e1354_d_n5, eq40_e1354_d_n6, eq40_e1354_d_n7, eq40_e1354_d_n8, eq40_e1354_d_n9, eq40_e1354_d_n10, eq40_e1354_d_n11, eq40_e1354_d_n12, eq40_e1354_d_b0, eq40_e1354_d_b1, eq40_e1354_d_b2, eq40_e1354_d_b3, eq40_e1354_d_b4, eq40_e1354_d_b5, eq40_e1354_d_b6, eq40_e1354_d_b7, eq40_e1354_d_b8, eq40_e1354_q,) = {
     if (!s.b[1863]) {
         let eq40_e1351_q: f64 = s.v[1231];
         let eq40_e1352: f64 = (s.v[36] * s.v[1231]);
@@ -5396,35 +5231,13 @@ impl Instance {
         let eq40_e1352_d_b7: f64 = (s.v[36] * s.db[1231][7]);
         let eq40_e1352_d_b8: f64 = (s.v[36] * s.db[1231][8]);
         let eq40_e1352_q: f64 = (s.v[36] * eq40_e1351_q);
-        let eq40_e1352_q_d_n0: f64 = (s.v[36] * s.dn[1231][0]);
-        let eq40_e1352_q_d_n1: f64 = (s.v[36] * s.dn[1231][1]);
-        let eq40_e1352_q_d_n2: f64 = (s.v[36] * s.dn[1231][2]);
-        let eq40_e1352_q_d_n3: f64 = (s.v[36] * s.dn[1231][3]);
-        let eq40_e1352_q_d_n4: f64 = (s.v[36] * s.dn[1231][4]);
-        let eq40_e1352_q_d_n5: f64 = (s.v[36] * s.dn[1231][5]);
-        let eq40_e1352_q_d_n6: f64 = (s.v[36] * s.dn[1231][6]);
-        let eq40_e1352_q_d_n7: f64 = (s.v[36] * s.dn[1231][7]);
-        let eq40_e1352_q_d_n8: f64 = (s.v[36] * s.dn[1231][8]);
-        let eq40_e1352_q_d_n9: f64 = (s.v[36] * s.dn[1231][9]);
-        let eq40_e1352_q_d_n10: f64 = (s.v[36] * s.dn[1231][10]);
-        let eq40_e1352_q_d_n11: f64 = (s.v[36] * s.dn[1231][11]);
-        let eq40_e1352_q_d_n12: f64 = (s.v[36] * s.dn[1231][12]);
-        let eq40_e1352_q_d_b0: f64 = (s.v[36] * s.db[1231][0]);
-        let eq40_e1352_q_d_b1: f64 = (s.v[36] * s.db[1231][1]);
-        let eq40_e1352_q_d_b2: f64 = (s.v[36] * s.db[1231][2]);
-        let eq40_e1352_q_d_b3: f64 = (s.v[36] * s.db[1231][3]);
-        let eq40_e1352_q_d_b4: f64 = (s.v[36] * s.db[1231][4]);
-        let eq40_e1352_q_d_b5: f64 = (s.v[36] * s.db[1231][5]);
-        let eq40_e1352_q_d_b6: f64 = (s.v[36] * s.db[1231][6]);
-        let eq40_e1352_q_d_b7: f64 = (s.v[36] * s.db[1231][7]);
-        let eq40_e1352_q_d_b8: f64 = (s.v[36] * s.db[1231][8]);
-        (eq40_e1352, eq40_e1352_d_n0, eq40_e1352_d_n1, eq40_e1352_d_n2, eq40_e1352_d_n3, eq40_e1352_d_n4, eq40_e1352_d_n5, eq40_e1352_d_n6, eq40_e1352_d_n7, eq40_e1352_d_n8, eq40_e1352_d_n9, eq40_e1352_d_n10, eq40_e1352_d_n11, eq40_e1352_d_n12, eq40_e1352_d_b0, eq40_e1352_d_b1, eq40_e1352_d_b2, eq40_e1352_d_b3, eq40_e1352_d_b4, eq40_e1352_d_b5, eq40_e1352_d_b6, eq40_e1352_d_b7, eq40_e1352_d_b8, eq40_e1352_q, eq40_e1352_q_d_n0, eq40_e1352_q_d_n1, eq40_e1352_q_d_n2, eq40_e1352_q_d_n3, eq40_e1352_q_d_n4, eq40_e1352_q_d_n5, eq40_e1352_q_d_n6, eq40_e1352_q_d_n7, eq40_e1352_q_d_n8, eq40_e1352_q_d_n9, eq40_e1352_q_d_n10, eq40_e1352_q_d_n11, eq40_e1352_q_d_n12, eq40_e1352_q_d_b0, eq40_e1352_q_d_b1, eq40_e1352_q_d_b2, eq40_e1352_q_d_b3, eq40_e1352_q_d_b4, eq40_e1352_q_d_b5, eq40_e1352_q_d_b6, eq40_e1352_q_d_b7, eq40_e1352_q_d_b8,)
+        (eq40_e1352, eq40_e1352_d_n0, eq40_e1352_d_n1, eq40_e1352_d_n2, eq40_e1352_d_n3, eq40_e1352_d_n4, eq40_e1352_d_n5, eq40_e1352_d_n6, eq40_e1352_d_n7, eq40_e1352_d_n8, eq40_e1352_d_n9, eq40_e1352_d_n10, eq40_e1352_d_n11, eq40_e1352_d_n12, eq40_e1352_d_b0, eq40_e1352_d_b1, eq40_e1352_d_b2, eq40_e1352_d_b3, eq40_e1352_d_b4, eq40_e1352_d_b5, eq40_e1352_d_b6, eq40_e1352_d_b7, eq40_e1352_d_b8, eq40_e1352_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq40_reactive_node_derivatives: [f64; 13] = [eq40_e1354_q_d_n0, eq40_e1354_q_d_n1, eq40_e1354_q_d_n2, eq40_e1354_q_d_n3, eq40_e1354_q_d_n4, eq40_e1354_q_d_n5, eq40_e1354_q_d_n6, eq40_e1354_q_d_n7, eq40_e1354_q_d_n8, eq40_e1354_q_d_n9, eq40_e1354_q_d_n10, eq40_e1354_q_d_n11, eq40_e1354_q_d_n12];
-        let eq40_reactive_branch_derivatives: [f64; 9] = [eq40_e1354_q_d_b0, eq40_e1354_q_d_b1, eq40_e1354_q_d_b2, eq40_e1354_q_d_b3, eq40_e1354_q_d_b4, eq40_e1354_q_d_b5, eq40_e1354_q_d_b6, eq40_e1354_q_d_b7, eq40_e1354_q_d_b8];
+        let eq40_reactive_node_derivatives: [f64; 13] = [eq40_e1354_d_n0, eq40_e1354_d_n1, eq40_e1354_d_n2, eq40_e1354_d_n3, eq40_e1354_d_n4, eq40_e1354_d_n5, eq40_e1354_d_n6, eq40_e1354_d_n7, eq40_e1354_d_n8, eq40_e1354_d_n9, eq40_e1354_d_n10, eq40_e1354_d_n11, eq40_e1354_d_n12];
+        let eq40_reactive_branch_derivatives: [f64; 9] = [eq40_e1354_d_b0, eq40_e1354_d_b1, eq40_e1354_d_b2, eq40_e1354_d_b3, eq40_e1354_d_b4, eq40_e1354_d_b5, eq40_e1354_d_b6, eq40_e1354_d_b7, eq40_e1354_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[9]),
             Some(nodes[8]),
@@ -5434,7 +5247,7 @@ impl Instance {
             &eq40_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq41_e1362, eq41_e1362_d_n0, eq41_e1362_d_n1, eq41_e1362_d_n2, eq41_e1362_d_n3, eq41_e1362_d_n4, eq41_e1362_d_n5, eq41_e1362_d_n6, eq41_e1362_d_n7, eq41_e1362_d_n8, eq41_e1362_d_n9, eq41_e1362_d_n10, eq41_e1362_d_n11, eq41_e1362_d_n12, eq41_e1362_d_b0, eq41_e1362_d_b1, eq41_e1362_d_b2, eq41_e1362_d_b3, eq41_e1362_d_b4, eq41_e1362_d_b5, eq41_e1362_d_b6, eq41_e1362_d_b7, eq41_e1362_d_b8, eq41_e1362_q, eq41_e1362_q_d_n0, eq41_e1362_q_d_n1, eq41_e1362_q_d_n2, eq41_e1362_q_d_n3, eq41_e1362_q_d_n4, eq41_e1362_q_d_n5, eq41_e1362_q_d_n6, eq41_e1362_q_d_n7, eq41_e1362_q_d_n8, eq41_e1362_q_d_n9, eq41_e1362_q_d_n10, eq41_e1362_q_d_n11, eq41_e1362_q_d_n12, eq41_e1362_q_d_b0, eq41_e1362_q_d_b1, eq41_e1362_q_d_b2, eq41_e1362_q_d_b3, eq41_e1362_q_d_b4, eq41_e1362_q_d_b5, eq41_e1362_q_d_b6, eq41_e1362_q_d_b7, eq41_e1362_q_d_b8,) = {
+        let (eq41_e1362, eq41_e1362_d_n0, eq41_e1362_d_n1, eq41_e1362_d_n2, eq41_e1362_d_n3, eq41_e1362_d_n4, eq41_e1362_d_n5, eq41_e1362_d_n6, eq41_e1362_d_n7, eq41_e1362_d_n8, eq41_e1362_d_n9, eq41_e1362_d_n10, eq41_e1362_d_n11, eq41_e1362_d_n12, eq41_e1362_d_b0, eq41_e1362_d_b1, eq41_e1362_d_b2, eq41_e1362_d_b3, eq41_e1362_d_b4, eq41_e1362_d_b5, eq41_e1362_d_b6, eq41_e1362_d_b7, eq41_e1362_d_b8, eq41_e1362_q,) = {
     if (!s.b[1863]) {
         let eq41_e1359: f64 = ((nv9 - nv3) * s.v[697]);
         let eq41_e1359_d_n0: f64 = ((nv9 - nv3) * s.dn[697][0]);
@@ -5460,13 +5273,13 @@ impl Instance {
         let eq41_e1359_d_b7: f64 = ((nv9 - nv3) * s.db[697][7]);
         let eq41_e1359_d_b8: f64 = ((nv9 - nv3) * s.db[697][8]);
         let eq41_e1360_q: f64 = eq41_e1359;
-        (eq41_e1359, eq41_e1359_d_n0, eq41_e1359_d_n1, eq41_e1359_d_n2, eq41_e1359_d_n3, eq41_e1359_d_n4, eq41_e1359_d_n5, eq41_e1359_d_n6, eq41_e1359_d_n7, eq41_e1359_d_n8, eq41_e1359_d_n9, eq41_e1359_d_n10, eq41_e1359_d_n11, eq41_e1359_d_n12, eq41_e1359_d_b0, eq41_e1359_d_b1, eq41_e1359_d_b2, eq41_e1359_d_b3, eq41_e1359_d_b4, eq41_e1359_d_b5, eq41_e1359_d_b6, eq41_e1359_d_b7, eq41_e1359_d_b8, eq41_e1360_q, eq41_e1359_d_n0, eq41_e1359_d_n1, eq41_e1359_d_n2, eq41_e1359_d_n3, eq41_e1359_d_n4, eq41_e1359_d_n5, eq41_e1359_d_n6, eq41_e1359_d_n7, eq41_e1359_d_n8, eq41_e1359_d_n9, eq41_e1359_d_n10, eq41_e1359_d_n11, eq41_e1359_d_n12, eq41_e1359_d_b0, eq41_e1359_d_b1, eq41_e1359_d_b2, eq41_e1359_d_b3, eq41_e1359_d_b4, eq41_e1359_d_b5, eq41_e1359_d_b6, eq41_e1359_d_b7, eq41_e1359_d_b8,)
+        (eq41_e1359, eq41_e1359_d_n0, eq41_e1359_d_n1, eq41_e1359_d_n2, eq41_e1359_d_n3, eq41_e1359_d_n4, eq41_e1359_d_n5, eq41_e1359_d_n6, eq41_e1359_d_n7, eq41_e1359_d_n8, eq41_e1359_d_n9, eq41_e1359_d_n10, eq41_e1359_d_n11, eq41_e1359_d_n12, eq41_e1359_d_b0, eq41_e1359_d_b1, eq41_e1359_d_b2, eq41_e1359_d_b3, eq41_e1359_d_b4, eq41_e1359_d_b5, eq41_e1359_d_b6, eq41_e1359_d_b7, eq41_e1359_d_b8, eq41_e1360_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq41_reactive_node_derivatives: [f64; 13] = [eq41_e1362_q_d_n0, eq41_e1362_q_d_n1, eq41_e1362_q_d_n2, eq41_e1362_q_d_n3, eq41_e1362_q_d_n4, eq41_e1362_q_d_n5, eq41_e1362_q_d_n6, eq41_e1362_q_d_n7, eq41_e1362_q_d_n8, eq41_e1362_q_d_n9, eq41_e1362_q_d_n10, eq41_e1362_q_d_n11, eq41_e1362_q_d_n12];
-        let eq41_reactive_branch_derivatives: [f64; 9] = [eq41_e1362_q_d_b0, eq41_e1362_q_d_b1, eq41_e1362_q_d_b2, eq41_e1362_q_d_b3, eq41_e1362_q_d_b4, eq41_e1362_q_d_b5, eq41_e1362_q_d_b6, eq41_e1362_q_d_b7, eq41_e1362_q_d_b8];
+        let eq41_reactive_node_derivatives: [f64; 13] = [eq41_e1362_d_n0, eq41_e1362_d_n1, eq41_e1362_d_n2, eq41_e1362_d_n3, eq41_e1362_d_n4, eq41_e1362_d_n5, eq41_e1362_d_n6, eq41_e1362_d_n7, eq41_e1362_d_n8, eq41_e1362_d_n9, eq41_e1362_d_n10, eq41_e1362_d_n11, eq41_e1362_d_n12];
+        let eq41_reactive_branch_derivatives: [f64; 9] = [eq41_e1362_d_b0, eq41_e1362_d_b1, eq41_e1362_d_b2, eq41_e1362_d_b3, eq41_e1362_d_b4, eq41_e1362_d_b5, eq41_e1362_d_b6, eq41_e1362_d_b7, eq41_e1362_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[9]),
             Some(nodes[3]),
@@ -5500,7 +5313,7 @@ impl Instance {
             &eq43_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq58_e1476, eq58_e1476_d_n0, eq58_e1476_d_n1, eq58_e1476_d_n2, eq58_e1476_d_n3, eq58_e1476_d_n4, eq58_e1476_d_n5, eq58_e1476_d_n6, eq58_e1476_d_n7, eq58_e1476_d_n8, eq58_e1476_d_n9, eq58_e1476_d_n10, eq58_e1476_d_n11, eq58_e1476_d_n12, eq58_e1476_d_b0, eq58_e1476_d_b1, eq58_e1476_d_b2, eq58_e1476_d_b3, eq58_e1476_d_b4, eq58_e1476_d_b5, eq58_e1476_d_b6, eq58_e1476_d_b7, eq58_e1476_d_b8, eq58_e1476_q, eq58_e1476_q_d_n0, eq58_e1476_q_d_n1, eq58_e1476_q_d_n2, eq58_e1476_q_d_n3, eq58_e1476_q_d_n4, eq58_e1476_q_d_n5, eq58_e1476_q_d_n6, eq58_e1476_q_d_n7, eq58_e1476_q_d_n8, eq58_e1476_q_d_n9, eq58_e1476_q_d_n10, eq58_e1476_q_d_n11, eq58_e1476_q_d_n12, eq58_e1476_q_d_b0, eq58_e1476_q_d_b1, eq58_e1476_q_d_b2, eq58_e1476_q_d_b3, eq58_e1476_q_d_b4, eq58_e1476_q_d_b5, eq58_e1476_q_d_b6, eq58_e1476_q_d_b7, eq58_e1476_q_d_b8,) = {
+        let (eq58_e1476, eq58_e1476_d_n0, eq58_e1476_d_n1, eq58_e1476_d_n2, eq58_e1476_d_n3, eq58_e1476_d_n4, eq58_e1476_d_n5, eq58_e1476_d_n6, eq58_e1476_d_n7, eq58_e1476_d_n8, eq58_e1476_d_n9, eq58_e1476_d_n10, eq58_e1476_d_n11, eq58_e1476_d_n12, eq58_e1476_d_b0, eq58_e1476_d_b1, eq58_e1476_d_b2, eq58_e1476_d_b3, eq58_e1476_d_b4, eq58_e1476_d_b5, eq58_e1476_d_b6, eq58_e1476_d_b7, eq58_e1476_d_b8, eq58_e1476_q,) = {
     if s.b[1869] {
         let eq58_e1473: f64 = (s.v[770] * s.v[528]);
         let eq58_e1473_d_n0: f64 = (s.dn[770][0] * s.v[528]);
@@ -5526,13 +5339,13 @@ impl Instance {
         let eq58_e1473_d_b7: f64 = (s.db[770][7] * s.v[528]);
         let eq58_e1473_d_b8: f64 = (s.db[770][8] * s.v[528]);
         let eq58_e1474_q: f64 = eq58_e1473;
-        (eq58_e1473, eq58_e1473_d_n0, eq58_e1473_d_n1, eq58_e1473_d_n2, eq58_e1473_d_n3, eq58_e1473_d_n4, eq58_e1473_d_n5, eq58_e1473_d_n6, eq58_e1473_d_n7, eq58_e1473_d_n8, eq58_e1473_d_n9, eq58_e1473_d_n10, eq58_e1473_d_n11, eq58_e1473_d_n12, eq58_e1473_d_b0, eq58_e1473_d_b1, eq58_e1473_d_b2, eq58_e1473_d_b3, eq58_e1473_d_b4, eq58_e1473_d_b5, eq58_e1473_d_b6, eq58_e1473_d_b7, eq58_e1473_d_b8, eq58_e1474_q, eq58_e1473_d_n0, eq58_e1473_d_n1, eq58_e1473_d_n2, eq58_e1473_d_n3, eq58_e1473_d_n4, eq58_e1473_d_n5, eq58_e1473_d_n6, eq58_e1473_d_n7, eq58_e1473_d_n8, eq58_e1473_d_n9, eq58_e1473_d_n10, eq58_e1473_d_n11, eq58_e1473_d_n12, eq58_e1473_d_b0, eq58_e1473_d_b1, eq58_e1473_d_b2, eq58_e1473_d_b3, eq58_e1473_d_b4, eq58_e1473_d_b5, eq58_e1473_d_b6, eq58_e1473_d_b7, eq58_e1473_d_b8,)
+        (eq58_e1473, eq58_e1473_d_n0, eq58_e1473_d_n1, eq58_e1473_d_n2, eq58_e1473_d_n3, eq58_e1473_d_n4, eq58_e1473_d_n5, eq58_e1473_d_n6, eq58_e1473_d_n7, eq58_e1473_d_n8, eq58_e1473_d_n9, eq58_e1473_d_n10, eq58_e1473_d_n11, eq58_e1473_d_n12, eq58_e1473_d_b0, eq58_e1473_d_b1, eq58_e1473_d_b2, eq58_e1473_d_b3, eq58_e1473_d_b4, eq58_e1473_d_b5, eq58_e1473_d_b6, eq58_e1473_d_b7, eq58_e1473_d_b8, eq58_e1474_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        let eq58_reactive_node_derivatives: [f64; 13] = [eq58_e1476_q_d_n0, eq58_e1476_q_d_n1, eq58_e1476_q_d_n2, eq58_e1476_q_d_n3, eq58_e1476_q_d_n4, eq58_e1476_q_d_n5, eq58_e1476_q_d_n6, eq58_e1476_q_d_n7, eq58_e1476_q_d_n8, eq58_e1476_q_d_n9, eq58_e1476_q_d_n10, eq58_e1476_q_d_n11, eq58_e1476_q_d_n12];
-        let eq58_reactive_branch_derivatives: [f64; 9] = [eq58_e1476_q_d_b0, eq58_e1476_q_d_b1, eq58_e1476_q_d_b2, eq58_e1476_q_d_b3, eq58_e1476_q_d_b4, eq58_e1476_q_d_b5, eq58_e1476_q_d_b6, eq58_e1476_q_d_b7, eq58_e1476_q_d_b8];
+        let eq58_reactive_node_derivatives: [f64; 13] = [eq58_e1476_d_n0, eq58_e1476_d_n1, eq58_e1476_d_n2, eq58_e1476_d_n3, eq58_e1476_d_n4, eq58_e1476_d_n5, eq58_e1476_d_n6, eq58_e1476_d_n7, eq58_e1476_d_n8, eq58_e1476_d_n9, eq58_e1476_d_n10, eq58_e1476_d_n11, eq58_e1476_d_n12];
+        let eq58_reactive_branch_derivatives: [f64; 9] = [eq58_e1476_d_b0, eq58_e1476_d_b1, eq58_e1476_d_b2, eq58_e1476_d_b3, eq58_e1476_d_b4, eq58_e1476_d_b5, eq58_e1476_d_b6, eq58_e1476_d_b7, eq58_e1476_d_b8];
         stamper.stamp_current_reactive_dense(
             Some(nodes[6]),
             None,

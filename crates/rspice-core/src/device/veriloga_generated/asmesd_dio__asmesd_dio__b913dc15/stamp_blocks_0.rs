@@ -782,53 +782,53 @@ impl Instance {
             &eq2_reactive_branch_derivatives,
             multiplicity,
         );
-        let (eq6_e101, eq6_e101_d_n2, eq6_e101_q, eq6_e101_q_d_n2,) = {
+        let (eq6_e101, eq6_e101_d_n2, eq6_e101_q,) = {
     if s.b[70] {
         let eq6_e98: f64 = ((nv2 - 0.0) * p.p34);
         let eq6_e98_d_n2: f64 = p.p34;
         let eq6_e99_q: f64 = eq6_e98;
-        (eq6_e98, eq6_e98_d_n2, eq6_e99_q, eq6_e98_d_n2,)
+        (eq6_e98, eq6_e98_d_n2, eq6_e99_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node1(
             Some(nodes[2]),
             None,
             nodes[2],
-            multiplicity * (eq6_e101_q_d_n2),
+            multiplicity * (eq6_e101_d_n2),
         );
-        let (eq10_e137, eq10_e137_d_n2, eq10_e137_q, eq10_e137_q_d_n2,) = {
+        let (eq10_e137, eq10_e137_d_n2, eq10_e137_q,) = {
     if ((!s.b[70]) && s.b[71]) {
         let eq10_e134: f64 = (p.p34 * (nv2 - 0.0));
         let eq10_e134_d_n2: f64 = p.p34;
         let eq10_e135_q: f64 = eq10_e134;
-        (eq10_e134, eq10_e134_d_n2, eq10_e135_q, eq10_e134_d_n2,)
+        (eq10_e134, eq10_e134_d_n2, eq10_e135_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node1(
             Some(nodes[2]),
             None,
             nodes[2],
-            multiplicity * (eq10_e137_q_d_n2),
+            multiplicity * (eq10_e137_d_n2),
         );
-        let (eq12_e156, eq12_e156_d_n5, eq12_e156_q, eq12_e156_q_d_n5,) = {
+        let (eq12_e156, eq12_e156_d_n5, eq12_e156_q,) = {
     if ((!s.b[70]) && s.b[71]) {
         let eq12_e153: f64 = (p.p36 * (nv5 - 0.0));
         let eq12_e153_d_n5: f64 = p.p36;
         let eq12_e154_q: f64 = eq12_e153;
-        (eq12_e153, eq12_e153_d_n5, eq12_e154_q, eq12_e153_d_n5,)
+        (eq12_e153, eq12_e153_d_n5, eq12_e154_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node1(
             Some(nodes[5]),
             None,
             nodes[5],
-            multiplicity * (eq12_e156_q_d_n5),
+            multiplicity * (eq12_e156_d_n5),
         );
         let eq25_e269: f64 = (s.v[9] * s.v[33]);
         let eq25_e269_d_n0: f64 = (s.v[9] * s.dn[33][0]);

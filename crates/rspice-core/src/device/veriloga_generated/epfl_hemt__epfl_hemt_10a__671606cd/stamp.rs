@@ -246,21 +246,21 @@ impl Instance {
         s.b[148] = (p.p35 != 0.0);
         s.v[148] = if s.b[148] { 1.0 } else { 0.0 };
 
-        let (eq4_e64, eq4_e64_d_n4, eq4_e64_q, eq4_e64_q_d_n4,) = {
+        let (eq4_e64, eq4_e64_d_n4, eq4_e64_q,) = {
     if s.b[148] {
         let eq4_e61: f64 = (p.p36 * (nv4 - 0.0));
         let eq4_e61_d_n4: f64 = p.p36;
         let eq4_e62_q: f64 = eq4_e61;
-        (eq4_e61, eq4_e61_d_n4, eq4_e62_q, eq4_e61_d_n4,)
+        (eq4_e61, eq4_e61_d_n4, eq4_e62_q,)
     } else {
-        (0.0, 0.0, 0.0, 0.0,)
+        (0.0, 0.0, 0.0,)
     }
 };
         stamper.stamp_current_reactive_node1(
             Some(nodes[4]),
             None,
             nodes[4],
-            multiplicity * (eq4_e64_q_d_n4),
+            multiplicity * (eq4_e64_d_n4),
         );
     }
 }

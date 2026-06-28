@@ -612,8 +612,7 @@ impl Instance {
         Self::stamp_reactive_block_96(s, p);
 
         Self::stamp_reactive_equations_block_0(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_1(stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_3(ctx, stamper, s, p, nodes, multiplicity);
     }
 }

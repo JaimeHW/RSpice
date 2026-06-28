@@ -32,8 +32,6 @@ mod stamp_blocks_8;
 mod stamp_blocks_9;
 #[path = "stamp_blocks_10.rs"]
 mod stamp_blocks_10;
-#[path = "stamp_blocks_11.rs"]
-mod stamp_blocks_11;
 
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 
@@ -1165,28 +1163,7 @@ impl Instance {
         Self::stamp_reactive_equations_block_30(stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_31(stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_32(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_33(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_34(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_35(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_36(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_37(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_38(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_39(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_40(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_41(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_42(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_43(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_44(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_45(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_46(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_47(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_48(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_49(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_50(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_51(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_52(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_53(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_54(stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_55(ctx, stamper, s, p, nodes, multiplicity);
+        Self::stamp_reactive_equations_block_33(ctx, stamper, s, p, nodes, branches, multiplicity);
+        Self::stamp_reactive_equations_block_34(ctx, stamper, s, p, nodes, branches, multiplicity);
     }
 }
