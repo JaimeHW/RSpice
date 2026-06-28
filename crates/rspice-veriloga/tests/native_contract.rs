@@ -161,6 +161,23 @@ endmodule
     )
 }
 
+fn above_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_above_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real gate;
+    analog begin
+        gate = above(V(p, n), 1.5);
+        I(p, n) <+ gate;
+    end
+endmodule
+"#,
+    )
+}
+
 fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -946,6 +963,29 @@ fn native_device_executes_analysis_guards_without_fallback() {
             .to_bits(),
         28.0_f64.to_bits()
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_above_assignments_without_fallback() {
+    let model = above_assignment_model();
+    let mut device =
+        VerilogADevice::try_new("ABV1", model, &[1, 0]).expect("above model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[1.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native below-threshold above evaluation succeeds");
+    assert_eq!(device.variable("gate"), Some(0.0));
+    assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
+
+    device.update_voltages(&[2.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native above-threshold above evaluation succeeds");
+    assert_eq!(device.variable("gate"), Some(1.0));
+    assert_eq!(currents[0].to_bits(), 1.0_f64.to_bits());
 }
 
 #[cfg(target_arch = "x86_64")]
