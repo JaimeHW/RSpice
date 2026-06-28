@@ -530,11 +530,13 @@ fn indexed_assignment_model() -> rspice_veriloga::CompiledModel {
 module indexed_native(p, n);
     inout p, n;
     electrical p, n;
-    parameter integer idx = 1 from [1:2];
+    parameter integer idx = 1;
     real w[1:2];
     analog begin
-        w[idx] = 0.25;
-        I(p, n) <+ w[idx] * V(p, n);
+        w[1] = 1.0;
+        w[2] = 3.0;
+        w[idx] = 5.0;
+        I(p, n) <+ (w[1] + 10.0 * w[2]) * V(p, n);
     end
 endmodule
 "#,
@@ -1564,8 +1566,9 @@ fn native_compile_rejects_runtime_loop_assignments_without_fallback() {
     assert!(msg.contains("Loop"), "error must name Loop, got: {msg}");
 }
 
+#[cfg(target_arch = "x86_64")]
 #[test]
-fn native_compile_rejects_indexed_assignments_without_fallback() {
+fn native_device_executes_indexed_assignments_without_fallback() {
     let model = indexed_assignment_model();
     assert!(
         model.assignment_steps.iter().any(|step| matches!(
@@ -1575,13 +1578,42 @@ fn native_compile_rejects_indexed_assignments_without_fallback() {
         "fixture must contain an indexed assignment"
     );
 
-    let err = compile_native(&model).expect_err("native JIT must reject indexed assignments");
-    let msg = err.to_string();
+    let mut first = VerilogADevice::try_new("IDXASSIGN1", model.clone(), &[1, 0])
+        .expect("indexed assignment model uses native JIT");
+    assert!(first.is_using_native());
+    first.update_voltages(&[1.0]);
+    let currents = first
+        .try_evaluate()
+        .expect("native indexed assignment to first element succeeds");
+    assert!(
+        (currents[0] - 35.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
 
+    let mut second = VerilogADevice::try_new("IDXASSIGN2", model.clone(), &[1, 0])
+        .expect("indexed assignment model uses native JIT");
+    assert!(second.set_parameter("idx", 2.0));
+    second.update_voltages(&[1.0]);
+    let currents = second
+        .try_evaluate()
+        .expect("native indexed assignment to second element succeeds");
+    assert!(
+        (currents[0] - 51.0).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
+
+    let mut out_of_range = VerilogADevice::try_new("IDXASSIGN3", model, &[1, 0])
+        .expect("indexed assignment model uses native JIT");
+    assert!(out_of_range.set_parameter("idx", 3.0));
+    out_of_range.update_voltages(&[1.0]);
+    let err = out_of_range
+        .try_evaluate()
+        .expect_err("indexed assignment outside bounds must hard-fail");
+    let msg = err.to_string();
     assert_native_hard_fail_message(&msg);
     assert!(
-        msg.contains("AssignIndexed") || msg.contains("PushVariableDyn"),
-        "error must name indexed assignment coverage, got: {msg}"
+        msg.contains("array index 3 outside declared bounds [1:2]"),
+        "error must preserve indexed assignment bounds diagnostic, got: {msg}"
     );
 }
 
