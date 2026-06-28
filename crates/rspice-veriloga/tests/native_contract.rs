@@ -247,6 +247,23 @@ endmodule
     )
 }
 
+fn transition_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_transition_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = transition(V(p, n) > 0.5, 0.2, 0.4, 0.4);
+        I(p, n) <+ y;
+    end
+endmodule
+"#,
+    )
+}
+
 fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1414,6 +1431,32 @@ fn native_device_executes_timer_assignments_without_fallback() {
             .expect("native timer evaluation succeeds");
         assert_eq!(device.variable("tick"), Some(expected), "time: {time}");
         assert_eq!(currents[0].to_bits(), expected.to_bits(), "time: {time}");
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_transition_assignments_without_fallback() {
+    let model = transition_assignment_model();
+    let mut device =
+        VerilogADevice::try_new("TRN1", model, &[1, 0]).expect("transition model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_analysis_type(2);
+
+    for (time, expected) in [(1.0, 0.0), (1.4, 0.5), (1.6, 1.0)] {
+        device.set_time(time);
+        device.update_voltages(&[1.0]);
+        let currents = device
+            .try_evaluate()
+            .expect("native transition evaluation succeeds");
+        assert!(
+            (device.variable("y").unwrap() - expected).abs() < 1e-12,
+            "time: {time}"
+        );
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
     }
 }
 

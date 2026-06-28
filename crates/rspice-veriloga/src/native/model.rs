@@ -507,6 +507,8 @@ mod tests {
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,
+            transition_filters: std::ptr::null_mut(),
+            transition_filters_len: 0,
         }
     }
 }
