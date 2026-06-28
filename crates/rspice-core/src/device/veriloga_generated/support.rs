@@ -1080,18 +1080,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let left_value = self.v[left];
         let right_value = self.v[right];
         let denominator_value = self.v[denominator];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let denominator_dn = self.dn[denominator];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
-        let denominator_db = self.db[denominator];
         let reciprocal = 1.0 / denominator_value;
         let delta = left_value - right_value;
         let denominator_scale = -delta * reciprocal * reciprocal;
         self.v[index] = delta * reciprocal;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] - right_dn[axis]) * reciprocal + denominator_dn[axis] * denominator_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] - right_db[axis]) * reciprocal + denominator_db[axis] * denominator_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[left][axis] - self.dn[right][axis]) * reciprocal + self.dn[denominator][axis] * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[left][axis] - self.db[right][axis]) * reciprocal + self.db[denominator][axis] * denominator_scale; }
     }
 
     #[inline]
@@ -15289,18 +15283,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let left_value = self.v[left];
         let right_value = self.v[right];
         let denominator_value = self.v[denominator];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let denominator_dn = self.dn[denominator];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
-        let denominator_db = self.db[denominator];
         let reciprocal = 1.0 / denominator_value;
         let delta = left_value - right_value;
         let denominator_scale = -delta * reciprocal * reciprocal;
         self.v[index] = delta * reciprocal;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] - right_dn[axis]) * reciprocal + denominator_dn[axis] * denominator_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] - right_db[axis]) * reciprocal + denominator_db[axis] * denominator_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[left][axis] - self.dn[right][axis]) * reciprocal + self.dn[denominator][axis] * denominator_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[left][axis] - self.db[right][axis]) * reciprocal + self.db[denominator][axis] * denominator_scale; }
     }
 
     #[inline]
