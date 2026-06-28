@@ -2623,7 +2623,8 @@ fn rust_backend_uses_compact_ad_operation_store_helpers() {
     assert!(stamp.contains("s.store_sub(4, 3, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_div(5, 4, 0);"), "{stamp}");
     assert!(stamp.contains("s.store_sqrt(6, 5);"), "{stamp}");
-    assert!(stamp.contains("s.store_powf(7, 6, 2.0);"), "{stamp}");
+    assert!(stamp.contains("s.store_square(7, 6);"), "{stamp}");
+    assert!(!stamp.contains("s.store_powf(7, 6, 2.0);"), "{stamp}");
     assert!(stamp.contains("s.store_scale(8, 7, p.p0);"), "{stamp}");
     assert!(stamp.contains("s.store_offset(9, 8, p.p1);"), "{stamp}");
     assert!(
@@ -2635,6 +2636,34 @@ fn rust_backend_uses_compact_ad_operation_store_helpers() {
         !stamp.contains("s.store_ad(2, &A::mul(s.ad_value(0), s.ad_value(1)));"),
         "{stamp}"
     );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_integer_power_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_integer_power_helper_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact integer power helper");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_powi(&mut self, index: usize, source: usize, exponent: i32)"),
+        "{support}"
+    );
+    assert!(stamp.contains("s.store_powi("), "{stamp}");
+    assert!(!stamp.contains("store_powf("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2698,10 +2727,16 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_operands() {
         "the repeated expensive-call operand should be emitted as an AD local:\n{stamp}"
     );
     assert_eq!(
-        stamp.matches("A::powf(").count(),
-        4,
-        "different exponents should keep distinct powf calls while reusing the shared base:\n{stamp}"
+        stamp.matches("A::square(").count(),
+        1,
+        "pow(..., 2.0) should use the square helper while reusing the shared base:\n{stamp}"
     );
+    assert_eq!(
+        stamp.matches("A::powi(").count(),
+        3,
+        "integer exponents above two should use powi while reusing the shared base:\n{stamp}"
+    );
+    assert!(!stamp.contains("A::powf("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2731,10 +2766,11 @@ fn rust_backend_avoids_pow_operand_local_when_pow_root_is_reused() {
         "the pow root local should make a separate base local unnecessary:\n{stamp}"
     );
     assert_eq!(
-        stamp.matches("A::powf(").count(),
+        stamp.matches(": A = A::square(").count(),
         1,
-        "the repeated identical pow root should still be materialized once:\n{stamp}"
+        "the repeated identical integer pow root should still be materialized once:\n{stamp}"
     );
+    assert!(!stamp.contains("A::powf("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -13520,6 +13556,25 @@ module compact_ad_operation_store(p, n);
         k = gain - j;
         l = -k;
         I(p, n) <+ l;
+    end
+endmodule
+"#
+}
+
+fn compact_integer_power_helper_source() -> &'static str {
+    r#"
+module compact_integer_power_helper(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a;
+    real b;
+    real c;
+    analog begin
+        a = V(p, n);
+        b = a * gain;
+        c = pow(b, 3.0);
+        I(p, n) <+ c;
     end
 endmodule
 "#

@@ -11524,6 +11524,16 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_powi_ad(&mut self, index: usize, value: AdValue, exponent: i32) {",
+        "        let base = value.value;",
+        "        let output = base.powi(exponent);",
+        "        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };",
+        "        self.values[index] = output;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_add(&mut self, index: usize, left: usize, right: usize) {",
         "        let left_value = self.values[left];",
         "        let right_value = self.values[right];",
@@ -15199,6 +15209,14 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_powi(&mut self, index: usize, source: usize, exponent: i32) {",
+        "        let base = self.values[source];",
+        "        let value = base.powi(exponent);",
+        "        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_neg_add(&mut self, index: usize, left: usize, right: usize) {",
         "        let value = -(self.values[left] + self.values[right]);",
         "        self.store_unary_add_scaled(index, left, right, value, -1.0);",
@@ -15221,6 +15239,14 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_powi_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: i32) {",
+        "        let base = self.values[source] * input_scale;",
+        "        let value = base.powi(exponent);",
+        "        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) * input_scale };",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_powf_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: f64) {",
         "        let base = self.values[source] + offset;",
         "        let value = base.powf(exponent);",
@@ -15229,10 +15255,26 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_powi_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: i32) {",
+        "        let base = self.values[source] + offset;",
+        "        let value = base.powi(exponent);",
+        "        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_powf_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: f64) {",
         "        let base = self.values[source] * input_scale + offset;",
         "        let value = base.powf(exponent);",
         "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, input_scale, 0.0);",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_powi_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: i32) {",
+        "        let base = self.values[source] * input_scale + offset;",
+        "        let value = base.powi(exponent);",
+        "        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) * input_scale };",
         "        self.store_unary_scaled(index, source, value, derivative_scale);",
         "    }",
         "",
@@ -17727,6 +17769,17 @@ fn generate_ad_value_struct() -> String {
         "        result.value = value;",
         "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = Self::pow_derivative(value, base, exponent, result.node_derivatives[index], 0.0); }",
         "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = Self::pow_derivative(value, base, exponent, result.branch_derivatives[index], 0.0); }",
+        "        result",
+        "    }",
+        "    #[inline]",
+        "    fn powi(left: Self, exponent: i32) -> Self {",
+        "        let base = left.value;",
+        "        let value = base.powi(exponent);",
+        "        let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1) };",
+        "        let mut result = left;",
+        "        result.value = value;",
+        "        for derivative in &mut result.node_derivatives { *derivative *= derivative_scale; }",
+        "        for derivative in &mut result.branch_derivatives { *derivative *= derivative_scale; }",
         "        result",
         "    }",
         "    #[inline]",
@@ -21511,9 +21564,28 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         && args.len() == 2
     {
         let source = compact_scratch_ad_value_index(args[0])?;
+        if let Some(exponent) = compact_integer_power_exponent_literal(args[1]) {
+            return Some(compact_integer_power_store_helper_line(
+                target_index,
+                source,
+                exponent,
+            ));
+        }
         return Some(format!(
             "scratch.store_powf({target_index}, {source}, {});",
             args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "powi")
+        && args.len() == 2
+    {
+        let source = compact_scratch_ad_value_index(args[0])?;
+        let exponent = args[1].trim().parse::<i32>().ok()?;
+        return Some(compact_integer_power_store_helper_line(
+            target_index,
+            source,
+            exponent,
         ));
     }
 
@@ -23265,6 +23337,21 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         ));
     }
 
+    if let Some(args) = compact_ad_call_args(value, "powi") {
+        if args.len() != 2 {
+            return None;
+        }
+        let exponent = args[1].trim().parse::<i32>().ok()?;
+        if !compact_non_atomic_ad_value(args[0]) {
+            return None;
+        }
+        return Some(compact_integer_power_ad_store_helper_line(
+            target_index,
+            args[0],
+            exponent,
+        ));
+    }
+
     if let Some(args) = compact_ad_call_args(value, "div_from_scalar") {
         if args.len() != 2 {
             return None;
@@ -23343,6 +23430,16 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
             compact_powf_affine_input_store_helper_line(target_index, args[0], args[1])
         {
             return Some(line);
+        }
+        if let Some(exponent) = compact_integer_power_exponent_literal(args[1]) {
+            if !compact_non_atomic_ad_value(args[0]) {
+                return None;
+            }
+            return Some(compact_integer_power_ad_store_helper_line(
+                target_index,
+                args[0],
+                exponent,
+            ));
         }
         if !compact_non_atomic_ad_value(args[0]) {
             return None;
@@ -23497,11 +23594,18 @@ fn compact_powf_affine_input_store_helper_line(
     base: &str,
     exponent: &str,
 ) -> Option<String> {
+    let integer_exponent = compact_integer_power_exponent_literal(exponent);
     if let Some(args) = compact_ad_call_args(base, "scale") {
         if args.len() != 2 {
             return None;
         }
         let source = compact_scratch_ad_value_index(args[0])?;
+        if let Some(exponent) = integer_exponent {
+            return Some(format!(
+                "scratch.store_powi_scaled_input({target_index}, {source}, {}, {exponent});",
+                args[1]
+            ));
+        }
         return Some(format!(
             "scratch.store_powf_scaled_input({target_index}, {source}, {}, {exponent});",
             args[1]
@@ -23513,6 +23617,12 @@ fn compact_powf_affine_input_store_helper_line(
             return None;
         }
         let source = compact_scratch_ad_value_index(args[0])?;
+        if let Some(exponent) = integer_exponent {
+            return Some(format!(
+                "scratch.store_powi_offset_input({target_index}, {source}, {}, {exponent});",
+                args[1]
+            ));
+        }
         return Some(format!(
             "scratch.store_powf_offset_input({target_index}, {source}, {}, {exponent});",
             args[1]
@@ -23524,6 +23634,12 @@ fn compact_powf_affine_input_store_helper_line(
             return None;
         }
         let source = compact_scratch_ad_value_index(args[0])?;
+        if let Some(exponent) = integer_exponent {
+            return Some(format!(
+                "scratch.store_powi_scale_offset_input({target_index}, {source}, {}, {}, {exponent});",
+                args[1], args[2]
+            ));
+        }
         return Some(format!(
             "scratch.store_powf_scale_offset_input({target_index}, {source}, {}, {}, {exponent});",
             args[1], args[2]
@@ -31802,7 +31918,10 @@ impl CompactAdEmitter<'_> {
                             }
                         }
                         "Pow" => {
-                            if let Some(exponent) = self.scalar_constant(*right)? {
+                            if let Some(exponent) = self.numeric_integer_power_exponent(*right)? {
+                                let left = self.lower(*left)?;
+                                compact_integer_power_ad_expr(&left, exponent)
+                            } else if let Some(exponent) = self.scalar_constant(*right)? {
                                 let left = self.lower(*left)?;
                                 format!("AdValue::powf({left}, {exponent})")
                             } else if let Some(base) = self.scalar_constant(*left)? {
@@ -32369,6 +32488,12 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Number { value, .. } => Some(*value),
             _ => None,
         })
+    }
+
+    fn numeric_integer_power_exponent(&self, id: ExprId) -> Result<Option<i32>, RustBackendError> {
+        Ok(self
+            .numeric_literal(id)?
+            .and_then(compact_integer_power_exponent_value))
     }
 
     fn is_numeric_zero(&self, id: ExprId) -> Result<bool, RustBackendError> {
@@ -33136,6 +33261,10 @@ impl CompactAdEmitter<'_> {
                 .get(1)
                 .copied()
                 .ok_or_else(|| self.unsupported("intrinsic function 'pow' missing argument 1"))?;
+            if let Some(exponent) = self.numeric_integer_power_exponent(exponent)? {
+                let base = self.lower(base)?;
+                return Ok(compact_integer_power_ad_expr(&base, exponent));
+            }
             if let Some(exponent) = self.scalar_constant(exponent)? {
                 return Ok(format!("AdValue::powf({}, {exponent})", self.lower(base)?));
             }
@@ -33973,6 +34102,63 @@ fn compact_scalar_is_negative_one(value: &str) -> bool {
 
 fn compact_scalar_same(left: &str, right: &str) -> bool {
     left.trim() == right.trim()
+}
+
+fn compact_integer_power_exponent_value(value: f64) -> Option<i32> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return None;
+    }
+    if value <= i32::MIN as f64 || value > i32::MAX as f64 {
+        return None;
+    }
+    Some(value as i32)
+}
+
+fn compact_integer_power_exponent_literal(value: &str) -> Option<i32> {
+    let mut value = value.trim();
+    while let Some(inner) = value
+        .strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+    {
+        value = inner.trim();
+    }
+    let value = value.strip_suffix("_f64").unwrap_or(value);
+    compact_integer_power_exponent_value(value.parse::<f64>().ok()?)
+}
+
+fn compact_integer_power_ad_expr(base: &str, exponent: i32) -> String {
+    match exponent {
+        0 => "AdValue::constant(1.0)".to_string(),
+        1 => base.to_string(),
+        2 => format!("AdValue::square({base})"),
+        _ => format!("AdValue::powi({base}, {exponent})"),
+    }
+}
+
+fn compact_integer_power_store_helper_line(
+    target_index: usize,
+    source: usize,
+    exponent: i32,
+) -> String {
+    match exponent {
+        0 => format!("scratch.store_scalar({target_index}, 1.0);"),
+        1 => format!("scratch.copy_ad({target_index}, {source});"),
+        2 => format!("scratch.store_square({target_index}, {source});"),
+        _ => format!("scratch.store_powi({target_index}, {source}, {exponent});"),
+    }
+}
+
+fn compact_integer_power_ad_store_helper_line(
+    target_index: usize,
+    value: &str,
+    exponent: i32,
+) -> String {
+    match exponent {
+        0 => format!("scratch.store_scalar({target_index}, 1.0);"),
+        1 => format!("scratch.store_ad_value({target_index}, {value});"),
+        2 => format!("scratch.store_square_ad({target_index}, {value});"),
+        _ => format!("scratch.store_powi_ad({target_index}, {value}, {exponent});"),
+    }
 }
 
 fn compact_ad_expression_same(left: &str, right: &str) -> bool {
