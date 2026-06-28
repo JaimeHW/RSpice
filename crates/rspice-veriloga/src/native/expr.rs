@@ -38,6 +38,7 @@ pub(crate) enum NativeOp {
     Mul,
     Div,
     Neg,
+    Sqrt,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -261,6 +262,16 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::Neg);
+                }
+                Instruction::Sqrt => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::Sqrt);
                 }
                 Instruction::PushCurrent(pos, neg) => {
                     let pair_index =
@@ -544,6 +555,29 @@ mod tests {
         assert_eq!(lowered.max_stack_depth(), 1);
         assert_eq!(lowered.ops(), &[NativeOp::LoadThermalVoltage]);
         assert!(lowered.current_pair_dependencies().is_empty());
+    }
+
+    #[test]
+    fn lowers_sqrt_as_native_unary_op() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushVoltage(0, 1), Instruction::Sqrt],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("sqrt", EntryKind::StampValue, &program, limits(2, 0))
+                .expect("sqrt has a direct native x64 lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::Sqrt,
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
     }
 
     #[test]

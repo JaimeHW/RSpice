@@ -136,6 +136,10 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0x66, 0x57, dst, src);
     }
 
+    pub(crate) fn sqrtsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x51, dst, src);
+    }
+
     pub(crate) fn addsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x58, dst, src);
     }
@@ -348,6 +352,15 @@ mod tests {
                 0xFF,
             ]
         );
+    }
+
+    #[test]
+    fn encodes_scalar_sqrt_register_op() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.sqrtsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm1);
+
+        assert_eq!(encoder.into_bytes(), [0xF2, 0x0F, 0x51, 0xC9]);
     }
 
     #[cfg(all(feature = "native", target_arch = "x86_64"))]
