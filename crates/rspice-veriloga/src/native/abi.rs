@@ -11,7 +11,7 @@ pub struct EvalContext {
     pub branch_currents: *const f64,
     /// Length of `branch_currents` buffer
     pub branch_currents_len: usize,
-    /// Sequentially evaluated branch currents for fallback semantics
+    /// Sequentially evaluated contribution currents for current-probe reads
     pub currents: *const f64,
     /// Length of `currents` buffer
     pub currents_len: usize,

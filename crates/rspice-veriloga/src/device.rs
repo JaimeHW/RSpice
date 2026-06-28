@@ -336,11 +336,10 @@ impl VerilogADevice {
         compiled.map_err(VmError::NativeJit)
     }
 
-    /// Check if this device is using native compiled code
+    /// Check if this device is using native compiled code.
     ///
-    /// Returns true if native compilation succeeded and the device
-    /// will use native code for evaluation. Returns false if using
-    /// the VM interpreter.
+    /// In native-feature builds, construction succeeds only with a complete
+    /// native image, so every constructed device reports true.
     #[cfg(feature = "native")]
     pub fn is_using_native(&self) -> bool {
         true
@@ -489,26 +488,58 @@ impl VerilogADevice {
             if self.context.is_param_given(i) {
                 continue;
             }
-            let Some(program) = self.model.parameters[i].default_program.clone() else {
+            if self.model.parameters[i].default_program.is_none() {
                 continue;
-            };
+            }
+
+            #[cfg(feature = "native")]
+            {
+                return Err(Self::native_unsupported_coverage(
+                    &self.model,
+                    "DependentParameterDefaults",
+                ));
+            }
+
+            #[cfg(not(feature = "native"))]
             let value = {
-                let mut vm = Vm::new(&mut self.context);
-                vm.execute(&program)?
+                let default_program = self.model.parameters[i]
+                    .default_program
+                    .clone()
+                    .expect("default program checked above");
+                let context = &mut self.context;
+                let mut vm = Vm::new(context);
+                vm.execute(&default_program)?
             };
-            let (min, max) = (self.model.parameters[i].min, self.model.parameters[i].max);
-            let clamped = match (min, max) {
-                (Some(min), Some(max)) => value.clamp(min, max),
-                (Some(min), None) => value.max(min),
-                (None, Some(max)) => value.min(max),
-                (None, None) => value,
-            };
-            self.context.set_param(i, clamped);
+
+            #[cfg(not(feature = "native"))]
+            {
+                let (min, max) = (self.model.parameters[i].min, self.model.parameters[i].max);
+                let clamped = match (min, max) {
+                    (Some(min), Some(max)) => value.clamp(min, max),
+                    (Some(min), None) => value.max(min),
+                    (None, Some(max)) => value.min(max),
+                    (None, None) => value,
+                };
+                self.context.set_param(i, clamped);
+            }
         }
 
-        // Topology guards depend on final parameter values
+        // Topology guards depend on final parameter values.
+        #[cfg(feature = "native")]
+        self.try_refresh_static_conditions()?;
+
+        #[cfg(not(feature = "native"))]
         self.refresh_static_conditions();
+
         Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn native_unsupported_coverage(model: &CompiledModel, feature: &'static str) -> VmError {
+        VmError::NativeJit(
+            crate::native::JitError::unsupported_native_coverage(model.name.clone(), feature)
+                .to_string(),
+        )
     }
 
     /// Set simulation temperature in Kelvin
@@ -580,36 +611,77 @@ impl VerilogADevice {
     /// derived purely from parameters). A potential contribution whose
     /// guard is false leaves its branch open; a branch driven by no
     /// active potential contribution is forced to zero current.
+    #[cfg(feature = "native")]
+    fn refresh_static_conditions(&mut self) {
+        self.try_refresh_static_conditions().unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' static-condition evaluation failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    #[cfg(feature = "native")]
+    fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
+        let model = &self.model;
+        if model
+            .stamp_programs
+            .iter()
+            .any(|program| program.static_condition.is_some())
+        {
+            return Err(Self::native_unsupported_coverage(
+                model,
+                "StaticConditionPrograms",
+            ));
+        }
+
+        let program_active = vec![true; model.stamp_programs.len()];
+        let mut branch_active = vec![false; model.branch_sources.len()];
+        for program in &model.stamp_programs {
+            if let Some(ordinal) = program.branch_ordinal
+                && ordinal < branch_active.len()
+            {
+                branch_active[ordinal] = true;
+            }
+        }
+
+        self.program_active = program_active;
+        self.branch_active = branch_active;
+        Ok(())
+    }
+
+    #[cfg(not(feature = "native"))]
     fn refresh_static_conditions(&mut self) {
         let model = &self.model;
         let mut program_active = vec![true; model.stamp_programs.len()];
         let mut branch_active = vec![false; model.branch_sources.len()];
 
         {
-            let mut vm = Vm::new(&mut self.context);
+            let context = &mut self.context;
+            let mut bytecode_vm = Vm::new(context);
             // Static guards may reference instance-static variables (e.g.
             // BSIM4rdsMod derived from the rdsmod parameter); run the
             // evaluation stream once so those variables hold their values.
             // Node voltages are irrelevant to instance-static expressions.
-            Self::execute_assignment_programs(&mut vm, model).unwrap_or_else(|err| {
+            Self::execute_assignment_programs(&mut bytecode_vm, model).unwrap_or_else(|err| {
                 panic!(
                     "Verilog-A device '{}' model '{}' static-condition evaluation failed: {}",
                     self.name, model.name, err
                 )
             });
             for (idx, program) in model.stamp_programs.iter().enumerate() {
-                let active =
-                    match &program.static_condition {
-                        Some(condition) => vm.execute(condition).map(|v| v != 0.0).unwrap_or_else(
-                            |err| {
-                                panic!(
-                                    "Verilog-A device '{}' model '{}' static condition failed: {}",
-                                    self.name, model.name, err
-                                )
-                            },
-                        ),
-                        None => true,
-                    };
+                let active = match &program.static_condition {
+                    Some(condition) => bytecode_vm
+                        .execute(condition)
+                        .map(|v| v != 0.0)
+                        .unwrap_or_else(|err| {
+                            panic!(
+                                "Verilog-A device '{}' model '{}' static condition failed: {}",
+                                self.name, model.name, err
+                            )
+                        }),
+                    None => true,
+                };
                 program_active[idx] = active;
                 if active
                     && let Some(ordinal) = program.branch_ordinal
@@ -942,7 +1014,8 @@ impl VerilogADevice {
         let program_active = &self.program_active;
         #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
-        let mut vm = Vm::new(&mut self.context);
+        let context = &mut self.context;
+        let mut vm = Vm::new(context);
         Self::run_assignment_pass(
             &mut vm,
             &self.model,
@@ -1076,9 +1149,11 @@ impl VerilogADevice {
 
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
     /// must not hang the Newton loop)
+    #[cfg(not(feature = "native"))]
     const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
 
     /// Execute assignment programs and update VM variable storage.
+    #[cfg(not(feature = "native"))]
     fn execute_assignment_programs(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
@@ -1089,6 +1164,7 @@ impl VerilogADevice {
 
     /// Execute a sequence of evaluation steps (assignments and runtime
     /// loops), recursively
+    #[cfg(not(feature = "native"))]
     fn execute_assignment_steps(
         vm: &mut Vm<'_>,
         steps: &[crate::codegen::AssignmentStep],
@@ -1756,3 +1832,191 @@ impl DeviceBuilder {
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(all(test, feature = "native"))]
+mod tests {
+    use super::*;
+    use crate::codegen::{AssignmentProgram, AssignmentStep, BytecodeProgram};
+    use crate::native::EvalContext;
+    use crate::{CompilerOptions, VerilogACompiler};
+    use std::sync::Arc;
+
+    extern "C" fn assign_noop(_ctx: *const EvalContext, _vars: *mut f64) {}
+
+    extern "C" fn stamp_zero(_ctx: *const EvalContext, _vars: *const f64) -> f64 {
+        0.0
+    }
+
+    fn compile(source: &str) -> CompiledModel {
+        VerilogACompiler::new(CompilerOptions::default())
+            .compile(source)
+            .expect("Verilog-A source must compile")
+    }
+
+    fn native_test_device(model: CompiledModel) -> VerilogADevice {
+        let model = Arc::new(model);
+        let num_terminals = model.num_terminals;
+        let num_internal_nodes = model.internal_nodes;
+        let num_branch_unknowns = model.branch_sources.len();
+        let num_stamp_programs = model.stamp_programs.len();
+
+        let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
+        context.port_connected = vec![1; num_terminals];
+        for (i, param) in model.parameters.iter().enumerate() {
+            context.set_param(i, param.default);
+        }
+        context.param_given = vec![false; model.parameters.len()];
+        context.variables.resize(model.num_variables, 0.0);
+        context.lookup_tables = model.lookup_tables.clone();
+        context.laplace_filters = model.laplace_filters.clone();
+        context.zi_filters = model.zi_filters.clone();
+        VerilogADevice::preallocate_vm_runtime_state(&mut context, &model);
+
+        let mut device = VerilogADevice {
+            name: SmolStr::new("NTEST"),
+            model,
+            context,
+            node_mapping: vec![0; num_terminals],
+            internal_node_indices: vec![0; num_internal_nodes],
+            num_internal_nodes,
+            branch_current_indices: vec![0; num_branch_unknowns],
+            program_active: vec![true; num_stamp_programs],
+            branch_active: vec![true; num_branch_unknowns],
+            matrix_indices: MatrixIndices::default(),
+            native_model: Arc::new(NativeModel::new_for_test(
+                0,
+                assign_noop,
+                vec![stamp_zero; num_stamp_programs],
+                vec![vec![]; num_stamp_programs],
+                vec![vec![]; num_stamp_programs],
+            )),
+            prev_discontinuity: false,
+        };
+        device.context.branch_current_values = vec![0.0; num_branch_unknowns];
+        device.rebuild_matrix_indices();
+        device
+    }
+
+    fn assert_native_hard_fail(err: VmError, feature: &str) {
+        let msg = err.to_string();
+        assert!(
+            msg.contains("native JIT"),
+            "error must identify native JIT failure, got: {msg}"
+        );
+        assert!(
+            msg.contains(feature),
+            "error must identify {feature}, got: {msg}"
+        );
+        assert!(
+            msg.contains("no interpreter fallback"),
+            "error must state the hard-fail contract, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn native_rejects_dependent_parameter_defaults_without_bytecode_execution() {
+        let model = compile(
+            r#"
+`include "disciplines.vams"
+module dependent_default(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real base = 2.0;
+    parameter real derived = base * 3.0;
+    analog I(p, n) <+ V(p, n) * derived;
+endmodule
+"#,
+        );
+        assert!(
+            model
+                .parameters
+                .iter()
+                .any(|param| param.default_program.is_some()),
+            "fixture must contain a dependent parameter default program"
+        );
+
+        let mut device = native_test_device(model);
+        let err = device
+            .try_resolve_parameter_defaults()
+            .expect_err("native mode must reject dependent default bytecode");
+
+        assert_native_hard_fail(err, "DependentParameterDefaults");
+    }
+
+    #[test]
+    fn native_rejects_static_condition_programs_without_bytecode_execution() {
+        let model = compile(
+            r#"
+`include "disciplines.vams"
+module static_condition(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real enabled = 1.0;
+    analog begin
+        if (enabled)
+            I(p, n) <+ V(p, n) * 1.0e-3;
+    end
+endmodule
+"#,
+        );
+        assert!(
+            model
+                .stamp_programs
+                .iter()
+                .any(|program| program.static_condition.is_some()),
+            "fixture must contain a static condition program"
+        );
+
+        let mut device = native_test_device(model);
+        let err = device
+            .try_resolve_parameter_defaults()
+            .expect_err("native mode must reject static-condition bytecode");
+
+        assert_native_hard_fail(err, "StaticConditionPrograms");
+    }
+
+    #[test]
+    fn native_static_refresh_without_conditions_does_not_execute_assignment_bytecode() {
+        let mut model = compile(
+            r#"
+`include "disciplines.vams"
+module unconditional_vsource(p, n);
+    inout p, n;
+    electrical p, n;
+    real value;
+    analog begin
+        value = 1.0;
+        V(p, n) <+ value;
+    end
+endmodule
+"#,
+        );
+        assert!(
+            !model.assignment_steps.is_empty(),
+            "fixture must contain assignment bytecode"
+        );
+        assert!(
+            !model.branch_sources.is_empty(),
+            "fixture must contain a branch-current unknown"
+        );
+        assert!(
+            model
+                .stamp_programs
+                .iter()
+                .all(|program| program.static_condition.is_none()),
+            "fixture must not contain static condition programs"
+        );
+        model.assignment_steps = vec![AssignmentStep::Assign(AssignmentProgram {
+            var_index: 0,
+            program: BytecodeProgram {
+                instructions: vec![Instruction::PushParam(999)],
+            },
+        })];
+
+        let mut device = native_test_device(model);
+        device.refresh_static_conditions();
+
+        assert!(device.program_active.iter().all(|active| *active));
+        assert!(device.branch_active.iter().all(|active| *active));
+    }
+}
