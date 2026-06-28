@@ -5090,6 +5090,27 @@ fn stamp() {
             ),
             "{div}"
         );
+
+        for signature in [
+            "fn store_div_scaled_inputs_indices(",
+            "fn store_offset_div_scaled_inputs_indices(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                body.contains(
+                    "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale;"
+                ),
+                "{body}"
+            );
+        }
     }
 
     #[test]
@@ -18309,36 +18330,44 @@ fn generate_index_or_mixed_offset_add_scaled_inputs_helper(mask: &str) -> String
 }
 
 fn generate_index_or_mixed_div_scaled_inputs_helper(mask: &str) -> String {
-    let operands = ["left", "right"];
     let helper = index_or_mixed_helper_name("store_div_scaled_inputs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let left = mixed_helper_component_args(mask, 0, "left");
-    let right = mixed_helper_component_args(mask, 1, "right");
-    format!(
-        r#"
-
-    #[inline]
-    fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64) {{
-{locals}        self.store_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale);
-    }}
-"#,
-        left_ty = mixed_helper_type(mask, 0),
-        right_ty = mixed_helper_type(mask, 1),
-    )
+    generate_index_or_mixed_div_scaled_inputs_body(mask, &helper, &[])
 }
 
 fn generate_index_or_mixed_offset_div_scaled_inputs_helper(mask: &str) -> String {
-    let operands = ["left", "right"];
     let helper = index_or_mixed_helper_name("store_offset_div_scaled_inputs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let left = mixed_helper_component_args(mask, 0, "left");
-    let right = mixed_helper_component_args(mask, 1, "right");
+    generate_index_or_mixed_div_scaled_inputs_body(mask, &helper, &["offset: f64"])
+}
+
+fn generate_index_or_mixed_div_scaled_inputs_body(
+    mask: &str,
+    helper: &str,
+    offsets: &[&str],
+) -> String {
+    let left_value = index_or_mixed_value_expr(mask, 0, "left");
+    let left_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "left");
+    let left_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "left");
+    let right_value = index_or_mixed_value_expr(mask, 1, "right");
+    let right_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "right");
+    let right_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "right");
+    let offset_args = offset_helper_args(offsets);
+    let offset_sum = offset_helper_sum(offsets);
     format!(
         r#"
 
     #[inline]
-    fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64, offset: f64) {{
-{locals}        self.store_offset_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale, offset);
+    fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64{offset_args}) {{
+        let left_raw = {left_value};
+        let right_raw = {right_value};
+        let left_value = left_raw * left_scale;
+        let right_value = right_raw * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        let left_derivative_scale = left_scale * reciprocal;
+        let right_derivative_scale = -quotient * reciprocal * right_scale;
+        self.values[index] = quotient{offset_sum};
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * left_derivative_scale + {right_node_derivative} * right_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * left_derivative_scale + {right_branch_derivative} * right_derivative_scale; }}
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
