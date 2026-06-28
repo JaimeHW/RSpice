@@ -990,6 +990,39 @@ fn rust_backend_auto_scalarizes_wide_ddt_reactive_current_equations() {
 }
 
 #[test]
+fn rust_backend_reuses_reactive_derivative_aliases_for_ddt_charge() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(conditional_ddt_reactive_alias_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile conditional ddt current");
+    let generated_rust = generated
+        .files
+        .iter()
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        generated_rust.contains("_d_n0"),
+        "fixture must materialize ordinary derivative lanes:\n{generated_rust}"
+    );
+    assert!(
+        !generated_rust.contains("_q_d_n"),
+        "reactive ddt charge derivatives that match value derivatives must reuse the value derivative locals instead of recomputing q lanes:\n{generated_rust}"
+    );
+    assert!(
+        !generated_rust.contains("_q_d_b"),
+        "reactive ddt charge branch derivatives that match value derivatives must reuse existing locals:\n{generated_rust}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_named_branch_current_probes() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(named_branch_current_probe())
@@ -17458,6 +17491,20 @@ module wide_ddt_reactive_current(p0, p1, p2, p3, p4);
     inout p0, p1, p2, p3, p4;
     electrical p0, p1, p2, p3, p4;
     analog I(p0, p1) <+ ddt(V(p0, p1) + 0.5 * V(p2, p3) + 0.25 * V(p4, p1));
+endmodule
+"#
+}
+
+fn conditional_ddt_reactive_alias_source() -> &'static str {
+    r#"
+module conditional_ddt_reactive_alias(p0, p1, p2, p3, p4, p5);
+    inout p0, p1, p2, p3, p4, p5;
+    electrical p0, p1, p2, p3, p4, p5;
+    parameter real gain = 2.0;
+    analog I(p0, p1) <+
+        (V(p0, p1) > 0.0)
+            ? ddt(gain * (V(p0, p1) + V(p2, p3) + V(p4, p5)))
+            : ddt(gain * (V(p0, p1) + V(p2, p3) - V(p4, p5)));
 endmodule
 "#
 }

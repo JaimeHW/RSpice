@@ -978,35 +978,26 @@ impl ExprEmitter<'_> {
             ReactiveValue::none(zero_derivatives(node_count))
         };
 
+        let mut derivative_aliases = HashMap::new();
         let mut derivative_vars = Vec::with_capacity(derivatives.len());
         for (index, derivative) in derivatives.into_iter().enumerate() {
-            if is_zero_derivative(&derivative) {
-                derivative_vars.push("0.0".to_string());
-            } else if is_inline_derivative_expr(&derivative) {
-                derivative_vars.push(derivative);
-            } else if matches!(self.derivative_emission, DerivativeEmission::Inline) {
-                derivative_vars.push(derivative);
-            } else {
-                let derivative_var = format!("{base}_d_n{index}");
-                self.lines
-                    .push(format!("let {derivative_var}: f64 = {derivative};"));
-                derivative_vars.push(derivative_var);
-            }
+            derivative_vars.push(materialize_derivative_expr(
+                &mut self.lines,
+                format!("{base}_d_n{index}"),
+                derivative,
+                self.derivative_emission,
+                &mut derivative_aliases,
+            ));
         }
         let mut branch_derivative_vars = Vec::with_capacity(branch_derivatives.len());
         for (index, derivative) in branch_derivatives.into_iter().enumerate() {
-            if is_zero_derivative(&derivative) {
-                branch_derivative_vars.push("0.0".to_string());
-            } else if is_inline_derivative_expr(&derivative) {
-                branch_derivative_vars.push(derivative);
-            } else if matches!(self.derivative_emission, DerivativeEmission::Inline) {
-                branch_derivative_vars.push(derivative);
-            } else {
-                let derivative_var = format!("{base}_d_b{index}");
-                self.lines
-                    .push(format!("let {derivative_var}: f64 = {derivative};"));
-                branch_derivative_vars.push(derivative_var);
-            }
+            branch_derivative_vars.push(materialize_derivative_expr(
+                &mut self.lines,
+                format!("{base}_d_b{index}"),
+                derivative,
+                self.derivative_emission,
+                &mut derivative_aliases,
+            ));
         }
 
         let (reactive_value, reactive_derivatives, reactive_branch_derivatives) = if reactive
@@ -1017,33 +1008,23 @@ impl ExprEmitter<'_> {
                 .push(format!("let {value_var}: f64 = {};", reactive.value));
             let mut derivative_vars = Vec::with_capacity(reactive.derivatives.len());
             for (index, derivative) in reactive.derivatives.into_iter().enumerate() {
-                if is_zero_derivative(&derivative) {
-                    derivative_vars.push("0.0".to_string());
-                } else if is_inline_derivative_expr(&derivative) {
-                    derivative_vars.push(derivative);
-                } else if matches!(self.derivative_emission, DerivativeEmission::Inline) {
-                    derivative_vars.push(derivative);
-                } else {
-                    let derivative_var = format!("{base}_q_d_n{index}");
-                    self.lines
-                        .push(format!("let {derivative_var}: f64 = {derivative};"));
-                    derivative_vars.push(derivative_var);
-                }
+                derivative_vars.push(materialize_derivative_expr(
+                    &mut self.lines,
+                    format!("{base}_q_d_n{index}"),
+                    derivative,
+                    self.derivative_emission,
+                    &mut derivative_aliases,
+                ));
             }
             let mut branch_derivative_vars = Vec::with_capacity(reactive.branch_derivatives.len());
             for (index, derivative) in reactive.branch_derivatives.into_iter().enumerate() {
-                if is_zero_derivative(&derivative) {
-                    branch_derivative_vars.push("0.0".to_string());
-                } else if is_inline_derivative_expr(&derivative) {
-                    branch_derivative_vars.push(derivative);
-                } else if matches!(self.derivative_emission, DerivativeEmission::Inline) {
-                    branch_derivative_vars.push(derivative);
-                } else {
-                    let derivative_var = format!("{base}_q_d_b{index}");
-                    self.lines
-                        .push(format!("let {derivative_var}: f64 = {derivative};"));
-                    branch_derivative_vars.push(derivative_var);
-                }
+                branch_derivative_vars.push(materialize_derivative_expr(
+                    &mut self.lines,
+                    format!("{base}_q_d_b{index}"),
+                    derivative,
+                    self.derivative_emission,
+                    &mut derivative_aliases,
+                ));
             }
             (value_var, derivative_vars, branch_derivative_vars)
         } else {
@@ -1363,9 +1344,19 @@ impl ExprEmitter<'_> {
         let branch_axis_count = branch_derivative_axis_count(self.branch_current_unknowns);
         let base = format!("{}_e{}", self.prefix, id.index());
 
-        let mut names = vec![base.clone()];
-        let mut then_values = vec![then_branch.value.value.clone()];
-        let mut else_values = vec![else_branch.value.value.clone()];
+        let mut names = Vec::new();
+        let mut then_values = Vec::new();
+        let mut else_values = Vec::new();
+        let mut tuple_aliases = HashMap::new();
+        push_conditional_tuple_binding(
+            &mut names,
+            &mut then_values,
+            &mut else_values,
+            &mut tuple_aliases,
+            base.clone(),
+            then_branch.value.value.clone(),
+            else_branch.value.value.clone(),
+        );
 
         let mut derivatives = Vec::with_capacity(node_count);
         if matches!(self.derivative_emission, DerivativeEmission::None) {
@@ -1378,11 +1369,15 @@ impl ExprEmitter<'_> {
                     derivatives.push("0.0".to_string());
                     continue;
                 }
-                let name = format!("{base}_d_n{index}");
-                names.push(name.clone());
-                then_values.push(then_derivative.clone());
-                else_values.push(else_derivative.clone());
-                derivatives.push(name);
+                derivatives.push(push_conditional_tuple_binding(
+                    &mut names,
+                    &mut then_values,
+                    &mut else_values,
+                    &mut tuple_aliases,
+                    format!("{base}_d_n{index}"),
+                    then_derivative.clone(),
+                    else_derivative.clone(),
+                ));
             }
         }
 
@@ -1397,20 +1392,29 @@ impl ExprEmitter<'_> {
                     branch_derivatives.push("0.0".to_string());
                     continue;
                 }
-                let name = format!("{base}_d_b{index}");
-                names.push(name.clone());
-                then_values.push(then_derivative.clone());
-                else_values.push(else_derivative.clone());
-                branch_derivatives.push(name);
+                branch_derivatives.push(push_conditional_tuple_binding(
+                    &mut names,
+                    &mut then_values,
+                    &mut else_values,
+                    &mut tuple_aliases,
+                    format!("{base}_d_b{index}"),
+                    then_derivative.clone(),
+                    else_derivative.clone(),
+                ));
             }
         }
 
         let has_reactive = then_branch.value.has_reactive || else_branch.value.has_reactive;
         let (reactive_value, reactive_derivatives, reactive_branch_derivatives) = if has_reactive {
-            let reactive_value = format!("{base}_q");
-            names.push(reactive_value.clone());
-            then_values.push(then_branch.value.reactive_value.clone());
-            else_values.push(else_branch.value.reactive_value.clone());
+            let reactive_value = push_conditional_tuple_binding(
+                &mut names,
+                &mut then_values,
+                &mut else_values,
+                &mut tuple_aliases,
+                format!("{base}_q"),
+                then_branch.value.reactive_value.clone(),
+                else_branch.value.reactive_value.clone(),
+            );
 
             let mut reactive_derivatives = Vec::with_capacity(node_count);
             for index in 0..node_count {
@@ -1420,11 +1424,15 @@ impl ExprEmitter<'_> {
                     reactive_derivatives.push("0.0".to_string());
                     continue;
                 }
-                let name = format!("{base}_q_d_n{index}");
-                names.push(name.clone());
-                then_values.push(then_derivative.clone());
-                else_values.push(else_derivative.clone());
-                reactive_derivatives.push(name);
+                reactive_derivatives.push(push_conditional_tuple_binding(
+                    &mut names,
+                    &mut then_values,
+                    &mut else_values,
+                    &mut tuple_aliases,
+                    format!("{base}_q_d_n{index}"),
+                    then_derivative.clone(),
+                    else_derivative.clone(),
+                ));
             }
 
             let mut reactive_branch_derivatives = Vec::with_capacity(branch_axis_count);
@@ -1435,11 +1443,15 @@ impl ExprEmitter<'_> {
                     reactive_branch_derivatives.push("0.0".to_string());
                     continue;
                 }
-                let name = format!("{base}_q_d_b{index}");
-                names.push(name.clone());
-                then_values.push(then_derivative.clone());
-                else_values.push(else_derivative.clone());
-                reactive_branch_derivatives.push(name);
+                reactive_branch_derivatives.push(push_conditional_tuple_binding(
+                    &mut names,
+                    &mut then_values,
+                    &mut else_values,
+                    &mut tuple_aliases,
+                    format!("{base}_q_d_b{index}"),
+                    then_derivative.clone(),
+                    else_derivative.clone(),
+                ));
             }
 
             (
@@ -2308,6 +2320,27 @@ struct ConditionalBranch {
     value: ExprValue,
 }
 
+fn push_conditional_tuple_binding(
+    names: &mut Vec<String>,
+    then_values: &mut Vec<String>,
+    else_values: &mut Vec<String>,
+    aliases: &mut HashMap<(String, String), String>,
+    name: String,
+    then_value: String,
+    else_value: String,
+) -> String {
+    let key = (then_value.trim().to_string(), else_value.trim().to_string());
+    if let Some(alias) = aliases.get(&key) {
+        return alias.clone();
+    }
+
+    names.push(name.clone());
+    then_values.push(then_value);
+    else_values.push(else_value);
+    aliases.insert(key, name.clone());
+    name
+}
+
 fn lazy_conditional_tuple(
     names: &[String],
     condition: &str,
@@ -2409,6 +2442,32 @@ pub fn unique_identifiers(names: &[String]) -> HashMap<String, String> {
 
 fn zero_derivatives(count: usize) -> Vec<String> {
     vec!["0.0".to_string(); count]
+}
+
+fn materialize_derivative_expr(
+    lines: &mut Vec<String>,
+    local: String,
+    derivative: String,
+    derivative_emission: DerivativeEmission,
+    aliases: &mut HashMap<String, String>,
+) -> String {
+    if is_zero_derivative(&derivative) {
+        return "0.0".to_string();
+    }
+    if is_inline_derivative_expr(&derivative)
+        || matches!(derivative_emission, DerivativeEmission::Inline)
+    {
+        return derivative;
+    }
+
+    let key = derivative.trim().to_string();
+    if let Some(alias) = aliases.get(&key) {
+        return alias.clone();
+    }
+
+    lines.push(format!("let {local}: f64 = {derivative};"));
+    aliases.insert(key, local.clone());
+    local
 }
 
 fn lowered_variable_is_constant_zero(variable: &LoweredVariable) -> bool {
