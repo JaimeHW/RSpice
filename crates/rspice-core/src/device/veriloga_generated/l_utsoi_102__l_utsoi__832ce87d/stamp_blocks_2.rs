@@ -396,7 +396,7 @@ impl Instance {
             s.store_scalar(30, p.p229);
             s.store_scale(545, 576, p.p230);
             s.store_min_with_scalar_ad(534, A::max_with_scalar(s.ad_value(545), (-1.0)), 1.0);
-            s.store_mul_ad(0, A::powf(s.ad_value(580), p.p232), A::scale_offset(s.ad_value(576), p.p233, 1.0));
+            s.store_mul_powf_mixed_ai(0, A::scale_offset(s.ad_value(576), p.p233, 1.0), 580, p.p232);
             s.store_scale(542, 0, p.p231);
             s.store_max_with_scalar(183, 542, 0.0);
             s.store_div_scaled_product_indices(184, 183, 530, p.p234, 529, 1.0);
@@ -532,7 +532,7 @@ impl Instance {
             s.store_scaled_mul_scale_offset_rhs_ad(0, A::powf(s.ad_value(580), p.p369), 576, p.p370, 1.0, (p.p368 * 2.0));
             s.store_min_with_scalar_ad(105, A::max_with_scalar(s.ad_value(0), 0.0), 5.0);
             s.store_div_scaled_product_indices(106, 105, 530, p.p371, 529, 1.0);
-            s.store_mul_ad(0, A::powf(s.ad_value(580), p.p373), A::scale_offset(s.ad_value(576), p.p374, 1.0));
+            s.store_mul_powf_mixed_ai(0, A::scale_offset(s.ad_value(576), p.p374, 1.0), 580, p.p373);
             s.store_scale(0, 0, p.p372);
             s.store_max_with_scalar(107, 0, 0.0);
             s.store_div_scaled_product_indices(108, 107, 530, p.p375, 529, 1.0);

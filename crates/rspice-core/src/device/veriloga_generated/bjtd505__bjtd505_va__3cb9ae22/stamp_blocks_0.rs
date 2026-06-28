@@ -1380,7 +1380,7 @@ impl Instance {
         s.v[532] = if s.b[532] { 1.0 } else { 0.0 };
 
         if ((((s.b[521] && (!s.b[522])) && (!s.b[526])) && s.b[531]) && s.b[532]) {
-            s.store_mul_ad(200, A::powf(A::sub_from_scalar(p.p43, s.ad_value(230)), p.p40), A::powf(A::sub_from_scalar(1.0, A::div_scaled_value_offset_denominator(s.ad_value(149), 1.0, s.ad_value(149), p.p47, 1.0)), p.p48));
+            s.store_mul_powf(200, A::powf(A::sub_from_scalar(1.0, A::div_scaled_value_offset_denominator(s.ad_value(149), 1.0, s.ad_value(149), p.p47, 1.0)), p.p48), A::sub_from_scalar(p.p43, s.ad_value(230)), p.p40);
         }
 
         s.b[533] = (p.p7 == 0.0);
@@ -2855,7 +2855,7 @@ impl Instance {
         s.v[532] = if s.b[532] { 1.0 } else { 0.0 };
 
         if ((((s.b[521] && (!s.b[522])) && (!s.b[526])) && s.b[531]) && s.b[532]) {
-            s.store_mul_ad(200, A::powf(A::sub_from_scalar(p.p43, s.ad_value(230)), p.p40), A::powf(A::sub_from_scalar(1.0, A::div_scaled_value_offset_denominator(s.ad_value(149), 1.0, s.ad_value(149), p.p47, 1.0)), p.p48));
+            s.store_mul_powf(200, A::powf(A::sub_from_scalar(1.0, A::div_scaled_value_offset_denominator(s.ad_value(149), 1.0, s.ad_value(149), p.p47, 1.0)), p.p48), A::sub_from_scalar(p.p43, s.ad_value(230)), p.p40);
         }
 
         s.b[533] = (p.p7 == 0.0);
