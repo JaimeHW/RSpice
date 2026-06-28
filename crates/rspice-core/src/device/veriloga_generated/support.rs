@@ -3786,6 +3786,29 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_offset_scaled_mul_sub_from_scalar_scaled_sub_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value_left: usize, value_scalar: f64, value: usize, value_scale: f64, value_output_scale: f64, output_scale: f64, offset: f64) {
+        let left_value = self.v[left];
+        let value_left_value = self.v[value_left];
+        let value_value = self.v[value];
+        let nested_right_value = value_scalar - value_value * value_scale;
+        let nested_value = value_left_value * nested_right_value * value_output_scale;
+        let right_value = scalar - nested_value;
+        let left_dn = self.dn[left];
+        let value_left_dn = self.dn[value_left];
+        let value_dn = self.dn[value];
+        let left_db = self.db[left];
+        let value_left_db = self.db[value_left];
+        let value_db = self.db[value];
+        let scaled_left_value = left_value * output_scale;
+        let scaled_right_value = right_value * output_scale;
+        let value_left_derivative_scale = nested_right_value * value_output_scale;
+        let value_derivative_scale = value_left_value * value_scale * value_output_scale;
+        self.v[index] = left_value * scaled_right_value + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * scaled_right_value - scaled_left_value * (value_left_dn[axis] * value_left_derivative_scale - value_dn[axis] * value_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * scaled_right_value - scaled_left_value * (value_left_db[axis] * value_left_derivative_scale - value_db[axis] * value_derivative_scale); }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_sub_from_scalar_ad_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output_scale: f64) {
         let left_value = self.v[left];
         let right_value = scalar - value.value;
@@ -16386,6 +16409,29 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value * scaled_right_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * scaled_right_value - scaled_left_value * value_dn[axis] * value_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * scaled_right_value - scaled_left_value * value_db[axis] * value_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_offset_scaled_mul_sub_from_scalar_scaled_sub_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value_left: usize, value_scalar: f64, value: usize, value_scale: f64, value_output_scale: f64, output_scale: f64, offset: f64) {
+        let left_value = self.v[left];
+        let value_left_value = self.v[value_left];
+        let value_value = self.v[value];
+        let nested_right_value = value_scalar - value_value * value_scale;
+        let nested_value = value_left_value * nested_right_value * value_output_scale;
+        let right_value = scalar - nested_value;
+        let left_dn = self.dn[left];
+        let value_left_dn = self.dn[value_left];
+        let value_dn = self.dn[value];
+        let left_db = self.db[left];
+        let value_left_db = self.db[value_left];
+        let value_db = self.db[value];
+        let scaled_left_value = left_value * output_scale;
+        let scaled_right_value = right_value * output_scale;
+        let value_left_derivative_scale = nested_right_value * value_output_scale;
+        let value_derivative_scale = value_left_value * value_scale * value_output_scale;
+        self.v[index] = left_value * scaled_right_value + offset;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * scaled_right_value - scaled_left_value * (value_left_dn[axis] * value_left_derivative_scale - value_dn[axis] * value_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * scaled_right_value - scaled_left_value * (value_left_db[axis] * value_left_derivative_scale - value_db[axis] * value_derivative_scale); }
     }
 
     #[inline]
