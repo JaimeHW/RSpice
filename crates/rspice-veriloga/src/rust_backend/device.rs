@@ -5164,6 +5164,38 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_repeated_sub_add_scaled_product_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_add_scaled_sub_square_product_mixed_ia("),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(180, AdValue::add_scaled_products(AdValue::sub(scratch.ad_value(2), scratch.ad_value(3)), AdValue::sub(scratch.ad_value(2), scratch.ad_value(3)), params.square_scale, scratch.ad_value(4), AdValue::add(AdValue::offset(scratch.ad_value(3), -1.0), scratch.ad_value(5)), params.product_scale));
+    scratch.store_ad_value(181, AdValue::add_scaled_products(AdValue::sub(scratch.ad_value(2), scratch.ad_value(3)), AdValue::sub(scratch.ad_value(2), scratch.ad_value(4)), params.square_scale, scratch.ad_value(5), AdValue::offset(scratch.ad_value(6), 1.0), params.product_scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_add_scaled_sub_square_product_mixed_ia(180, 2, 3, p.square_scale, 4, A::add(A::offset(s.ad_value(3), -1.0), s.ad_value(5)), p.product_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_add_scaled_products_mixed_aaia(181, A::sub(s.ad_value(2), s.ad_value(3)), A::sub(s.ad_value(2), s.ad_value(4)), p.square_scale, 5, A::offset(s.ad_value(6), 1.0), p.product_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_add_scaled_value_products3_ad_rvalue_stores_as_direct_stores() {
         let source = r#"
 fn stamp() {
@@ -8599,6 +8631,24 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left_product_term + right_product_term;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_product_left_node_derivatives[axis] * left_product_right_value + left_product_left_value * left_product_right_node_derivatives[axis]) * left_scale + (right_product_left_node_derivatives[axis] * right_product_right_value + right_product_left_value * right_product_right_node_derivatives[axis]) * right_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_product_left_branch_derivatives[axis] * left_product_right_value + left_product_left_value * left_product_right_branch_derivatives[axis]) * left_scale + (right_product_left_branch_derivatives[axis] * right_product_right_value + right_product_left_value * right_product_right_branch_derivatives[axis]) * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_scaled_sub_square_product_mixed_ia(&mut self, index: usize, sub_left: usize, sub_right: usize, square_scale: f64, product_left: usize, product_right: AdValue, product_scale: f64) {",
+        "        let sub_left_value = self.values[sub_left];",
+        "        let sub_right_value = self.values[sub_right];",
+        "        let sub_left_node_derivatives = self.node_derivatives[sub_left];",
+        "        let sub_right_node_derivatives = self.node_derivatives[sub_right];",
+        "        let sub_left_branch_derivatives = self.branch_derivatives[sub_left];",
+        "        let sub_right_branch_derivatives = self.branch_derivatives[sub_right];",
+        "        let product_left_value = self.values[product_left];",
+        "        let product_left_node_derivatives = self.node_derivatives[product_left];",
+        "        let product_left_branch_derivatives = self.branch_derivatives[product_left];",
+        "        let sub_value = sub_left_value - sub_right_value;",
+        "        let product_right_value = product_right.value;",
+        "        self.values[index] = sub_value * sub_value * square_scale + product_left_value * product_right_value * product_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { let sub_derivative = sub_left_node_derivatives[axis] - sub_right_node_derivatives[axis]; self.node_derivatives[index][axis] = (sub_derivative * sub_value + sub_value * sub_derivative) * square_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { let sub_derivative = sub_left_branch_derivatives[axis] - sub_right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = (sub_derivative * sub_value + sub_value * sub_derivative) * square_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -19775,6 +19825,24 @@ fn compact_binary_scratch_ad_indices(value: &str, name: &str) -> Option<(usize, 
     ))
 }
 
+fn compact_repeated_sub_scratch_indices(left: &str, right: &str) -> Option<(usize, usize)> {
+    let left_args = compact_ad_call_args(left, "sub")?;
+    let right_args = compact_ad_call_args(right, "sub")?;
+    if left_args.len() != 2 || right_args.len() != 2 {
+        return None;
+    }
+
+    let left_minuend = compact_scratch_ad_value_index(left_args[0])?;
+    let left_subtrahend = compact_scratch_ad_value_index(left_args[1])?;
+    let right_minuend = compact_scratch_ad_value_index(right_args[0])?;
+    let right_subtrahend = compact_scratch_ad_value_index(right_args[1])?;
+    if left_minuend == right_minuend && left_subtrahend == right_subtrahend {
+        Some((left_minuend, left_subtrahend))
+    } else {
+        None
+    }
+}
+
 fn compact_ad_store_rvalue(value: &str) -> bool {
     let value = value.trim();
     value.starts_with("AdValue::") || value.starts_with('{')
@@ -20684,6 +20752,16 @@ fn compact_common_fused_expression_store_helper_call(
         let left_product_right_index = compact_scratch_ad_value_index(args[1]);
         let right_product_left_index = compact_scratch_ad_value_index(args[3]);
         let right_product_right_index = compact_scratch_ad_value_index(args[4]);
+        if let Some((sub_left, sub_right)) = compact_repeated_sub_scratch_indices(args[0], args[1])
+            && let Some(right_product_left) = right_product_left_index
+            && right_product_right_index.is_none()
+            && compact_dynamic_ad_value(args[4])
+        {
+            return Some(format!(
+                "scratch.store_add_scaled_sub_square_product_mixed_ia({target_index}, {sub_left}, {sub_right}, {}, {right_product_left}, {}, {});",
+                args[2], args[4], args[5]
+            ));
+        }
         match (
             left_product_left_index,
             left_product_right_index,
