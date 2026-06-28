@@ -3500,7 +3500,7 @@ impl Instance {
         }
 
         if (s.b[1620] && (!s.b[1634])) {
-            s.store_mul_div_scaled_inputs_rhs(310, 309, s.ad_value(746), 2.0, s.ad_value(740), 1.0);
+            s.store_mul_div_scaled_inputs_indices(310, 309, 746, 2.0, 740, 1.0);
             s.store_scale(311, 310, s.v[184]);
             s.store_mul_add_scaled_inputs_rhs(173, 742, s.ad_value(306), 1.0, s.ad_value(269), 2.0);
         }

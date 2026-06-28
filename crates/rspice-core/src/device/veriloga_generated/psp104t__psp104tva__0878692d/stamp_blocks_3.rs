@@ -222,7 +222,7 @@ impl Instance {
         }
 
         if s.b[1016] {
-            s.store_mul_ad(150, A::div_scaled_inputs(s.ad_value(344), p.p259, A::mul(s.ad_value(347), s.ad_value(312)), 1.0), A::scale_offset(s.ad_value(316), p.p420, 1.0));
+            s.store_mul_div_scaled_inputs_mixed_aia(150, A::scale_offset(s.ad_value(316), p.p420, 1.0), 344, p.p259, A::mul(s.ad_value(347), s.ad_value(312)), 1.0);
             s.store_add_scaled_inputs3_offset_indices(151, 314, p.p422, 316, p.p423, 318, p.p424, p.p421);
             s.store_scaled_mul_scale_offset_rhs_ad(152, A::powf(s.ad_value(314), p.p426), 316, p.p427, 1.0, p.p425);
             s.store_scalar(153, p.p428);

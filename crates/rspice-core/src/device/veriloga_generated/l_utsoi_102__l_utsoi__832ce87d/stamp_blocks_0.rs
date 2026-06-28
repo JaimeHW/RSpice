@@ -607,7 +607,7 @@ impl Instance {
             s.store_scalar(109, p.p376);
             s.store_offset_ad(0, A::mul_sub_from_scalar_rhs(A::div_from_scalar((p.p377 * p.p378), s.ad_value(571)), 1.0, A::exp_scaled_input(s.ad_value(571), (-1.0 / (p.p378)))), 1.0);
             s.store_max_with_scalar(0, 0, 1e-15);
-            s.store_mul_ad(209, A::div_scaled_inputs(s.ad_value(585), p.p240, A::mul(s.ad_value(0), s.ad_value(571)), 1.0), A::scale_offset(s.ad_value(576), p.p379, 1.0));
+            s.store_mul_div_scaled_inputs_mixed_aia(209, A::scale_offset(s.ad_value(576), p.p379, 1.0), 585, p.p240, A::mul(s.ad_value(0), s.ad_value(571)), 1.0);
             s.store_add_scaled_inputs_product_first_ad(111, A::scale_offset(s.ad_value(575), p.p381, p.p380), 1.0, 576, p.p382, 575, 576, p.p383);
             s.store_mul(116, 574, 573);
             s.store_offset_scaled(559, 578, p.p393, p.p392);

@@ -1885,7 +1885,7 @@ impl Instance {
         }
 
         if ((s.b[1620] && s.b[1741]) && (!s.b[1755])) {
-            s.store_mul_div_scaled_inputs_rhs(310, 309, s.ad_value(746), 2.0, s.ad_value(740), 1.0);
+            s.store_mul_div_scaled_inputs_indices(310, 309, 746, 2.0, 740, 1.0);
             s.store_scale(311, 310, s.v[184]);
             s.store_mul_add_scaled_inputs_rhs(173, 742, s.ad_value(306), 1.0, s.ad_value(271), 2.0);
         }
@@ -3008,7 +3008,7 @@ impl Instance {
 
         if (s.b[1620] && (s.b[1794] && (!s.b[1793]))) {
             s.store_scaled_add_sqrt_square_offset_rhs(179, 179, 179, ((0.25 * 0.1) * 0.1), 0.5);
-            s.store_mul_ad(624, A::div_scaled_inputs(s.ad_value(167), (p.p2 * s.v[183]), s.ad_value(625), 1.0), A::add_scaled_product(A::div_scaled_product(s.ad_value(174), s.ad_value(631), 1.0, s.ad_value(170), 12.0), 1.0, s.ad_value(168), s.ad_value(179), 1.0));
+            s.store_mul_div_scaled_inputs_mixed_aii(624, A::add_scaled_product(A::div_scaled_product(s.ad_value(174), s.ad_value(631), 1.0, s.ad_value(170), 12.0), 1.0, s.ad_value(168), s.ad_value(179), 1.0), 167, (p.p2 * s.v[183]), 625, 1.0);
             s.store_div_scaled_product3_mixed_aaii(622, A::mul3(s.ad_value(625), s.ad_value(177), s.ad_value(177)), A::add_scaled_inputs3(A::div(s.ad_value(168), s.ad_value(171)), 1.0, A::div(s.ad_value(176), A::mul_scaled_lhs(s.ad_value(171), 60.0, s.ad_value(171))), (-1.0), A::div_scaled_product_by_product(s.ad_value(174), s.ad_value(174), 1.0, s.ad_value(171), s.ad_value(172), 144.0), 1.0), 632, (15.0 * 1.0 / (4.0)), 167, ((p.p2 * s.v[183]) * 12.0));
             s.store_sqrt_mul(628, 621, 624);
         }
@@ -3800,7 +3800,7 @@ impl Instance {
         }
 
         if ((s.b[1620] && s.b[1799]) && (!s.b[1817])) {
-            s.store_mul_div_scaled_inputs_rhs(310, 309, s.ad_value(746), 2.0, s.ad_value(740), 1.0);
+            s.store_mul_div_scaled_inputs_indices(310, 309, 746, 2.0, 740, 1.0);
             s.store_scale(311, 310, s.v[184]);
             s.store_mul_add_scaled_inputs_rhs(173, 742, s.ad_value(306), 1.0, s.ad_value(269), 2.0);
         }

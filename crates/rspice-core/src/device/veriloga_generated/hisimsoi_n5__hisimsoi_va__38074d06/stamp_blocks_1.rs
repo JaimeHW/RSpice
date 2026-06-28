@@ -2368,7 +2368,7 @@ impl Instance {
         if s.b[1222] {
             s.store_sqrt_offset_input(1241, 328, (10.0 * 2.220446049250313e-16));
             s.store_mul(1242, 1240, 1241);
-            s.store_mul_div_scaled_inputs_rhs(1238, 1242, s.ad_value(227), 2.0, s.ad_value(1229), 1.0);
+            s.store_mul_div_scaled_inputs_indices(1238, 1242, 227, 2.0, 1229, 1.0);
             s.store_mul_product3_rhs(204, 337, s.ad_value(1238), s.ad_value(1237), s.ad_value(107), 1.0);
             s.store_add(199, 202, 204);
         }

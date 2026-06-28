@@ -3531,18 +3531,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], input_value: f64, input_dn: [f64; NODE_COUNT], input_db: [f64; BRANCH_COUNT], input_scale: f64, denominator_value: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], denominator_scale: f64) {
+        let scaled_input = input_value * input_scale;
+        let reciprocal = 1.0 / (denominator_value * denominator_scale);
+        let quotient = scaled_input * reciprocal;
+        let input_derivative_scale = input_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = factor_value * quotient;
+        for axis in 0..NODE_COUNT { let quotient_derivative = input_dn[axis] * input_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; self.dn[index][axis] = factor_dn[axis] * quotient + factor_value * quotient_derivative; }
+        for axis in 0..BRANCH_COUNT { let quotient_derivative = input_db[axis] * input_derivative_scale + denominator_db[axis] * denominator_derivative_scale; self.db[index][axis] = factor_db[axis] * quotient + factor_value * quotient_derivative; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_div_scaled_inputs_rhs(&mut self, index: usize, left: usize, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
         let left_value = self.v[left];
         let left_dn = self.dn[left];
         let left_db = self.db[left];
-        let input_value = input.value * input_scale;
-        let reciprocal = 1.0 / (denominator.value * denominator_scale);
-        let quotient = input_value * reciprocal;
-        let input_derivative_scale = input_scale * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = left_value * quotient;
-        for axis in 0..NODE_COUNT { let quotient_derivative = input.dn[axis] * input_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; self.dn[index][axis] = left_dn[axis] * quotient + left_value * quotient_derivative; }
-        for axis in 0..BRANCH_COUNT { let quotient_derivative = input.db[axis] * input_derivative_scale + denominator.db[axis] * denominator_derivative_scale; self.db[index][axis] = left_db[axis] * quotient + left_value * quotient_derivative; }
+        self.store_mul_div_scaled_inputs_components(index, left_value, left_dn, left_db, input.value, input.dn, input.db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
     }
 
     #[inline]
@@ -12435,6 +12440,90 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let right_dn = self.dn[right];
         let right_db = self.db[right];
         self.store_offset_limited_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right_value, right_dn, right_db, right_scale, offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aaa(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input.value, input.dn, input.db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input.value, input.dn, input.db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: usize, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input_value, input_dn, input_db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: usize, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input_value, input_dn, input_db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_iaa(&mut self, index: usize, factor: usize, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input.value, input.dn, input.db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_iai(&mut self, index: usize, factor: usize, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input.value, input.dn, input.db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_iia(&mut self, index: usize, factor: usize, input: usize, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input_value, input_dn, input_db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_indices(&mut self, index: usize, factor: usize, input: usize, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input_value, input_dn, input_db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
     }
 
 
@@ -16768,18 +16857,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], input_value: f64, input_dn: [f64; NODE_COUNT], input_db: [f64; BRANCH_COUNT], input_scale: f64, denominator_value: f64, denominator_dn: [f64; NODE_COUNT], denominator_db: [f64; BRANCH_COUNT], denominator_scale: f64) {
+        let scaled_input = input_value * input_scale;
+        let reciprocal = 1.0 / (denominator_value * denominator_scale);
+        let quotient = scaled_input * reciprocal;
+        let input_derivative_scale = input_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = factor_value * quotient;
+        for axis in 0..NODE_COUNT { let quotient_derivative = input_dn[axis] * input_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; self.dn[index][axis] = factor_dn[axis] * quotient + factor_value * quotient_derivative; }
+        for axis in 0..BRANCH_COUNT { let quotient_derivative = input_db[axis] * input_derivative_scale + denominator_db[axis] * denominator_derivative_scale; self.db[index][axis] = factor_db[axis] * quotient + factor_value * quotient_derivative; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_div_scaled_inputs_rhs(&mut self, index: usize, left: usize, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
         let left_value = self.v[left];
         let left_dn = self.dn[left];
         let left_db = self.db[left];
-        let input_value = input.value * input_scale;
-        let reciprocal = 1.0 / (denominator.value * denominator_scale);
-        let quotient = input_value * reciprocal;
-        let input_derivative_scale = input_scale * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = left_value * quotient;
-        for axis in 0..NODE_COUNT { let quotient_derivative = input.dn[axis] * input_derivative_scale + denominator.dn[axis] * denominator_derivative_scale; self.dn[index][axis] = left_dn[axis] * quotient + left_value * quotient_derivative; }
-        for axis in 0..BRANCH_COUNT { let quotient_derivative = input.db[axis] * input_derivative_scale + denominator.db[axis] * denominator_derivative_scale; self.db[index][axis] = left_db[axis] * quotient + left_value * quotient_derivative; }
+        self.store_mul_div_scaled_inputs_components(index, left_value, left_dn, left_db, input.value, input.dn, input.db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
     }
 
     #[inline]
@@ -25672,6 +25766,90 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let right_dn = self.dn[right];
         let right_db = self.db[right];
         self.store_offset_limited_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right_value, right_dn, right_db, right_scale, offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aaa(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input.value, input.dn, input.db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input.value, input.dn, input.db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: usize, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input_value, input_dn, input_db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, input: usize, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor.value, factor.dn, factor.db, input_value, input_dn, input_db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_iaa(&mut self, index: usize, factor: usize, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input.value, input.dn, input.db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_iai(&mut self, index: usize, factor: usize, input: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input.value, input.dn, input.db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_mixed_iia(&mut self, index: usize, factor: usize, input: usize, input_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input_value, input_dn, input_db, input_scale, denominator.value, denominator.dn, denominator.db, denominator_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_indices(&mut self, index: usize, factor: usize, input: usize, input_scale: f64, denominator: usize, denominator_scale: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let input_value = self.v[input];
+        let input_dn = self.dn[input];
+        let input_db = self.db[input];
+        let denominator_value = self.v[denominator];
+        let denominator_dn = self.dn[denominator];
+        let denominator_db = self.db[denominator];
+        self.store_mul_div_scaled_inputs_components(index, factor_value, factor_dn, factor_db, input_value, input_dn, input_db, input_scale, denominator_value, denominator_dn, denominator_db, denominator_scale);
     }
 
 
