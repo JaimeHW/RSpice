@@ -5501,6 +5501,66 @@ fn stamp() {
             "{value_products3_mixed}"
         );
 
+        for signature in [
+            "fn store_add_scaled_offset_product_rhs_mixed_iai(",
+            "fn store_add_scaled_offset_product_lhs(",
+            "fn store_add_scaled_offset_product_lhs_indices(",
+            "fn store_add_scaled_offset_product_lhs_mixed_aai(",
+            "fn store_add_scaled_offset_product_lhs_product(",
+            "fn store_add_scaled_offset_product_lhs_product_indices(",
+            "fn store_add_scaled_offset_product_lhs_product_mixed_aaiia(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_add_scaled_offset_product_rhs_components"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_add_scaled_offset_product_lhs_components"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_add_scaled_offset_product_lhs_product_components"),
+                "{body}"
+            );
+        }
+
+        let offset_rhs_mixed = helper_body(
+            &support,
+            "fn store_add_scaled_offset_product_rhs_mixed_iai(",
+        );
+        assert!(
+            offset_rhs_mixed.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[value][axis] * value_scale + (product_left.node_derivatives[axis] * product_right_offset_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale;"
+            ),
+            "{offset_rhs_mixed}"
+        );
+
+        let offset_lhs = helper_body(&support, "fn store_add_scaled_offset_product_lhs(");
+        assert!(
+            offset_lhs.contains(
+                "self.node_derivatives[index][axis] = value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_offset_value * product_right.node_derivatives[axis]) * product_scale;"
+            ),
+            "{offset_lhs}"
+        );
+
+        let offset_lhs_product =
+            helper_body(&support, "fn store_add_scaled_offset_product_lhs_product(");
+        assert!(
+            offset_lhs_product.contains(
+                "self.node_derivatives[index][axis] = value.node_derivatives[axis] * value_scale + (offset_product_left.node_derivatives[axis] * offset_product_right_value + offset_product_left_offset_value * offset_product_right.node_derivatives[axis]) * offset_product_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale;"
+            ),
+            "{offset_lhs_product}"
+        );
+
         let sqrt_square_add = helper_body(&support, "fn store_sqrt_square_add(");
         assert!(
             !sqrt_square_add.contains("_node_derivatives = self.node_derivatives"),
@@ -11972,12 +12032,27 @@ fn generate_scratch_operation_helpers() -> String {
         "",
         "    #[inline]",
         "    fn store_add_scaled_offset_product_lhs(&mut self, index: usize, value: AdValue, value_scale: f64, product_left: AdValue, product_left_offset: f64, product_right: AdValue, product_scale: f64) {",
-        "        self.store_add_scaled_offset_product_lhs_components(index, value.value, value.node_derivatives, value.branch_derivatives, value_scale, product_left.value, product_left.node_derivatives, product_left.branch_derivatives, product_left_offset, product_right.value, product_right.node_derivatives, product_right.branch_derivatives, product_scale);",
+        "        let value_term = value.value * value_scale;",
+        "        let product_left_offset_value = product_left.value + product_left_offset;",
+        "        let product_right_value = product_right.value;",
+        "        let product_term = product_left_offset_value * product_right_value * product_scale;",
+        "        self.values[index] = value_term + product_term;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_offset_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * value_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_offset_value * product_right.branch_derivatives[axis]) * product_scale; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_add_scaled_offset_product_lhs_product(&mut self, index: usize, value: AdValue, value_scale: f64, offset_product_left: AdValue, offset_product_left_offset: f64, offset_product_right: AdValue, offset_product_scale: f64, product_left: AdValue, product_right: AdValue, product_scale: f64) {",
-        "        self.store_add_scaled_offset_product_lhs_product_components(index, value.value, value.node_derivatives, value.branch_derivatives, value_scale, offset_product_left.value, offset_product_left.node_derivatives, offset_product_left.branch_derivatives, offset_product_left_offset, offset_product_right.value, offset_product_right.node_derivatives, offset_product_right.branch_derivatives, offset_product_scale, product_left.value, product_left.node_derivatives, product_left.branch_derivatives, product_right.value, product_right.node_derivatives, product_right.branch_derivatives, product_scale);",
+        "        let value_term = value.value * value_scale;",
+        "        let offset_product_left_offset_value = offset_product_left.value + offset_product_left_offset;",
+        "        let offset_product_right_value = offset_product_right.value;",
+        "        let product_left_value = product_left.value;",
+        "        let product_right_value = product_right.value;",
+        "        let offset_product_term = offset_product_left_offset_value * offset_product_right_value * offset_product_scale;",
+        "        let product_term = product_left_value * product_right_value * product_scale;",
+        "        self.values[index] = value_term + offset_product_term + product_term;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * value_scale + (offset_product_left.node_derivatives[axis] * offset_product_right_value + offset_product_left_offset_value * offset_product_right.node_derivatives[axis]) * offset_product_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * value_scale + (offset_product_left.branch_derivatives[axis] * offset_product_right_value + offset_product_left_offset_value * offset_product_right.branch_derivatives[axis]) * offset_product_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -18458,37 +18533,6 @@ fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
     }
 
     #[inline]
-    fn store_add_scaled_offset_product_rhs_components(&mut self, index: usize, value_raw: f64, value_node_derivatives: [f64; Instance::NODE_COUNT], value_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_offset: f64, product_scale: f64) {
-        let value_term = value_raw * value_scale;
-        let product_right_offset_value = product_right_value + product_right_offset;
-        let product_term = product_left_value * product_right_offset_value * product_scale;
-        self.values[index] = value_term + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value_node_derivatives[axis] * value_scale + (product_left_node_derivatives[axis] * product_right_offset_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value_branch_derivatives[axis] * value_scale + (product_left_branch_derivatives[axis] * product_right_offset_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; }
-    }
-
-    #[inline]
-    fn store_add_scaled_offset_product_lhs_components(&mut self, index: usize, value_raw: f64, value_node_derivatives: [f64; Instance::NODE_COUNT], value_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_left_offset: f64, product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_scale: f64) {
-        let value_term = value_raw * value_scale;
-        let product_left_offset_value = product_left_value + product_left_offset;
-        let product_term = product_left_offset_value * product_right_value * product_scale;
-        self.values[index] = value_term + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value_node_derivatives[axis] * value_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_offset_value * product_right_node_derivatives[axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value_branch_derivatives[axis] * value_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_offset_value * product_right_branch_derivatives[axis]) * product_scale; }
-    }
-
-    #[inline]
-    fn store_add_scaled_offset_product_lhs_product_components(&mut self, index: usize, value_raw: f64, value_node_derivatives: [f64; Instance::NODE_COUNT], value_branch_derivatives: [f64; Instance::BRANCH_COUNT], value_scale: f64, offset_product_left_value: f64, offset_product_left_node_derivatives: [f64; Instance::NODE_COUNT], offset_product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset_product_left_offset: f64, offset_product_right_value: f64, offset_product_right_node_derivatives: [f64; Instance::NODE_COUNT], offset_product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], offset_product_scale: f64, product_left_value: f64, product_left_node_derivatives: [f64; Instance::NODE_COUNT], product_left_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_right_value: f64, product_right_node_derivatives: [f64; Instance::NODE_COUNT], product_right_branch_derivatives: [f64; Instance::BRANCH_COUNT], product_scale: f64) {
-        let value_term = value_raw * value_scale;
-        let offset_product_left_offset_value = offset_product_left_value + offset_product_left_offset;
-        let offset_product_term = offset_product_left_offset_value * offset_product_right_value * offset_product_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.values[index] = value_term + offset_product_term + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value_node_derivatives[axis] * value_scale + (offset_product_left_node_derivatives[axis] * offset_product_right_value + offset_product_left_offset_value * offset_product_right_node_derivatives[axis]) * offset_product_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value_branch_derivatives[axis] * value_scale + (offset_product_left_branch_derivatives[axis] * offset_product_right_value + offset_product_left_offset_value * offset_product_right_branch_derivatives[axis]) * offset_product_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; }
-    }
-
-    #[inline]
     fn store_add_scaled_product_value_ad(&mut self, index: usize, value: AdValue, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
         let product_left_value = self.values[product_left];
         let product_right_value = self.values[product_right];
@@ -18977,17 +19021,29 @@ fn generate_mixed_add_scaled_product_helper(mask: &str) -> String {
 }
 
 fn generate_mixed_add_scaled_offset_product_rhs_helper(mask: &str) -> String {
-    let operands = ["value", "product_left", "product_right"];
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let value = mixed_helper_component_args(mask, 0, "value");
-    let product_left = mixed_helper_component_args(mask, 1, "product_left");
-    let product_right = mixed_helper_component_args(mask, 2, "product_right");
+    let value_raw = mixed_helper_value_expr(mask, 0, "value");
+    let product_left_value = mixed_helper_value_expr(mask, 1, "product_left");
+    let product_right_value = mixed_helper_value_expr(mask, 2, "product_right");
+    let value_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "value");
+    let product_left_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "product_left");
+    let product_right_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "product_right");
+    let value_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "value");
+    let product_left_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 1, "product_left");
+    let product_right_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 2, "product_right");
     format!(
         r#"
 
     #[inline]
     fn store_add_scaled_offset_product_rhs_mixed_{mask}(&mut self, index: usize, value: {value_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_right_offset: f64, product_scale: f64) {{
-{locals}        self.store_add_scaled_offset_product_rhs_components(index, {value}, value_scale, {product_left}, {product_right}, product_right_offset, product_scale);
+        let value_term = {value_raw} * value_scale;
+        let product_left_value = {product_left_value};
+        let product_right_offset_value = {product_right_value} + product_right_offset;
+        let product_term = product_left_value * product_right_offset_value * product_scale;
+        self.values[index] = value_term + product_term;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {value_node_derivative} * value_scale + ({product_left_node_derivative} * product_right_offset_value + product_left_value * {product_right_node_derivative}) * product_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {value_branch_derivative} * value_scale + ({product_left_branch_derivative} * product_right_offset_value + product_left_value * {product_right_branch_derivative}) * product_scale; }}
     }}
 "#,
         value_ty = mixed_helper_type(mask, 0),
@@ -18997,18 +19053,30 @@ fn generate_mixed_add_scaled_offset_product_rhs_helper(mask: &str) -> String {
 }
 
 fn generate_index_or_mixed_add_scaled_offset_product_lhs_helper(mask: &str) -> String {
-    let operands = ["value", "product_left", "product_right"];
     let helper = index_or_mixed_helper_name("store_add_scaled_offset_product_lhs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let value = mixed_helper_component_args(mask, 0, "value");
-    let product_left = mixed_helper_component_args(mask, 1, "product_left");
-    let product_right = mixed_helper_component_args(mask, 2, "product_right");
+    let value_raw = mixed_helper_value_expr(mask, 0, "value");
+    let product_left_value = mixed_helper_value_expr(mask, 1, "product_left");
+    let product_right_value = mixed_helper_value_expr(mask, 2, "product_right");
+    let value_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "value");
+    let product_left_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "product_left");
+    let product_right_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "product_right");
+    let value_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "value");
+    let product_left_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 1, "product_left");
+    let product_right_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 2, "product_right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, value: {value_ty}, value_scale: f64, product_left: {product_left_ty}, product_left_offset: f64, product_right: {product_right_ty}, product_scale: f64) {{
-{locals}        self.store_add_scaled_offset_product_lhs_components(index, {value}, value_scale, {product_left}, product_left_offset, {product_right}, product_scale);
+        let value_term = {value_raw} * value_scale;
+        let product_left_offset_value = {product_left_value} + product_left_offset;
+        let product_right_value = {product_right_value};
+        let product_term = product_left_offset_value * product_right_value * product_scale;
+        self.values[index] = value_term + product_term;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {value_node_derivative} * value_scale + ({product_left_node_derivative} * product_right_value + product_left_offset_value * {product_right_node_derivative}) * product_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {value_branch_derivative} * value_scale + ({product_left_branch_derivative} * product_right_value + product_left_offset_value * {product_right_branch_derivative}) * product_scale; }}
     }}
 "#,
         value_ty = mixed_helper_type(mask, 0),
@@ -19711,26 +19779,43 @@ fn generate_index_or_mixed_div_from_scalar_offset_mul_offset_lhs_helper(mask: &s
 }
 
 fn generate_index_or_mixed_add_scaled_offset_product_lhs_product_helper(mask: &str) -> String {
-    let operands = [
-        "value",
-        "offset_product_left",
-        "offset_product_right",
-        "product_left",
-        "product_right",
-    ];
     let helper = index_or_mixed_helper_name("store_add_scaled_offset_product_lhs_product", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let value = mixed_helper_component_args(mask, 0, "value");
-    let offset_product_left = mixed_helper_component_args(mask, 1, "offset_product_left");
-    let offset_product_right = mixed_helper_component_args(mask, 2, "offset_product_right");
-    let product_left = mixed_helper_component_args(mask, 3, "product_left");
-    let product_right = mixed_helper_component_args(mask, 4, "product_right");
+    let value_raw = mixed_helper_value_expr(mask, 0, "value");
+    let offset_product_left_value = mixed_helper_value_expr(mask, 1, "offset_product_left");
+    let offset_product_right_value = mixed_helper_value_expr(mask, 2, "offset_product_right");
+    let product_left_value = mixed_helper_value_expr(mask, 3, "product_left");
+    let product_right_value = mixed_helper_value_expr(mask, 4, "product_right");
+    let value_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "value");
+    let offset_product_left_node_derivative =
+        mixed_helper_node_derivative_expr(mask, 1, "offset_product_left");
+    let offset_product_right_node_derivative =
+        mixed_helper_node_derivative_expr(mask, 2, "offset_product_right");
+    let product_left_node_derivative = mixed_helper_node_derivative_expr(mask, 3, "product_left");
+    let product_right_node_derivative = mixed_helper_node_derivative_expr(mask, 4, "product_right");
+    let value_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "value");
+    let offset_product_left_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 1, "offset_product_left");
+    let offset_product_right_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 2, "offset_product_right");
+    let product_left_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 3, "product_left");
+    let product_right_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 4, "product_right");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, value: {value_ty}, value_scale: f64, offset_product_left: {offset_product_left_ty}, offset_product_left_offset: f64, offset_product_right: {offset_product_right_ty}, offset_product_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64) {{
-{locals}        self.store_add_scaled_offset_product_lhs_product_components(index, {value}, value_scale, {offset_product_left}, offset_product_left_offset, {offset_product_right}, offset_product_scale, {product_left}, {product_right}, product_scale);
+        let value_term = {value_raw} * value_scale;
+        let offset_product_left_offset_value = {offset_product_left_value} + offset_product_left_offset;
+        let offset_product_right_value = {offset_product_right_value};
+        let product_left_value = {product_left_value};
+        let product_right_value = {product_right_value};
+        let offset_product_term = offset_product_left_offset_value * offset_product_right_value * offset_product_scale;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.values[index] = value_term + offset_product_term + product_term;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {value_node_derivative} * value_scale + ({offset_product_left_node_derivative} * offset_product_right_value + offset_product_left_offset_value * {offset_product_right_node_derivative}) * offset_product_scale + ({product_left_node_derivative} * product_right_value + product_left_value * {product_right_node_derivative}) * product_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {value_branch_derivative} * value_scale + ({offset_product_left_branch_derivative} * offset_product_right_value + offset_product_left_offset_value * {offset_product_right_branch_derivative}) * offset_product_scale + ({product_left_branch_derivative} * product_right_value + product_left_value * {product_right_branch_derivative}) * product_scale; }}
     }}
 "#,
         value_ty = mixed_helper_type(mask, 0),
