@@ -404,6 +404,29 @@ endmodule
     )
 }
 
+fn integer_bit_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_integer_bit_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    real gain;
+    analog begin
+        x = V(p, n) + 8.75;
+        gain = (x << 1.0)
+             + ((-x) >> 1.0)
+             + (x & 6.0)
+             + (x | 3.0)
+             + (x ^ 5.0);
+        I(p, n) <+ gain;
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1197,6 +1220,30 @@ fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native rounding/mod assignment evaluation succeeds");
+
+    assert_eq!(device.variable("x"), Some(x));
+    assert_eq!(device.variable("gain"), Some(expected_gain));
+    assert!((currents[0] - expected_gain).abs() < 1e-12);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_integer_bit_assignments_without_fallback() {
+    let model = integer_bit_assignment_model();
+    let mut device = VerilogADevice::try_new("BITOPS1", model, &[1, 0])
+        .expect("integer bit assignment model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[4.0]);
+
+    let x: f64 = 12.75;
+    let expected_gain = (((x as i64) << 1_i64) as f64)
+        + (((-x as i64) >> 1_i64) as f64)
+        + (((x as i64) & 6_i64) as f64)
+        + (((x as i64) | 3_i64) as f64)
+        + (((x as i64) ^ 5_i64) as f64);
+    let currents = device
+        .try_evaluate()
+        .expect("native integer bit assignment evaluation succeeds");
 
     assert_eq!(device.variable("x"), Some(x));
     assert_eq!(device.variable("gain"), Some(expected_gain));

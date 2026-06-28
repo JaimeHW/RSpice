@@ -1,10 +1,11 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
-    rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_ceil, rspice_cos, rspice_cosh,
-    rspice_exp, rspice_floor, rspice_idtmod_wrap, rspice_limexp, rspice_log, rspice_log10,
-    rspice_mod, rspice_pow, rspice_sin, rspice_sinh, rspice_tan, rspice_tanh,
+    rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_bitand, rspice_bitor,
+    rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_exp, rspice_floor,
+    rspice_idtmod_wrap, rspice_limexp, rspice_log, rspice_log10, rspice_mod, rspice_pow,
+    rspice_shl, rspice_shr, rspice_sin, rspice_sinh, rspice_tan, rspice_tanh,
 };
-use crate::native::expr::{BinaryMathOp, UnaryMathOp};
+use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
 
@@ -188,6 +189,7 @@ impl FunctionCompiler {
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                 NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
+                NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
                 NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
                 NativeOp::IdtState(index) => self.emit_idt_state(index)?,
@@ -421,6 +423,25 @@ impl FunctionCompiler {
         let left = XMM_STACK[self.depth - 2];
         let right = XMM_STACK[self.depth - 1];
         self.emit_binary_helper_call(left, right, binary_math_helper(op));
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_integer_binary(&mut self, op: IntegerBinaryOp) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "integer binary op requires stack depth 2, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+
+        let left = XMM_STACK[self.depth - 2];
+        let right = XMM_STACK[self.depth - 1];
+        self.emit_binary_helper_call(left, right, integer_binary_helper(op));
         self.depth -= 1;
         Ok(())
     }
@@ -1073,6 +1094,16 @@ fn binary_math_helper(op: BinaryMathOp) -> BinaryHelper {
     }
 }
 
+fn integer_binary_helper(op: IntegerBinaryOp) -> BinaryHelper {
+    match op {
+        IntegerBinaryOp::Shl => rspice_shl,
+        IntegerBinaryOp::Shr => rspice_shr,
+        IntegerBinaryOp::BitAnd => rspice_bitand,
+        IntegerBinaryOp::BitOr => rspice_bitor,
+        IntegerBinaryOp::BitXor => rspice_bitxor,
+    }
+}
+
 fn call_spill_disp(index: usize) -> i32 {
     CALL_SHADOW_BYTES + (index * WORD_BYTES) as i32
 }
@@ -1085,7 +1116,10 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
     program.ops().iter().any(|op| {
         matches!(
             op,
-            NativeOp::UnaryMath(_) | NativeOp::BinaryMath(_) | NativeOp::IdtModState(_)
+            NativeOp::UnaryMath(_)
+                | NativeOp::BinaryMath(_)
+                | NativeOp::IntegerBinary(_)
+                | NativeOp::IdtModState(_)
         )
     })
 }
@@ -1803,6 +1837,81 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_calls_integer_binary_helpers_and_preserves_state() {
+        let cases = [
+            ("shl", Instruction::Shl, 3.0, 2.0, runtime_shl(3.0, 2.0)),
+            (
+                "shr-negative",
+                Instruction::Shr,
+                -16.0,
+                2.0,
+                runtime_shr(-16.0, 2.0),
+            ),
+            (
+                "bitand",
+                Instruction::BitAnd,
+                13.0,
+                6.0,
+                runtime_bitand(13.0, 6.0),
+            ),
+            (
+                "bitor",
+                Instruction::BitOr,
+                8.0,
+                3.0,
+                runtime_bitor(8.0, 3.0),
+            ),
+            (
+                "bitxor",
+                Instruction::BitXor,
+                15.0,
+                6.0,
+                runtime_bitxor(15.0, 6.0),
+            ),
+            (
+                "truncates-operands",
+                Instruction::BitAnd,
+                13.75,
+                6.25,
+                runtime_bitand(13.75, 6.25),
+            ),
+        ];
+
+        for (name, op, left, right, integer_expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    op,
+                    Instruction::Add,
+                    Instruction::PushTime,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile integer helper leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer helper leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = 310.0;
+            ctx.time = 2.0;
+            let vars = [7.0_f64];
+
+            assert_eq!(
+                f(&ctx, vars.as_ptr()).to_bits(),
+                (310.0 + ((7.0 + integer_expected) + 2.0)).to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_computes_ifelse() {
         let then_nan = f64::from_bits(0x7ff8_0000_0000_0001);
         let else_neg_zero = -0.0_f64;
@@ -2400,6 +2509,26 @@ mod tests {
 
     fn runtime_mod(left: f64, right: f64) -> f64 {
         std::hint::black_box(left) % std::hint::black_box(right)
+    }
+
+    fn runtime_shl(left: f64, right: f64) -> f64 {
+        ((std::hint::black_box(left) as i64) << (std::hint::black_box(right) as i64)) as f64
+    }
+
+    fn runtime_shr(left: f64, right: f64) -> f64 {
+        ((std::hint::black_box(left) as i64) >> (std::hint::black_box(right) as i64)) as f64
+    }
+
+    fn runtime_bitand(left: f64, right: f64) -> f64 {
+        ((std::hint::black_box(left) as i64) & (std::hint::black_box(right) as i64)) as f64
+    }
+
+    fn runtime_bitor(left: f64, right: f64) -> f64 {
+        ((std::hint::black_box(left) as i64) | (std::hint::black_box(right) as i64)) as f64
+    }
+
+    fn runtime_bitxor(left: f64, right: f64) -> f64 {
+        ((std::hint::black_box(left) as i64) ^ (std::hint::black_box(right) as i64)) as f64
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {
