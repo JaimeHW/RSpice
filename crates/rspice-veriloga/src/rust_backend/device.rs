@@ -465,6 +465,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_add_sub_div_lhs_helper_calls(source);
     source = compact_div_ln_lhs_helper_calls(source);
     source = compact_add_sub_ln_lhs_helper_calls(source);
+    source = compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_calls(source);
     source = compact_mul_div_from_scalar_lhs_helper_calls(source);
     source = compact_mul_div_helper_calls(source);
     source = compact_mul_div_scaled_inputs_helper_calls(source);
@@ -2271,6 +2272,113 @@ fn compact_mul_scale_offset_helper_line(
         args[1],
         args[2],
     )
+}
+
+fn compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_calls(
+    source: String,
+) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_call_replacement(
+                &source, call_start, indent,
+            )
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_line(
+        target_index,
+        left,
+        right,
+    )
+    .or_else(|| {
+        compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_line(
+            target_index,
+            right,
+            left,
+        )
+    })?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_line(
+    target_index: usize,
+    product: &str,
+    reciprocal_sqrt: &str,
+) -> Option<String> {
+    let product_args = compact_ad_call_args(product, "div_scaled_product3")?;
+    if product_args.len() != 6 {
+        return None;
+    }
+    let reciprocal_sqrt_args = compact_ad_call_args(reciprocal_sqrt, "div_from_scalar")?;
+    if reciprocal_sqrt_args.len() != 2 {
+        return None;
+    }
+    let sqrt_args = compact_ad_call_args(reciprocal_sqrt_args[1], "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+    let offset_args = compact_ad_call_args(sqrt_args[0], "offset")?;
+    if offset_args.len() != 2 {
+        return None;
+    }
+
+    let product_left = compact_scratch_ad_value_index(product_args[0])?;
+    let product_middle = compact_scratch_ad_value_index(product_args[1])?;
+    let product_right = compact_scratch_ad_value_index(product_args[2])?;
+    let denominator = compact_scratch_ad_value_index(product_args[4])?;
+    let sqrt_source = compact_scratch_ad_value_index(offset_args[0])?;
+    Some(format!(
+        "scratch.store_mul_div_scaled_product3_div_from_scalar_sqrt_offset({target_index}, {product_left}, {product_middle}, {product_right}, {}, {denominator}, {}, {}, {sqrt_source}, {});",
+        product_args[3], product_args[5], reciprocal_sqrt_args[0], offset_args[1]
+    ))
 }
 
 fn compact_sqrt_mul_sub_operand_helper_calls(source: String) -> String {
@@ -5483,6 +5591,37 @@ fn stamp() {
         assert!(
             compact.contains(
                 "s.store_mul_scale_offset_mixed_ai(221, A::sqrt(s.ad_value(5)), 4, 2.0, 1.0);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_div_scaled_product3_reciprocal_sqrt_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_mul_div_scaled_product3_div_from_scalar_sqrt_offset"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(230, AdValue::div_scaled_product3(scratch.ad_value(2), scratch.ad_value(3), scratch.ad_value(4), params.product_scale, scratch.ad_value(5), params.denominator_scale), AdValue::div_from_scalar(params.scalar, AdValue::sqrt(AdValue::offset(scratch.ad_value(6), params.sqrt_offset))));
+    scratch.store_mul_ad(231, AdValue::div_from_scalar(0.5, AdValue::sqrt(AdValue::offset(scratch.ad_value(7), 1.0))), AdValue::div_scaled_product3(scratch.ad_value(8), scratch.ad_value(9), scratch.ad_value(10), 1.0, scratch.ad_value(11), 1.0));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_div_scaled_product3_div_from_scalar_sqrt_offset(230, 2, 3, 4, p.product_scale, 5, p.denominator_scale, p.scalar, 6, p.sqrt_offset);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_div_scaled_product3_div_from_scalar_sqrt_offset(231, 8, 9, 10, 1.0, 11, 1.0, 0.5, 7, 1.0);"
             ),
             "{compact}"
         );
@@ -18832,6 +18971,46 @@ fn generate_square_product_and_product3_scratch_helpers() -> String {
         self.values[index] = quotient;
         for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (product_left_node_derivatives[axis] * middle_right_value + product_middle_node_derivatives[axis] * left_right_value + product_right_node_derivatives[axis] * left_middle_value) * product_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; }
         for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (product_left_branch_derivatives[axis] * middle_right_value + product_middle_branch_derivatives[axis] * left_right_value + product_right_branch_derivatives[axis] * left_middle_value) * product_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_mul_div_scaled_product3_div_from_scalar_sqrt_offset(&mut self, index: usize, product_left: usize, product_middle: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64, scalar: f64, sqrt_source: usize, sqrt_offset: f64) {
+        let product_left_value = self.values[product_left];
+        let product_middle_value = self.values[product_middle];
+        let product_right_value = self.values[product_right];
+        let denominator_raw = self.values[denominator];
+        let sqrt_input = self.values[sqrt_source] + sqrt_offset;
+        let product_left_node_derivatives = self.node_derivatives[product_left];
+        let product_middle_node_derivatives = self.node_derivatives[product_middle];
+        let product_right_node_derivatives = self.node_derivatives[product_right];
+        let denominator_node_derivatives = self.node_derivatives[denominator];
+        let sqrt_source_node_derivatives = self.node_derivatives[sqrt_source];
+        let product_left_branch_derivatives = self.branch_derivatives[product_left];
+        let product_middle_branch_derivatives = self.branch_derivatives[product_middle];
+        let product_right_branch_derivatives = self.branch_derivatives[product_right];
+        let denominator_branch_derivatives = self.branch_derivatives[denominator];
+        let sqrt_source_branch_derivatives = self.branch_derivatives[sqrt_source];
+        let denominator_value = denominator_raw * denominator_scale;
+        let product_reciprocal = 1.0 / denominator_value;
+        let left_middle_value = product_left_value * product_middle_value;
+        let left_right_value = product_left_value * product_right_value;
+        let middle_right_value = product_middle_value * product_right_value;
+        let scaled_product_value = left_middle_value * product_right_value * product_scale;
+        let product_quotient = scaled_product_value * product_reciprocal;
+        let product_derivative_scale = product_scale * product_reciprocal;
+        let denominator_derivative_scale = -product_quotient * product_reciprocal * denominator_scale;
+        let sqrt_reciprocal = 1.0 / sqrt_input.sqrt();
+        let sqrt_quotient = scalar * sqrt_reciprocal;
+        let sqrt_derivative_scale = -sqrt_quotient / (2.0 * sqrt_input);
+        self.values[index] = product_quotient * sqrt_quotient;
+        for axis in 0..Instance::NODE_COUNT {
+            let product_derivative = (product_left_node_derivatives[axis] * middle_right_value + product_middle_node_derivatives[axis] * left_right_value + product_right_node_derivatives[axis] * left_middle_value) * product_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale;
+            self.node_derivatives[index][axis] = product_derivative * sqrt_quotient + product_quotient * sqrt_source_node_derivatives[axis] * sqrt_derivative_scale;
+        }
+        for axis in 0..Instance::BRANCH_COUNT {
+            let product_derivative = (product_left_branch_derivatives[axis] * middle_right_value + product_middle_branch_derivatives[axis] * left_right_value + product_right_branch_derivatives[axis] * left_middle_value) * product_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale;
+            self.branch_derivatives[index][axis] = product_derivative * sqrt_quotient + product_quotient * sqrt_source_branch_derivatives[axis] * sqrt_derivative_scale;
+        }
     }
 "#
     .to_string();
