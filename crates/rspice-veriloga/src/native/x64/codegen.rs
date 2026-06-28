@@ -6,8 +6,10 @@ const MODEL: &str = "native-x64";
 const VOLTAGES_OFFSET: i32 = 0;
 const INTERNAL_VOLTAGES_OFFSET: i32 = 8;
 const PARAMS_OFFSET: i32 = 16;
+const PORT_CONNECTED_OFFSET: i32 = 64;
 const TEMPERATURE_OFFSET: i32 = 80;
 const TIME_OFFSET: i32 = 88;
+const PARAM_GIVEN_OFFSET: i32 = 152;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 160;
 const MFACTOR_OFFSET: i32 = 176;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
@@ -92,6 +94,12 @@ impl FunctionCompiler {
                     self.emit_context_pointer_load(PARAMS_OFFSET);
                     self.encoder
                         .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                }
+                NativeOp::LoadParamGiven(index) => {
+                    self.emit_context_u8_flag_load(PARAM_GIVEN_OFFSET, index)?;
+                }
+                NativeOp::LoadPortConnected(index) => {
+                    self.emit_context_u8_flag_load(PORT_CONNECTED_OFFSET, index)?;
                 }
                 NativeOp::LoadVoltage { pos, neg } => {
                     self.emit_voltage_load(pos, neg)?;
@@ -299,6 +307,19 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_context_u8_flag_load(
+        &mut self,
+        ctx_pointer_field_offset: i32,
+        index: usize,
+    ) -> JitResult<()> {
+        let dst = self.push_register()?;
+        self.emit_context_pointer_load(ctx_pointer_field_offset);
+        self.encoder
+            .movzx_r32_m8_base_disp32(Gpr::R10, Gpr::Rax, byte_disp_u8(index)?);
+        self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
+        Ok(())
+    }
+
     fn emit_literal_load(&mut self, dst: Xmm, value: f64) {
         let displacement_offset = self.encoder.movsd_xmm_m64_rip_disp32(dst, 0);
         self.literals.push(LiteralPatch {
@@ -348,6 +369,13 @@ fn byte_disp(index: usize) -> JitResult<i32> {
     i32::try_from(byte_offset).map_err(|_| JitError::Encoding {
         model: MODEL.into(),
         detail: format!("index {index} byte offset exceeds x64 disp32 range").into(),
+    })
+}
+
+fn byte_disp_u8(index: usize) -> JitResult<i32> {
+    i32::try_from(index).map_err(|_| JitError::Encoding {
+        model: MODEL.into(),
+        detail: format!("u8 flag index {index} exceeds x64 disp32 range").into(),
     })
 }
 
