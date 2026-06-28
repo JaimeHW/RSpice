@@ -48,6 +48,7 @@ pub(crate) enum NativeOp {
     Extremum(ExtremumOp),
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
+    IntegerBinary(IntegerBinaryOp),
     DdtState(usize),
     DdtJacobian,
     IdtState(usize),
@@ -102,6 +103,15 @@ pub(crate) enum BinaryMathOp {
     Pow,
     Atan2,
     Mod,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntegerBinaryOp {
+    Shl,
+    Shr,
+    BitAnd,
+    BitOr,
+    BitXor,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -329,6 +339,20 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     ops.push(NativeOp::BinaryMath(binary_math_op(instruction)));
+                }
+                Instruction::Shl
+                | Instruction::Shr
+                | Instruction::BitAnd
+                | Instruction::BitOr
+                | Instruction::BitXor => {
+                    pop_binary_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::IntegerBinary(integer_binary_op(instruction)));
                 }
                 Instruction::Neg => {
                     require_stack(
@@ -779,6 +803,17 @@ fn binary_math_op(instruction: &Instruction) -> BinaryMathOp {
     }
 }
 
+fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
+    match instruction {
+        Instruction::Shl => IntegerBinaryOp::Shl,
+        Instruction::Shr => IntegerBinaryOp::Shr,
+        Instruction::BitAnd => IntegerBinaryOp::BitAnd,
+        Instruction::BitOr => IntegerBinaryOp::BitOr,
+        Instruction::BitXor => IntegerBinaryOp::BitXor,
+        _ => unreachable!("integer binary lowering only accepts supported integer instructions"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1115,6 +1150,41 @@ mod tests {
                     NativeOp::LoadTemperature,
                     NativeOp::Const(2.0),
                     NativeOp::BinaryMath(expected),
+                ]
+            );
+            assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_integer_binary_functions_as_native_integer_ops() {
+        let cases = [
+            (Instruction::Shl, IntegerBinaryOp::Shl),
+            (Instruction::Shr, IntegerBinaryOp::Shr),
+            (Instruction::BitAnd, IntegerBinaryOp::BitAnd),
+            (Instruction::BitOr, IntegerBinaryOp::BitOr),
+            (Instruction::BitXor, IntegerBinaryOp::BitXor),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(2.0),
+                    instruction,
+                ],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode("bits", EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("integer binary ops have native x64 helper-call lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::Const(2.0),
+                    NativeOp::IntegerBinary(expected),
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);

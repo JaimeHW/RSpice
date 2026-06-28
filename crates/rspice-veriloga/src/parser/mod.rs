@@ -1531,12 +1531,66 @@ impl<'a> Parser<'a> {
     /// Parse logical and
     fn parse_and(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
-        let mut left = self.parse_comparison()?;
+        let mut left = self.parse_bit_or()?;
 
         while self.match_token(TokenKind::And) {
-            let right = self.parse_comparison()?;
+            let right = self.parse_bit_or()?;
             left = Expression::Binary(BinaryExpr {
                 op: BinaryOp::And,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: start.extend(self.previous_span()),
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse bitwise or (|)
+    fn parse_bit_or(&mut self) -> Result<Expression, ParseError> {
+        let start = self.current_span();
+        let mut left = self.parse_bit_xor()?;
+
+        while self.match_token(TokenKind::BitOr) {
+            let right = self.parse_bit_xor()?;
+            left = Expression::Binary(BinaryExpr {
+                op: BinaryOp::BitOr,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: start.extend(self.previous_span()),
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse bitwise xor (^)
+    fn parse_bit_xor(&mut self) -> Result<Expression, ParseError> {
+        let start = self.current_span();
+        let mut left = self.parse_bit_and()?;
+
+        while self.match_token(TokenKind::BitXor) {
+            let right = self.parse_bit_and()?;
+            left = Expression::Binary(BinaryExpr {
+                op: BinaryOp::BitXor,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: start.extend(self.previous_span()),
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse bitwise and (&)
+    fn parse_bit_and(&mut self) -> Result<Expression, ParseError> {
+        let start = self.current_span();
+        let mut left = self.parse_comparison()?;
+
+        while self.match_token(TokenKind::BitAnd) {
+            let right = self.parse_comparison()?;
+            left = Expression::Binary(BinaryExpr {
+                op: BinaryOp::BitAnd,
                 left: Box::new(left),
                 right: Box::new(right),
                 span: start.extend(self.previous_span()),
@@ -1549,7 +1603,7 @@ impl<'a> Parser<'a> {
     /// Parse comparison
     fn parse_comparison(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
-        let mut left = self.parse_additive()?;
+        let mut left = self.parse_shift()?;
 
         loop {
             let op = match self.current().kind {
@@ -1576,6 +1630,36 @@ impl<'a> Parser<'a> {
                 TokenKind::Ge => {
                     self.advance();
                     BinaryOp::Ge
+                }
+                _ => break,
+            };
+
+            let right = self.parse_shift()?;
+            left = Expression::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: start.extend(self.previous_span()),
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse shifts (<< >>)
+    fn parse_shift(&mut self) -> Result<Expression, ParseError> {
+        let start = self.current_span();
+        let mut left = self.parse_additive()?;
+
+        loop {
+            let op = match self.current().kind {
+                TokenKind::Shl => {
+                    self.advance();
+                    BinaryOp::Shl
+                }
+                TokenKind::Shr => {
+                    self.advance();
+                    BinaryOp::Shr
                 }
                 _ => break,
             };
@@ -2437,6 +2521,57 @@ mod tests {
         };
         assert_eq!(call.name.as_str(), "laplace_nd");
         assert!(matches!(call.args[1], Expression::ArrayLiteral(_)));
+    }
+
+    #[test]
+    fn bitwise_and_shift_expressions_parse_with_precedence() {
+        let m = parse_module(
+            r#"module a(p, n);
+                inout p, n;
+                electrical p, n;
+                real a, b, c, d;
+                real y1, y2, y3, y4;
+                analog begin
+                    y1 = a << b + c;
+                    y2 = a + b << c;
+                    y3 = a & b ^ c | d;
+                    y4 = a == b & c != d;
+                end
+            endmodule"#,
+        );
+        let statements = &m.analog_block.as_ref().unwrap().statements;
+
+        let assignment_value = |index: usize| {
+            let AnalogStatement::Assignment(assign) = &statements[index] else {
+                panic!("expected assignment {index}");
+            };
+            &assign.value
+        };
+
+        let Expression::Binary(y1) = assignment_value(0) else {
+            panic!("expected y1 binary expression");
+        };
+        assert_eq!(y1.op, BinaryOp::Shl);
+        assert!(matches!(*y1.right, Expression::Binary(ref b) if b.op == BinaryOp::Add));
+
+        let Expression::Binary(y2) = assignment_value(1) else {
+            panic!("expected y2 binary expression");
+        };
+        assert_eq!(y2.op, BinaryOp::Shl);
+        assert!(matches!(*y2.left, Expression::Binary(ref b) if b.op == BinaryOp::Add));
+
+        let Expression::Binary(y3) = assignment_value(2) else {
+            panic!("expected y3 binary expression");
+        };
+        assert_eq!(y3.op, BinaryOp::BitOr);
+        assert!(matches!(*y3.left, Expression::Binary(ref b) if b.op == BinaryOp::BitXor));
+
+        let Expression::Binary(y4) = assignment_value(3) else {
+            panic!("expected y4 binary expression");
+        };
+        assert_eq!(y4.op, BinaryOp::BitAnd);
+        assert!(matches!(*y4.left, Expression::Binary(ref b) if b.op == BinaryOp::Eq));
+        assert!(matches!(*y4.right, Expression::Binary(ref b) if b.op == BinaryOp::Ne));
     }
 
     #[test]

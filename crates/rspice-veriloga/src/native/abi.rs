@@ -226,6 +226,36 @@ pub extern "C" fn rspice_mod(left: f64, right: f64) -> f64 {
     left % right
 }
 
+/// External helper function for Verilog-A left shift.
+#[unsafe(export_name = "rspice_shl")]
+pub extern "C" fn rspice_shl(left: f64, right: f64) -> f64 {
+    ((left as i64) << (right as i64)) as f64
+}
+
+/// External helper function for Verilog-A arithmetic right shift.
+#[unsafe(export_name = "rspice_shr")]
+pub extern "C" fn rspice_shr(left: f64, right: f64) -> f64 {
+    ((left as i64) >> (right as i64)) as f64
+}
+
+/// External helper function for Verilog-A bitwise and.
+#[unsafe(export_name = "rspice_bitand")]
+pub extern "C" fn rspice_bitand(left: f64, right: f64) -> f64 {
+    ((left as i64) & (right as i64)) as f64
+}
+
+/// External helper function for Verilog-A bitwise or.
+#[unsafe(export_name = "rspice_bitor")]
+pub extern "C" fn rspice_bitor(left: f64, right: f64) -> f64 {
+    ((left as i64) | (right as i64)) as f64
+}
+
+/// External helper function for Verilog-A bitwise xor.
+#[unsafe(export_name = "rspice_bitxor")]
+pub extern "C" fn rspice_bitxor(left: f64, right: f64) -> f64 {
+    ((left as i64) ^ (right as i64)) as f64
+}
+
 /// External helper function for Laplace state-space filter step.
 ///
 /// # Safety
