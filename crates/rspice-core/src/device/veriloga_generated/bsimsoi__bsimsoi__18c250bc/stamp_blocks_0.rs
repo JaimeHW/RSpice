@@ -4345,7 +4345,7 @@ impl Instance {
         s.v[1261] = if s.b[1261] { 1.0 } else { 0.0 };
 
         if ((!s.b[1260]) && s.b[1261]) {
-            s.store_mul_ad(848, A::div_scaled_inputs2(s.ad_value(875), 1.0, s.ad_value(965), (-1.0), s.ad_value(415), 1.0), A::add_scaled_inputs3(A::add_scaled_product(s.ad_value(956), 1.0, s.ad_value(958), s.ad_value(841), 1.0), 1.0, s.ad_value(856), 1.0, A::div_scaled_product(s.ad_value(957), A::sub(s.ad_value(875), s.ad_value(965)), 1.0, s.ad_value(415), 1.0), 1.0));
+            s.store_mul_shared_diff_quotient_add_product_input_product_quotient(848, 875, 965, 415, 956, 958, 841, 856, 957);
         }
 
         s.b[1262] = (p.p62 == 3.0);

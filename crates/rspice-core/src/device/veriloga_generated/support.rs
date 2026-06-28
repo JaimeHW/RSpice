@@ -3369,6 +3369,59 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_shared_diff_quotient_add_product_input_product_quotient(&mut self, index: usize, diff_left: usize, diff_right: usize, denominator: usize, sum_value: usize, sum_product_left: usize, sum_product_right: usize, sum_input: usize, quotient_product_left: usize) {
+        let diff_left_value = self.v[diff_left];
+        let diff_right_value = self.v[diff_right];
+        let denominator_value = self.v[denominator];
+        let sum_value_raw = self.v[sum_value];
+        let sum_product_left_value = self.v[sum_product_left];
+        let sum_product_right_value = self.v[sum_product_right];
+        let sum_input_value = self.v[sum_input];
+        let quotient_product_left_value = self.v[quotient_product_left];
+        let diff_left_dn = self.dn[diff_left];
+        let diff_right_dn = self.dn[diff_right];
+        let denominator_dn = self.dn[denominator];
+        let sum_value_dn = self.dn[sum_value];
+        let sum_product_left_dn = self.dn[sum_product_left];
+        let sum_product_right_dn = self.dn[sum_product_right];
+        let sum_input_dn = self.dn[sum_input];
+        let quotient_product_left_dn = self.dn[quotient_product_left];
+        let diff_left_db = self.db[diff_left];
+        let diff_right_db = self.db[diff_right];
+        let denominator_db = self.db[denominator];
+        let sum_value_db = self.db[sum_value];
+        let sum_product_left_db = self.db[sum_product_left];
+        let sum_product_right_db = self.db[sum_product_right];
+        let sum_input_db = self.db[sum_input];
+        let quotient_product_left_db = self.db[quotient_product_left];
+        let reciprocal = 1.0 / denominator_value;
+        let diff_value = diff_left_value - diff_right_value;
+        let diff_quotient = diff_value * reciprocal;
+        let denominator_derivative_scale = -diff_quotient * reciprocal;
+        let product_quotient = quotient_product_left_value * diff_value * reciprocal;
+        let product_quotient_denominator_derivative_scale = -product_quotient * reciprocal;
+        let product_sum_value = sum_value_raw + sum_product_left_value * sum_product_right_value;
+        let right_value = product_sum_value + sum_input_value + product_quotient;
+        self.v[index] = diff_quotient * right_value;
+        for axis in 0..NODE_COUNT {
+            let diff_derivative = diff_left_dn[axis] - diff_right_dn[axis];
+            let left_derivative = diff_derivative * reciprocal + denominator_dn[axis] * denominator_derivative_scale;
+            let product_sum_derivative = sum_value_dn[axis] + sum_product_left_dn[axis] * sum_product_right_value + sum_product_left_value * sum_product_right_dn[axis];
+            let product_quotient_derivative = (quotient_product_left_dn[axis] * diff_value + quotient_product_left_value * diff_derivative) * reciprocal + denominator_dn[axis] * product_quotient_denominator_derivative_scale;
+            let right_derivative = product_sum_derivative + sum_input_dn[axis] + product_quotient_derivative;
+            self.dn[index][axis] = left_derivative * right_value + diff_quotient * right_derivative;
+        }
+        for axis in 0..BRANCH_COUNT {
+            let diff_derivative = diff_left_db[axis] - diff_right_db[axis];
+            let left_derivative = diff_derivative * reciprocal + denominator_db[axis] * denominator_derivative_scale;
+            let product_sum_derivative = sum_value_db[axis] + sum_product_left_db[axis] * sum_product_right_value + sum_product_left_value * sum_product_right_db[axis];
+            let product_quotient_derivative = (quotient_product_left_db[axis] * diff_value + quotient_product_left_value * diff_derivative) * reciprocal + denominator_db[axis] * product_quotient_denominator_derivative_scale;
+            let right_derivative = product_sum_derivative + sum_input_db[axis] + product_quotient_derivative;
+            self.db[index][axis] = left_derivative * right_value + diff_quotient * right_derivative;
+        }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_add_scaled_sub_value_product_rhs(&mut self, index: usize, left: usize, scalar: f64, subtrahend: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
         let left_value = self.v[left];
         let left_dn = self.dn[left];
@@ -17518,6 +17571,59 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value * right_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * (value.dn[axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale); }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * (value.db[axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_shared_diff_quotient_add_product_input_product_quotient(&mut self, index: usize, diff_left: usize, diff_right: usize, denominator: usize, sum_value: usize, sum_product_left: usize, sum_product_right: usize, sum_input: usize, quotient_product_left: usize) {
+        let diff_left_value = self.v[diff_left];
+        let diff_right_value = self.v[diff_right];
+        let denominator_value = self.v[denominator];
+        let sum_value_raw = self.v[sum_value];
+        let sum_product_left_value = self.v[sum_product_left];
+        let sum_product_right_value = self.v[sum_product_right];
+        let sum_input_value = self.v[sum_input];
+        let quotient_product_left_value = self.v[quotient_product_left];
+        let diff_left_dn = self.dn[diff_left];
+        let diff_right_dn = self.dn[diff_right];
+        let denominator_dn = self.dn[denominator];
+        let sum_value_dn = self.dn[sum_value];
+        let sum_product_left_dn = self.dn[sum_product_left];
+        let sum_product_right_dn = self.dn[sum_product_right];
+        let sum_input_dn = self.dn[sum_input];
+        let quotient_product_left_dn = self.dn[quotient_product_left];
+        let diff_left_db = self.db[diff_left];
+        let diff_right_db = self.db[diff_right];
+        let denominator_db = self.db[denominator];
+        let sum_value_db = self.db[sum_value];
+        let sum_product_left_db = self.db[sum_product_left];
+        let sum_product_right_db = self.db[sum_product_right];
+        let sum_input_db = self.db[sum_input];
+        let quotient_product_left_db = self.db[quotient_product_left];
+        let reciprocal = 1.0 / denominator_value;
+        let diff_value = diff_left_value - diff_right_value;
+        let diff_quotient = diff_value * reciprocal;
+        let denominator_derivative_scale = -diff_quotient * reciprocal;
+        let product_quotient = quotient_product_left_value * diff_value * reciprocal;
+        let product_quotient_denominator_derivative_scale = -product_quotient * reciprocal;
+        let product_sum_value = sum_value_raw + sum_product_left_value * sum_product_right_value;
+        let right_value = product_sum_value + sum_input_value + product_quotient;
+        self.v[index] = diff_quotient * right_value;
+        for axis in 0..NODE_COUNT {
+            let diff_derivative = diff_left_dn[axis] - diff_right_dn[axis];
+            let left_derivative = diff_derivative * reciprocal + denominator_dn[axis] * denominator_derivative_scale;
+            let product_sum_derivative = sum_value_dn[axis] + sum_product_left_dn[axis] * sum_product_right_value + sum_product_left_value * sum_product_right_dn[axis];
+            let product_quotient_derivative = (quotient_product_left_dn[axis] * diff_value + quotient_product_left_value * diff_derivative) * reciprocal + denominator_dn[axis] * product_quotient_denominator_derivative_scale;
+            let right_derivative = product_sum_derivative + sum_input_dn[axis] + product_quotient_derivative;
+            self.dn[index][axis] = left_derivative * right_value + diff_quotient * right_derivative;
+        }
+        for axis in 0..BRANCH_COUNT {
+            let diff_derivative = diff_left_db[axis] - diff_right_db[axis];
+            let left_derivative = diff_derivative * reciprocal + denominator_db[axis] * denominator_derivative_scale;
+            let product_sum_derivative = sum_value_db[axis] + sum_product_left_db[axis] * sum_product_right_value + sum_product_left_value * sum_product_right_db[axis];
+            let product_quotient_derivative = (quotient_product_left_db[axis] * diff_value + quotient_product_left_value * diff_derivative) * reciprocal + denominator_db[axis] * product_quotient_denominator_derivative_scale;
+            let right_derivative = product_sum_derivative + sum_input_db[axis] + product_quotient_derivative;
+            self.db[index][axis] = left_derivative * right_value + diff_quotient * right_derivative;
+        }
     }
 
     #[inline]
