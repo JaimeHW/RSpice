@@ -1205,6 +1205,12 @@ impl VerilogADevice {
                 context.delay_buffers.as_mut_ptr()
             },
             delay_buffers_len: context.delay_buffers.len(),
+            cross_detectors: if context.cross_detectors.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.cross_detectors.as_mut_ptr()
+            },
+            cross_detectors_len: context.cross_detectors.len(),
         }
     }
 

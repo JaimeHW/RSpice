@@ -61,6 +61,7 @@ pub(crate) enum NativeOp {
     TransitionState(usize),
     SlewState(usize),
     AbsDelayState(usize),
+    CrossState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -542,6 +543,17 @@ impl NativeProgram {
                     depth -= 1;
                     ops.push(NativeOp::AbsDelayState(*buffer_id));
                 }
+                Instruction::CrossState(detector_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::CrossState(*detector_id));
+                }
                 Instruction::WhiteNoise => {
                     require_stack(
                         model.clone(),
@@ -749,12 +761,6 @@ impl NativeProgram {
                     }
                     ops.push(NativeOp::LoadCurrent(pair_index));
                     push_stack(&mut depth, &mut max_stack_depth);
-                }
-                _ => {
-                    return Err(JitError::unsupported_program_op(
-                        model,
-                        instruction_name(instruction),
-                    ));
                 }
             }
         }
@@ -1983,6 +1989,78 @@ mod tests {
                 limits(0, 0),
             )
             .expect_err("absdelay state must stay out of restricted entries");
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
+            assert!(
+                msg.contains("no interpreter fallback"),
+                "{entry_kind:?}: got {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_cross_state_as_native_context_detector() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(1.0),
+                Instruction::CrossState(4),
+            ],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("cross", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("cross state has native x64 helper-call lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(1.0),
+                NativeOp::CrossState(4),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowering_rejects_cross_state_without_value_and_direction() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushTemperature, Instruction::CrossState(0)],
+        };
+
+        let error = NativeProgram::from_bytecode(
+            "bad-cross",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect_err("cross state requires value and direction operands");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("CrossState requires stack depth 2"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_cross_state_in_restricted_entry_kinds() {
+        for (entry_kind, expected) in [
+            (EntryKind::StaticCondition, "StaticCondition CrossState"),
+            (EntryKind::ParameterDefault, "ParameterDefault CrossState"),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::CrossState(0),
+                ],
+            };
+
+            let error =
+                NativeProgram::from_bytecode("bad-cross-entry", entry_kind, &program, limits(0, 0))
+                    .expect_err("cross state must stay out of restricted entries");
             let msg = error.to_string();
             assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
             assert!(

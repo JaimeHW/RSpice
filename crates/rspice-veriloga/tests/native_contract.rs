@@ -298,6 +298,23 @@ endmodule
     )
 }
 
+fn cross_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_cross_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = cross(V(p, n), 1);
+        I(p, n) <+ y;
+    end
+endmodule
+"#,
+    )
+}
+
 fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1560,6 +1577,40 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
         .expect("native absdelay interpolation succeeds");
     assert!((device.variable("y").unwrap() - 2.0).abs() < 1e-12);
     assert!((currents[0] - 2.0).abs() < 1e-12);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_cross_assignments_without_fallback() {
+    let model = cross_assignment_model();
+    let mut device =
+        VerilogADevice::try_new("XNG1", model, &[1, 0]).expect("cross model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.set_analysis_type(0);
+    device.update_voltages(&[7.0]);
+    let dc_currents = device
+        .try_evaluate()
+        .expect("native cross DC evaluation succeeds");
+    assert_eq!(device.variable("y"), Some(0.0));
+    assert_eq!(dc_currents[0], 0.0);
+
+    device.set_analysis_type(2);
+    for (time, voltage, expected) in [(0.0, -1.0, 0.0), (0.5, 1.0, 1.0), (1.0, 2.0, 0.0)] {
+        device.set_time(time);
+        device.update_voltages(&[voltage]);
+        let currents = device
+            .try_evaluate()
+            .expect("native cross transient evaluation succeeds");
+        assert!(
+            (device.variable("y").unwrap() - expected).abs() < 1e-12,
+            "time: {time}"
+        );
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

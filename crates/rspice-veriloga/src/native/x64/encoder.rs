@@ -913,6 +913,8 @@ mod tests {
             slew_filters_len: 0,
             delay_buffers: std::ptr::null_mut(),
             delay_buffers_len: 0,
+            cross_detectors: std::ptr::null_mut(),
+            cross_detectors_len: 0,
         };
 
         let mut encoder = X64Encoder::new();
