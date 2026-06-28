@@ -142,6 +142,19 @@ endmodule
     )
 }
 
+fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_thermal_voltage(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ $vt * V(p, n);
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -532,6 +545,26 @@ fn native_device_executes_scalar_simulator_context_reads() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_executes_thermal_voltage_context_read() {
+    let model = thermal_voltage_model();
+    let mut device = VerilogADevice::try_new("VT1", model, &[1, 0])
+        .expect("thermal voltage model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_temperature(315.0);
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native thermal-voltage evaluation succeeds");
+
+    assert!(
+        (currents[0] - (thermal_voltage(315.0) * 4.0)).abs() < 1e-15,
+        "currents: {currents:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_executes_param_given_and_port_connected_reads() {
     let model = flag_context_model();
 
@@ -765,4 +798,11 @@ fn native_new_panics_instead_of_falling_back() {
         .or_else(|| panic.downcast_ref::<&'static str>().copied())
         .unwrap_or("<non-string panic>");
     assert_native_hard_fail_message(msg);
+}
+
+fn thermal_voltage(temperature: f64) -> f64 {
+    const K_BOLTZMANN: f64 = 1.380649e-23;
+    const Q_ELECTRON: f64 = 1.602176634e-19;
+
+    K_BOLTZMANN * temperature / Q_ELECTRON
 }
