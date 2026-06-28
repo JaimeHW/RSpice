@@ -5451,6 +5451,25 @@ fn stamp() {
             ),
             "{add_ad_rhs}"
         );
+
+        let add_scaled_sqrt_sub_square = helper_body(
+            &support,
+            "fn store_add_scaled_inputs3_sqrt_third_sub_square_offset(",
+        );
+        assert!(
+            !add_scaled_sqrt_sub_square.contains("_node_derivatives = self.node_derivatives"),
+            "{add_scaled_sqrt_sub_square}"
+        );
+        assert!(
+            !add_scaled_sqrt_sub_square.contains("_branch_derivatives = self.branch_derivatives"),
+            "{add_scaled_sqrt_sub_square}"
+        );
+        assert!(
+            add_scaled_sqrt_sub_square.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale) + (self.node_derivatives[sqrt_left][axis] - self.node_derivatives[sqrt_right][axis]) * sqrt_derivative_scale;"
+            ),
+            "{add_scaled_sqrt_sub_square}"
+        );
     }
 
     #[test]
@@ -12049,20 +12068,12 @@ fn generate_scratch_operation_helpers() -> String {
         "        let second_raw = self.values[second];",
         "        let sqrt_left_raw = self.values[sqrt_left];",
         "        let sqrt_right_raw = self.values[sqrt_right];",
-        "        let first_node_derivatives = self.node_derivatives[first];",
-        "        let second_node_derivatives = self.node_derivatives[second];",
-        "        let sqrt_left_node_derivatives = self.node_derivatives[sqrt_left];",
-        "        let sqrt_right_node_derivatives = self.node_derivatives[sqrt_right];",
-        "        let first_branch_derivatives = self.branch_derivatives[first];",
-        "        let second_branch_derivatives = self.branch_derivatives[second];",
-        "        let sqrt_left_branch_derivatives = self.branch_derivatives[sqrt_left];",
-        "        let sqrt_right_branch_derivatives = self.branch_derivatives[sqrt_right];",
         "        let sqrt_delta = sqrt_left_raw - sqrt_right_raw;",
         "        let root = (sqrt_delta * sqrt_delta + sqrt_offset).sqrt();",
         "        let sqrt_derivative_scale = sqrt_delta * sqrt_scale / root;",
         "        self.values[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first_node_derivatives[axis] * first_scale + second_node_derivatives[axis] * second_scale) + (sqrt_left_node_derivatives[axis] - sqrt_right_node_derivatives[axis]) * sqrt_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first_branch_derivatives[axis] * first_scale + second_branch_derivatives[axis] * second_scale) + (sqrt_left_branch_derivatives[axis] - sqrt_right_branch_derivatives[axis]) * sqrt_derivative_scale; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale) + (self.node_derivatives[sqrt_left][axis] - self.node_derivatives[sqrt_right][axis]) * sqrt_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (self.branch_derivatives[first][axis] * first_scale + self.branch_derivatives[second][axis] * second_scale) + (self.branch_derivatives[sqrt_left][axis] - self.branch_derivatives[sqrt_right][axis]) * sqrt_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
