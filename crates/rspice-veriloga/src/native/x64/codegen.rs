@@ -1,9 +1,10 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
-    rspice_acos, rspice_asin, rspice_atan, rspice_cos, rspice_cosh, rspice_exp, rspice_limexp,
-    rspice_log, rspice_log10, rspice_sin, rspice_sinh, rspice_tan, rspice_tanh,
+    rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_cos, rspice_cosh, rspice_exp,
+    rspice_limexp, rspice_log, rspice_log10, rspice_pow, rspice_sin, rspice_sinh, rspice_tan,
+    rspice_tanh,
 };
-use crate::native::expr::UnaryMathOp;
+use crate::native::expr::{BinaryMathOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
 
@@ -178,6 +179,7 @@ impl FunctionCompiler {
                 NativeOp::IfElse => self.emit_ifelse()?,
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
+                NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
             }
         }
 
@@ -392,6 +394,56 @@ impl FunctionCompiler {
         }
         self.encoder
             .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+    }
+
+    fn emit_binary_math(&mut self, op: BinaryMathOp) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("binary math requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let left = XMM_STACK[self.depth - 2];
+        let right = XMM_STACK[self.depth - 1];
+        self.emit_binary_helper_call(left, right, binary_math_helper(op));
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_binary_helper_call(&mut self, left: Xmm, right: Xmm, helper: BinaryHelper) {
+        debug_assert!(self.uses_helper_calls);
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != left && register != right {
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+            }
+        }
+
+        if left != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, left);
+        }
+        if right != Xmm::Xmm1 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm1, right);
+        }
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != left && register != right {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(left, Gpr::R11, call_result_disp());
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -713,6 +765,7 @@ enum BinaryOp {
 }
 
 type UnaryHelper = extern "C" fn(f64) -> f64;
+type BinaryHelper = extern "C" fn(f64, f64) -> f64;
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
@@ -732,6 +785,13 @@ fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     }
 }
 
+fn binary_math_helper(op: BinaryMathOp) -> BinaryHelper {
+    match op {
+        BinaryMathOp::Pow => rspice_pow,
+        BinaryMathOp::Atan2 => rspice_atan2,
+    }
+}
+
 fn call_spill_disp(index: usize) -> i32 {
     CALL_SHADOW_BYTES + (index * WORD_BYTES) as i32
 }
@@ -744,7 +804,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
     program
         .ops()
         .iter()
-        .any(|op| matches!(op, NativeOp::UnaryMath(_)))
+        .any(|op| matches!(op, NativeOp::UnaryMath(_) | NativeOp::BinaryMath(_)))
 }
 
 fn byte_disp(index: usize) -> JitResult<i32> {
@@ -1378,6 +1438,66 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_calls_binary_math_helpers_and_preserves_state() {
+        let cases = [
+            (
+                "pow-operator",
+                Instruction::Pow,
+                2.0,
+                3.0,
+                runtime_pow(2.0, 3.0),
+            ),
+            (
+                "fn-pow",
+                Instruction::FnPow,
+                4.0,
+                0.5,
+                runtime_pow(4.0, 0.5),
+            ),
+            (
+                "atan2",
+                Instruction::Atan2,
+                0.5,
+                0.25,
+                runtime_atan2(0.5, 0.25),
+            ),
+        ];
+
+        for (name, op, left, right, binary_expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    op,
+                    Instruction::Add,
+                    Instruction::PushTime,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile binary helper-call leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate binary helper leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = 310.0;
+            ctx.time = 2.0;
+            let vars = [7.0_f64];
+
+            assert_eq!(
+                f(&ctx, vars.as_ptr()).to_bits(),
+                (310.0 + ((7.0 + binary_expected) + 2.0)).to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_spills_max_depth_across_helper_call() {
         let input = 0.25;
         let program = native_program(
@@ -1408,6 +1528,40 @@ mod tests {
         assert_eq!(
             f(&ctx, std::ptr::null()).to_bits(),
             (1.0 + 2.0 + 3.0 + 4.0 + 5.0 + runtime_exp(input)).to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_spills_max_depth_across_binary_helper_call() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushConst(5.0),
+                Instruction::PushConst(2.0),
+                Instruction::Pow,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            0,
+        );
+        let bytes =
+            compile_value_function(&program).expect("compile max-depth binary helper-call leaf");
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate max-depth binary helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (1.0 + (2.0 + (3.0 + (4.0 + runtime_pow(5.0, 2.0))))).to_bits()
         );
     }
 
@@ -1628,6 +1782,14 @@ mod tests {
 
     fn runtime_atan(value: f64) -> f64 {
         std::hint::black_box(value).atan()
+    }
+
+    fn runtime_pow(left: f64, right: f64) -> f64 {
+        std::hint::black_box(left).powf(std::hint::black_box(right))
+    }
+
+    fn runtime_atan2(left: f64, right: f64) -> f64 {
+        std::hint::black_box(left).atan2(std::hint::black_box(right))
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {

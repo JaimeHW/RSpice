@@ -343,6 +343,27 @@ endmodule
     )
 }
 
+fn binary_math_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_binary_math_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    real gain;
+    analog begin
+        x = $abstime + 0.25;
+        gain = pow(x + 2.0, 2.0)
+             + ((x + 1.0) ** 3.0)
+             + atan2(x, x + 0.5);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -990,6 +1011,38 @@ fn native_device_executes_transcendental_assignments() {
 
         assert_eq!(device.variable("x"), Some(x), "{name}");
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
+        assert!(
+            (currents[0] - (expected_gain * 1.5)).abs() < 1e-12,
+            "{name}: currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_binary_math_assignments() {
+    let model = binary_math_assignment_model();
+    let cases = [("dc-ish", 0.0), ("mid", 0.5), ("large", 1.0)];
+
+    for (name, time) in cases {
+        let mut device = VerilogADevice::try_new("BINMATH1", model.clone(), &[1, 0])
+            .expect("binary math assignment model uses native JIT");
+        assert!(device.is_using_native());
+        device.set_time(time);
+        device.update_voltages(&[1.5]);
+
+        let x = time + 0.25;
+        let expected_gain = (x + 2.0).powf(2.0) + (x + 1.0).powf(3.0) + x.atan2(x + 0.5);
+        let currents = device
+            .try_evaluate()
+            .expect("native binary math assignment evaluation succeeds");
+
+        assert_eq!(device.variable("x"), Some(x), "{name}");
+        assert!(
+            (device.variable("gain").unwrap() - expected_gain).abs() < 1e-12,
+            "{name}: gain={:?}, expected={expected_gain}",
+            device.variable("gain")
+        );
         assert!(
             (currents[0] - (expected_gain * 1.5)).abs() < 1e-12,
             "{name}: currents: {currents:?}"
