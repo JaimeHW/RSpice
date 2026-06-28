@@ -168,6 +168,23 @@ endmodule
     )
 }
 
+fn abs_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_abs_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = abs($temperature - 320.0);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -590,6 +607,24 @@ fn native_device_executes_sqrt_expression() {
         .expect("native sqrt expression evaluation succeeds");
 
     assert!((currents[0] - 5.0).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_abs_assignment() {
+    let model = abs_assignment_model();
+    let mut device = VerilogADevice::try_new("ABS1", model, &[1, 0])
+        .expect("abs assignment model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_temperature(315.0);
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native abs assignment evaluation succeeds");
+
+    assert!((currents[0] - 20.0).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(device.variable("gain"), Some(5.0));
 }
 
 #[cfg(target_arch = "x86_64")]

@@ -136,6 +136,27 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0x66, 0x57, dst, src);
     }
 
+    pub(crate) fn movq_r64_xmm(&mut self, dst: Gpr, src: Xmm) {
+        self.emit_u8(0x66);
+        self.emit_rex(true, src.code(), 0, dst.code());
+        self.emit_all(&[0x0F, 0x7E]);
+        self.emit_modrm(0b11, src.code(), dst.code());
+    }
+
+    pub(crate) fn movq_xmm_r64(&mut self, dst: Xmm, src: Gpr) {
+        self.emit_u8(0x66);
+        self.emit_rex(true, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, 0x6E]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
+    pub(crate) fn btr_r64_imm8(&mut self, reg: Gpr, bit: u8) {
+        self.emit_rex(true, 0, 0, reg.code());
+        self.emit_all(&[0x0F, 0xBA]);
+        self.emit_modrm(0b11, 0b110, reg.code());
+        self.emit_u8(bit);
+    }
+
     pub(crate) fn sqrtsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x51, dst, src);
     }
@@ -361,6 +382,23 @@ mod tests {
         encoder.sqrtsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm1);
 
         assert_eq!(encoder.into_bytes(), [0xF2, 0x0F, 0x51, 0xC9]);
+    }
+
+    #[test]
+    fn encodes_scalar_abs_integer_bit_clear_sequence() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.movq_r64_xmm(Gpr::Rax, Xmm::Xmm2);
+        encoder.btr_r64_imm8(Gpr::Rax, 63);
+        encoder.movq_xmm_r64(Xmm::Xmm2, Gpr::Rax);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x66, 0x48, 0x0F, 0x7E, 0xD0, 0x48, 0x0F, 0xBA, 0xF0, 0x3F, 0x66, 0x48, 0x0F, 0x6E,
+                0xD0,
+            ]
+        );
     }
 
     #[cfg(all(feature = "native", target_arch = "x86_64"))]

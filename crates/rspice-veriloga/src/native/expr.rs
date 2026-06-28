@@ -38,6 +38,7 @@ pub(crate) enum NativeOp {
     Mul,
     Div,
     Neg,
+    Abs,
     Sqrt,
 }
 
@@ -262,6 +263,16 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::Neg);
+                }
+                Instruction::Abs => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::Abs);
                 }
                 Instruction::Sqrt => {
                     require_stack(
@@ -577,6 +588,20 @@ mod tests {
                 NativeOp::Sqrt,
             ]
         );
+        assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_abs_as_native_unary_op() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushTemperature, Instruction::Abs],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("abs", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("abs has a direct native x64 lowering");
+
+        assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, NativeOp::Abs]);
         assert_eq!(lowered.max_stack_depth(), 1);
     }
 
