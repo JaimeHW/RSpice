@@ -42,6 +42,7 @@ pub(crate) enum NativeOp {
     Sqrt,
     Compare(CompareOp),
     Logical(LogicalOp),
+    IfElse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -337,6 +338,17 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::Logical(LogicalOp::Not));
+                }
+                Instruction::IfElse => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        3,
+                    )?;
+                    depth -= 2;
+                    ops.push(NativeOp::IfElse);
                 }
                 Instruction::PushCurrent(pos, neg) => {
                     let pair_index =
@@ -793,6 +805,33 @@ mod tests {
             &[NativeOp::LoadTemperature, NativeOp::Logical(LogicalOp::Not)]
         );
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_ifelse_as_native_stack_select_op() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(7.0),
+                Instruction::PushConst(3.0),
+                Instruction::IfElse,
+            ],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("ifelse", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("ifelse has a direct native x64 lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(7.0),
+                NativeOp::Const(3.0),
+                NativeOp::IfElse,
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 3);
     }
 
     #[test]

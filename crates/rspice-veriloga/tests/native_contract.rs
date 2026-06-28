@@ -263,6 +263,23 @@ endmodule
     )
 }
 
+fn ifelse_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_ifelse_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = $abstime ? 2.0 : 3.0;
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -784,6 +801,36 @@ fn native_device_preserves_logical_truthiness_boundaries() {
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
             (currents[0] - (expected_gain * 2.0)).abs() < 1e-12,
+            "{name}: currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_ifelse_assignments() {
+    let model = ifelse_assignment_model();
+    let cases = [
+        ("within-epsilon", 0.5e-15, 3.0),
+        ("at-epsilon", 1.0e-15, 3.0),
+        ("outside-epsilon", 2.0e-15, 2.0),
+        ("unordered", f64::NAN, 3.0),
+    ];
+
+    for (name, time, expected_gain) in cases {
+        let mut device = VerilogADevice::try_new("IFELSE1", model.clone(), &[1, 0])
+            .expect("ifelse assignment model uses native JIT");
+        assert!(device.is_using_native());
+        device.set_time(time);
+        device.update_voltages(&[4.0]);
+
+        let currents = device
+            .try_evaluate()
+            .expect("native ifelse assignment evaluation succeeds");
+
+        assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
+        assert!(
+            (currents[0] - (expected_gain * 4.0)).abs() < 1e-12,
             "{name}: currents: {currents:?}"
         );
     }

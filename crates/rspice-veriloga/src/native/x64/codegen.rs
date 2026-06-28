@@ -153,6 +153,7 @@ impl FunctionCompiler {
                 NativeOp::Sqrt => self.emit_sqrt()?,
                 NativeOp::Compare(op) => self.emit_compare(op)?,
                 NativeOp::Logical(op) => self.emit_logical(op)?,
+                NativeOp::IfElse => self.emit_ifelse()?,
             }
         }
 
@@ -398,6 +399,27 @@ impl FunctionCompiler {
         self.encoder.setcc_r8(ConditionCode::Below, dst);
         self.encoder.setcc_r8(ConditionCode::NotParity, scratch);
         self.encoder.and_r8_r8(dst, scratch);
+    }
+
+    fn emit_ifelse(&mut self) -> JitResult<()> {
+        if self.depth < 3 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("ifelse requires stack depth 3, found {}", self.depth).into(),
+            });
+        }
+
+        let cond = XMM_STACK[self.depth - 3];
+        let then_value = XMM_STACK[self.depth - 2];
+        let else_value = XMM_STACK[self.depth - 1];
+        self.emit_truthy_to_gpr(cond, Gpr::R10);
+        self.encoder.movq_r64_xmm(Gpr::Rax, else_value);
+        self.encoder.movq_r64_xmm(Gpr::R11, then_value);
+        self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cmovne_r64_r64(Gpr::Rax, Gpr::R11);
+        self.encoder.movq_xmm_r64(cond, Gpr::Rax);
+        self.depth -= 2;
+        Ok(())
     }
 
     fn emit_voltage_load(&mut self, pos: VoltageNode, neg: VoltageNode) -> JitResult<()> {
@@ -976,6 +998,53 @@ mod tests {
             let ctx = eval_context(&[], &[], &[], &[]);
 
             assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_ifelse() {
+        let then_nan = f64::from_bits(0x7ff8_0000_0000_0001);
+        let else_neg_zero = -0.0_f64;
+        let cases = [
+            ("true", 2.0e-15, 7.0, 3.0, 7.0_f64.to_bits()),
+            ("within-epsilon", 0.5e-15, 7.0, 3.0, 3.0_f64.to_bits()),
+            ("at-epsilon", 1.0e-15, 7.0, 3.0, 3.0_f64.to_bits()),
+            ("unordered", f64::NAN, 7.0, 3.0, 3.0_f64.to_bits()),
+            (
+                "selected-then-bits",
+                2.0e-15,
+                then_nan,
+                3.0,
+                then_nan.to_bits(),
+            ),
+            (
+                "selected-else-bits",
+                0.0,
+                7.0,
+                else_neg_zero,
+                else_neg_zero.to_bits(),
+            ),
+        ];
+
+        for (name, cond, then_value, else_value, expected_bits) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(cond),
+                    Instruction::PushConst(then_value),
+                    Instruction::PushConst(else_value),
+                    Instruction::IfElse,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile ifelse leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate ifelse leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected_bits, "{name}");
         }
     }
 
