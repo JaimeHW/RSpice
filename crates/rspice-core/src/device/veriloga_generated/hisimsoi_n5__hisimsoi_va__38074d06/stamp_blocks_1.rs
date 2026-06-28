@@ -2611,7 +2611,7 @@ impl Instance {
 
         if ((s.b[1293] && (!s.b[1306])) && (!s.b[1307])) {
             s.store_offset(1305, 1305, 1e-50);
-            s.store_exp_div_scaled_inputs_indices(1295, 133, -1.0, 1305, 1.0);
+            s.store_ad_value(1295, A::exp_div_scaled_inputs(s.ad_value(133), -1.0, s.ad_value(1305), 1.0));
             s.store_mul_product3_rhs(263, 1295, s.ad_value(132), s.ad_value(1305), s.ad_value(199), 1.0);
         }
 

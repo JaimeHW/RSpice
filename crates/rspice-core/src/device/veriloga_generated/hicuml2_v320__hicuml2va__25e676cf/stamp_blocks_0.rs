@@ -2014,12 +2014,12 @@ impl Instance {
         s.v[442] = if s.b[442] { 1.0 } else { 0.0 };
 
         if ((s.b[430] && s.b[437]) && s.b[442]) {
-            s.store_mul_exp_ad_rhs(434, 63, A::div_scaled_inputs(s.ad_value(432), -1.0, A::mul(s.ad_value(433), s.ad_value(436)), 1.0));
+            s.store_mul_ad_rhs(434, 63, A::exp_div_scaled_inputs(s.ad_value(432), -1.0, A::mul(s.ad_value(433), s.ad_value(436)), 1.0));
             s.store_mul_ad_rhs(435, 434, A::add_scaled_offset_product_lhs(s.ad_value(433), 1.0, A::div(s.ad_value(432), s.ad_value(433)), 1.0, A::sub(s.ad_value(431), s.ad_value(433)), 1.0));
         }
 
         if ((s.b[430] && s.b[437]) && (!s.b[442])) {
-            s.store_mul_ad_product_rhs(435, 63, s.ad_value(431), A::exp(A::div_scaled_inputs(s.ad_value(432), -1.0, A::mul(s.ad_value(431), s.ad_value(436)), 1.0)));
+            s.store_mul_ad_product_rhs(435, 63, s.ad_value(431), A::exp_div_scaled_inputs(s.ad_value(432), -1.0, A::mul(s.ad_value(431), s.ad_value(436)), 1.0));
         }
 
         s.b[443] = (p.p34 > 0.0);
@@ -2167,7 +2167,7 @@ impl Instance {
         if (s.b[461] && s.b[464]) {
             s.store_exp_scaled_input_ad(462, A::ln(A::div(s.ad_value(212), s.ad_value(29))), (1.0 - (1.0 / p.p45)));
             s.store_mul_ad_affine_product_lhs(463, A::div(s.ad_value(205), s.ad_value(30)), s.ad_value(64), -1.0, 0.0, 462);
-            s.store_mul_exp_ad_rhs(191, 463, A::div_scaled_inputs(s.ad_value(65), -1.0, s.ad_value(462), 1.0));
+            s.store_mul_ad_rhs(191, 463, A::exp_div_scaled_inputs(s.ad_value(65), -1.0, s.ad_value(462), 1.0));
         }
 
         s.b[465] = (((p.p29 == 0.0) && (s.v[26] > 0.0)) && (s.v[27] > 0.0));
@@ -2176,7 +2176,7 @@ impl Instance {
         if ((s.b[461] && (!s.b[464])) && s.b[465]) {
             s.store_exp_scaled_input_ad(462, A::ln(A::div(s.ad_value(211), s.ad_value(26))), (1.0 - (1.0 / p.p41)));
             s.store_mul_ad_affine_product_lhs(463, A::div(s.ad_value(202), s.ad_value(27)), s.ad_value(64), -1.0, 0.0, 462);
-            s.store_mul_exp_ad_rhs(191, 463, A::div_scaled_inputs(s.ad_value(65), -1.0, s.ad_value(462), 1.0));
+            s.store_mul_ad_rhs(191, 463, A::exp_div_scaled_inputs(s.ad_value(65), -1.0, s.ad_value(462), 1.0));
         }
 
         if ((s.b[461] && (!s.b[464])) && (!s.b[465])) {

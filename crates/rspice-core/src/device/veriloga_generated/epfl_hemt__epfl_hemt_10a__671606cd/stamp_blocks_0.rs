@@ -50,7 +50,7 @@ impl Instance {
 
         s.store_div_from_scalar(64, 1.0, 63);
 
-        s.store_scaled_exp_ad(59, A::div_scaled_inputs(s.ad_value(48), -1.0, s.ad_value(63), (2.0 * s.v[39])), (((s.v[58] * s.v[56])) as f64).sqrt());
+        s.store_scale_ad(59, A::exp_div_scaled_inputs(s.ad_value(48), -1.0, s.ad_value(63), (2.0 * s.v[39])), (((s.v[58] * s.v[56])) as f64).sqrt());
 
         s.store_ln_ad(30, A::max_with_scalar(A::div_from_scalar(p.p11, s.ad_value(59)), 1e-38));
 

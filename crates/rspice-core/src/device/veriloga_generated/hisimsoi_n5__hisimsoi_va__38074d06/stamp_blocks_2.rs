@@ -3873,7 +3873,7 @@ impl Instance {
 
         if (((s.b[735] && s.b[802]) && s.b[803]) && (!s.b[845])) {
             s.store_offset(844, 844, 1e-50);
-            s.store_exp_div_scaled_inputs_indices(834, 133, -1.0, 844, 1.0);
+            s.store_ad_value(834, A::exp_div_scaled_inputs(s.ad_value(133), -1.0, s.ad_value(844), 1.0));
             s.store_mul_product3_rhs(263, 834, s.ad_value(132), s.ad_value(844), s.ad_value(394), 1.0);
         }
 

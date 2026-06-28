@@ -27492,6 +27492,21 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     #[inline]
     pub(crate) fn exp(arg: Self) -> Self { let value = arg.value.exp(); Self::unary_intrinsic(arg, value, value) }
     #[inline]
+    pub(crate) fn exp_div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value * left_scale;
+        let right_value = right.value * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        let output = quotient.exp();
+        let left_derivative_scale = left_scale * reciprocal * output;
+        let right_derivative_scale = -quotient * reciprocal * right_scale * output;
+        value.value = output;
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * left_derivative_scale + right.dn[index] * right_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * left_derivative_scale + right.db[index] * right_derivative_scale; }
+        value
+    }
+    #[inline]
     pub(crate) fn exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) }
     #[inline]
     pub(crate) fn limexp(arg: Self) -> Self { let raw = arg.value; if raw < 80.0 { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } else { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + (raw - 80.0)), LIMEXP_MAX) } }

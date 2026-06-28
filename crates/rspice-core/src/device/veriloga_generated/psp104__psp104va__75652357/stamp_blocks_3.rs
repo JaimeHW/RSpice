@@ -5499,7 +5499,7 @@ impl Instance {
         s.v[2592] = if s.b[2592] { 1.0 } else { 0.0 };
 
         if ((((s.b[2555] && (!s.b[2556])) && (!s.b[2580])) && (!s.b[2590])) && s.b[2592]) {
-            s.store_exp_div_scaled_inputs_indices(2526, 435, -1.0, 2551, 1.0);
+            s.store_ad_value(2526, A::exp_div_scaled_inputs(s.ad_value(435), -1.0, s.ad_value(2551), 1.0));
         }
 
         s.b[2593] = (((-s.v[435]) / s.v[2551]) < 0.0);

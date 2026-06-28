@@ -2322,8 +2322,8 @@ impl Instance {
 
         if s.b[3299] {
             s.store_scalar(916, ((-((s.v[903] * p.p13) * 1.6021918e-19)) * p.p545));
-            s.store_mul_ad_product_rhs(917, 912, s.ad_value(928), A::sub(A::exp(A::div_from_scalar((-p.p545), s.ad_value(912))), A::exp(A::div_scaled_inputs(s.ad_value(933), -1.0, s.ad_value(912), 1.0))));
-            s.store_mul_ad_product_rhs(918, 912, s.ad_value(929), A::offset(A::exp(A::div_scaled_inputs(A::sub_from_scalar(p.p545, s.ad_value(933)), -1.0, s.ad_value(912), 1.0)), (-1.0)));
+            s.store_mul_ad_product_rhs(917, 912, s.ad_value(928), A::sub(A::exp(A::div_from_scalar((-p.p545), s.ad_value(912))), A::exp_div_scaled_inputs(s.ad_value(933), -1.0, s.ad_value(912), 1.0)));
+            s.store_mul_ad_product_rhs(918, 912, s.ad_value(929), A::offset(A::exp_div_scaled_inputs(A::sub_from_scalar(p.p545, s.ad_value(933)), -1.0, s.ad_value(912), 1.0), (-1.0)));
             s.store_add_scaled_inputs3_indices(919, 916, (-1.0), 917, (-1.0), 918, (-1.0));
             s.store_add_scaled_inputs(65, 65, 1.0, 919, s.v[365]);
         }
@@ -2480,7 +2480,7 @@ impl Instance {
         if (s.b[3309] && s.b[3310]) {
             s.store_div(339, 668, 958);
             s.store_mul(340, 669, 958);
-            s.store_exp_div_scaled_inputs_indices(336, 340, -1.0, 283, 1.0);
+            s.store_ad_value(336, A::exp_div_scaled_inputs(s.ad_value(340), -1.0, s.ad_value(283), 1.0));
         }
 
         s.b[3319] = (s.v[78] == 0.0);
