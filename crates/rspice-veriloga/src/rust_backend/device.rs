@@ -4403,6 +4403,37 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_sqrt_square_div_square_offset_denominator_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sqrt_div_scaled_square_offset_denominator"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(17, AdValue::sqrt(AdValue::div_scaled_product_offset_denominator(scratch.ad_value(2), scratch.ad_value(2), params.product_scale, AdValue::square(scratch.ad_value(2)), params.denominator_offset, params.denominator_scale)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_sqrt_div_scaled_square_offset_denominator(17, 2, p.product_scale, p.denominator_offset, p.denominator_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_sqrt_ad("), "{compact}");
+        assert!(
+            !compact.contains("A::div_scaled_product_offset_denominator("),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::square("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_div_scaled_product_sqrt_square_sum_denominator_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -14181,15 +14212,27 @@ fn generate_scratch_operation_helpers() -> String {
     "        let square_branch_derivatives = self.branch_derivatives[square_source];",
     "        let cube_branch_derivatives = self.branch_derivatives[cube_source];",
     "        self.values[index] = value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_derivative_scale + cube_node_derivatives[axis] * cube_derivative_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_derivative_scale + cube_branch_derivatives[axis] * cube_derivative_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_sqrt_square_sum(&mut self, index: usize, left: usize, right: usize) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = self.values[right];",
-    "        let value = (left_value * left_value + right_value * right_value).sqrt();",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_derivative_scale + cube_node_derivatives[axis] * cube_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_derivative_scale + cube_branch_derivatives[axis] * cube_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt_div_scaled_square_offset_denominator(&mut self, index: usize, source: usize, product_scale: f64, denominator_offset: f64, denominator_scale: f64) {",
+        "        let source_value = self.values[source];",
+        "        let source_square = source_value * source_value;",
+        "        let denominator = (source_square + denominator_offset) * denominator_scale;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = source_square * product_scale * reciprocal;",
+        "        let value = quotient.sqrt();",
+        "        let derivative_scale = source_value * product_scale * denominator_offset * denominator_scale * reciprocal * reciprocal / value;",
+        "        self.store_unary_scaled(index, source, value, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt_square_sum(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        let value = (left_value * left_value + right_value * right_value).sqrt();",
     "        let left_scale = left_value / value;",
     "        let right_scale = right_value / value;",
     "        let left_node_derivatives = self.node_derivatives[left];",
@@ -26752,6 +26795,28 @@ fn compact_sqrt_square_and_affine_store_helper_call(
             return Some(format!(
                 "scratch.store_sqrt_offset_square_offset({target_index}, {source}, {square_offset}, {});",
                 offset_args[1]
+            ));
+        }
+    }
+
+    if let Some(div_scaled_product_offset_denominator_args) =
+        compact_ad_call_args(inner, "div_scaled_product_offset_denominator")
+    {
+        if div_scaled_product_offset_denominator_args.len() != 6 {
+            return None;
+        }
+        let product_left =
+            compact_scratch_ad_value_index(div_scaled_product_offset_denominator_args[0])?;
+        let product_right =
+            compact_scratch_ad_value_index(div_scaled_product_offset_denominator_args[1])?;
+        let denominator_square =
+            compact_square_scratch_arg(div_scaled_product_offset_denominator_args[3])?;
+        if product_left == product_right && product_left == denominator_square {
+            return Some(format!(
+                "scratch.store_sqrt_div_scaled_square_offset_denominator({target_index}, {product_left}, {}, {}, {});",
+                div_scaled_product_offset_denominator_args[2],
+                div_scaled_product_offset_denominator_args[4],
+                div_scaled_product_offset_denominator_args[5]
             ));
         }
     }
