@@ -4311,6 +4311,33 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_sqrt_div_scaled_inputs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_sqrt_div_scaled_inputs("),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(93, AdValue::sqrt(AdValue::div_scaled_inputs(scratch.ad_value(8), params.numerator_scale, scratch.ad_value(9), params.denominator_scale)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_sqrt_div_scaled_inputs(93, 8, p.numerator_scale, 9, p.denominator_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_sqrt_ad("), "{compact}");
+        assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_scaled_sqrt_product_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(support.contains("fn store_scaled_sqrt_mul"), "{support}");
@@ -14832,6 +14859,25 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_sqrt(&mut self, index: usize, source: usize) {",
     "        let value = self.values[source].sqrt();",
     "        self.store_unary_scaled(index, source, value, 1.0 / (2.0 * value));",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_sqrt_div_scaled_inputs(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64) {",
+    "        let numerator_value = self.values[numerator];",
+    "        let denominator_value = self.values[denominator] * denominator_scale;",
+    "        let reciprocal = 1.0 / denominator_value;",
+    "        let quotient = numerator_value * numerator_scale * reciprocal;",
+    "        let root = quotient.sqrt();",
+    "        let sqrt_derivative_scale = 1.0 / (2.0 * root);",
+    "        let numerator_derivative_scale = numerator_scale * reciprocal * sqrt_derivative_scale;",
+    "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * sqrt_derivative_scale;",
+    "        self.values[index] = root;",
+    "        let numerator_node_derivatives = self.node_derivatives[numerator];",
+    "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+    "        let numerator_branch_derivatives = self.branch_derivatives[numerator];",
+    "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = numerator_node_derivatives[axis] * numerator_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = numerator_branch_derivatives[axis] * numerator_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; }",
     "    }",
     "",
     "    #[inline]",
@@ -28159,6 +28205,14 @@ fn compact_sqrt_general_ad_store_helper_call(target_index: usize, value: &str) -
         return None;
     }
     let inner = args[0];
+
+    if let Some((numerator, numerator_scale, denominator, denominator_scale)) =
+        compact_div_scaled_inputs_scratch_args(inner)
+    {
+        return Some(format!(
+            "scratch.store_sqrt_div_scaled_inputs({target_index}, {numerator}, {numerator_scale}, {denominator}, {denominator_scale});"
+        ));
+    }
 
     for (name, helper) in [
         ("offset", "store_sqrt_offset_ad"),
