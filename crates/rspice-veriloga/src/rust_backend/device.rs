@@ -3822,6 +3822,41 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_negated_scaled_sum_inputs_as_direct_stores() {
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(120, AdValue::neg(AdValue::add_scaled_inputs3(scratch.ad_value(2), params.a, scratch.ad_value(3), 0.5, scratch.ad_value(4), -1.0)));
+    scratch.store_ad_value(121, AdValue::neg(AdValue::add_scaled_inputs3_offset(scratch.ad_value(5), params.a, scratch.ad_value(6), params.b, scratch.ad_value(7), params.c, params.offset)));
+    scratch.store_ad_value(122, AdValue::neg(AdValue::add_scaled_inputs4(scratch.ad_value(8), params.a, scratch.ad_value(9), params.b, scratch.ad_value(10), params.c, scratch.ad_value(11), params.d)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact
+                .contains("s.store_add_scaled_inputs3_indices(120, 2, (-p.a), 3, (-0.5), 4, 1.0);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_scaled_inputs3_offset_indices(121, 5, (-p.a), 6, (-p.b), 7, (-p.c), (-p.offset));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_add_scaled_inputs4_indices(122, 8, (-p.a), 9, (-p.b), 10, (-p.c), 11, (-p.d));"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_neg_ad("), "{compact}");
+        assert!(!compact.contains("A::add_scaled_inputs3("), "{compact}");
+        assert!(
+            !compact.contains("A::add_scaled_inputs3_offset("),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::add_scaled_inputs4("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_sqrt_shifted_square_offset_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(
@@ -21766,6 +21801,10 @@ fn compact_negated_binary_input_store_helper_line(
         }
     }
 
+    if let Some(line) = compact_negated_scaled_sum_store_helper_line(target_index, args[0]) {
+        return Some(line);
+    }
+
     if let Some((left, right)) = compact_binary_scratch_ad_indices(args[0], "add") {
         return Some(format!(
             "scratch.store_neg_add({target_index}, {left}, {right});"
@@ -21779,6 +21818,91 @@ fn compact_negated_binary_input_store_helper_line(
     }
 
     None
+}
+
+fn compact_negated_scaled_sum_store_helper_line(
+    target_index: usize,
+    inner: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(inner, "add_scaled_inputs3") {
+        if args.len() != 6 {
+            return None;
+        }
+        return compact_negated_scaled_inputs_store_helper_line(
+            target_index,
+            "store_add_scaled_inputs3",
+            &[args[0], args[2], args[4]],
+            &[args[1], args[3], args[5]],
+            &[],
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(inner, "add_scaled_inputs3_offset") {
+        if args.len() != 7 {
+            return None;
+        }
+        return compact_negated_scaled_inputs_store_helper_line(
+            target_index,
+            "store_add_scaled_inputs3_offset",
+            &[args[0], args[2], args[4]],
+            &[args[1], args[3], args[5]],
+            &[args[6]],
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(inner, "add_scaled_inputs4") {
+        if args.len() != 8 {
+            return None;
+        }
+        return compact_negated_scaled_inputs_store_helper_line(
+            target_index,
+            "store_add_scaled_inputs4",
+            &[args[0], args[2], args[4], args[6]],
+            &[args[1], args[3], args[5], args[7]],
+            &[],
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(inner, "add_scaled_inputs4_offset") {
+        if args.len() != 9 {
+            return None;
+        }
+        return compact_negated_scaled_inputs_store_helper_line(
+            target_index,
+            "store_add_scaled_inputs4_offset",
+            &[args[0], args[2], args[4], args[6]],
+            &[args[1], args[3], args[5], args[7]],
+            &[args[8]],
+        );
+    }
+
+    None
+}
+
+fn compact_negated_scaled_inputs_store_helper_line(
+    target_index: usize,
+    base: &str,
+    values: &[&str],
+    scales: &[&str],
+    trailing: &[&str],
+) -> Option<String> {
+    let negated_scales: Vec<String> = scales
+        .iter()
+        .map(|scale| compact_scalar_negate(scale))
+        .collect();
+    let negated_trailing: Vec<String> = trailing
+        .iter()
+        .map(|arg| compact_scalar_negate(arg))
+        .collect();
+    let scale_refs: Vec<&str> = negated_scales.iter().map(String::as_str).collect();
+    let trailing_refs: Vec<&str> = negated_trailing.iter().map(String::as_str).collect();
+    compact_index_or_mixed_scaled_inputs_helper_line(
+        target_index,
+        base,
+        values,
+        &scale_refs,
+        &trailing_refs,
+    )
 }
 
 fn compact_powf_affine_input_store_helper_line(
