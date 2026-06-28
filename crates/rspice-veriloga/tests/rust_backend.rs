@@ -10166,6 +10166,41 @@ fn rust_backend_uses_dense_stamp_calls_for_wide_derivative_equations() {
 }
 
 #[test]
+fn rust_backend_prunes_zero_scaled_named_branch_dense_derivatives() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(zero_scaled_named_branch_dense_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile zero-scaled dense named-branch device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("eq0_value"), "{stamp}");
+    assert!(
+        stamp.matches("stamper.stamp_current_const_local(").count() >= 2,
+        "zero-scaled current should collapse to a const stamp instead of dense derivative work:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("stamper.stamp_current_dense_local("),
+        "zero-scaled dense expression should not materialize dense derivative arrays:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("eq1_d_n") && !stamp.contains("eq1_node_derivatives"),
+        "zero-scaled dense expression should not emit per-axis derivative locals or arrays:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_wide_dense_current_equations() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(dense_derivative_source())
@@ -16756,6 +16791,20 @@ module dense_derivative(p0, p1, p2, p3, p4, p5);
     inout p0, p1, p2, p3, p4, p5;
     electrical p0, p1, p2, p3, p4, p5;
     analog I(p0, p1) <+ V(p0, p1) + V(p2, p3) + V(p4, p5);
+endmodule
+"#
+}
+
+fn zero_scaled_named_branch_dense_source() -> &'static str {
+    r#"
+module zero_scaled_named_branch_dense(p0, p1, p2, p3, p4, p5);
+    inout p0, p1, p2, p3, p4, p5;
+    electrical p0, p1, p2, p3, p4, p5, sense_node;
+    branch (sense_node) sense;
+    analog begin
+        I(sense) <+ 0.0;
+        I(p0, p1) <+ (V(p0, p1) + V(p2, p3) + V(p4, p5)) * I(sense);
+    end
 endmodule
 "#
 }

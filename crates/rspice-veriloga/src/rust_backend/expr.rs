@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::{
     CanonicalIrArtifact, ExprId, HirAnalogOperator, HirExprKind, MirBranchRef,
@@ -310,6 +310,24 @@ impl ExprEmitter<'_> {
             let lowered = self.lower_conditional(id, *condition, *then_expr, *else_expr)?;
             self.emitted.insert(id, lowered.clone());
             return Ok(lowered);
+        }
+
+        if let HirExprKind::Binary { op, left, right } = &expression.kind
+            && op.as_str() == "Mul"
+        {
+            let left_has_side_effects =
+                self.expression_has_side_effects(*left, &mut HashSet::new())?;
+            let right_has_side_effects =
+                self.expression_has_side_effects(*right, &mut HashSet::new())?;
+            if !left_has_side_effects
+                && !right_has_side_effects
+                && (self.expression_value_is_known_zero(*left, &mut HashSet::new())?
+                    || self.expression_value_is_known_zero(*right, &mut HashSet::new())?)
+            {
+                let lowered = self.zero_value();
+                self.emitted.insert(id, lowered.clone());
+                return Ok(lowered);
+            }
         }
 
         let value_expr = match &expression.kind {
@@ -1058,6 +1076,115 @@ impl ExprEmitter<'_> {
             Err(self.unsupported(format!(
                 "identifier '{name}' is not a parameter or scalar variable"
             )))
+        }
+    }
+
+    fn zero_value(&self) -> ExprValue {
+        let node_count = self.artifact.mir.nodes.len();
+        let branch_axis_count = branch_derivative_axis_count(self.branch_current_unknowns);
+        ExprValue {
+            value: "0.0".to_string(),
+            derivatives: zero_derivatives(node_count),
+            branch_derivatives: zero_derivatives(branch_axis_count),
+            has_reactive: false,
+            reactive_value: "0.0".to_string(),
+            reactive_derivatives: zero_derivatives(node_count),
+            reactive_branch_derivatives: zero_derivatives(branch_axis_count),
+        }
+    }
+
+    fn expression_value_is_known_zero(
+        &self,
+        id: ExprId,
+        visited: &mut HashSet<ExprId>,
+    ) -> Result<bool, RustBackendError> {
+        if !visited.insert(id) {
+            return Ok(false);
+        }
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(id))
+            .ok_or_else(|| self.internal(format!("expression {id} is outside MIR arena")))?;
+
+        match &expression.kind {
+            HirExprKind::Number { value, .. } => Ok(*value == 0.0),
+            HirExprKind::NoiseSource { .. } => Ok(true),
+            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => Ok(true),
+            HirExprKind::Identifier { name } => Ok(self
+                .variables
+                .get(name.as_str())
+                .is_some_and(lowered_variable_is_constant_zero)),
+            HirExprKind::NamedBranchAccess { access, name } if access.as_str() == "I" => Ok(self
+                .branch_currents
+                .get(name.as_str())
+                .is_some_and(lowered_variable_is_constant_zero)),
+            HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Pos" | "Neg") => {
+                self.expression_value_is_known_zero(*operand, visited)
+            }
+            HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Add" | "Sub") => Ok(
+                self.expression_value_is_known_zero(*left, &mut HashSet::new())?
+                    && self.expression_value_is_known_zero(*right, &mut HashSet::new())?,
+            ),
+            HirExprKind::Binary { op, left, right } if op.as_str() == "Mul" => Ok(self
+                .expression_value_is_known_zero(*left, &mut HashSet::new())?
+                || self.expression_value_is_known_zero(*right, &mut HashSet::new())?),
+            HirExprKind::Binary { op, left, .. } if matches!(op.as_str(), "Div" | "Mod") => {
+                self.expression_value_is_known_zero(*left, &mut HashSet::new())
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } if !self.expression_has_side_effects(*condition, &mut HashSet::new())? => Ok(self
+                .expression_value_is_known_zero(*then_expr, visited)?
+                && self.expression_value_is_known_zero(*else_expr, &mut HashSet::new())?),
+            _ => Ok(false),
+        }
+    }
+
+    fn expression_has_side_effects(
+        &self,
+        id: ExprId,
+        visited: &mut HashSet<ExprId>,
+    ) -> Result<bool, RustBackendError> {
+        if !visited.insert(id) {
+            return Ok(false);
+        }
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(id))
+            .ok_or_else(|| self.internal(format!("expression {id} is outside MIR arena")))?;
+
+        match &expression.kind {
+            HirExprKind::Call { name, .. }
+                if is_ddt_name(name.as_str()) || is_idt_name(name.as_str()) =>
+            {
+                Ok(true)
+            }
+            HirExprKind::AnalogOperator {
+                op:
+                    HirAnalogOperator::Ddt { .. }
+                    | HirAnalogOperator::Idt { .. }
+                    | HirAnalogOperator::IdtMod { .. }
+                    | HirAnalogOperator::Absdelay { .. }
+                    | HirAnalogOperator::Transition { .. }
+                    | HirAnalogOperator::Slew { .. }
+                    | HirAnalogOperator::LastCrossing { .. },
+            } => Ok(true),
+            _ => expression_children(&expression.kind).into_iter().try_fold(
+                false,
+                |has_side_effects, child| {
+                    if has_side_effects {
+                        Ok(true)
+                    } else {
+                        self.expression_has_side_effects(child, visited)
+                    }
+                },
+            ),
         }
     }
 
@@ -2282,6 +2409,184 @@ pub fn unique_identifiers(names: &[String]) -> HashMap<String, String> {
 
 fn zero_derivatives(count: usize) -> Vec<String> {
     vec!["0.0".to_string(); count]
+}
+
+fn lowered_variable_is_constant_zero(variable: &LoweredVariable) -> bool {
+    is_zero_derivative(&variable.value)
+        && variable
+            .derivatives
+            .iter()
+            .all(|derivative| is_zero_derivative(derivative))
+        && variable
+            .branch_derivatives
+            .iter()
+            .all(|derivative| is_zero_derivative(derivative))
+        && (!variable.has_reactive
+            || (is_zero_derivative(&variable.reactive_value)
+                && variable
+                    .reactive_derivatives
+                    .iter()
+                    .all(|derivative| is_zero_derivative(derivative))
+                && variable
+                    .reactive_branch_derivatives
+                    .iter()
+                    .all(|derivative| is_zero_derivative(derivative))))
+}
+
+fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
+    let mut children = Vec::new();
+    match kind {
+        HirExprKind::Number { .. }
+        | HirExprKind::StringLiteral { .. }
+        | HirExprKind::Identifier { .. }
+        | HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. } => {}
+        HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+            children.extend(args.iter().copied());
+        }
+        HirExprKind::Binary { left, right, .. } => {
+            children.push(*left);
+            children.push(*right);
+        }
+        HirExprKind::Unary { operand, .. } => {
+            children.push(*operand);
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            children.push(*condition);
+            children.push(*then_expr);
+            children.push(*else_expr);
+        }
+        HirExprKind::ArrayAccess { index, .. } => {
+            children.push(*index);
+        }
+        HirExprKind::ArrayLiteral { elements } => {
+            children.extend(elements.iter().copied());
+        }
+        HirExprKind::AnalogOperator { op } => push_analog_operator_children(op, &mut children),
+        HirExprKind::Laplace { expr, kind } => {
+            children.push(*expr);
+            push_laplace_children(kind, &mut children);
+        }
+        HirExprKind::Zi { expr, kind } => {
+            children.push(*expr);
+            push_zi_children(kind, &mut children);
+        }
+        HirExprKind::NoiseSource { operands, .. } => {
+            children.extend(operands.iter().copied());
+        }
+    }
+    children
+}
+
+fn push_analog_operator_children(op: &HirAnalogOperator, children: &mut Vec<ExprId>) {
+    match op {
+        HirAnalogOperator::Ddt { expr, abstol } => {
+            children.push(*expr);
+            children.extend(abstol.iter().copied());
+        }
+        HirAnalogOperator::Idt {
+            expr,
+            ic,
+            assert,
+            abstol,
+        } => {
+            children.push(*expr);
+            children.extend([*ic, *assert, *abstol].into_iter().flatten());
+        }
+        HirAnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+        } => {
+            children.push(*expr);
+            children.extend([*ic, *modulus, *offset, *abstol].into_iter().flatten());
+        }
+        HirAnalogOperator::Ddx { expr, probe } => {
+            children.push(*expr);
+            children.push(*probe);
+        }
+        HirAnalogOperator::Limexp { expr } => {
+            children.push(*expr);
+        }
+        HirAnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+        } => {
+            children.push(*expr);
+            children.push(*delay);
+            children.extend(max_delay.iter().copied());
+        }
+        HirAnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+        } => {
+            children.push(*expr);
+            children.extend([*delay, *rise, *fall, *tolerance].into_iter().flatten());
+        }
+        HirAnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+        } => {
+            children.push(*expr);
+            children.extend([*max_rise, *max_fall].into_iter().flatten());
+        }
+        HirAnalogOperator::LastCrossing { expr, .. } => {
+            children.push(*expr);
+        }
+    }
+}
+
+fn push_laplace_children(kind: &crate::canonical_ir::HirLaplaceKind, children: &mut Vec<ExprId>) {
+    match kind {
+        crate::canonical_ir::HirLaplaceKind::ZeroPole { zeros, poles }
+        | crate::canonical_ir::HirLaplaceKind::NumeratorPole {
+            numerator: zeros,
+            poles,
+        } => {
+            children.extend(zeros.iter().copied());
+            children.extend(poles.iter().copied());
+        }
+        crate::canonical_ir::HirLaplaceKind::ZeroDenominator { zeros, denominator }
+        | crate::canonical_ir::HirLaplaceKind::NumeratorDenominator {
+            numerator: zeros,
+            denominator,
+        } => {
+            children.extend(zeros.iter().copied());
+            children.extend(denominator.iter().copied());
+        }
+    }
+}
+
+fn push_zi_children(kind: &crate::canonical_ir::HirZiKind, children: &mut Vec<ExprId>) {
+    match kind {
+        crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles }
+        | crate::canonical_ir::HirZiKind::NumeratorPole {
+            numerator: zeros,
+            poles,
+        } => {
+            children.extend(zeros.iter().copied());
+            children.extend(poles.iter().copied());
+        }
+        crate::canonical_ir::HirZiKind::ZeroDenominator { zeros, denominator }
+        | crate::canonical_ir::HirZiKind::NumeratorDenominator {
+            numerator: zeros,
+            denominator,
+        } => {
+            children.extend(zeros.iter().copied());
+            children.extend(denominator.iter().copied());
+        }
+    }
 }
 
 fn branch_derivative_axis_count(

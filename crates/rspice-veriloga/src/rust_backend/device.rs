@@ -19060,8 +19060,13 @@ fn cache_named_branch_current(
         return;
     };
 
+    let cached_value = if lowered_expr_is_constant_zero(lowered, derivatives, branch_derivatives) {
+        "0.0".to_string()
+    } else {
+        value.to_string()
+    };
     let next = LoweredVariable {
-        value: value.to_string(),
+        value: cached_value,
         condition: None,
         derivatives: derivatives.to_vec(),
         branch_derivatives: branch_derivatives.to_vec(),
@@ -19074,36 +19079,42 @@ fn cache_named_branch_current(
     branch_currents
         .entry(branch_name)
         .and_modify(|current| {
-            current.value = format!("({} + {})", current.value, next.value);
+            current.value = add_cached_branch_current_expr(&current.value, &next.value);
             for (current_derivative, next_derivative) in
                 current.derivatives.iter_mut().zip(next.derivatives.iter())
             {
-                *current_derivative = format!("({current_derivative} + {next_derivative})");
+                *current_derivative =
+                    add_cached_branch_current_expr(current_derivative, next_derivative);
             }
             for (current_derivative, next_derivative) in current
                 .branch_derivatives
                 .iter_mut()
                 .zip(next.branch_derivatives.iter())
             {
-                *current_derivative = format!("({current_derivative} + {next_derivative})");
+                *current_derivative =
+                    add_cached_branch_current_expr(current_derivative, next_derivative);
             }
             if next.has_reactive {
                 if current.has_reactive {
-                    current.reactive_value =
-                        format!("({} + {})", current.reactive_value, next.reactive_value);
+                    current.reactive_value = add_cached_branch_current_expr(
+                        &current.reactive_value,
+                        &next.reactive_value,
+                    );
                     for (current_derivative, next_derivative) in current
                         .reactive_derivatives
                         .iter_mut()
                         .zip(next.reactive_derivatives.iter())
                     {
-                        *current_derivative = format!("({current_derivative} + {next_derivative})");
+                        *current_derivative =
+                            add_cached_branch_current_expr(current_derivative, next_derivative);
                     }
                     for (current_derivative, next_derivative) in current
                         .reactive_branch_derivatives
                         .iter_mut()
                         .zip(next.reactive_branch_derivatives.iter())
                     {
-                        *current_derivative = format!("({current_derivative} + {next_derivative})");
+                        *current_derivative =
+                            add_cached_branch_current_expr(current_derivative, next_derivative);
                     }
                 } else {
                     current.has_reactive = true;
@@ -19114,6 +19125,38 @@ fn cache_named_branch_current(
             }
         })
         .or_insert(next);
+}
+
+fn lowered_expr_is_constant_zero(
+    lowered: &LoweredExpr,
+    derivatives: &[String],
+    branch_derivatives: &[String],
+) -> bool {
+    is_zero_derivative(&lowered.value)
+        && derivatives.iter().all(|value| is_zero_derivative(value))
+        && branch_derivatives
+            .iter()
+            .all(|value| is_zero_derivative(value))
+        && (!lowered.has_reactive
+            || (is_zero_derivative(&lowered.reactive_value)
+                && lowered
+                    .reactive_derivatives
+                    .iter()
+                    .all(|value| is_zero_derivative(value))
+                && lowered
+                    .reactive_branch_derivatives
+                    .iter()
+                    .all(|value| is_zero_derivative(value))))
+}
+
+fn add_cached_branch_current_expr(left: &str, right: &str) -> String {
+    if is_zero_derivative(left) {
+        right.to_string()
+    } else if is_zero_derivative(right) {
+        left.to_string()
+    } else {
+        format!("({left} + {right})")
+    }
 }
 
 fn declared_contribution_branch_name(
