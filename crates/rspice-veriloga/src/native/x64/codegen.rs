@@ -1,5 +1,5 @@
-use super::encoder::{Gpr, X64Encoder, Xmm};
-use crate::native::expr::{NativeOp, NativeProgram, VoltageNode};
+use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
+use crate::native::expr::{CompareOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
 
 const MODEL: &str = "native-x64";
@@ -150,6 +150,7 @@ impl FunctionCompiler {
                 NativeOp::Neg => self.emit_neg()?,
                 NativeOp::Abs => self.emit_abs()?,
                 NativeOp::Sqrt => self.emit_sqrt()?,
+                NativeOp::Compare(op) => self.emit_compare(op)?,
             }
         }
 
@@ -282,6 +283,41 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 1];
         self.encoder.sqrtsd_xmm_xmm(target, target);
+        Ok(())
+    }
+
+    fn emit_compare(&mut self, op: CompareOp) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("comparison requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let left = XMM_STACK[self.depth - 2];
+        let right = XMM_STACK[self.depth - 1];
+        let condition = match op {
+            CompareOp::Gt => {
+                self.encoder.ucomisd_xmm_xmm(left, right);
+                ConditionCode::Above
+            }
+            CompareOp::Ge => {
+                self.encoder.ucomisd_xmm_xmm(left, right);
+                ConditionCode::AboveOrEqual
+            }
+            CompareOp::Lt => {
+                self.encoder.ucomisd_xmm_xmm(right, left);
+                ConditionCode::Above
+            }
+            CompareOp::Le => {
+                self.encoder.ucomisd_xmm_xmm(right, left);
+                ConditionCode::AboveOrEqual
+            }
+        };
+        self.encoder.setcc_r8(condition, Gpr::R10);
+        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cvtsi2sd_xmm_r32(left, Gpr::R10);
+        self.depth -= 1;
         Ok(())
     }
 
@@ -691,6 +727,50 @@ mod tests {
         let ctx = eval_context(&[], &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()), 7.5);
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_ordered_comparisons() {
+        let cases = [
+            ("gt-true", Instruction::Gt, 5.0, 3.0, 1.0),
+            ("gt-false", Instruction::Gt, 3.0, 5.0, 0.0),
+            ("lt-true", Instruction::Lt, 3.0, 5.0, 1.0),
+            ("lt-false", Instruction::Lt, 5.0, 3.0, 0.0),
+            ("ge-true", Instruction::Ge, 5.0, 3.0, 1.0),
+            ("ge-false", Instruction::Ge, 3.0, 5.0, 0.0),
+            ("ge-equal", Instruction::Ge, 3.0, 3.0, 1.0),
+            ("le-true", Instruction::Le, 3.0, 5.0, 1.0),
+            ("le-false", Instruction::Le, 5.0, 3.0, 0.0),
+            ("le-equal", Instruction::Le, 3.0, 3.0, 1.0),
+            ("gt-left-unordered", Instruction::Gt, f64::NAN, 3.0, 0.0),
+            ("gt-right-unordered", Instruction::Gt, 3.0, f64::NAN, 0.0),
+            ("lt-left-unordered", Instruction::Lt, f64::NAN, 3.0, 0.0),
+            ("lt-right-unordered", Instruction::Lt, 3.0, f64::NAN, 0.0),
+            ("ge-left-unordered", Instruction::Ge, f64::NAN, 3.0, 0.0),
+            ("ge-right-unordered", Instruction::Ge, 3.0, f64::NAN, 0.0),
+            ("le-left-unordered", Instruction::Le, f64::NAN, 3.0, 0.0),
+            ("le-right-unordered", Instruction::Le, 3.0, f64::NAN, 0.0),
+        ];
+
+        for (name, op, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    op,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile comparison leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate comparison leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
     }
 
     #[test]

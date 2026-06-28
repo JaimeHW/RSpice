@@ -185,6 +185,26 @@ endmodule
     )
 }
 
+fn comparison_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_comparison_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = (($temperature > 310.0) * 1.0)
+             + (($temperature < 310.0) * 2.0)
+             + (($temperature >= 315.0) * 4.0)
+             + (($temperature <= 315.0) * 8.0);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -625,6 +645,24 @@ fn native_device_executes_abs_assignment() {
 
     assert!((currents[0] - 20.0).abs() < 1e-12, "currents: {currents:?}");
     assert_eq!(device.variable("gain"), Some(5.0));
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_ordered_comparison_assignments() {
+    let model = comparison_assignment_model();
+    let mut device = VerilogADevice::try_new("CMP1", model, &[1, 0])
+        .expect("comparison assignment model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_temperature(315.0);
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native comparison assignment evaluation succeeds");
+
+    assert!((currents[0] - 52.0).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(device.variable("gain"), Some(13.0));
 }
 
 #[cfg(target_arch = "x86_64")]
