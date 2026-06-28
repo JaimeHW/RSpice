@@ -28,7 +28,7 @@ use crate::vm::{Vm, VmContext, VmError};
 use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
-use crate::native::NativeModel;
+use crate::native::{NativeModel, clear_native_runtime_error, take_native_runtime_error};
 
 #[cfg(feature = "native")]
 #[derive(Clone, Copy)]
@@ -1143,7 +1143,8 @@ impl VerilogADevice {
 
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
-        Ok(match entry {
+        clear_native_runtime_error();
+        let value = match entry {
             NativeValueEntry::StampValue(index) => native.run_stamp_value(index, &ctx, vars_ptr),
             NativeValueEntry::Jacobian { stamp, entry } => {
                 native.run_jacobian(stamp, entry, &ctx, vars_ptr)
@@ -1151,7 +1152,11 @@ impl VerilogADevice {
             NativeValueEntry::ReactiveJacobian { stamp, entry } => {
                 native.run_reactive_jacobian(stamp, entry, &ctx, vars_ptr)
             }
-        })
+        };
+        if let Some(error) = take_native_runtime_error() {
+            return Err(VmError::NativeJit(error));
+        }
+        Ok(value)
     }
 
     #[cfg(feature = "native")]
@@ -1199,7 +1204,11 @@ impl VerilogADevice {
         }
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
+        clear_native_runtime_error();
         native.run_assignments(&ctx, vars_ptr);
+        if let Some(error) = take_native_runtime_error() {
+            return Err(VmError::NativeJit(error));
+        }
         Ok(())
     }
 
@@ -1982,6 +1991,36 @@ mod tests {
             msg.contains("no interpreter fallback"),
             "error must state the hard-fail contract, got: {msg}"
         );
+    }
+
+    #[test]
+    fn native_runtime_helper_error_reaches_device_as_native_jit_error() {
+        let model = compile(
+            r#"
+`include "disciplines.vams"
+module native_laplace_error_path(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), {1.0}, {1.0, 1.0});
+endmodule
+"#,
+        );
+
+        let mut device = VerilogADevice::try_new("LERR1", model, &[1, 0])
+            .expect("laplace model uses native JIT");
+        device.update_voltages(&[1.0]);
+        assert_eq!(
+            device.context.laplace_filters.len(),
+            1,
+            "fixture must allocate one Laplace filter"
+        );
+        device.context.laplace_filters.clear();
+
+        let err = device
+            .try_evaluate()
+            .expect_err("native helper metadata error must hard-fail");
+
+        assert_native_hard_fail(err, "Laplace");
     }
 
     #[test]

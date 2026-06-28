@@ -678,6 +678,19 @@ endmodule
     )
 }
 
+fn laplace_current_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_laplace_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), {1.0}, {1.0, 1.0});
+endmodule
+"#,
+    )
+}
+
 fn current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1710,6 +1723,52 @@ fn native_device_executes_idtmod_current_without_fallback() {
             "phase {index}: got {got}, want {want}, all {phases:?}"
         );
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_laplace_current_without_fallback() {
+    let model = laplace_current_model();
+    assert_eq!(
+        model.laplace_filters.len(),
+        1,
+        "fixture must contain one compiled Laplace filter"
+    );
+
+    let mut device =
+        VerilogADevice::try_new("LAP1", model, &[1, 0]).expect("laplace model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[4.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native Laplace DC evaluation succeeds")[0]
+            .to_bits(),
+        4.0_f64.to_bits()
+    );
+
+    let (matrix, rhs) = stamp_device(&mut device, &[4.0]);
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 1.0).abs() < 1.0e-12,
+        "matrix: {matrix:?}"
+    );
+    assert!(
+        rhs.get(&0).copied().unwrap_or_default().abs() < 1.0e-12,
+        "rhs: {rhs:?}"
+    );
+
+    device.advance_state();
+    device.set_analysis_type(2);
+    device.set_timestep(0.5);
+    device.update_voltages(&[4.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native Laplace transient evaluation succeeds");
+    assert!(
+        (currents[0] - (4.0 / 3.0)).abs() < 1.0e-12,
+        "currents: {currents:?}"
+    );
 }
 
 #[cfg(target_arch = "x86_64")]

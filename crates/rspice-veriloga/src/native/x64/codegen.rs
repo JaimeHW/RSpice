@@ -2,9 +2,9 @@ use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
     rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_bitand, rspice_bitor,
     rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_exp, rspice_floor,
-    rspice_idtmod_wrap, rspice_limexp, rspice_log, rspice_log10, rspice_mod, rspice_pow,
-    rspice_shl, rspice_shr, rspice_sin, rspice_sinh, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh,
+    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
+    rspice_mod, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
+    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -202,6 +202,7 @@ impl FunctionCompiler {
                     self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
                 }
                 NativeOp::LimitState(index) => self.emit_limit_state(index)?,
+                NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
                 NativeOp::WhiteNoise => self.emit_white_noise()?,
                 NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
@@ -513,6 +514,49 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_laplace_helper_call(
+        &mut self,
+        target: Xmm,
+        filter_id: usize,
+        helper: LaplaceHelper,
+    ) -> JitResult<()> {
+        debug_assert!(self.uses_helper_calls);
+        debug_assert!(xmm_stack_slot(target) < self.depth);
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+            }
+        }
+
+        if target != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
+        }
+        self.encoder
+            .mov_r64_r64(laplace_ctx_arg_reg(), self.ctx_arg_reg());
+        self.encoder
+            .movabs_r64_imm64(laplace_id_arg_reg(), filter_id as u64);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        Ok(())
+    }
+
     fn emit_limit_state(&mut self, state_index: usize) -> JitResult<()> {
         if self.depth < 2 {
             return Err(JitError::Encoding {
@@ -614,6 +658,18 @@ impl FunctionCompiler {
         self.encoder.xorpd_xmm_xmm(target, target);
         self.depth -= 1;
         Ok(())
+    }
+
+    fn emit_laplace_state(&mut self, filter_id: usize) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "laplace state requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_laplace_helper_call(target, filter_id, rspice_laplace_step_native)
     }
 
     fn emit_ddt_state(&mut self, state_index: usize) -> JitResult<()> {
@@ -1237,6 +1293,7 @@ type BinaryHelper = extern "C" fn(f64, f64) -> f64;
 type TernaryHelper = extern "C" fn(f64, f64, f64) -> f64;
 type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
+type LaplaceHelper = unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
@@ -1293,6 +1350,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::IntegerBinary(_)
                 | NativeOp::TableLookup(_)
                 | NativeOp::TableDerivative(_)
+                | NativeOp::LaplaceState(_)
                 | NativeOp::IdtModState(_)
         )
     })
@@ -1391,10 +1449,31 @@ fn table_id_arg_reg() -> Gpr {
     Gpr::Rdx
 }
 
+#[cfg(windows)]
+fn laplace_ctx_arg_reg() -> Gpr {
+    Gpr::Rdx
+}
+
+#[cfg(windows)]
+fn laplace_id_arg_reg() -> Gpr {
+    Gpr::R8
+}
+
+#[cfg(not(windows))]
+fn laplace_ctx_arg_reg() -> Gpr {
+    Gpr::Rdi
+}
+
+#[cfg(not(windows))]
+fn laplace_id_arg_reg() -> Gpr {
+    Gpr::Rsi
+}
+
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{K_BOLTZMANN, Q_ELECTRON, compile_assignment_function, compile_value_function};
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
+    use crate::laplace::StateSpaceFilter;
     use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
@@ -2023,6 +2102,51 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn generated_value_leaf_calls_laplace_helper_and_preserves_stack() {
+        let program = NativeProgram::from_bytecode(
+            "x64-codegen-test",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(4.0),
+                    Instruction::LaplaceState(0),
+                    Instruction::Add,
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 0, 0).with_laplace_filter_count(1),
+        )
+        .expect("lower Laplace helper program");
+        let bytes = compile_value_function(&program).expect("compile Laplace helper leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate Laplace helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut filters = [StateSpaceFilter::from_transfer_function(
+            &[1.0],
+            &[1.0, 1.0],
+        )];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.laplace_filters = filters.as_mut_ptr();
+        ctx.laplace_filters_len = filters.len();
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            6.0_f64.to_bits(),
+            "non-transient Laplace evaluation uses DC output"
+        );
+
+        ctx.analysis_type = 2;
+        ctx.timestep = 0.5;
+        let transient = f(&ctx, std::ptr::null());
+        assert!(
+            (transient - (2.0 + 4.0 / 3.0)).abs() < 1.0e-12,
+            "transient Laplace value: {transient}"
+        );
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 /// Evaluation context passed to JIT-compiled functions.
 #[repr(C)]
 pub struct EvalContext {
@@ -56,6 +58,29 @@ pub struct EvalContext {
     pub analysis_type: u8,
     /// Instance multiplicity ($mfactor)
     pub multiplicity: f64,
+}
+
+thread_local! {
+    static NATIVE_RUNTIME_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn clear_native_runtime_error() {
+    NATIVE_RUNTIME_ERROR.with(|slot| {
+        slot.borrow_mut().take();
+    });
+}
+
+pub(crate) fn take_native_runtime_error() -> Option<String> {
+    NATIVE_RUNTIME_ERROR.with(|slot| slot.borrow_mut().take())
+}
+
+fn set_native_runtime_error(message: impl Into<String>) {
+    NATIVE_RUNTIME_ERROR.with(|slot| {
+        let mut error = slot.borrow_mut();
+        if error.is_none() {
+            *error = Some(message.into());
+        }
+    });
 }
 
 /// External helper function for table lookup interpolation.
@@ -334,6 +359,54 @@ pub unsafe extern "C" fn rspice_laplace_step(
     filters[filter_id].step(input, timestep)
 }
 
+/// External helper function for native x64 Laplace state-space filter
+/// evaluation.
+///
+/// Argument order is chosen to stay within register arguments on both Windows
+/// x64 and System V: scalar input in XMM0, then context pointer and filter ID
+/// in integer argument registers.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid EvalContext
+/// pointer. The context must own a Laplace filter array whose lifetime covers
+/// the call.
+#[unsafe(export_name = "rspice_laplace_step_native")]
+pub unsafe extern "C" fn rspice_laplace_step_native(
+    input: f64,
+    ctx: *const EvalContext,
+    filter_id: usize,
+) -> f64 {
+    if ctx.is_null() {
+        set_native_runtime_error(
+            "native Laplace helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+
+    let ctx = unsafe { &*ctx };
+    if ctx.laplace_filters.is_null() {
+        set_native_runtime_error(format!(
+            "native Laplace helper missing filter storage for filter {filter_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if filter_id >= ctx.laplace_filters_len {
+        set_native_runtime_error(format!(
+            "native Laplace helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+            ctx.laplace_filters_len
+        ));
+        return 0.0;
+    }
+
+    let filters =
+        unsafe { std::slice::from_raw_parts_mut(ctx.laplace_filters, ctx.laplace_filters_len) };
+    if ctx.analysis_type == 2 {
+        filters[filter_id].step(input, ctx.timestep)
+    } else {
+        filters[filter_id].dc_output(input)
+    }
+}
+
 /// External helper function for PushCurrent terminal-pair lookup.
 ///
 /// # Safety
@@ -363,7 +436,10 @@ pub unsafe extern "C" fn rspice_current_lookup(
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::EvalContext;
+    use super::{
+        EvalContext, clear_native_runtime_error, rspice_laplace_step_native,
+        take_native_runtime_error,
+    };
     use std::mem::{align_of, offset_of, size_of};
 
     #[test]
@@ -395,5 +471,28 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, multiplicity), 192);
         assert_eq!(size_of::<EvalContext>(), 200);
         assert_eq!(align_of::<EvalContext>(), 8);
+    }
+
+    #[test]
+    fn laplace_native_helper_records_runtime_error_for_invalid_context() {
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_laplace_step_native(1.25, std::ptr::null(), 0) };
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error()
+            .expect("invalid native Laplace context must record a runtime error");
+        assert!(
+            error.contains("Laplace") && error.contains("EvalContext"),
+            "error must identify the invalid Laplace context, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+        assert!(
+            take_native_runtime_error().is_none(),
+            "runtime error retrieval must clear the thread-local slot"
+        );
     }
 }
