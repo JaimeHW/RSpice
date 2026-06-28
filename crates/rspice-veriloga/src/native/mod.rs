@@ -5,6 +5,7 @@
 
 mod abi;
 mod error;
+mod expr;
 mod model;
 mod runtime;
 mod target;

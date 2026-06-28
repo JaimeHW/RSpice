@@ -27,6 +27,13 @@ impl JitError {
         }
     }
 
+    pub fn unsupported_program_op(model: impl Into<SmolStr>, op: impl Into<SmolStr>) -> Self {
+        Self::UnsupportedCanonicalOp {
+            model: model.into(),
+            op: op.into(),
+        }
+    }
+
     pub fn unsupported_native_coverage(
         model: impl Into<SmolStr>,
         feature: impl Into<SmolStr>,
