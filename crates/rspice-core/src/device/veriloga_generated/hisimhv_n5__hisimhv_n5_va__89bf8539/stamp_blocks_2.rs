@@ -5740,7 +5740,7 @@ impl Instance {
             if ((s.b[1441] && (s.b[1444] && (!(s.b[1442] || s.b[1443])))) && s.b[2232]) {
                 s.store_mul_neg_lhs(335, 154, 2154);
                 s.store_exp(336, 335);
-                s.store_sqrt_ad(338, A::div_scaled_inputs(s.ad_value(2112), 2.0, s.ad_value(154), 1.0));
+                s.store_sqrt_div_scaled_inputs(338, 2112, 2.0, 154, 1.0);
                 s.store_offset_sub(344, 336, 335, (-1.0));
                 s.store_mul_sqrt_ad_rhs(2155, 338, A::offset(s.ad_value(344), 1e-15));
             }

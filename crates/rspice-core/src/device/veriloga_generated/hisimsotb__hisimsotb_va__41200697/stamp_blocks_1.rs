@@ -3642,7 +3642,7 @@ impl Instance {
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        s.store_sqrt_ad(279, A::div_scaled_inputs(s.ad_value(332), ((2.0 * 1.034943e-10) / 1.6021918e-19), s.ad_value(471), 1.0));
+        s.store_sqrt_div_scaled_inputs(279, 332, ((2.0 * 1.034943e-10) / 1.6021918e-19), 471, 1.0);
 
         s.b[724] = (s.v[279] > (0.99 * p.p227));
         s.v[724] = if s.b[724] { 1.0 } else { 0.0 };
@@ -3728,7 +3728,7 @@ impl Instance {
             s.store_scalar(39, 1.0);
             s.store_scalar(292, (-1.0));
             s.copy_ad(332, 334);
-            s.store_sqrt_ad(279, A::div_scaled_inputs(s.ad_value(332), ((2.0 * 1.034943e-10) / 1.6021918e-19), s.ad_value(471), 1.0));
+            s.store_sqrt_div_scaled_inputs(279, 332, ((2.0 * 1.034943e-10) / 1.6021918e-19), 471, 1.0);
             s.store_scaled_square(278, 439, (s.v[293] * s.v[293]));
         }
 
@@ -3824,7 +3824,7 @@ impl Instance {
         }
 
         if ((!s.b[725]) && s.b[730]) {
-            s.store_sqrt_ad(279, A::div_scaled_inputs(s.ad_value(332), ((2.0 * 1.034943e-10) / 1.6021918e-19), s.ad_value(471), 1.0));
+            s.store_sqrt_div_scaled_inputs(279, 332, ((2.0 * 1.034943e-10) / 1.6021918e-19), 471, 1.0);
         }
 
         s.b[734] = ((s.v[345] + s.v[279]) < p.p227);
@@ -4139,7 +4139,7 @@ impl Instance {
 
         if (!s.b[725]) {
             if (s.v[321] > 0.0) {
-                s.store_sqrt_ad(345, A::div_scaled_inputs(s.ad_value(321), ((2.0 * 1.034943e-10) / 1.6021918e-19), s.ad_value(471), 1.0));
+                s.store_sqrt_div_scaled_inputs(345, 321, ((2.0 * 1.034943e-10) / 1.6021918e-19), 471, 1.0);
             } else {
                 s.store_scalar(345, 0.0);
             }
@@ -4568,7 +4568,7 @@ impl Instance {
             s.store_add_scaled_inputs4_indices(388, 72, 1.0, 389, (-1.0), 80, 1.0, 267, -1.0);
             s.store_scalar(32, p.p136);
             s.copy_ad(99, 388);
-            s.store_sqrt_ad(100, A::div_scaled_inputs(s.ad_value(471), ((2.0 * 1.6021918e-19) * 1.034943e-10), s.ad_value(120), 1.0));
+            s.store_sqrt_div_scaled_inputs(100, 471, ((2.0 * 1.6021918e-19) * 1.034943e-10), 120, 1.0);
             s.store_div_scaled_product_by_product(101, s.ad_value(127), s.ad_value(127), 1.0, s.ad_value(471), s.ad_value(471), 1.0);
             s.store_div_scaled_product_by_product(102, s.ad_value(100), s.ad_value(100), 1.0, s.ad_value(270), s.ad_value(270), 1.0);
             s.store_scaled_mul(103, 102, 120, 0.5);

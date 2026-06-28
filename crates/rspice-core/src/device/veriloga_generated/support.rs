@@ -5628,6 +5628,25 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sqrt_div_scaled_inputs(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64) {
+        let numerator_value = self.v[numerator];
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * numerator_scale * reciprocal;
+        let root = quotient.sqrt();
+        let sqrt_derivative_scale = 1.0 / (2.0 * root);
+        let numerator_derivative_scale = numerator_scale * reciprocal * sqrt_derivative_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * sqrt_derivative_scale;
+        self.v[index] = root;
+        let numerator_dn = self.dn[numerator];
+        let denominator_dn = self.dn[denominator];
+        let numerator_db = self.db[numerator];
+        let denominator_db = self.db[denominator];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_sqrt_offset_scaled_input(&mut self, index: usize, source: usize, scale: f64, offset: f64) {
         let raw = self.v[source] * scale + offset;
         let value = raw.sqrt();
@@ -18522,6 +18541,25 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_sqrt(&mut self, index: usize, source: usize) {
         let value = self.v[source].sqrt();
         self.store_unary_scaled(index, source, value, 1.0 / (2.0 * value));
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_div_scaled_inputs(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64) {
+        let numerator_value = self.v[numerator];
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * numerator_scale * reciprocal;
+        let root = quotient.sqrt();
+        let sqrt_derivative_scale = 1.0 / (2.0 * root);
+        let numerator_derivative_scale = numerator_scale * reciprocal * sqrt_derivative_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * sqrt_derivative_scale;
+        self.v[index] = root;
+        let numerator_dn = self.dn[numerator];
+        let denominator_dn = self.dn[denominator];
+        let numerator_db = self.db[numerator];
+        let denominator_db = self.db[denominator];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale; }
     }
 
     #[inline]
