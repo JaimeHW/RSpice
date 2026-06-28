@@ -7234,13 +7234,17 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
     let support = render_runtime_support_module();
 
     assert!(support.contains("pub(crate) fn store_pow_ad("), "{support}");
+    assert!(
+        support.contains("pub(crate) fn store_pow_offset_rhs("),
+        "{support}"
+    );
     assert!(support.contains("pub(crate) fn store_min_ad("), "{support}");
     assert!(
         stamp.contains("s.store_pow_ad(2, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_pow_ad(10, s.ad_value(0), A::offset(s.ad_value(1), p.p0));"),
+        stamp.contains("s.store_pow_offset_rhs(10, 0, 1, p.p0);"),
         "{stamp}"
     );
     assert!(

@@ -4037,6 +4037,28 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_pow_offset_exponent_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(support.contains("fn store_pow_offset_rhs"), "{support}");
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(17, AdValue::pow(scratch.ad_value(2), AdValue::offset(scratch.ad_value(3), params.offset)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_pow_offset_rhs(17, 2, 3, p.offset);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_pow_ad("), "{compact}");
+        assert!(!compact.contains("A::offset("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_negated_binary_inputs_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
         assert!(support.contains("fn store_neg_add"), "{support}");
@@ -9754,6 +9776,20 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = output;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left.node_derivatives[axis], right.node_derivatives[axis]); }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left.branch_derivatives[axis], right.branch_derivatives[axis]); }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_pow_offset_rhs(&mut self, index: usize, left: usize, right: usize, exponent_offset: f64) {",
+        "        let base = self.values[left];",
+        "        let exponent = self.values[right] + exponent_offset;",
+        "        let output = base.powf(exponent);",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = output;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left_node_derivatives[axis], right_node_derivatives[axis]); }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, left_branch_derivatives[axis], right_branch_derivatives[axis]); }",
         "    }",
         "",
         "    #[inline]",
@@ -22288,6 +22324,20 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
     if let Some(args) = compact_ad_call_args(value, "pow") {
         if args.len() != 2 {
             return None;
+        }
+        let left_index = compact_scratch_ad_value_index(args[0]);
+        if let Some(left) = left_index
+            && let Some(offset_args) = compact_ad_call_args(args[1], "offset")
+        {
+            if offset_args.len() != 2 {
+                return None;
+            }
+            if let Some(right) = compact_scratch_ad_value_index(offset_args[0]) {
+                return Some(format!(
+                    "scratch.store_pow_offset_rhs({target_index}, {left}, {right}, {});",
+                    offset_args[1]
+                ));
+            }
         }
         let left = compact_scratch_or_non_atomic_ad_arg(args[0])?;
         let right = compact_scratch_or_non_atomic_ad_arg(args[1])?;
