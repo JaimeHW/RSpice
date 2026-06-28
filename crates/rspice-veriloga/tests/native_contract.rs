@@ -427,6 +427,25 @@ endmodule
     )
 }
 
+fn table_model_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_table_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    real gain;
+    analog begin
+        x = V(p, n);
+        gain = $table_model(x, 0.0, 0.0, 1.0, 2.0, 2.0, 8.0);
+        I(p, n) <+ gain;
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1248,6 +1267,47 @@ fn native_device_executes_integer_bit_assignments_without_fallback() {
     assert_eq!(device.variable("x"), Some(x));
     assert_eq!(device.variable("gain"), Some(expected_gain));
     assert!((currents[0] - expected_gain).abs() < 1e-12);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
+    let model = table_model_assignment_model();
+    let mut device = VerilogADevice::try_new("TABLE1", model, &[1, 0])
+        .expect("table model assignment uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[1.5]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native table model evaluation succeeds");
+
+    assert_eq!(device.variable("x"), Some(1.5));
+    assert_eq!(device.variable("gain"), Some(5.0));
+    assert_eq!(currents.len(), 1);
+    assert!((currents[0] - 5.0).abs() < 1e-12, "currents: {currents:?}");
+
+    let jacobians = device
+        .try_compute_jacobian()
+        .expect("native table model jacobian succeeds");
+    let jacobian_order = jacobians
+        .iter()
+        .map(|entry| (entry.program_idx, entry.jacobian_idx, entry.value))
+        .collect::<Vec<_>>();
+    let expected = [(0, 0, 6.0), (0, 1, -6.0), (0, 2, -6.0), (0, 3, 6.0)];
+    assert_eq!(
+        jacobian_order.len(),
+        expected.len(),
+        "jacobians: {jacobians:?}"
+    );
+    for (actual, expected) in jacobian_order.iter().zip(expected) {
+        assert_eq!(actual.0, expected.0, "jacobians: {jacobians:?}");
+        assert_eq!(actual.1, expected.1, "jacobians: {jacobians:?}");
+        assert!(
+            (actual.2 - expected.2).abs() < 1e-12,
+            "jacobians: {jacobians:?}"
+        );
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

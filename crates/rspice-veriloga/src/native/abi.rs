@@ -73,6 +73,47 @@ pub unsafe extern "C" fn rspice_table_lookup(
     tables[table_id].interpolate(input)
 }
 
+/// External helper function for native x64 table lookup interpolation.
+///
+/// Argument order is chosen for x64 helper-call codegen: scalar input in XMM0,
+/// followed by table metadata in integer argument registers.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with valid pointers.
+#[unsafe(export_name = "rspice_table_lookup_native")]
+pub unsafe extern "C" fn rspice_table_lookup_native(
+    input: f64,
+    tables_ptr: *const crate::codegen::LookupTable,
+    tables_len: usize,
+    table_id: usize,
+) -> f64 {
+    if tables_ptr.is_null() || table_id >= tables_len {
+        return 0.0;
+    }
+
+    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
+    tables[table_id].interpolate(input)
+}
+
+/// External helper function for native x64 table-model derivatives.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with valid pointers.
+#[unsafe(export_name = "rspice_table_derivative_native")]
+pub unsafe extern "C" fn rspice_table_derivative_native(
+    input: f64,
+    tables_ptr: *const crate::codegen::LookupTable,
+    tables_len: usize,
+    table_id: usize,
+) -> f64 {
+    if tables_ptr.is_null() || table_id >= tables_len {
+        return 0.0;
+    }
+
+    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
+    tables[table_id].derivative(input)
+}
+
 /// External helper function for $limit operation.
 ///
 /// # Safety

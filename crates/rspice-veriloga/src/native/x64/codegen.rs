@@ -3,7 +3,8 @@ use crate::native::abi::{
     rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_bitand, rspice_bitor,
     rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_exp, rspice_floor,
     rspice_idtmod_wrap, rspice_limexp, rspice_log, rspice_log10, rspice_mod, rspice_pow,
-    rspice_shl, rspice_shr, rspice_sin, rspice_sinh, rspice_tan, rspice_tanh,
+    rspice_shl, rspice_shr, rspice_sin, rspice_sinh, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -20,6 +21,8 @@ const TIME_OFFSET: i32 = 88;
 const TIMESTEP_OFFSET: i32 = 96;
 const STATE_PREV_OFFSET: i32 = 104;
 const STATE_VALUES_OFFSET: i32 = 112;
+const LOOKUP_TABLES_OFFSET: i32 = 120;
+const LOOKUP_TABLES_LEN_OFFSET: i32 = 128;
 const PARAM_GIVEN_OFFSET: i32 = 152;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 160;
 const ANALYSIS_TYPE_OFFSET: i32 = 168;
@@ -190,6 +193,12 @@ impl FunctionCompiler {
                 NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                 NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
                 NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
+                NativeOp::TableLookup(table_id) => {
+                    self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
+                }
+                NativeOp::TableDerivative(table_id) => {
+                    self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
+                }
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
                 NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
                 NativeOp::IdtState(index) => self.emit_idt_state(index)?,
@@ -443,6 +452,59 @@ impl FunctionCompiler {
         let right = XMM_STACK[self.depth - 1];
         self.emit_binary_helper_call(left, right, integer_binary_helper(op));
         self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_table_helper_call(&mut self, table_id: usize, helper: TableHelper) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "table model helper requires stack depth 1, found 0".into(),
+            });
+        }
+
+        debug_assert!(self.uses_helper_calls);
+        let target = XMM_STACK[self.depth - 1];
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+            }
+        }
+
+        if target != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
+        }
+        self.encoder.mov_r64_m64_base_disp32(
+            table_ptr_arg_reg(),
+            self.ctx_arg_reg(),
+            LOOKUP_TABLES_OFFSET,
+        );
+        self.encoder.mov_r64_m64_base_disp32(
+            table_len_arg_reg(),
+            self.ctx_arg_reg(),
+            LOOKUP_TABLES_LEN_OFFSET,
+        );
+        self.encoder
+            .movabs_r64_imm64(table_id_arg_reg(), table_id as u64);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
         Ok(())
     }
 
@@ -1065,6 +1127,8 @@ enum BinaryOp {
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
 type TernaryHelper = extern "C" fn(f64, f64, f64) -> f64;
+type TableHelper =
+    unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
@@ -1119,6 +1183,8 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
             NativeOp::UnaryMath(_)
                 | NativeOp::BinaryMath(_)
                 | NativeOp::IntegerBinary(_)
+                | NativeOp::TableLookup(_)
+                | NativeOp::TableDerivative(_)
                 | NativeOp::IdtModState(_)
         )
     })
@@ -1187,10 +1253,40 @@ fn entry_vars_arg_reg() -> Gpr {
     Gpr::Rsi
 }
 
+#[cfg(windows)]
+fn table_ptr_arg_reg() -> Gpr {
+    Gpr::Rdx
+}
+
+#[cfg(windows)]
+fn table_len_arg_reg() -> Gpr {
+    Gpr::R8
+}
+
+#[cfg(windows)]
+fn table_id_arg_reg() -> Gpr {
+    Gpr::R9
+}
+
+#[cfg(not(windows))]
+fn table_ptr_arg_reg() -> Gpr {
+    Gpr::Rdi
+}
+
+#[cfg(not(windows))]
+fn table_len_arg_reg() -> Gpr {
+    Gpr::Rsi
+}
+
+#[cfg(not(windows))]
+fn table_id_arg_reg() -> Gpr {
+    Gpr::Rdx
+}
+
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{K_BOLTZMANN, Q_ELECTRON, compile_assignment_function, compile_value_function};
-    use crate::codegen::{BytecodeProgram, Instruction};
+    use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
@@ -1912,6 +2008,86 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_calls_table_helpers_and_preserves_state() {
+        let cases = [
+            (
+                "lookup-interpolate",
+                Instruction::TableLookup(0),
+                1.5,
+                5.0_f64,
+            ),
+            (
+                "lookup-extrapolate",
+                Instruction::TableLookup(0),
+                -0.5,
+                -1.0_f64,
+            ),
+            (
+                "lookup-second-table",
+                Instruction::TableLookup(1),
+                1.5,
+                13.0_f64,
+            ),
+            (
+                "derivative-interpolate",
+                Instruction::TableDerivative(0),
+                1.5,
+                6.0_f64,
+            ),
+            (
+                "derivative-extrapolate",
+                Instruction::TableDerivative(0),
+                -0.5,
+                2.0_f64,
+            ),
+            (
+                "derivative-second-table",
+                Instruction::TableDerivative(1),
+                1.5,
+                4.0_f64,
+            ),
+        ];
+
+        for (name, op, input, table_expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(input),
+                    op,
+                    Instruction::Add,
+                    Instruction::PushTime,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile table helper leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate table helper leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let table = [
+                LookupTable::from_data(vec![0.0, 1.0, 2.0], vec![0.0, 2.0, 8.0]),
+                LookupTable::from_data(vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 15.0]),
+            ];
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = 310.0;
+            ctx.time = 2.0;
+            ctx.lookup_tables = table.as_ptr();
+            ctx.lookup_tables_len = table.len();
+            let vars = [7.0_f64];
+
+            assert_eq!(
+                f(&ctx, vars.as_ptr()).to_bits(),
+                (310.0 + ((7.0 + table_expected) + 2.0)).to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_computes_ifelse() {
         let then_nan = f64::from_bits(0x7ff8_0000_0000_0001);
         let else_neg_zero = -0.0_f64;
@@ -2368,7 +2544,8 @@ mod tests {
             "x64-codegen-test",
             entry_kind,
             &BytecodeProgram { instructions },
-            NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8),
+            NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
+                .with_lookup_table_count(8),
         )
         .expect("lower bytecode to native program")
     }
@@ -2384,6 +2561,7 @@ mod tests {
             entry_kind,
             &BytecodeProgram { instructions },
             NativeLoweringLimits::new(terminal_count, 0, 8, 8, 8)
+                .with_lookup_table_count(8)
                 .with_available_current_pairs(available_current_pairs),
         )
         .expect("lower bytecode to native program")
