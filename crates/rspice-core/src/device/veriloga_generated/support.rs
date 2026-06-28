@@ -233,20 +233,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let second_raw = self.v[second];
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
         let first_value = first_raw * first_scale;
         let second_value = second_raw * second_scale;
         let product_term = product_left_value * product_right_value * product_scale;
         self.v[index] = first_value + second_value + product_term;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = first_dn[axis] * first_scale + second_dn[axis] * second_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first_db[axis] * first_scale + second_db[axis] * second_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
@@ -6824,16 +6816,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_add_scaled_inputs_product_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, product_left_value: f64, product_left_dn: [f64; NODE_COUNT], product_left_db: [f64; BRANCH_COUNT], product_right_value: f64, product_right_dn: [f64; NODE_COUNT], product_right_db: [f64; BRANCH_COUNT], product_scale: f64) {
-        let first_value = first_raw * first_scale;
-        let second_value = second_raw * second_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.v[index] = first_value + second_value + product_term;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = first_dn[axis] * first_scale + second_dn[axis] * second_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first_db[axis] * first_scale + second_db[axis] * second_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_scale; }
-    }
-
-    #[inline]
     pub(crate) fn store_add_scaled_inputs_products_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, first_product_left_value: f64, first_product_left_dn: [f64; NODE_COUNT], first_product_left_db: [f64; BRANCH_COUNT], first_product_right_value: f64, first_product_right_dn: [f64; NODE_COUNT], first_product_right_db: [f64; BRANCH_COUNT], first_product_scale: f64, second_product_left_value: f64, second_product_left_dn: [f64; NODE_COUNT], second_product_left_db: [f64; BRANCH_COUNT], second_product_right_value: f64, second_product_right_dn: [f64; NODE_COUNT], second_product_right_db: [f64; BRANCH_COUNT], second_product_scale: f64) {
         let first_value = first_raw * first_scale;
         let second_value = second_raw * second_scale;
@@ -6857,58 +6839,50 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_first_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
-        let second_raw = self.v[second];
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let second_dn = self.dn[second];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let second_db = self.db[second];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_raw, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_second_ad(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
-        let first_raw = self.v[first];
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let first_dn = self.dn[first];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let first_db = self.db[first];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first_raw, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_left_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
-        let first_raw = self.v[first];
-        let second_raw = self.v[second];
+        let first_value = self.v[first] * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let product_right_dn = self.dn[product_right];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first_raw, first_dn, first_db, first_scale, second_raw, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_right_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_raw = self.v[first];
-        let second_raw = self.v[second];
+        let first_value = self.v[first] * first_scale;
+        let second_value = self.v[second] * second_scale;
         let product_left_value = self.v[product_left];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let product_left_dn = self.dn[product_left];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first_raw, first_dn, first_db, first_scale, second_raw, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
     #[inline]
@@ -7276,10 +7250,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7294,10 +7272,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7312,10 +7294,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7330,10 +7316,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -7348,13 +7338,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let first_value = self.v[first] * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7372,13 +7363,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7396,13 +7388,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -7420,13 +7413,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7444,13 +7438,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -7468,13 +7463,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -14511,20 +14507,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let second_raw = self.v[second];
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
         let first_value = first_raw * first_scale;
         let second_value = second_raw * second_scale;
         let product_term = product_left_value * product_right_value * product_scale;
         self.v[index] = first_value + second_value + product_term;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = first_dn[axis] * first_scale + second_dn[axis] * second_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first_db[axis] * first_scale + second_db[axis] * second_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
@@ -21102,16 +21090,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_add_scaled_inputs_product_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, product_left_value: f64, product_left_dn: [f64; NODE_COUNT], product_left_db: [f64; BRANCH_COUNT], product_right_value: f64, product_right_dn: [f64; NODE_COUNT], product_right_db: [f64; BRANCH_COUNT], product_scale: f64) {
-        let first_value = first_raw * first_scale;
-        let second_value = second_raw * second_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.v[index] = first_value + second_value + product_term;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = first_dn[axis] * first_scale + second_dn[axis] * second_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first_db[axis] * first_scale + second_db[axis] * second_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_scale; }
-    }
-
-    #[inline]
     pub(crate) fn store_add_scaled_inputs_products_components(&mut self, index: usize, first_raw: f64, first_dn: [f64; NODE_COUNT], first_db: [f64; BRANCH_COUNT], first_scale: f64, second_raw: f64, second_dn: [f64; NODE_COUNT], second_db: [f64; BRANCH_COUNT], second_scale: f64, first_product_left_value: f64, first_product_left_dn: [f64; NODE_COUNT], first_product_left_db: [f64; BRANCH_COUNT], first_product_right_value: f64, first_product_right_dn: [f64; NODE_COUNT], first_product_right_db: [f64; BRANCH_COUNT], first_product_scale: f64, second_product_left_value: f64, second_product_left_dn: [f64; NODE_COUNT], second_product_left_db: [f64; BRANCH_COUNT], second_product_right_value: f64, second_product_right_dn: [f64; NODE_COUNT], second_product_right_db: [f64; BRANCH_COUNT], second_product_scale: f64) {
         let first_value = first_raw * first_scale;
         let second_value = second_raw * second_scale;
@@ -21135,58 +21113,50 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_first_ad(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
-        let second_raw = self.v[second];
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let second_dn = self.dn[second];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let second_db = self.db[second];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_raw, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_second_ad(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
-        let first_raw = self.v[first];
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let first_dn = self.dn[first];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let first_db = self.db[first];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first_raw, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_left_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
-        let first_raw = self.v[first];
-        let second_raw = self.v[second];
+        let first_value = self.v[first] * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let product_right_dn = self.dn[product_right];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first_raw, first_dn, first_db, first_scale, second_raw, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_right_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_raw = self.v[first];
-        let second_raw = self.v[second];
+        let first_value = self.v[first] * first_scale;
+        let second_value = self.v[second] * second_scale;
         let product_left_value = self.v[product_left];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let product_left_dn = self.dn[product_left];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first_raw, first_dn, first_db, first_scale, second_raw, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
     #[inline]
@@ -21554,10 +21524,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iaaa(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21572,10 +21546,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aiaa(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21590,10 +21568,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aaia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21608,10 +21590,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aaai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -21626,13 +21612,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iiaa(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let first_value = self.v[first] * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21650,13 +21637,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iaia(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21674,13 +21662,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_iaai(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
-        let first_value = self.v[first];
-        let first_dn = self.dn[first];
-        let first_db = self.db[first];
+        let first_value = self.v[first] * first_scale;
+        let second_value = second.value * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first_value, first_dn, first_db, first_scale, second.value, second.dn, second.db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[first][axis] * first_scale + second.dn[axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[first][axis] * first_scale + second.db[axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -21698,13 +21687,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aiia(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21722,13 +21712,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aiai(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
-        let second_value = self.v[second];
-        let second_dn = self.dn[second];
-        let second_db = self.db[second];
+        let first_value = first.value * first_scale;
+        let second_value = self.v[second] * second_scale;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second_value, second_dn, second_db, second_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -21746,13 +21737,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_inputs_product_mixed_aaii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let first_value = first.value * first_scale;
+        let second_value = second.value * second_scale;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_inputs_product_components(index, first.value, first.dn, first.db, first_scale, second.value, second.dn, second.db, second_scale, product_left_value, product_left_dn, product_left_db, product_right_value, product_right_dn, product_right_db, product_scale);
+        let product_term = product_left_value * product_right_value * product_scale;
+        self.v[index] = first_value + second_value + product_term;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = first.dn[axis] * first_scale + second.dn[axis] * second_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = first.db[axis] * first_scale + second.db[axis] * second_scale + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
