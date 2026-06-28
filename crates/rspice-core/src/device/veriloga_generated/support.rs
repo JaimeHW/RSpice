@@ -2084,6 +2084,35 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_scale: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], right_scale: f64) {
+        let left_value = left_raw * left_scale;
+        let right_value = right_raw * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        if quotient > 80.0 {
+            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;
+            self.v[index] = LIMEXP_MAX * (1.0 + quotient - 80.0);
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+        } else if quotient < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = quotient.exp();
+            let left_derivative_scale = left_scale * reciprocal * output;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * output;
+            self.v[index] = output;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        self.store_limited_exp_div_scaled_inputs_components(index, left.value, left.dn, left.db, left_scale, right.value, right.dn, right.db, right_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_offset_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_scale: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], right_scale: f64, offset: f64) {
         let left_value = left_raw * left_scale;
         let right_value = right_raw * right_scale;
@@ -12290,6 +12319,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_limited_exp_div_scaled_inputs_components(index, left.value, left.dn, left.db, left_scale, right_value, right_dn, right_db, right_scale);
+    }
+
+
+    #[inline]
     pub(crate) fn store_offset_limited_exp_div_scaled_inputs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64, offset: f64) {
         let right_value = self.v[right];
         let right_dn = self.dn[right];
@@ -12322,6 +12360,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let left_dn = self.dn[left];
         let left_db = self.db[left];
         self.store_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right.value, right.dn, right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_mixed_ia(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_limited_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right.value, right.dn, right.db, right_scale);
     }
 
 
@@ -12364,6 +12411,18 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let right_dn = self.dn[right];
         let right_db = self.db[right];
         self.store_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right_value, right_dn, right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_indices(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_limited_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right_value, right_dn, right_db, right_scale);
     }
 
 
@@ -15262,6 +15321,35 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_scale: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], right_scale: f64) {
+        let left_value = left_raw * left_scale;
+        let right_value = right_raw * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        if quotient > 80.0 {
+            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;
+            self.v[index] = LIMEXP_MAX * (1.0 + quotient - 80.0);
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+        } else if quotient < -80.0 {
+            self.store_scalar(index, 1.804851387e-35);
+        } else {
+            let output = quotient.exp();
+            let left_derivative_scale = left_scale * reciprocal * output;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * output;
+            self.v[index] = output;
+            for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * left_derivative_scale + right_dn[axis] * right_derivative_scale; }
+            for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * left_derivative_scale + right_db[axis] * right_derivative_scale; }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        self.store_limited_exp_div_scaled_inputs_components(index, left.value, left.dn, left.db, left_scale, right.value, right.dn, right.db, right_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_offset_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], left_scale: f64, right_raw: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT], right_scale: f64, offset: f64) {
         let left_value = left_raw * left_scale;
         let right_value = right_raw * right_scale;
@@ -25468,6 +25556,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_limited_exp_div_scaled_inputs_components(index, left.value, left.dn, left.db, left_scale, right_value, right_dn, right_db, right_scale);
+    }
+
+
+    #[inline]
     pub(crate) fn store_offset_limited_exp_div_scaled_inputs_mixed_ai(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64, offset: f64) {
         let right_value = self.v[right];
         let right_dn = self.dn[right];
@@ -25500,6 +25597,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let left_dn = self.dn[left];
         let left_db = self.db[left];
         self.store_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right.value, right.dn, right.db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_mixed_ia(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_limited_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right.value, right.dn, right.db, right_scale);
     }
 
 
@@ -25542,6 +25648,18 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let right_dn = self.dn[right];
         let right_db = self.db[right];
         self.store_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right_value, right_dn, right_db, right_scale);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_limited_exp_div_scaled_inputs_indices(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_limited_exp_div_scaled_inputs_components(index, left_value, left_dn, left_db, left_scale, right_value, right_dn, right_db, right_scale);
     }
 
 
@@ -27383,6 +27501,32 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     pub(crate) fn limited_exp(arg: Self) -> Self { let raw = arg.value; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } }
     #[inline]
     pub(crate) fn limited_exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX * scale) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) } }
+    #[inline]
+    pub(crate) fn limited_exp_div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value * left_scale;
+        let right_value = right.value * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        if quotient > 80.0 {
+            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;
+            value.value = LIMEXP_MAX * (1.0 + quotient - 80.0);
+            for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * left_derivative_scale + right.dn[index] * right_derivative_scale; }
+            for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * left_derivative_scale + right.db[index] * right_derivative_scale; }
+            value
+        } else if quotient < -80.0 {
+            Self::constant(1.804851387e-35)
+        } else {
+            let output = quotient.exp();
+            let left_derivative_scale = left_scale * reciprocal * output;
+            let right_derivative_scale = -quotient * reciprocal * right_scale * output;
+            value.value = output;
+            for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * left_derivative_scale + right.dn[index] * right_derivative_scale; }
+            for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * left_derivative_scale + right.db[index] * right_derivative_scale; }
+            value
+        }
+    }
     #[inline]
     pub(crate) fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }
     #[inline]
