@@ -4448,6 +4448,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_square_exp_scaled_input(&mut self, index: usize, square_source: usize, exp_source: usize, exp_scale: f64) {
+        let square_raw = self.v[square_source];
+        let square_value = square_raw * square_raw;
+        let exp_raw = self.v[exp_source] * exp_scale;
+        let exp_value = exp_raw.exp();
+        let square_dn = self.dn[square_source];
+        let exp_dn = self.dn[exp_source];
+        let square_db = self.db[square_source];
+        let exp_db = self.db[exp_source];
+        let square_derivative_scale = 2.0 * square_raw * exp_value;
+        let exp_derivative_scale = square_value * exp_value * exp_scale;
+        self.v[index] = square_value * exp_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + exp_dn[axis] * exp_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + exp_db[axis] * exp_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_square_lhs(&mut self, index: usize, value: usize, source: usize) {
         let raw = self.v[value];
         let square = raw * raw;
@@ -18497,6 +18514,23 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = source_value * quotient;
         for axis in 0..NODE_COUNT { let quotient_derivative = left.dn[axis] * reciprocal + right.dn[axis] * denominator_scale; self.dn[index][axis] = source_dn[axis] * quotient + source_value * quotient_derivative; }
         for axis in 0..BRANCH_COUNT { let quotient_derivative = left.db[axis] * reciprocal + right.db[axis] * denominator_scale; self.db[index][axis] = source_db[axis] * quotient + source_value * quotient_derivative; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_square_exp_scaled_input(&mut self, index: usize, square_source: usize, exp_source: usize, exp_scale: f64) {
+        let square_raw = self.v[square_source];
+        let square_value = square_raw * square_raw;
+        let exp_raw = self.v[exp_source] * exp_scale;
+        let exp_value = exp_raw.exp();
+        let square_dn = self.dn[square_source];
+        let exp_dn = self.dn[exp_source];
+        let square_db = self.db[square_source];
+        let exp_db = self.db[exp_source];
+        let square_derivative_scale = 2.0 * square_raw * exp_value;
+        let exp_derivative_scale = square_value * exp_value * exp_scale;
+        self.v[index] = square_value * exp_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + exp_dn[axis] * exp_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + exp_db[axis] * exp_derivative_scale; }
     }
 
     #[inline]

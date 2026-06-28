@@ -603,7 +603,7 @@ impl Instance {
             if (!s.b[863]) {
                 s.store_div_scaled_inputs_indices(281, 316, (-s.v[650]), 296, 1.0);
                 s.store_div_from_scalar_offset_ad(280, 1.0, A::exp_scaled_input(s.ad_value(281), -1.0), 1.0);
-                s.store_mul_ad(278, A::square(s.ad_value(280)), A::exp_scaled_input(s.ad_value(281), -1.0));
+                s.store_mul_square_exp_scaled_input(278, 280, 281, -1.0);
                 s.store_mul(280, 280, 600);
                 s.store_neg_add(279, 296, 280);
                 s.store_scalar(604, 0.0);
@@ -613,7 +613,7 @@ impl Instance {
                 s.store_scale(353, 604, 1.0 / (s.v[535]));
                 s.store_div_scaled_inputs_indices(281, 316, (-s.v[651]), 296, 1.0);
                 s.store_div_from_scalar_offset_ad(280, 1.0, A::exp_scaled_input(s.ad_value(281), -1.0), 1.0);
-                s.store_mul_ad(278, A::square(s.ad_value(280)), A::exp_scaled_input(s.ad_value(281), -1.0));
+                s.store_mul_square_exp_scaled_input(278, 280, 281, -1.0);
                 s.store_mul(280, 280, 600);
                 s.store_scalar(605, 0.0);
                 s.store_scaled_add(354, 585, 280, 1.0 / (s.v[535]));
