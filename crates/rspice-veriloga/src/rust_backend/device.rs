@@ -5587,6 +5587,22 @@ fn stamp() {
             ),
             "{sub_ad_lhs}"
         );
+
+        let mul_ad_product_rhs = helper_body(&support, "fn store_mul_ad_product_rhs(");
+        assert!(
+            !mul_ad_product_rhs.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_ad_product_rhs}"
+        );
+        assert!(
+            !mul_ad_product_rhs.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_ad_product_rhs}"
+        );
+        assert!(
+            mul_ad_product_rhs.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[source][axis] * product_value + source_value * product_derivative;"
+            ),
+            "{mul_ad_product_rhs}"
+        );
     }
 
     #[test]
@@ -15083,15 +15099,13 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_mul_ad_product_rhs(&mut self, index: usize, source: usize, left: AdValue, right: AdValue) {",
         "        let source_value = self.values[source];",
-        "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let product_value = left.value * right.value;",
-    "        self.values[index] = source_value * product_value;",
-    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left.node_derivatives[axis] * right.value + left.value * right.node_derivatives[axis]; self.node_derivatives[index][axis] = source_node_derivatives[axis] * product_value + source_value * product_derivative; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * right.value + left.value * right.branch_derivatives[axis]; self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * product_value + source_value * product_derivative; }",
-    "    }",
-    "",
-    "    #[inline]",
+        "        let product_value = left.value * right.value;",
+        "        self.values[index] = source_value * product_value;",
+        "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left.node_derivatives[axis] * right.value + left.value * right.node_derivatives[axis]; self.node_derivatives[index][axis] = self.node_derivatives[source][axis] * product_value + source_value * product_derivative; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left.branch_derivatives[axis] * right.value + left.value * right.branch_derivatives[axis]; self.branch_derivatives[index][axis] = self.branch_derivatives[source][axis] * product_value + source_value * product_derivative; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_mul3_affine_lhs(&mut self, index: usize, left: usize, middle: usize, scale: f64, offset: f64, right: usize) {",
         "        let left_value = self.values[left];",
         "        let middle_value = self.values[middle];",
