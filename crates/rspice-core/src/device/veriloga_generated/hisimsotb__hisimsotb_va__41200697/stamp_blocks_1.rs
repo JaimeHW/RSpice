@@ -644,7 +644,7 @@ impl Instance {
             s.store_div_scaled_inputs2_indices(425, 404, -1.0, 416, -1.0, 144, 1.0);
             s.store_add_scaled_inputs3(426, A::div_scaled_product(A::square(s.ad_value(422)), s.ad_value(422), 1.0, A::mul3_scaled_output(s.ad_value(421), s.ad_value(421), s.ad_value(421), 27.0), 1.0), 1.0, A::div_scaled_product_by_product(s.ad_value(422), s.ad_value(423), 1.0, s.ad_value(421), s.ad_value(421), 6.0), (-1.0), A::div_scaled_inputs(s.ad_value(425), 1.0, s.ad_value(421), 2.0), 1.0);
             s.store_div_ad(424, A::add_scaled_square_product(s.ad_value(422), (-1.0), s.ad_value(421), s.ad_value(423), 3.0), A::mul_scaled_lhs(s.ad_value(421), 9.0, s.ad_value(421)));
-            s.store_sqrt_ad(283, A::add_scaled_square_product(s.ad_value(426), 1.0, A::square(s.ad_value(424)), s.ad_value(424), 1.0));
+            s.store_sqrt_add_scaled_square_cube_product(283, 426, 1.0, 424, 1.0);
             s.store_powf_ad(427, A::sub(s.ad_value(283), s.ad_value(426)), 0.3333333333333333);
             s.store_neg_powf_add_input(428, 426, 283, 0.3333333333333333);
             s.store_add_scaled_inputs3_mixed_iia(290, 427, 1.0, 428, 1.0, A::div_scaled_inputs(s.ad_value(422), 1.0, s.ad_value(421), 3.0), -1.0);
@@ -1046,7 +1046,7 @@ impl Instance {
             s.store_div_scaled_inputs2_indices(425, 404, -1.0, 416, -1.0, 144, 1.0);
             s.store_add_scaled_inputs3(426, A::div_scaled_product(A::square(s.ad_value(422)), s.ad_value(422), 1.0, A::mul3_scaled_output(s.ad_value(421), s.ad_value(421), s.ad_value(421), 27.0), 1.0), 1.0, A::div_scaled_product_by_product(s.ad_value(422), s.ad_value(423), 1.0, s.ad_value(421), s.ad_value(421), 6.0), (-1.0), A::div_scaled_inputs(s.ad_value(425), 1.0, s.ad_value(421), 2.0), 1.0);
             s.store_div_ad(424, A::add_scaled_square_product(s.ad_value(422), (-1.0), s.ad_value(421), s.ad_value(423), 3.0), A::mul_scaled_lhs(s.ad_value(421), 9.0, s.ad_value(421)));
-            s.store_sqrt_ad(283, A::add_scaled_square_product(s.ad_value(426), 1.0, A::square(s.ad_value(424)), s.ad_value(424), 1.0));
+            s.store_sqrt_add_scaled_square_cube_product(283, 426, 1.0, 424, 1.0);
             s.store_powf_ad(427, A::sub(s.ad_value(283), s.ad_value(426)), 0.3333333333333333);
             s.store_neg_powf_add_input(428, 426, 283, 0.3333333333333333);
             s.store_add_scaled_inputs3_mixed_iia(290, 427, 1.0, 428, 1.0, A::div_scaled_inputs(s.ad_value(422), 1.0, s.ad_value(421), 3.0), -1.0);
