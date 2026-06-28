@@ -140,12 +140,20 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0xF2, 0x58, dst, src);
     }
 
+    pub(crate) fn addsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0xF2, 0x58, dst, disp)
+    }
+
     pub fn addsd_xmm0_xmm1(&mut self) {
         self.addsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }
 
     pub(crate) fn subsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x5C, dst, src);
+    }
+
+    pub(crate) fn subsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0xF2, 0x5C, dst, disp)
     }
 
     pub fn subsd_xmm0_xmm1(&mut self) {
@@ -156,12 +164,20 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0xF2, 0x59, dst, src);
     }
 
+    pub(crate) fn mulsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0xF2, 0x59, dst, disp)
+    }
+
     pub fn mulsd_xmm0_xmm1(&mut self) {
         self.mulsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }
 
     pub(crate) fn divsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x5E, dst, src);
+    }
+
+    pub(crate) fn divsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0xF2, 0x5E, dst, disp)
     }
 
     pub fn divsd_xmm0_xmm1(&mut self) {
@@ -177,6 +193,16 @@ impl X64Encoder {
         self.emit_rex(false, dst.code(), 0, src.code());
         self.emit_all(&[0x0F, opcode]);
         self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
+    fn emit_sse_reg_rip_disp32(&mut self, prefix: u8, opcode: u8, dst: Xmm, disp: i32) -> usize {
+        self.emit_u8(prefix);
+        self.emit_rex(false, dst.code(), 0, 0);
+        self.emit_all(&[0x0F, opcode]);
+        self.emit_modrm(0b00, dst.code(), 0b101);
+        let offset = self.position();
+        self.emit_i32(disp);
+        offset
     }
 
     fn emit_base_disp32_modrm(&mut self, reg: u8, base: u8, disp: i32) {
@@ -302,6 +328,24 @@ mod tests {
                 0x66, 0x0F, 0x57, 0xC0, 0xF2, 0x0F, 0x10, 0xC8, 0xF2, 0x0F, 0x58, 0xC8, 0xF2, 0x0F,
                 0x5C, 0xC8, 0xF2, 0x0F, 0x59, 0xC8, 0xF2, 0x0F, 0x5E, 0xC8, 0xF2, 0x0F, 0x11, 0x8A,
                 16, 0, 0, 0, 0xC3,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_scalar_f64_rip_memory_ops() {
+        let mut encoder = X64Encoder::new();
+
+        let mul_disp = encoder.mulsd_xmm_m64_rip_disp32(Xmm::Xmm1, 16);
+        let div_disp = encoder.divsd_xmm_m64_rip_disp32(Xmm::Xmm5, -8);
+
+        assert_eq!(mul_disp, 4);
+        assert_eq!(div_disp, 12);
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0xF2, 0x0F, 0x59, 0x0D, 16, 0, 0, 0, 0xF2, 0x0F, 0x5E, 0x2D, 0xF8, 0xFF, 0xFF,
+                0xFF,
             ]
         );
     }

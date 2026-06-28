@@ -14,6 +14,8 @@ const PARAM_GIVEN_OFFSET: i32 = 152;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 160;
 const MFACTOR_OFFSET: i32 = 176;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
+const K_BOLTZMANN: f64 = 1.380649e-23;
+const Q_ELECTRON: f64 = 1.602176634e-19;
 const XMM_STACK: [Xmm; 6] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
@@ -131,6 +133,9 @@ impl FunctionCompiler {
                 }
                 NativeOp::LoadTemperature => {
                     self.emit_context_f64_load(TEMPERATURE_OFFSET)?;
+                }
+                NativeOp::LoadThermalVoltage => {
+                    self.emit_thermal_voltage_load()?;
                 }
                 NativeOp::LoadTime => {
                     self.emit_context_f64_load(TIME_OFFSET)?;
@@ -277,6 +282,15 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_thermal_voltage_load(&mut self) -> JitResult<()> {
+        let dst = self.push_register()?;
+        self.encoder
+            .movsd_xmm_m64_base_disp32(dst, host_ctx_arg_reg(), TEMPERATURE_OFFSET);
+        self.emit_literal_binary_op(dst, K_BOLTZMANN, BinaryOp::Mul);
+        self.emit_literal_binary_op(dst, Q_ELECTRON, BinaryOp::Div);
+        Ok(())
+    }
+
     fn emit_node_voltage_load(&mut self, dst: Xmm, node: VoltageNode) -> JitResult<()> {
         match node {
             VoltageNode::Terminal(index) => self.emit_terminal_voltage_load(dst, index),
@@ -329,6 +343,19 @@ impl FunctionCompiler {
 
     fn emit_literal_load(&mut self, dst: Xmm, value: f64) {
         let displacement_offset = self.encoder.movsd_xmm_m64_rip_disp32(dst, 0);
+        self.literals.push(LiteralPatch {
+            displacement_offset,
+            value,
+        });
+    }
+
+    fn emit_literal_binary_op(&mut self, dst: Xmm, value: f64, op: BinaryOp) {
+        let displacement_offset = match op {
+            BinaryOp::Add => self.encoder.addsd_xmm_m64_rip_disp32(dst, 0),
+            BinaryOp::Sub => self.encoder.subsd_xmm_m64_rip_disp32(dst, 0),
+            BinaryOp::Mul => self.encoder.mulsd_xmm_m64_rip_disp32(dst, 0),
+            BinaryOp::Div => self.encoder.divsd_xmm_m64_rip_disp32(dst, 0),
+        };
         self.literals.push(LiteralPatch {
             displacement_offset,
             value,
@@ -415,7 +442,7 @@ fn host_vars_arg_reg() -> Gpr {
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::{compile_assignment_function, compile_value_function};
+    use super::{K_BOLTZMANN, Q_ELECTRON, compile_assignment_function, compile_value_function};
     use crate::codegen::{BytecodeProgram, Instruction};
     use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
@@ -585,6 +612,24 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_computes_thermal_voltage_from_context_temperature() {
+        let program = native_program(EntryKind::StampValue, vec![Instruction::PushVt], 0);
+        let bytes = compile_value_function(&program).expect("compile thermal voltage leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate thermal voltage leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 315.0;
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            thermal_voltage(315.0).to_bits()
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_runs_from_nonzero_concatenated_image_offset() {
         let program = native_program(
             EntryKind::StampValue,
@@ -732,5 +777,9 @@ mod tests {
             analysis_type: 0,
             multiplicity: 1.0,
         }
+    }
+
+    fn thermal_voltage(temperature: f64) -> f64 {
+        K_BOLTZMANN * temperature / Q_ELECTRON
     }
 }

@@ -30,6 +30,7 @@ pub(crate) enum NativeOp {
     LoadVariable(usize),
     LoadBranchUnknown(usize),
     LoadTemperature,
+    LoadThermalVoltage,
     LoadTime,
     LoadMfactor,
     Add,
@@ -197,6 +198,10 @@ impl NativeProgram {
                 }
                 Instruction::PushTemperature => {
                     ops.push(NativeOp::LoadTemperature);
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushVt => {
+                    ops.push(NativeOp::LoadThermalVoltage);
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushTime => {
@@ -524,6 +529,21 @@ mod tests {
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_thermal_voltage_context_read() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushVt],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("vt", EntryKind::StampValue, &program, limits(0, 0))
+                .expect("thermal voltage is a native context read");
+
+        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.ops(), &[NativeOp::LoadThermalVoltage]);
+        assert!(lowered.current_pair_dependencies().is_empty());
     }
 
     #[test]
