@@ -6638,15 +6638,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
-    pub(crate) fn store_add_scaled_product_components(&mut self, index: usize, value_raw: f64, value_dn: [f64; NODE_COUNT], value_db: [f64; BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_dn: [f64; NODE_COUNT], product_left_db: [f64; BRANCH_COUNT], product_right_value: f64, product_right_dn: [f64; NODE_COUNT], product_right_db: [f64; BRANCH_COUNT], product_scale: f64) {
-        let value_term = value_raw * value_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.v[index] = value_term + product_term;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = value_dn[axis] * value_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value_db[axis] * value_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_scale; }
-    }
-
-    #[inline]
     pub(crate) fn store_add_scaled_sub_value_product_components(&mut self, index: usize, scalar: f64, subtrahend_raw: f64, subtrahend_dn: [f64; NODE_COUNT], subtrahend_db: [f64; BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_dn: [f64; NODE_COUNT], product_left_db: [f64; BRANCH_COUNT], product_right_value: f64, product_right_dn: [f64; NODE_COUNT], product_right_db: [f64; BRANCH_COUNT], product_scale: f64) {
         let value_term = (scalar - subtrahend_raw) * value_scale;
         let product_term = product_left_value * product_right_value * product_scale;
@@ -6698,12 +6689,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_add_scaled_product_left_ad(&mut self, index: usize, value: usize, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
         let value_raw = self.v[value];
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let value_dn = self.dn[value];
-        let product_right_dn = self.dn[product_right];
-        let value_db = self.db[value];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_product_components(index, value_raw, value_dn, value_db, value_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[value][axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[value][axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
@@ -7095,10 +7085,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_product_mixed_iaa(&mut self, index: usize, value: usize, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let value_value = self.v[value];
-        let value_dn = self.dn[value];
-        let value_db = self.db[value];
-        self.store_add_scaled_product_components(index, value_value, value_dn, value_db, value_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let value_raw = self.v[value];
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[value][axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[value][axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7113,10 +7105,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_product_mixed_aia(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let value_raw = value.value;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * value_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * value_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -7131,10 +7125,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_product_mixed_aai(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let value_raw = value.value;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
@@ -21038,15 +21034,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
     #[inline]
-    pub(crate) fn store_add_scaled_product_components(&mut self, index: usize, value_raw: f64, value_dn: [f64; NODE_COUNT], value_db: [f64; BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_dn: [f64; NODE_COUNT], product_left_db: [f64; BRANCH_COUNT], product_right_value: f64, product_right_dn: [f64; NODE_COUNT], product_right_db: [f64; BRANCH_COUNT], product_scale: f64) {
-        let value_term = value_raw * value_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.v[index] = value_term + product_term;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = value_dn[axis] * value_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value_db[axis] * value_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_scale; }
-    }
-
-    #[inline]
     pub(crate) fn store_add_scaled_sub_value_product_components(&mut self, index: usize, scalar: f64, subtrahend_raw: f64, subtrahend_dn: [f64; NODE_COUNT], subtrahend_db: [f64; BRANCH_COUNT], value_scale: f64, product_left_value: f64, product_left_dn: [f64; NODE_COUNT], product_left_db: [f64; BRANCH_COUNT], product_right_value: f64, product_right_dn: [f64; NODE_COUNT], product_right_db: [f64; BRANCH_COUNT], product_scale: f64) {
         let value_term = (scalar - subtrahend_raw) * value_scale;
         let product_term = product_left_value * product_right_value * product_scale;
@@ -21098,12 +21085,11 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_add_scaled_product_left_ad(&mut self, index: usize, value: usize, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
         let value_raw = self.v[value];
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let value_dn = self.dn[value];
-        let product_right_dn = self.dn[product_right];
-        let value_db = self.db[value];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_product_components(index, value_raw, value_dn, value_db, value_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[value][axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[value][axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
     #[inline]
@@ -21495,10 +21481,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_product_mixed_iaa(&mut self, index: usize, value: usize, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        let value_value = self.v[value];
-        let value_dn = self.dn[value];
-        let value_db = self.db[value];
-        self.store_add_scaled_product_components(index, value_value, value_dn, value_db, value_scale, product_left.value, product_left.dn, product_left.db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let value_raw = self.v[value];
+        let product_left_value = product_left.value;
+        let product_right_value = product_right.value;
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[value][axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[value][axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21513,10 +21501,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_product_mixed_aia(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        let value_raw = value.value;
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
-        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left_value, product_left_dn, product_left_db, product_right.value, product_right.dn, product_right.db, product_scale);
+        let product_right_value = product_right.value;
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * value_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * value_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
     }
 
 
@@ -21531,10 +21521,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_add_scaled_product_mixed_aai(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64) {
+        let value_raw = value.value;
+        let product_left_value = product_left.value;
         let product_right_value = self.v[product_right];
-        let product_right_dn = self.dn[product_right];
-        let product_right_db = self.db[product_right];
-        self.store_add_scaled_product_components(index, value.value, value.dn, value.db, value_scale, product_left.value, product_left.dn, product_left.db, product_right_value, product_right_dn, product_right_db, product_scale);
+        self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = value.dn[axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value.db[axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale; }
     }
 
 
