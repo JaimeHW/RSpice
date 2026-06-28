@@ -530,6 +530,19 @@ endmodule
     )
 }
 
+fn idt_current_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_idt_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ idt(V(p, n), 0.5);
+endmodule
+"#,
+    )
+}
+
 fn current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1261,6 +1274,46 @@ fn native_compile_rejects_reactive_current_probes_without_fallback() {
     assert!(
         msg.contains("PushCurrent terminal pair 0,1 unavailable"),
         "error must name unavailable reactive current dependency, got: {msg}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_idt_current_and_jacobian_without_fallback() {
+    let model = idt_current_model();
+    let mut device =
+        VerilogADevice::try_new("IDT1", model, &[1, 0]).expect("idt model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[2.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native idt DC evaluation succeeds")[0]
+            .to_bits(),
+        0.5_f64.to_bits()
+    );
+    device.advance_state();
+
+    device.set_analysis_type(2);
+    device.set_timestep(0.25);
+    device.update_voltages(&[2.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native idt transient evaluation succeeds")[0]
+            .to_bits(),
+        1.0_f64.to_bits()
+    );
+
+    let (matrix, rhs) = stamp_device(&mut device, &[2.0]);
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 0.25).abs() < 1e-15,
+        "matrix: {matrix:?}"
+    );
+    assert!(
+        (rhs.get(&0).copied().unwrap_or_default() + 0.5).abs() < 1e-15,
+        "rhs: {rhs:?}"
     );
 }
 

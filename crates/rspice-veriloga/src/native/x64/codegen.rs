@@ -26,7 +26,7 @@ const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
-const DDT_DC_EPSILON: f64 = 1.0e-20;
+const TIMESTEP_DC_EPSILON: f64 = 1.0e-20;
 const CALL_SPILL_SLOT_COUNT: usize = 7;
 const CALL_RESULT_SLOT: usize = 6;
 const CALL_FRAME_BYTES: i32 = CALL_SHADOW_BYTES + (CALL_SPILL_SLOT_COUNT * WORD_BYTES) as i32;
@@ -186,6 +186,8 @@ impl FunctionCompiler {
                 NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
                 NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
+                NativeOp::IdtState(index) => self.emit_idt_state(index)?,
+                NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
             }
         }
 
@@ -430,12 +432,7 @@ impl FunctionCompiler {
         let scratch = self.scratch_register()?;
         let state_disp = byte_disp(state_index)?;
 
-        self.emit_context_pointer_load(STATE_VALUES_OFFSET);
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let skip_store = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, target);
-        self.patch_rel32_to_current(skip_store)?;
+        self.emit_state_value_store(state_disp, target)?;
 
         self.encoder.movsd_xmm_xmm(scratch, target);
         self.emit_context_pointer_load(STATE_PREV_OFFSET);
@@ -446,7 +443,7 @@ impl FunctionCompiler {
         self.patch_rel32_to_current(skip_previous_load)?;
 
         self.encoder.subsd_xmm_xmm(target, scratch);
-        self.emit_ddt_timestep_scale(target, scratch)
+        self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Div)
     }
 
     fn emit_ddt_jacobian(&mut self) -> JitResult<()> {
@@ -459,15 +456,75 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 1];
         let scratch = self.scratch_register()?;
-        self.emit_ddt_timestep_scale(target, scratch)
+        self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Div)
     }
 
-    fn emit_ddt_timestep_scale(&mut self, target: Xmm, scratch: Xmm) -> JitResult<()> {
+    fn emit_idt_state(&mut self, state_index: usize) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("idt state requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let value = XMM_STACK[self.depth - 2];
+        let ic = XMM_STACK[self.depth - 1];
+        let scratch = self.scratch_register()?;
+        let state_disp = byte_disp(state_index)?;
+
         self.encoder
             .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
         self.encoder.movq_r64_xmm(Gpr::R11, scratch);
         self.emit_abs_register(scratch);
-        self.emit_literal_compare(scratch, DDT_DC_EPSILON);
+        self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
+
+        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+        self.encoder.movsd_xmm_xmm(value, ic);
+        self.emit_state_value_store(state_disp, value)?;
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(non_dc_path)?;
+        self.emit_context_pointer_load(STATE_PREV_OFFSET);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let skip_previous_load = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.encoder
+            .movsd_xmm_m64_base_disp32(ic, Gpr::Rax, state_disp);
+        self.patch_rel32_to_current(skip_previous_load)?;
+
+        self.encoder.movq_xmm_r64(scratch, Gpr::R11);
+        self.encoder.mulsd_xmm_xmm(value, scratch);
+        self.encoder.addsd_xmm_xmm(value, ic);
+        self.emit_state_value_store(state_disp, value)?;
+
+        self.patch_rel32_to_current(done)?;
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_idt_jacobian(&mut self) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "idt jacobian requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        let scratch = self.scratch_register()?;
+        self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Mul)
+    }
+
+    fn emit_timestep_guarded_scale(
+        &mut self,
+        target: Xmm,
+        scratch: Xmm,
+        op: BinaryOp,
+    ) -> JitResult<()> {
+        self.encoder
+            .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
+        self.encoder.movq_r64_xmm(Gpr::R11, scratch);
+        self.emit_abs_register(scratch);
+        self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
 
         let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
         self.encoder.xorpd_xmm_xmm(target, target);
@@ -475,9 +532,22 @@ impl FunctionCompiler {
 
         self.patch_rel32_to_current(non_dc_path)?;
         self.encoder.movq_xmm_r64(scratch, Gpr::R11);
-        self.encoder.divsd_xmm_xmm(target, scratch);
+        match op {
+            BinaryOp::Mul => self.encoder.mulsd_xmm_xmm(target, scratch),
+            BinaryOp::Div => self.encoder.divsd_xmm_xmm(target, scratch),
+            BinaryOp::Add | BinaryOp::Sub => unreachable!("timestep scaling supports mul/div"),
+        }
 
         self.patch_rel32_to_current(done)
+    }
+
+    fn emit_state_value_store(&mut self, state_disp: i32, src: Xmm) -> JitResult<()> {
+        self.emit_context_pointer_load(STATE_VALUES_OFFSET);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let skip_store = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, src);
+        self.patch_rel32_to_current(skip_store)
     }
 
     fn emit_binary_helper_call(&mut self, left: Xmm, right: Xmm, helper: BinaryHelper) {
@@ -1215,6 +1285,93 @@ mod tests {
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 8.0_f64.to_bits());
 
         ctx.timestep = 0.0;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_idt_state_and_records_integral() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::IdtState(1),
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile idt state leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate idt state leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+
+        let previous_state = [0.0_f64, 1.5_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_values = state_values.as_mut_ptr();
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.0;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 1.0e-20;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.25;
+        ctx.state_prev = std::ptr::null();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 1.0_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = -0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 1.0_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = f64::NAN;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_idt_jacobian_from_timestep() {
+        let program = native_program(
+            EntryKind::Jacobian,
+            vec![Instruction::PushVariable(0), Instruction::IdtJacobian],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile idt jacobian leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate idt jacobian leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+
+        ctx.timestep = 0.25;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
+
+        ctx.timestep = 0.0;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+
+        ctx.timestep = 1.0e-20;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+
+        ctx.timestep = -0.25;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), (-0.5_f64).to_bits());
+
+        ctx.timestep = f64::NAN;
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
     }
 

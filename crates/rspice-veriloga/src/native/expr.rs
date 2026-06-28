@@ -49,6 +49,8 @@ pub(crate) enum NativeOp {
     BinaryMath(BinaryMathOp),
     DdtState(usize),
     DdtJacobian,
+    IdtState(usize),
+    IdtJacobian,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -390,6 +392,27 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::DdtJacobian);
+                }
+                Instruction::IdtState(index) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::IdtState(*index));
+                }
+                Instruction::IdtJacobian => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::IdtJacobian);
                 }
                 Instruction::Gt
                 | Instruction::Lt
