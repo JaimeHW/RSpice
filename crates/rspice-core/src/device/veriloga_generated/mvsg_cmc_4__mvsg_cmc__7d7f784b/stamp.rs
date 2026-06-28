@@ -866,21 +866,20 @@ impl Instance {
         Self::stamp_transient_block_22(s, p);
         Self::stamp_transient_block_23(s, p);
         Self::stamp_transient_block_24(ctx, s, p, nodes);
-        Self::stamp_transient_block_25(s, p);
+        Self::stamp_transient_block_25(ctx, s, p, nodes);
         Self::stamp_transient_block_26(ctx, s, p, nodes);
-        Self::stamp_transient_block_27(ctx, s, p, nodes);
+        Self::stamp_transient_block_27(s, p);
         Self::stamp_transient_block_28(ctx, s, p, nodes);
         Self::stamp_transient_block_29(ctx, s, p, nodes);
         Self::stamp_transient_block_30(ctx, s, p, nodes);
         Self::stamp_transient_block_31(ctx, s, p, nodes);
-        Self::stamp_transient_block_32(s, p);
+        Self::stamp_transient_block_32(ctx, s, p, nodes);
         Self::stamp_transient_block_33(ctx, s, p, nodes);
-        Self::stamp_transient_block_34(ctx, s, p, nodes);
+        Self::stamp_transient_block_34(s, p);
         Self::stamp_transient_block_35(s, p);
         Self::stamp_transient_block_36(ctx, s, p, nodes);
         Self::stamp_transient_block_37(s, p);
-        Self::stamp_transient_block_38(s, p);
-        Self::stamp_transient_block_39(ctx, s, p, nodes);
+        Self::stamp_transient_block_38(ctx, s, p, nodes);
 
         Self::stamp_transient_equations_block_0(ctx, stamper, s, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         Self::stamp_transient_equations_block_1(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
@@ -935,7 +934,6 @@ impl Instance {
         Self::stamp_reactive_block_18(s, p);
         Self::stamp_reactive_block_19(s, p);
         Self::stamp_reactive_block_20(ctx, s, p, nodes);
-        Self::stamp_reactive_block_21(ctx, s, p, nodes);
 
         Self::stamp_reactive_equations_block_0(ctx, stamper, s, p, nodes, multiplicity);
         Self::stamp_reactive_equations_block_1(stamper, s, p, nodes, branches, multiplicity);

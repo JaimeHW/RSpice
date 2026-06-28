@@ -294,7 +294,7 @@ impl Instance {
         }
 
         if s.b[63] {
-            let assign410_ad_e599: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[52] >= 37.0)) && (!(s.v[52] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(52))
                 } else {
@@ -312,8 +312,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign410_ad_e633: A = {
+            }, {
                 if ((!(s.v[53] >= 37.0)) && (!(s.v[53] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(53))
                 } else {
@@ -331,8 +330,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign410_ad_e599, assign410_ad_e633);
+            });
         }
 
         if s.b[63] {
@@ -560,7 +558,7 @@ impl Instance {
         }
 
         if s.b[63] {
-            let assign410_ad_e599: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[52] >= 37.0)) && (!(s.v[52] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(52))
                 } else {
@@ -578,8 +576,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign410_ad_e633: A = {
+            }, {
                 if ((!(s.v[53] >= 37.0)) && (!(s.v[53] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(53))
                 } else {
@@ -597,8 +594,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign410_ad_e599, assign410_ad_e633);
+            });
         }
 
         if s.b[63] {

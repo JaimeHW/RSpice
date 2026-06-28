@@ -184,7 +184,7 @@ impl Instance {
         }
 
         if s.b[105] {
-            let assign800_ad_e1032: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -202,8 +202,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign800_ad_e1066: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -221,8 +220,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign800_ad_e1032, assign800_ad_e1066);
+            });
         }
 
         if s.b[105] {
@@ -288,7 +286,7 @@ impl Instance {
         }
 
         if s.b[109] {
-            let assign1020_ad_e1266: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -306,8 +304,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign1020_ad_e1300: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -325,8 +322,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign1020_ad_e1266, assign1020_ad_e1300);
+            });
         }
 
         if s.b[109] {
@@ -363,7 +359,7 @@ impl Instance {
         }
 
         if s.b[111] {
-            let assign1140_ad_e1428: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -381,8 +377,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign1140_ad_e1462: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -400,8 +395,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign1140_ad_e1428, assign1140_ad_e1462);
+            });
         }
 
         if s.b[111] {
@@ -437,16 +431,8 @@ impl Instance {
             s.store_mul_exp_rhs(1, 1, 0);
         }
 
-    }
-
-    pub(super) fn stamp_transient_block_1(
-        ctx: &GeneratedEvalContext<'_>,
-        s: &mut Scratch,
-        p: &Parameters,
-        nodes: &[usize; Instance::NODE_COUNT],
-    ) {
         if s.b[113] {
-            let assign1260_ad_e1590: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -464,8 +450,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign1260_ad_e1624: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -483,14 +468,21 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign1260_ad_e1590, assign1260_ad_e1624);
+            });
         }
 
         if s.b[113] {
             s.store_add_scaled_offset_product_rhs_mixed_aii(39, A::div_scaled_inputs(s.ad_value(2), 0.0, A::scale_offset(A::powf(A::abs(s.ad_value(77)), p.p9), p.p8, 1.0), 1.0), (-1.0), 21, 1, (-1.0), 1.0);
         }
 
+    }
+
+    pub(super) fn stamp_transient_block_1(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+        nodes: &[usize; Instance::NODE_COUNT],
+    ) {
         if (!s.b[113]) {
             s.store_scalar(39, 0.0);
         }
@@ -844,7 +836,7 @@ impl Instance {
         }
 
         if s.b[105] {
-            let assign800_ad_e1032: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -862,8 +854,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign800_ad_e1066: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -881,8 +872,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign800_ad_e1032, assign800_ad_e1066);
+            });
         }
 
         if s.b[105] {
@@ -943,7 +933,7 @@ impl Instance {
         }
 
         if s.b[109] {
-            let assign1020_ad_e1266: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -961,8 +951,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign1020_ad_e1300: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -980,8 +969,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign1020_ad_e1266, assign1020_ad_e1300);
+            });
         }
 
         s.b[111] = (s.v[19] > 0.0);
@@ -1010,7 +998,7 @@ impl Instance {
         }
 
         if s.b[111] {
-            let assign1140_ad_e1428: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -1028,8 +1016,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign1140_ad_e1462: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -1047,8 +1034,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign1140_ad_e1428, assign1140_ad_e1462);
+            });
         }
 
         if s.b[111] {
@@ -1085,7 +1071,7 @@ impl Instance {
         }
 
         if s.b[113] {
-            let assign1260_ad_e1590: A = {
+            s.store_sub_ad(2, {
                 if ((!(s.v[90] >= 37.0)) && (!(s.v[90] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(90))
                 } else {
@@ -1103,8 +1089,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            let assign1260_ad_e1624: A = {
+            }, {
                 if ((!(s.v[91] >= 37.0)) && (!(s.v[91] <= (-37.0)))) {
                     A::ln_one_plus_exp(s.ad_value(91))
                 } else {
@@ -1122,8 +1107,7 @@ impl Instance {
                         }
                     }
                 }
-            };
-            s.store_sub_ad(2, assign1260_ad_e1590, assign1260_ad_e1624);
+            });
         }
 
         s.store_offset_scaled(66, 77, ((p.p81) * (s.v[66])), s.v[66]);
@@ -1150,12 +1134,6 @@ impl Instance {
 
         s.store_scale(56, 45, p.p73);
 
-    }
-
-    pub(super) fn stamp_reactive_block_1(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         s.b[115] = (p.p32 == 1.0);
         s.v[115] = if s.b[115] { 1.0 } else { 0.0 };
 
@@ -1166,6 +1144,12 @@ impl Instance {
             s.store_mul_ad_affine_product_rhs(57, 24, s.ad_value(27), A::sub_from_scalar(1.0, A::exp_scaled_input(A::ln(A::sub_from_scalar(1.0, A::div(s.ad_value(75), s.ad_value(27)))), (1.0 - p.p76))), 1.0 / ((1.0 - p.p76)), 0.0);
         }
 
+    }
+
+    pub(super) fn stamp_reactive_block_1(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         if (!s.b[117]) {
             s.store_mul_ad_product_rhs(57, 24, s.ad_value(75), A::offset(A::div_scaled_inputs(s.ad_value(75), (0.5 * p.p76), s.ad_value(27), 1.0), 1.0));
         }

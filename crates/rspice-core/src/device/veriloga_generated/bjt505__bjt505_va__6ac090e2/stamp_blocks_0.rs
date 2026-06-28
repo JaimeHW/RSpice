@@ -3083,14 +3083,14 @@ impl Instance {
 
         s.store_mul_add_scaled_inputs3_offset_rhs(217, 23, A::mul_sub_from_scalar_rhs_scaled_output(s.ad_value(14), 1.0, A::powf(A::sub_from_scalar(1.0, A::mul(s.ad_value(216), s.ad_value(65))), (1.0 - p.p67)), 1.0 / ((1.0 - p.p67))), p.p68, s.ad_value(247), ((3.0) * (p.p68)), s.ad_value(216), (((-3.0)) * (p.p68)), 0.0);
 
+        s.store_scaled_mul(218, 24, 145, p.p77);
+
     }
 
     pub(super) fn stamp_reactive_block_3(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        s.store_scaled_mul(218, 24, 145, p.p77);
-
         s.v[219] = (s.v[94] * s.v[36]);
 
         s.store_scaled_mul(223, 149, 184, (0.5 * s.v[219]));

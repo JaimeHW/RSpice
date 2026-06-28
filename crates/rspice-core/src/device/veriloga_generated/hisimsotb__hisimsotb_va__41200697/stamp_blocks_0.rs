@@ -2143,10 +2143,7 @@ impl Instance {
                 s.store_mul3_lhs(285, 285, 283, 286);
                 s.store_div_scaled_inputs_mixed_ai(332, A::square(s.ad_value(284)), ((0.5 * 9662367879.197212) * 6.241449993689894e18), 471, 1.0);
                 s.store_div_scaled_product_indices(333, 332, 285, 2.0, 284, 1.0);
-            }
-            if (((!s.b[725]) && s.b[730]) && (!s.b[734])) {
-                let assign7580_body27_ad_e7124: A = A::div(A::add(A::sub(A::add(A::add_scaled_inputs3(s.ad_value(305), 1.0, s.ad_value(307), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), (p.p227 * 9662367879.197212), s.ad_value(296), (0.5 * (p.p227 * 9662367879.197212)))), s.ad_value(440)), s.ad_value(332)), A::add_scaled_inputs3_offset(s.ad_value(283), 1.0 / (s.v[294]), s.ad_value(283), (p.p227 * 9662367879.197212), s.ad_value(333), 1.0, (-1.0)));
-                s.store_sub_ad_rhs(284, 307, assign7580_body27_ad_e7124);
+                s.store_sub_div_rhs_ad(284, 307, A::add(A::sub(A::add(A::add_scaled_inputs3(s.ad_value(305), 1.0, s.ad_value(307), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), (p.p227 * 9662367879.197212), s.ad_value(296), (0.5 * (p.p227 * 9662367879.197212)))), s.ad_value(440)), s.ad_value(332)), A::add_scaled_inputs3_offset(s.ad_value(283), 1.0 / (s.v[294]), s.ad_value(283), (p.p227 * 9662367879.197212), s.ad_value(333), 1.0, (-1.0)));
             }
             s.b[742] = ((((s.v[284] - s.v[307])) as f64).abs() < 0.001);
             s.v[742] = if s.b[742] { 1.0 } else { 0.0 };
@@ -2647,8 +2644,7 @@ impl Instance {
                 s.store_neg_ad(283, A::sqrt(A::mul(s.ad_value(438), s.ad_value(120))));
             }
             if ((!s.b[725]) && (!s.b[755])) {
-                let assign8640_body12_ad_e8877: A = A::div(A::sub(A::add(A::add_scaled_inputs3(s.ad_value(56), 1.0, s.ad_value(307), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), (p.p227 * 9662367879.197212), s.ad_value(296), (0.5 * (p.p227 * 9662367879.197212)))), s.ad_value(440)), A::add_scaled_inputs(A::scale_offset(s.ad_value(283), 1.0 / (s.v[294]), (-1.0)), 1.0, s.ad_value(283), (p.p227 * 9662367879.197212)));
-                s.store_sub_ad_rhs(284, 307, assign8640_body12_ad_e8877);
+                s.store_sub_div_rhs_ad(284, 307, A::sub(A::add(A::add_scaled_inputs3(s.ad_value(56), 1.0, s.ad_value(307), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), (p.p227 * 9662367879.197212), s.ad_value(296), (0.5 * (p.p227 * 9662367879.197212)))), s.ad_value(440)), A::add_scaled_inputs(A::scale_offset(s.ad_value(283), 1.0 / (s.v[294]), (-1.0)), 1.0, s.ad_value(283), (p.p227 * 9662367879.197212)));
             }
             s.b[762] = ((((s.v[284] - s.v[307])) as f64).abs() < s.v[315]);
             s.v[762] = if s.b[762] { 1.0 } else { 0.0 };
@@ -2734,8 +2730,7 @@ impl Instance {
                 s.store_neg_ad(283, A::sqrt(A::mul(s.ad_value(438), s.ad_value(120))));
             }
             if ((!s.b[725]) && (!s.b[755])) {
-                let assign8730_body12_ad_e9220: A = A::div(A::sub(A::add(A::add_scaled_inputs3(s.ad_value(56), 1.0, s.ad_value(307), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), (p.p227 * 9662367879.197212), s.ad_value(296), (0.5 * (p.p227 * 9662367879.197212)))), s.ad_value(440)), A::add_scaled_inputs(A::scale_offset(s.ad_value(283), 1.0 / (s.v[294]), (-1.0)), 1.0, s.ad_value(283), (p.p227 * 9662367879.197212)));
-                s.store_sub_ad_rhs(284, 307, assign8730_body12_ad_e9220);
+                s.store_sub_div_rhs_ad(284, 307, A::sub(A::add(A::add_scaled_inputs3(s.ad_value(56), 1.0, s.ad_value(307), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), (p.p227 * 9662367879.197212), s.ad_value(296), (0.5 * (p.p227 * 9662367879.197212)))), s.ad_value(440)), A::add_scaled_inputs(A::scale_offset(s.ad_value(283), 1.0 / (s.v[294]), (-1.0)), 1.0, s.ad_value(283), (p.p227 * 9662367879.197212)));
             }
             s.b[767] = ((((s.v[284] - s.v[307])) as f64).abs() < s.v[315]);
             s.v[767] = if s.b[767] { 1.0 } else { 0.0 };
@@ -2761,6 +2756,10 @@ impl Instance {
             s.store_scalar(63, 0.0);
         }
 
+        if (!s.b[725]) {
+            s.store_offset_add(307, 440, 307, (-0.01));
+        }
+
     }
 
     pub(super) fn stamp_transient_block_7(
@@ -2768,7 +2767,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if (!s.b[725]) {
-            s.store_offset_add(307, 440, 307, (-0.01));
             s.store_sub_scaled_inputs(306, 307, 1.0, 312, 1.0 / (s.v[294]));
         }
 
@@ -4083,10 +4081,7 @@ impl Instance {
                 s.store_mul3_lhs(285, 285, 283, 286);
                 s.store_div_scaled_inputs_mixed_ai(332, A::square(s.ad_value(284)), ((0.5 * 9662367879.197212) * 6.241449993689894e18), 471, 1.0);
                 s.store_div_scaled_product_indices(333, 332, 285, 2.0, 284, 1.0);
-            }
-            if (((!s.b[837]) && (!s.b[838])) && (!s.b[845])) {
-                let assign11490_body27_ad_e14835: A = A::div(A::add(A::sub(A::add(A::add_scaled_inputs3(s.ad_value(308), 1.0, s.ad_value(310), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), s.v[536], s.ad_value(296), (0.5 * s.v[536]))), s.ad_value(440)), s.ad_value(332)), A::add_scaled_inputs3_offset(s.ad_value(283), 1.0 / (s.v[294]), s.ad_value(283), s.v[536], s.ad_value(333), 1.0, (-1.0)));
-                s.store_sub_ad_rhs(284, 310, assign11490_body27_ad_e14835);
+                s.store_sub_div_rhs_ad(284, 310, A::add(A::sub(A::add(A::add_scaled_inputs3(s.ad_value(308), 1.0, s.ad_value(310), (-1.0), s.ad_value(282), 1.0 / (s.v[294])), A::add_scaled_inputs(s.ad_value(282), s.v[536], s.ad_value(296), (0.5 * s.v[536]))), s.ad_value(440)), s.ad_value(332)), A::add_scaled_inputs3_offset(s.ad_value(283), 1.0 / (s.v[294]), s.ad_value(283), s.v[536], s.ad_value(333), 1.0, (-1.0)));
             }
             s.b[853] = ((((s.v[284] - s.v[310])) as f64).abs() < 1e-12);
             s.v[853] = if s.b[853] { 1.0 } else { 0.0 };

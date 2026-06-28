@@ -244,7 +244,7 @@ impl Instance {
         Self::stamp_transient_block_14(ctx, s, p, nodes);
         Self::stamp_transient_block_15(ctx, s, p, nodes);
         Self::stamp_transient_block_16(s, p);
-        Self::stamp_transient_block_17(s, p);
+        Self::stamp_transient_block_17(ctx, s, p, nodes);
         Self::stamp_transient_block_18(ctx, s, p, nodes);
         Self::stamp_transient_block_19(s, p);
         Self::stamp_transient_block_20(ctx, s, p, nodes, param_given);
@@ -332,7 +332,6 @@ impl Instance {
         Self::stamp_reactive_block_18(s, p);
         Self::stamp_reactive_block_19(ctx, s, p, nodes, param_given);
         Self::stamp_reactive_block_20(ctx, s, p, nodes);
-        Self::stamp_reactive_block_21(ctx, s, p, nodes);
 
         Self::stamp_reactive_equations_block_0(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_1(ctx, stamper, s, p, nodes, branches, multiplicity);

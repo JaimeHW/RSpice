@@ -9,11 +9,6 @@ impl Instance {
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        if (!s.b[1256]) {
-            s.store_mul(850, 848, 849);
-            s.store_offset_mul(1074, 844, 845, 1.0);
-        }
-
         s.b[1259] = (s.v[1074] < 0.01);
         s.v[1259] = if s.b[1259] { 1.0 } else { 0.0 };
 
@@ -371,6 +366,8 @@ impl Instance {
             s.store_scaled_add_sqrt_square_offset_rhs(844, 844, 844, ((4.0 * 0.01) * 0.01), 0.5);
             s.store_div_scaled_value_offset_denominator(845, s.ad_value(1151), 1.0, s.ad_value(844), 0.001, 1.0);
             s.store_square(847, 824);
+            s.store_mul_neg_lhs(848, 824, 847);
+            s.store_offset_add_ad(849, s.ad_value(1152), A::abs(s.ad_value(848)), 1e-9);
         }
 
     }
@@ -380,8 +377,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((s.b[1275] && s.b[1277]) && (!s.b[1279])) {
-            s.store_mul_neg_lhs(848, 824, 847);
-            s.store_offset_add_ad(849, s.ad_value(1152), A::abs(s.ad_value(848)), 1e-9);
             s.store_offset_add_scaled_inputs(850, A::div(s.ad_value(848), s.ad_value(849)), 0.5, A::sqrt_square_offset(A::div(s.ad_value(848), s.ad_value(849)), ((4.0 * 1e-6) * 1e-6)), 0.5, (-1e-6));
         }
 
@@ -782,6 +777,8 @@ impl Instance {
 
         if ((s.b[1275] && (!s.b[1310])) && (!s.b[1313])) {
             s.store_offset_div_scaled_inputs2_indices(843, 1087, 1.0, 1088, 1.0, 354, 1.0, 1.0);
+            s.store_add(844, 989, 990);
+            s.store_sqrt_add_scaled_square_input(846, 843, 1.0, 844, 4.0);
         }
 
     }
@@ -791,8 +788,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((s.b[1275] && (!s.b[1310])) && (!s.b[1313])) {
-            s.store_add(844, 989, 990);
-            s.store_sqrt_add_scaled_square_input(846, 843, 1.0, 844, 4.0);
             s.store_scaled_add(845, 843, 846, 0.5);
         }
 
@@ -1165,12 +1160,6 @@ impl Instance {
             s.store_scaled_offset(843, 1076, (-p.p381), 1.0 / (p.p382));
         }
 
-    }
-
-    pub(super) fn stamp_reactive_block_14(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         s.b[1342] = (s.v[843] > 100.0);
         s.v[1342] = if s.b[1342] { 1.0 } else { 0.0 };
 
@@ -1181,6 +1170,12 @@ impl Instance {
         s.b[1343] = (s.v[843] < (-100.0));
         s.v[1343] = if s.b[1343] { 1.0 } else { 0.0 };
 
+    }
+
+    pub(super) fn stamp_reactive_block_14(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         if ((s.b[1341] && (!s.b[1342])) && s.b[1343]) {
             s.store_scalar(844, 3.720075976e-44);
         }
@@ -1533,6 +1528,8 @@ impl Instance {
             s.store_offset_mul(843, 183, 1026, 1.0);
             s.store_mul_neg_lhs(844, 184, 818);
             s.store_add_scaled_inputs_product_mixed_aiia(845, A::div_from_scalar(1.0, s.ad_value(843)), 1.0, 844, 1.0, 185, A::sub(s.ad_value(897), s.ad_value(941)), 1.0);
+            s.store_add_ad_rhs(846, 845, A::sqrt_square_offset(s.ad_value(845), 0.01));
+            s.store_scale(847, 1096, 0.5);
         }
 
     }
@@ -1542,8 +1539,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((!s.b[1380]) && s.b[1385]) {
-            s.store_add_ad_rhs(846, 845, A::sqrt_square_offset(s.ad_value(845), 0.01));
-            s.store_scale(847, 1096, 0.5);
             s.store_sub(843, 820, 375);
             s.store_sqrt_square_offset(844, 843, 0.0001);
             s.store_scaled_add(1027, 843, 844, 0.5);
@@ -1913,6 +1908,8 @@ impl Instance {
             s.store_scaled_offset_ad(844, A::sub_scaled_inputs(s.ad_value(1118), 1.0, s.ad_value(843), 0.5), 1e-20, 12.0);
             s.store_div(845, 1130, 844);
             s.store_mul(846, 843, 845);
+            s.store_sub_from_scalar(850, 1.0, 894);
+            s.store_add_ad_rhs(1006, 1006, A::mul3(s.ad_value(1116), s.ad_value(850), A::sub_scaled_inputs(s.ad_value(1130), 0.5, s.ad_value(846), 1.0)));
         }
 
     }
@@ -1921,11 +1918,6 @@ impl Instance {
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        if ((s.b[1402] && (!s.b[1412])) && s.b[1413]) {
-            s.store_sub_from_scalar(850, 1.0, 894);
-            s.store_add_ad_rhs(1006, 1006, A::mul3(s.ad_value(1116), s.ad_value(850), A::sub_scaled_inputs(s.ad_value(1130), 0.5, s.ad_value(846), 1.0)));
-        }
-
         if s.b[1402] {
             s.store_mul(843, 894, 877);
             s.store_scaled_offset_ad(844, A::sub_scaled_inputs(s.ad_value(875), 1.0, s.ad_value(843), 0.5), 1e-20, 12.0);

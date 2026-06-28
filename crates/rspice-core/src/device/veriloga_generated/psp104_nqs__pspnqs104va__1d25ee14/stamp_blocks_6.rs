@@ -8,26 +8,6 @@ impl Instance {
     pub(super) fn stamp_reactive_block_36(
         s: &mut ReactiveScratch,
     ) {
-        if (((((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3193])) && (!s.b[3194])) && (!s.b[3199])) && (!s.b[3200])) {
-            s.store_scaled_softlimit_poly_offset_lhs_ad(2005, A::neg(s.ad_value(2013)), (-230.25850929940458), 0.3333333333333333, (((((-230.25850929940458)) * (0.3333333333333333))) + (1.0)), 0.5, 1.0, 1.0, 1e100);
-        }
-
-        if (((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3193])) && (!s.b[3194])) {
-            s.store_sub_from_scalar_scaled_mul(2006, 1.0, 1939, 2005, 0.5);
-            s.store_add_scaled_inputs3_mixed_iia(2007, 2027, 2.0, 2013, (-2.0), A::mul_sub_from_scalar_rhs(s.ad_value(1939), 1.0, s.ad_value(2005)), 1.0);
-            s.store_add_scaled_sub_square_product_mixed_ia(2008, 2027, 2013, 1.0, 1939, A::add(A::offset(s.ad_value(2013), (-1.0)), s.ad_value(2005)), (-1.0));
-            s.store_add_scaled_square_product_indices(2009, 2007, 1.0, 2006, 2008, (-4.0));
-            s.store_div_scaled_inputs_mixed_ia(2014, 2008, 2.0, A::add(s.ad_value(2007), A::sqrt(s.ad_value(2009))), 1.0);
-            s.store_add(2022, 2013, 2014);
-        }
-
-        if (((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) {
-            s.store_add_div_lhs_indices(2027, 1974, 1937, 1890);
-        }
-
-        s.b[3201] = (((s.v[2027]) as f64).abs() <= s.v[1941]);
-        s.v[3201] = if s.b[3201] { 1.0 } else { 0.0 };
-
         if ((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && s.b[3201]) {
             s.store_div(2023, 2027, 1940);
         }
@@ -331,12 +311,6 @@ impl Instance {
         s.b[3224] = ((-s.v[2013]) < 0.0);
         s.v[3224] = if s.b[3224] { 1.0 } else { 0.0 };
 
-    }
-
-    pub(super) fn stamp_reactive_block_37(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         if (((((((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) && (!s.b[3217])) && (!s.b[3218])) && (!s.b[3223])) && s.b[3224]) {
             s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_self_offset_rhs(2005, 1e-100, (-230.25850929940458), A::neg(s.ad_value(2013)), 0.3333333333333333, 1.0, 0.5, 1.0, 1.0);
         }
@@ -354,6 +328,12 @@ impl Instance {
             s.store_add(2025, 2013, 2014);
         }
 
+    }
+
+    pub(super) fn stamp_reactive_block_37(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         if (((((s.b[3067] && (!s.b[3068])) && (!s.b[3077])) && (!s.b[3094])) && (!s.b[3119])) && s.b[3160]) {
             s.store_add_div_lhs_indices(2027, 1977, 1937, 1890);
         }

@@ -338,7 +338,7 @@ impl Instance {
         Self::stamp_reactive_block_25(s);
         Self::stamp_reactive_block_26(s, p);
         Self::stamp_reactive_block_27(s, p);
-        Self::stamp_reactive_block_28(s, p);
+        Self::stamp_reactive_block_28(s);
         Self::stamp_reactive_block_29(s, p);
         Self::stamp_reactive_block_30(s, p);
 

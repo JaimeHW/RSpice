@@ -10,7 +10,6 @@ impl Instance {
         p: &Parameters,
     ) {
         if (((((p.p24 != 0.0) && s.b[1606]) && (!s.b[1607])) && (!s.b[1630])) && s.b[1637]) {
-            s.store_mul(458, 1556, 1605);
             s.store_div_from_scalar_add_ad(1524, 1.0, s.ad_value(1597), s.ad_value(1605));
             s.store_mul3_lhs(460, 1556, 1593, 1524);
             s.store_add(459, 458, 460);
@@ -407,16 +406,16 @@ impl Instance {
             s.store_mul_sub_from_scalar_ad_rhs_scaled_output(284, 1666, 1.0, A::mul(s.ad_value(1683), s.ad_value(1684)), (p.p185 * 1.0 / ((1.0 - p.p182))));
         }
 
+        if (((s.b[1656] && s.b[1701]) && s.b[1702]) && (!s.b[1703])) {
+            s.store_scalar(284, 0.0);
+        }
+
     }
 
     pub(super) fn stamp_reactive_block_29(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        if (((s.b[1656] && s.b[1701]) && s.b[1702]) && (!s.b[1703])) {
-            s.store_scalar(284, 0.0);
-        }
-
         s.b[1705] = (s.v[1668] > 0.0);
         s.v[1705] = if s.b[1705] { 1.0 } else { 0.0 };
 
@@ -608,11 +607,7 @@ impl Instance {
             s.store_mul(293, 251, 1737);
             s.store_scaled_add(1739, 250, 293, 0.5);
             s.store_square(1738, 190);
-        }
-
-        if s.b[1748] {
-            let assign33750_ad_e48938: A = A::add_scaled_inputs3(A::mul3(A::add_scaled_inputs(A::scale_offset(s.ad_value(190), 3.0, 1.0), 1.0, s.ad_value(1738), 6.0), s.ad_value(293), s.ad_value(293)), 1.0, A::mul3(A::add_scaled_inputs(A::scale_offset(s.ad_value(190), 4.0, 3.0), 1.0, s.ad_value(1738), 3.0), s.ad_value(293), s.ad_value(250)), 1.0, A::mul3(A::add(A::scale_offset(s.ad_value(190), 3.0, 6.0), s.ad_value(1738)), s.ad_value(250), s.ad_value(250)), 1.0);
-            s.store_div_scaled_product3_by_product(292, A::mul3(s.ad_value(107), s.ad_value(323), s.ad_value(192)), s.ad_value(250), assign33750_ad_e48938, 1.0, A::mul3_scaled_output(s.ad_value(441), A::offset(s.ad_value(190), 1.0), s.ad_value(1739), 15.0), s.ad_value(1739), 1.0);
+            s.store_div_scaled_product3_by_product(292, A::mul3(s.ad_value(107), s.ad_value(323), s.ad_value(192)), s.ad_value(250), A::add_scaled_inputs3(A::mul3(A::add_scaled_inputs(A::scale_offset(s.ad_value(190), 3.0, 1.0), 1.0, s.ad_value(1738), 6.0), s.ad_value(293), s.ad_value(293)), 1.0, A::mul3(A::add_scaled_inputs(A::scale_offset(s.ad_value(190), 4.0, 3.0), 1.0, s.ad_value(1738), 3.0), s.ad_value(293), s.ad_value(250)), 1.0, A::mul3(A::add(A::scale_offset(s.ad_value(190), 3.0, 6.0), s.ad_value(1738)), s.ad_value(250), s.ad_value(250)), 1.0), 1.0, A::mul3_scaled_output(s.ad_value(441), A::offset(s.ad_value(190), 1.0), s.ad_value(1739), 15.0), s.ad_value(1739), 1.0);
         }
 
         if (!s.b[1748]) {
@@ -745,6 +740,10 @@ impl Instance {
         s.b[1762] = (p.p65 != 0.0);
         s.v[1762] = if s.b[1762] { 1.0 } else { 0.0 };
 
+        if s.b[1762] {
+            s.store_add_scaled_product_indices(280, 280, 1.0, 135, 513, 1.0);
+        }
+
     }
 
     pub(super) fn stamp_reactive_block_30(
@@ -753,10 +752,6 @@ impl Instance {
         p: &Parameters,
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
-        if s.b[1762] {
-            s.store_add_scaled_product_indices(280, 280, 1.0, 135, 513, 1.0);
-        }
-
         s.b[1763] = (p.p24 == 1.0);
         s.v[1763] = if s.b[1763] { 1.0 } else { 0.0 };
 

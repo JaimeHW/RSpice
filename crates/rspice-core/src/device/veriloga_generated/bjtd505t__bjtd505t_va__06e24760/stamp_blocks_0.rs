@@ -1340,14 +1340,14 @@ impl Instance {
 
         s.store_mul(82, 82, 326);
 
+        s.store_mul(160, 160, 326);
+
     }
 
     pub(super) fn stamp_transient_block_3(
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        s.store_mul(160, 160, 326);
-
         s.store_mul(157, 157, 326);
 
         s.store_mul(172, 172, 326);
@@ -1601,9 +1601,7 @@ impl Instance {
             s.copy_ad(93, 237);
         }
 
-        let assign5720_ad_e5783: A = A::add_scaled_inputs_products(A::add_scaled_products3(s.ad_value(152), A::sub(s.ad_value(238), s.ad_value(123)), 1.0, s.ad_value(111), A::sub(s.ad_value(123), s.ad_value(236)), 1.0, s.ad_value(201), s.ad_value(123), (-1.0)), 1.0, A::div_scaled_product(s.ad_value(245), s.ad_value(245), 1.0, s.ad_value(28), 1.0), 1.0, A::square(s.ad_value(248)), s.ad_value(104), 1.0, A::square(s.ad_value(243)), s.ad_value(105), 1.0);
-        let assign5720_ad_e5815: A = A::add_scaled_inputs_products(A::add_scaled_product(assign5720_ad_e5783, 1.0, A::square(s.ad_value(244)), s.ad_value(106), 1.0), 1.0, A::div_scaled_product(s.ad_value(246), s.ad_value(246), 1.0, s.ad_value(30), 1.0), 1.0, s.ad_value(180), s.ad_value(240), 1.0, A::add(A::add(A::add_scaled_inputs4(s.ad_value(154), 1.0, s.ad_value(156), 1.0, s.ad_value(238), s.v[320], s.ad_value(57), -1.0), s.ad_value(334)), s.ad_value(333)), s.ad_value(238), 1.0);
-        s.store_add_scaled_product_value_ad(208, A::add_scaled_value_products3(assign5720_ad_e5815, 1.0, s.ad_value(82), s.ad_value(93), (-1.0), A::add_scaled_inputs3(s.ad_value(155), 1.0, s.ad_value(158), 1.0, s.ad_value(159), 1.0), s.ad_value(239), 1.0, A::add_scaled_inputs3(s.ad_value(160), 1.0, s.ad_value(157), 1.0, s.ad_value(241), s.v[320]), s.ad_value(241), 1.0), 1.0, 172, 247, 1.0);
+        s.store_add_scaled_product_value_ad(208, A::add_scaled_value_products3(A::add_scaled_inputs_products(A::add_scaled_product(A::add_scaled_inputs_products(A::add_scaled_products3(s.ad_value(152), A::sub(s.ad_value(238), s.ad_value(123)), 1.0, s.ad_value(111), A::sub(s.ad_value(123), s.ad_value(236)), 1.0, s.ad_value(201), s.ad_value(123), (-1.0)), 1.0, A::div_scaled_product(s.ad_value(245), s.ad_value(245), 1.0, s.ad_value(28), 1.0), 1.0, A::square(s.ad_value(248)), s.ad_value(104), 1.0, A::square(s.ad_value(243)), s.ad_value(105), 1.0), 1.0, A::square(s.ad_value(244)), s.ad_value(106), 1.0), 1.0, A::div_scaled_product(s.ad_value(246), s.ad_value(246), 1.0, s.ad_value(30), 1.0), 1.0, s.ad_value(180), s.ad_value(240), 1.0, A::add(A::add(A::add_scaled_inputs4(s.ad_value(154), 1.0, s.ad_value(156), 1.0, s.ad_value(238), s.v[320], s.ad_value(57), -1.0), s.ad_value(334)), s.ad_value(333)), s.ad_value(238), 1.0), 1.0, s.ad_value(82), s.ad_value(93), (-1.0), A::add_scaled_inputs3(s.ad_value(155), 1.0, s.ad_value(158), 1.0, s.ad_value(159), 1.0), s.ad_value(239), 1.0, A::add_scaled_inputs3(s.ad_value(160), 1.0, s.ad_value(157), 1.0, s.ad_value(241), s.v[320]), s.ad_value(241), 1.0), 1.0, 172, 247, 1.0);
 
         s.store_scaled_mul(210, 23, 134, (1.0 - p.p67));
 
@@ -1773,6 +1771,7 @@ impl Instance {
             s.store_mul3_affine_lhs(185, 214, 176, 0.5, 0.0, 187);
             s.store_div_scaled_inputs_indices(186, 228, 1.0, 6, p.p84);
             s.store_mul_add_scaled_inputs3_offset_rhs(217, 240, s.ad_value(184), 0.2, s.ad_value(185), 0.2, s.ad_value(186), 0.2, 0.0);
+            s.store_scale(227, 228, (1.0 - p.p94));
         }
 
     }
@@ -1790,7 +1789,6 @@ impl Instance {
     ) {
         let nv3 = ctx.node_voltage(nodes[3]);
         if s.b[561] {
-            s.store_scale(227, 228, (1.0 - p.p94));
             s.store_add_scaled_inputs(313, 218, 1.0, 228, p.p94);
             s.store_add_scaled_inputs(216, 313, p.p93, 219, 1.0);
             s.store_scale(215, 313, (1.0 - p.p93));
@@ -3218,6 +3216,8 @@ impl Instance {
 
         s.store_mul_add_scaled_product_rhs(225, 24, A::mul_sub_from_scalar_lhs(1.0, s.ad_value(25), s.ad_value(224)), ((1.0 - p.p76) * p.p32), s.ad_value(25), s.ad_value(247), ((1.0 - p.p76) * p.p32));
 
+        s.store_mul_ad_product_rhs(226, 94, s.ad_value(36), A::powf(A::div(s.ad_value(35), s.ad_value(36)), (1.0 / p.p84)));
+
     }
 
     pub(super) fn stamp_reactive_block_3(
@@ -3227,8 +3227,6 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
         let nv3 = ctx.node_voltage(nodes[3]);
-        s.store_mul_ad_product_rhs(226, 94, s.ad_value(36), A::powf(A::div(s.ad_value(35), s.ad_value(36)), (1.0 / p.p84)));
-
         s.b[555] = ((s.v[238] / (p.p84 * s.v[6])) < p.p138);
         s.v[555] = if s.b[555] { 1.0 } else { 0.0 };
 

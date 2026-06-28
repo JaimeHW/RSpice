@@ -340,21 +340,20 @@ impl Instance {
         Self::stamp_transient_block_12(s, p);
         Self::stamp_transient_block_13(s, p);
         Self::stamp_transient_block_14(s, p, param_given);
-        Self::stamp_transient_block_15(s, p, param_given);
-        Self::stamp_transient_block_16(ctx, s, p, nodes);
+        Self::stamp_transient_block_15(ctx, s, p, nodes);
+        Self::stamp_transient_block_16(s, p);
         Self::stamp_transient_block_17(s, p);
         Self::stamp_transient_block_18(s, p);
         Self::stamp_transient_block_19(s, p);
-        Self::stamp_transient_block_20(s, p);
+        Self::stamp_transient_block_20(ctx, s, p, nodes);
         Self::stamp_transient_block_21(ctx, s, p, nodes);
         Self::stamp_transient_block_22(ctx, s, p, nodes);
-        Self::stamp_transient_block_23(ctx, s, p, nodes);
+        Self::stamp_transient_block_23(s, p);
         Self::stamp_transient_block_24(s, p);
         Self::stamp_transient_block_25(s, p);
         Self::stamp_transient_block_26(s, p);
-        Self::stamp_transient_block_27(s, p);
+        Self::stamp_transient_block_27(ctx, s, p, nodes);
         Self::stamp_transient_block_28(ctx, s, p, nodes);
-        Self::stamp_transient_block_29(ctx, s, p, nodes);
 
         stamper.stamp_potential_branch_local(
             Some(9),
@@ -440,13 +439,12 @@ impl Instance {
         Self::stamp_reactive_block_19(s, p);
         Self::stamp_reactive_block_20(ctx, s, p, nodes);
         Self::stamp_reactive_block_21(ctx, s, p, nodes);
-        Self::stamp_reactive_block_22(ctx, s, p, nodes);
+        Self::stamp_reactive_block_22(s, p);
         Self::stamp_reactive_block_23(s, p);
         Self::stamp_reactive_block_24(s, p);
         Self::stamp_reactive_block_25(s, p);
         Self::stamp_reactive_block_26(ctx, s, p, nodes);
-        Self::stamp_reactive_block_27(s, p);
-        Self::stamp_reactive_block_28(ctx, s, p, nodes);
+        Self::stamp_reactive_block_27(ctx, s, p, nodes);
 
         Self::stamp_reactive_equations_block_0(stamper, s, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_1(stamper, s, nodes, branches, multiplicity);
