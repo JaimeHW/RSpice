@@ -1,8 +1,60 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum Gpr {
+    Rax,
+    Rcx,
+    Rdx,
+    Rdi,
+    Rsi,
+    R10,
+    R11,
+}
+
+#[allow(dead_code)]
+impl Gpr {
+    fn code(self) -> u8 {
+        match self {
+            Self::Rax => 0,
+            Self::Rcx => 1,
+            Self::Rdx => 2,
+            Self::Rsi => 6,
+            Self::Rdi => 7,
+            Self::R10 => 10,
+            Self::R11 => 11,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum Xmm {
+    Xmm0,
+    Xmm1,
+    Xmm2,
+    Xmm3,
+    Xmm4,
+    Xmm5,
+}
+
+impl Xmm {
+    fn code(self) -> u8 {
+        match self {
+            Self::Xmm0 => 0,
+            Self::Xmm1 => 1,
+            Self::Xmm2 => 2,
+            Self::Xmm3 => 3,
+            Self::Xmm4 => 4,
+            Self::Xmm5 => 5,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct X64Encoder {
     bytes: Vec<u8>,
 }
 
+#[allow(dead_code)]
 impl X64Encoder {
     pub fn new() -> Self {
         Self { bytes: Vec::new() }
@@ -20,35 +72,131 @@ impl X64Encoder {
         self.bytes.extend_from_slice(bytes);
     }
 
+    pub(crate) fn position(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub(crate) fn patch_i32(&mut self, offset: usize, value: i32) {
+        self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
     pub fn mov_eax_imm32(&mut self, value: u32) {
         self.emit_u8(0xB8);
         self.emit_all(&value.to_le_bytes());
     }
 
+    pub(crate) fn mov_r64_m64_base_disp32(&mut self, dst: Gpr, base: Gpr, disp: i32) {
+        self.emit_rex(true, dst.code(), 0, base.code());
+        self.emit_u8(0x8B);
+        self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
+    }
+
+    pub(crate) fn movsd_xmm_m64_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_u8(0xF2);
+        self.emit_rex(false, dst.code(), 0, base.code());
+        self.emit_all(&[0x0F, 0x10]);
+        self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
+    }
+
+    pub(crate) fn movsd_m64_base_disp32_xmm(&mut self, base: Gpr, disp: i32, src: Xmm) {
+        self.emit_u8(0xF2);
+        self.emit_rex(false, src.code(), 0, base.code());
+        self.emit_all(&[0x0F, 0x11]);
+        self.emit_base_disp32_modrm(src.code(), base.code(), disp);
+    }
+
+    pub(crate) fn movsd_xmm_m64_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_u8(0xF2);
+        self.emit_rex(false, dst.code(), 0, 0);
+        self.emit_all(&[0x0F, 0x10]);
+        self.emit_modrm(0b00, dst.code(), 0b101);
+        let offset = self.position();
+        self.emit_i32(disp);
+        offset
+    }
+
+    pub(crate) fn movsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x10, dst, src);
+    }
+
+    pub(crate) fn xorpd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0x66, 0x57, dst, src);
+    }
+
+    pub(crate) fn addsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x58, dst, src);
+    }
+
     pub fn addsd_xmm0_xmm1(&mut self) {
-        self.emit_all(&[0xF2, 0x0F, 0x58, 0xC1]);
+        self.addsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
+    }
+
+    pub(crate) fn subsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x5C, dst, src);
     }
 
     pub fn subsd_xmm0_xmm1(&mut self) {
-        self.emit_all(&[0xF2, 0x0F, 0x5C, 0xC1]);
+        self.subsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
+    }
+
+    pub(crate) fn mulsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x59, dst, src);
     }
 
     pub fn mulsd_xmm0_xmm1(&mut self) {
-        self.emit_all(&[0xF2, 0x0F, 0x59, 0xC1]);
+        self.mulsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
+    }
+
+    pub(crate) fn divsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x5E, dst, src);
     }
 
     pub fn divsd_xmm0_xmm1(&mut self) {
-        self.emit_all(&[0xF2, 0x0F, 0x5E, 0xC1]);
+        self.divsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
     }
 
     pub fn ret(&mut self) {
         self.emit_u8(0xC3);
     }
+
+    fn emit_sse_reg_reg(&mut self, prefix: u8, opcode: u8, dst: Xmm, src: Xmm) {
+        self.emit_u8(prefix);
+        self.emit_rex(false, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, opcode]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
+    fn emit_base_disp32_modrm(&mut self, reg: u8, base: u8, disp: i32) {
+        self.emit_modrm(0b10, reg, base);
+        self.emit_i32(disp);
+    }
+
+    fn emit_i32(&mut self, value: i32) {
+        self.emit_all(&value.to_le_bytes());
+    }
+
+    fn emit_modrm(&mut self, mode: u8, reg: u8, rm: u8) {
+        self.emit_u8(((mode & 0b11) << 6) | ((reg & 0b111) << 3) | (rm & 0b111));
+    }
+
+    fn emit_rex(&mut self, w: bool, reg: u8, index: u8, base: u8) {
+        let rex = 0x40
+            | ((w as u8) << 3)
+            | (((reg >> 3) & 1) << 2)
+            | (((index >> 3) & 1) << 1)
+            | ((base >> 3) & 1);
+        if rex != 0x40 {
+            self.emit_u8(rex);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::X64Encoder;
+    use super::{Gpr, X64Encoder, Xmm};
+
+    #[cfg(all(feature = "native", target_arch = "x86_64"))]
+    use crate::native::{EvalContext, runtime::ExecutableMemory};
 
     #[test]
     fn encodes_mov_eax_imm32_ret() {
@@ -73,9 +221,141 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [
-                0xF2, 0x0F, 0x58, 0xC1, 0xF2, 0x0F, 0x5C, 0xC1, 0xF2, 0x0F, 0x59, 0xC1,
-                0xF2, 0x0F, 0x5E, 0xC1, 0xC3,
+                0xF2, 0x0F, 0x58, 0xC1, 0xF2, 0x0F, 0x5C, 0xC1, 0xF2, 0x0F, 0x59, 0xC1, 0xF2, 0x0F,
+                0x5E, 0xC1, 0xC3,
             ]
         );
+    }
+
+    #[test]
+    fn encodes_windows_param_load_leaf() {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rcx, 16);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rax, 24);
+        encoder.ret();
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x48, 0x8B, 0x81, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_system_v_param_load_leaf() {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rdi, 16);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rax, 24);
+        encoder.ret();
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x48, 0x8B, 0x87, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_scalar_register_and_memory_ops() {
+        let mut encoder = X64Encoder::new();
+        encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
+        encoder.movsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
+        encoder.addsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
+        encoder.subsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
+        encoder.mulsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
+        encoder.divsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm0);
+        encoder.movsd_m64_base_disp32_xmm(Gpr::Rdx, 16, Xmm::Xmm1);
+        encoder.ret();
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x66, 0x0F, 0x57, 0xC0, 0xF2, 0x0F, 0x10, 0xC8, 0xF2, 0x0F, 0x58, 0xC8, 0xF2, 0x0F,
+                0x5C, 0xC8, 0xF2, 0x0F, 0x59, 0xC8, 0xF2, 0x0F, 0x5E, 0xC8, 0xF2, 0x0F, 0x11, 0x8A,
+                16, 0, 0, 0, 0xC3,
+            ]
+        );
+    }
+
+    #[cfg(all(feature = "native", target_arch = "x86_64"))]
+    #[test]
+    fn encoded_leaf_loads_and_combines_context_values() {
+        let params = [2.0_f64];
+        let voltages = [5.0_f64];
+        let internals = [1.0_f64];
+        let vars = [0.0_f64, 8.0_f64];
+        let branch_unknowns = [4.0_f64];
+        let ctx = EvalContext {
+            voltages: voltages.as_ptr(),
+            internal_voltages: internals.as_ptr(),
+            params: params.as_ptr(),
+            branch_currents: std::ptr::null(),
+            branch_currents_len: 0,
+            currents: std::ptr::null(),
+            currents_len: 0,
+            num_terminals: 0,
+            port_connected: std::ptr::null(),
+            port_connected_len: 0,
+            temperature: 0.0,
+            time: 0.0,
+            timestep: 0.0,
+            state_prev: std::ptr::null(),
+            state_values: std::ptr::null_mut(),
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+            param_given: std::ptr::null(),
+            branch_unknowns: branch_unknowns.as_ptr(),
+            analysis_type: 0,
+            multiplicity: 1.0,
+        };
+
+        let mut encoder = X64Encoder::new();
+        let ctx_reg = host_ctx_arg_reg();
+        let vars_reg = host_vars_arg_reg();
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, ctx_reg, 0);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rax, 0);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, ctx_reg, 8);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 0);
+        encoder.subsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, ctx_reg, 16);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm1, Gpr::Rax, 0);
+        encoder.mulsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm1, vars_reg, 8);
+        encoder.mov_r64_m64_base_disp32(Gpr::Rax, ctx_reg, 160);
+        encoder.movsd_xmm_m64_base_disp32(Xmm::Xmm2, Gpr::Rax, 0);
+        encoder.divsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm2);
+        encoder.addsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
+        encoder.ret();
+
+        let memory = ExecutableMemory::allocate(&encoder.into_bytes()).expect("allocate leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        assert_eq!(f(&ctx, vars.as_ptr()), 10.0);
+    }
+
+    #[cfg(all(windows, feature = "native", target_arch = "x86_64"))]
+    fn host_ctx_arg_reg() -> Gpr {
+        Gpr::Rcx
+    }
+
+    #[cfg(all(windows, feature = "native", target_arch = "x86_64"))]
+    fn host_vars_arg_reg() -> Gpr {
+        Gpr::Rdx
+    }
+
+    #[cfg(all(not(windows), feature = "native", target_arch = "x86_64"))]
+    fn host_ctx_arg_reg() -> Gpr {
+        Gpr::Rdi
+    }
+
+    #[cfg(all(not(windows), feature = "native", target_arch = "x86_64"))]
+    fn host_vars_arg_reg() -> Gpr {
+        Gpr::Rsi
     }
 }

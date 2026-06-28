@@ -164,3 +164,38 @@ pub unsafe extern "C" fn rspice_current_lookup(
 
     f64::NAN
 }
+
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod tests {
+    use super::EvalContext;
+    use std::mem::{align_of, offset_of, size_of};
+
+    #[test]
+    fn eval_context_layout_matches_x64_jit_offsets() {
+        assert_eq!(offset_of!(EvalContext, voltages), 0);
+        assert_eq!(offset_of!(EvalContext, internal_voltages), 8);
+        assert_eq!(offset_of!(EvalContext, params), 16);
+        assert_eq!(offset_of!(EvalContext, branch_currents), 24);
+        assert_eq!(offset_of!(EvalContext, branch_currents_len), 32);
+        assert_eq!(offset_of!(EvalContext, currents), 40);
+        assert_eq!(offset_of!(EvalContext, currents_len), 48);
+        assert_eq!(offset_of!(EvalContext, num_terminals), 56);
+        assert_eq!(offset_of!(EvalContext, port_connected), 64);
+        assert_eq!(offset_of!(EvalContext, port_connected_len), 72);
+        assert_eq!(offset_of!(EvalContext, temperature), 80);
+        assert_eq!(offset_of!(EvalContext, time), 88);
+        assert_eq!(offset_of!(EvalContext, timestep), 96);
+        assert_eq!(offset_of!(EvalContext, state_prev), 104);
+        assert_eq!(offset_of!(EvalContext, state_values), 112);
+        assert_eq!(offset_of!(EvalContext, lookup_tables), 120);
+        assert_eq!(offset_of!(EvalContext, lookup_tables_len), 128);
+        assert_eq!(offset_of!(EvalContext, laplace_filters), 136);
+        assert_eq!(offset_of!(EvalContext, laplace_filters_len), 144);
+        assert_eq!(offset_of!(EvalContext, param_given), 152);
+        assert_eq!(offset_of!(EvalContext, branch_unknowns), 160);
+        assert_eq!(offset_of!(EvalContext, analysis_type), 168);
+        assert_eq!(offset_of!(EvalContext, multiplicity), 176);
+        assert_eq!(size_of::<EvalContext>(), 184);
+        assert_eq!(align_of::<EvalContext>(), 8);
+    }
+}
