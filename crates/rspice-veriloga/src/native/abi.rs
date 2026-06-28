@@ -55,7 +55,6 @@ pub struct EvalContext {
 }
 
 /// External helper function for table lookup interpolation.
-/// Called from JIT code to perform table interpolation.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers.
@@ -70,13 +69,11 @@ pub unsafe extern "C" fn rspice_table_lookup(
         return 0.0;
     }
 
-    // Safety: caller guarantees valid pointer and bounds.
     let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
     tables[table_id].interpolate(input)
 }
 
 /// External helper function for $limit operation.
-/// Bounds value change per iteration for convergence control.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers.
@@ -88,13 +85,11 @@ pub unsafe extern "C" fn rspice_limit(
     step_limit: f64,
 ) -> f64 {
     let prev_value = if state_prev.is_null() {
-        new_value // First iteration: use new value
+        new_value
     } else {
-        // Safety: caller guarantees valid pointer.
         unsafe { *state_prev.add(state_idx) }
     };
 
-    // If prev is 0 and this is effectively first iteration, use new_value.
     if prev_value == 0.0 && new_value != 0.0 {
         return new_value;
     }
@@ -105,21 +100,13 @@ pub unsafe extern "C" fn rspice_limit(
 }
 
 /// External helper function for limited exponential.
-/// Uses linear extrapolation beyond the limit to prevent overflow
-/// while maintaining C0 and C1 continuity.
-///
-/// # Safety
-/// This function is called from JIT-compiled code.
 #[unsafe(export_name = "rspice_limexp")]
 pub extern "C" fn rspice_limexp(x: f64) -> f64 {
-    const LIMIT: f64 = 40.0; // exp(40) ~= 2.4e17
+    const LIMIT: f64 = 40.0;
     if x > LIMIT {
         let exp_limit = LIMIT.exp();
-        // Linear extrapolation: f(x) = f(limit) + f'(limit) * (x - limit).
-        // For exp, f'(x) = exp(x), so f'(limit) = exp(limit).
         exp_limit * (1.0 + x - LIMIT)
     } else if x < -LIMIT {
-        // For very negative values, return essentially 0.
         (-LIMIT).exp()
     } else {
         x.exp()
@@ -127,7 +114,6 @@ pub extern "C" fn rspice_limexp(x: f64) -> f64 {
 }
 
 /// External helper function for Laplace state-space filter step.
-/// Called from JIT code to advance filter state using Backward Euler integration.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers.
@@ -139,21 +125,16 @@ pub unsafe extern "C" fn rspice_laplace_step(
     input: f64,
     timestep: f64,
 ) -> f64 {
-    // Null pointer or out-of-bounds check.
     if filters_ptr.is_null() || filter_id >= filters_len {
-        // DC passthrough: return input unchanged for safety.
         return input;
     }
 
-    // Safety: caller guarantees valid pointer and bounds.
     let filters = unsafe { std::slice::from_raw_parts_mut(filters_ptr, filters_len) };
 
-    // Zero timestep means DC analysis - return DC gain * input.
     if timestep <= 0.0 {
         return filters[filter_id].dc_output(input);
     }
 
-    // Step the filter forward in time.
     filters[filter_id].step(input, timestep)
 }
 
@@ -174,7 +155,6 @@ pub unsafe extern "C" fn rspice_current_lookup(
     if !branch_currents_ptr.is_null() && pos < num_terminals && neg < num_terminals {
         let idx = pos.saturating_mul(num_terminals).saturating_add(neg);
         if idx < branch_currents_len {
-            // Safety: caller guarantees valid pointer and bounds.
             let value = unsafe { *branch_currents_ptr.add(idx) };
             if value.is_finite() {
                 return value;
