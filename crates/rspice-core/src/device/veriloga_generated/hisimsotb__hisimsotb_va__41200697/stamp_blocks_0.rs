@@ -935,7 +935,7 @@ impl Instance {
 
         s.copy_ad(438, 474);
 
-        s.store_sqrt_ad(439, A::mul_scaled_lhs(s.ad_value(438), 2.0, s.ad_value(122)));
+        s.store_sqrt_mul_scaled_lhs(439, 438, 2.0, 122);
 
         s.store_div(279, 127, 471);
 
@@ -1377,7 +1377,7 @@ impl Instance {
         s.v[708] = if s.b[708] { 1.0 } else { 0.0 };
 
         if s.b[708] {
-            s.store_sqrt_ad(278, A::mul_scaled_lhs(s.ad_value(471), ((2.0 * 1.6021918e-19) * 1.034943e-10), s.ad_value(136)));
+            s.store_sqrt_mul_scaled_lhs(278, 471, ((2.0 * 1.6021918e-19) * 1.034943e-10), 136);
             s.store_add_scaled_inputs_product_indices(79, 136, 1.0, 138, 1.0, 278, 271, 1.0);
             s.store_scalar(278, ((2.0 * p.p227) / (p.p58 * p.p58)));
             s.store_mul_ad_affine_product_rhs(81, 271, s.ad_value(278), A::sub_from_scalar(p.p55, s.ad_value(130)), 1.034943e-10, 0.0);
@@ -2189,7 +2189,7 @@ impl Instance {
 
         if ((!s.b[725]) && s.b[743]) {
             if (s.v[319] > 0.0) {
-                s.store_sqrt_ad(283, A::mul_scaled_lhs(s.ad_value(471), ((1.6021918e-19 * 2.0) * 1.034943e-10), s.ad_value(319)));
+                s.store_sqrt_mul_scaled_lhs(283, 471, ((1.6021918e-19 * 2.0) * 1.034943e-10), 319);
             } else {
                 s.store_scalar(283, 0.0);
             }
@@ -3292,7 +3292,7 @@ impl Instance {
             s.store_offset_scaled(280, 471, (((((36.0 * 1e-7) / 0.0001)) as f64).sqrt() * 13.0), ((((((13.0 * 1e-7) / 0.0001)) as f64).sqrt() * 36.0) * (1e20 / 1e-6)));
             s.store_div_from_scalar_mul_ad(282, (((((13.0 * 1e-7) / 0.0001)) as f64).sqrt() * ((((36.0 * 1e-7) / 0.0001)) as f64).sqrt()), s.ad_value(279), s.ad_value(280));
             s.store_scale(283, 122, 0.0);
-            s.store_sqrt_ad(284, A::mul_scaled_lhs(s.ad_value(471), ((2.0 * 1.034943e-10) * 1.6021918e-19), s.ad_value(122)));
+            s.store_sqrt_mul_scaled_lhs(284, 471, ((2.0 * 1.034943e-10) * 1.6021918e-19), 122);
             s.store_sqrt_mul_sub_rhs(285, 120, 339, 283);
             s.store_sqrt_mul(286, 120, 339);
             s.store_mul_sub_scaled_inputs_rhs(337, 284, s.ad_value(285), -1.0, s.ad_value(286), -1.0);
