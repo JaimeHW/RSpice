@@ -453,6 +453,7 @@ fn compact_generated_stamp_helper_surface(mut source: String) -> String {
 fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_immediate_generated_ad_local_stores(source);
     source = compact_direct_ad_rvalue_stores(source);
+    source = compact_offset_scaled_nested_mul_sub_helper_calls(source);
     source = compact_scaled_sqrt_square_offset_rhs_helper_calls(source);
     source = compact_scaled_add_offset_sqrt_square_offset_helper_calls(source);
     source = compact_div_scaled_product_sqrt_square_sum_denominator_helper_calls(source);
@@ -681,6 +682,79 @@ fn compact_direct_ad_rvalue_stores(source: String) -> String {
 
     out.push_str(&source[cursor..]);
     out
+}
+
+fn compact_offset_scaled_nested_mul_sub_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_offset_scaled_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_offset_scaled_nested_mul_sub_helper_call_replacement(
+                &source, call_start, indent,
+            )
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_offset_scaled_nested_mul_sub_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_offset_scaled_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 4 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let (
+        left,
+        scalar,
+        value_left,
+        value_scalar,
+        value,
+        value_scale,
+        value_output_scale,
+        output_scale,
+    ) = compact_mul_sub_from_scalar_scaled_sub_rhs_scaled_output_arg(args[1].trim())?;
+    let combined_output_scale = compact_scale_product(output_scale, args[2].trim());
+    let line = format!(
+        "scratch.store_offset_scaled_mul_sub_from_scalar_scaled_sub_rhs_scaled_output({target_index}, {left}, {scalar}, {value_left}, {value_scalar}, {value}, {value_scale}, {value_output_scale}, {combined_output_scale}, {});",
+        args[3].trim()
+    );
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
 }
 
 fn compact_div_scaled_product_sqrt_square_sum_denominator_helper_calls(source: String) -> String {
@@ -2888,6 +2962,27 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_offset_scaled_ad_nested_mul_sub_product_as_direct_store() {
+        let source = r#"
+fn stamp() {
+    scratch.store_offset_scaled_ad(87, AdValue::mul_sub_from_scalar_rhs_scaled_output(scratch.ad_value(2), params.scalar, AdValue::mul_sub_from_scalar_rhs_scaled_output(scratch.ad_value(3), params.value_scalar, AdValue::scale(scratch.ad_value(4), params.value_scale), params.value_output_scale), params.output_scale), params.store_scale, params.offset);
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_offset_scaled_mul_sub_from_scalar_scaled_sub_rhs_scaled_output(87, 2, p.scalar, 3, p.value_scalar, 4, p.value_scale, p.value_output_scale, ((p.output_scale) * (p.store_scale)), p.offset);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_offset_scaled_ad("), "{compact}");
+        assert!(
+            !compact.contains("A::mul_sub_from_scalar_rhs_scaled_output("),
+            "{compact}"
+        );
     }
 
     #[test]
