@@ -78,7 +78,7 @@ impl NativeModel {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_arch = "x86_64"))]
     pub(crate) fn new_for_test(
         num_variables: usize,
         stamp_value_entry_points: usize,
@@ -202,7 +202,7 @@ impl NativeModel {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 fn append_test_value_stub(bytes: &mut Vec<u8>, value: u32) -> CodeOffset {
     let offset = CodeOffset::new(bytes.len());
     // mov eax, imm32; cvtsi2sd xmm0, eax; ret

@@ -1870,7 +1870,7 @@ impl DeviceBuilder {
 // Tests
 // ============================================================================
 
-#[cfg(all(test, feature = "native"))]
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::*;
     use crate::codegen::{AssignmentProgram, AssignmentStep, BytecodeProgram};
