@@ -122,9 +122,9 @@ impl Instance {
         s.v[1347] = if s.b[1347] { 1.0 } else { 0.0 };
 
         if (s.b[1346] && s.b[1347]) {
-            s.store_mul_ad(688, A::div(s.ad_value(625), s.ad_value(647)), A::sub(s.ad_value(655), s.ad_value(653)));
-            s.store_mul_ad(689, A::div(s.ad_value(626), A::powf(s.ad_value(647), p.p930)), A::sub(s.ad_value(655), s.ad_value(653)));
-            s.store_mul_ad(690, A::div(s.ad_value(627), A::powf(s.ad_value(647), p.p932)), A::sub(s.ad_value(655), s.ad_value(653)));
+            s.store_mul_div_scaled_inputs_mixed_aii(688, A::sub(s.ad_value(655), s.ad_value(653)), 625, 1.0, 647, 1.0);
+            s.store_mul_div_scaled_inputs_mixed_aia(689, A::sub(s.ad_value(655), s.ad_value(653)), 626, 1.0, A::powf(s.ad_value(647), p.p930), 1.0);
+            s.store_mul_div_scaled_inputs_mixed_aia(690, A::sub(s.ad_value(655), s.ad_value(653)), 627, 1.0, A::powf(s.ad_value(647), p.p932), 1.0);
         }
 
         if s.b[1346] {

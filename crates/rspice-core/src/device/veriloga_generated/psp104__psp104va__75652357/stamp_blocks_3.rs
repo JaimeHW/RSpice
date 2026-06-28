@@ -151,7 +151,7 @@ impl Instance {
         s.v[1053] = if s.b[1053] { 1.0 } else { 0.0 };
 
         if (s.b[1019] && s.b[1053]) {
-            s.store_mul_ad(65, A::div(s.ad_value(307), s.ad_value(306)), A::add_scaled_inputs3_offset(s.ad_value(308), p.p525, s.ad_value(310), p.p526, s.ad_value(312), p.p527, p.p524));
+            s.store_mul_div_scaled_inputs_mixed_aii(65, A::add_scaled_inputs3_offset(s.ad_value(308), p.p525, s.ad_value(310), p.p526, s.ad_value(312), p.p527, p.p524), 307, 1.0, 306, 1.0);
         }
 
         s.b[1054] = (((param_given[528] || param_given[529]) || param_given[530]) || param_given[531]);
@@ -596,7 +596,7 @@ impl Instance {
         s.v[1115] = if s.b[1115] { 1.0 } else { 0.0 };
 
         if (s.b[1019] && s.b[1115]) {
-            s.store_mul_ad(150, A::div(s.ad_value(338), s.ad_value(306)), A::add_scaled_inputs3_offset(s.ad_value(308), p.p741, s.ad_value(310), p.p742, s.ad_value(312), p.p743, p.p740));
+            s.store_mul_div_scaled_inputs_mixed_aii(150, A::add_scaled_inputs3_offset(s.ad_value(308), p.p741, s.ad_value(310), p.p742, s.ad_value(312), p.p743, p.p740), 338, 1.0, 306, 1.0);
         }
 
         s.b[1116] = (((param_given[744] || param_given[745]) || param_given[746]) || param_given[747]);

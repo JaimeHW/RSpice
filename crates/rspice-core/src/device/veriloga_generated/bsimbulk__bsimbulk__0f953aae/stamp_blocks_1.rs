@@ -5539,7 +5539,7 @@ impl Instance {
 
         s.store_sub_from_scalar_ad(37, p.p109, A::div_scaled_product_offset_denominator(s.ad_value(392), s.ad_value(392), p.p821, s.ad_value(392), p.p822, 1.0));
 
-        s.store_mul_ad(13, A::div(s.ad_value(391), s.ad_value(392)), A::sqrt(A::div(s.ad_value(391), s.ad_value(392))));
+        s.store_mul_div_scaled_inputs_mixed_aii(13, A::sqrt(A::div(s.ad_value(391), s.ad_value(392))), 391, 1.0, 392, 1.0);
 
         s.store_mul_scaled_limited_exp_ad_rhs(28, 13, p.p108, A::sub(A::div_scaled_inputs(s.ad_value(36), 1.0, s.ad_value(394), 2.0), A::div_scaled_inputs(s.ad_value(36), 1.0, s.ad_value(393), 2.0)));
 

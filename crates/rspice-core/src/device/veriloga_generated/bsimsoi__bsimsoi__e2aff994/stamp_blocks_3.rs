@@ -2060,7 +2060,7 @@ impl Instance {
 
         s.store_sub_from_scalar_ad(190, p.p108, A::div_scaled_product_offset_denominator(s.ad_value(635), s.ad_value(635), p.p1029, s.ad_value(635), p.p1030, 1.0));
 
-        s.store_mul_ad(168, A::div(s.ad_value(635), s.ad_value(636)), A::sqrt(A::div(s.ad_value(635), s.ad_value(636))));
+        s.store_mul_div_scaled_inputs_mixed_aii(168, A::sqrt(A::div(s.ad_value(635), s.ad_value(636))), 635, 1.0, 636, 1.0);
 
         s.store_mul_scaled_limited_exp_ad_rhs(182, 168, p.p107, A::sub(A::div_scaled_inputs(s.ad_value(190), 1.0, s.ad_value(638), 2.0), A::div_scaled_inputs(s.ad_value(190), 1.0, s.ad_value(637), 2.0)));
 
@@ -2563,9 +2563,9 @@ impl Instance {
         s.v[1609] = if s.b[1609] { 1.0 } else { 0.0 };
 
         if (s.b[1608] && s.b[1609]) {
-            s.store_mul_ad(956, A::div(s.ad_value(850), s.ad_value(914)), A::sub(s.ad_value(922), s.ad_value(920)));
-            s.store_mul_ad(957, A::div(s.ad_value(851), A::powf(s.ad_value(914), p.p1120)), A::sub(s.ad_value(922), s.ad_value(920)));
-            s.store_mul_ad(958, A::div(s.ad_value(852), A::powf(s.ad_value(914), p.p1122)), A::sub(s.ad_value(922), s.ad_value(920)));
+            s.store_mul_div_scaled_inputs_mixed_aii(956, A::sub(s.ad_value(922), s.ad_value(920)), 850, 1.0, 914, 1.0);
+            s.store_mul_div_scaled_inputs_mixed_aia(957, A::sub(s.ad_value(922), s.ad_value(920)), 851, 1.0, A::powf(s.ad_value(914), p.p1120), 1.0);
+            s.store_mul_div_scaled_inputs_mixed_aia(958, A::sub(s.ad_value(922), s.ad_value(920)), 852, 1.0, A::powf(s.ad_value(914), p.p1122), 1.0);
         }
 
         if s.b[1608] {
@@ -4407,7 +4407,7 @@ impl Instance {
             s.store_mul_offset_ad_rhs(83, 74, A::mul3_scaled_output(s.ad_value(342), s.ad_value(167), s.ad_value(167), 0.5), 1.0);
             s.store_offset_add_scaled_inputs(83, A::offset(s.ad_value(83), (-0.001)), 0.5, A::sqrt_square_offset(A::offset(s.ad_value(83), (-0.001)), ((4.0 * 1e-5) * 1e-5)), 0.5, 0.001);
             s.store_add_scaled_product_indices(81, 80, 1.0, 269, 74, 1.0);
-            s.store_mul_ad(84, A::div(s.ad_value(81), s.ad_value(83)), A::div(s.ad_value(341), s.ad_value(343)));
+            s.store_mul_div_scaled_inputs_mixed_aii(84, A::div(s.ad_value(341), s.ad_value(343)), 81, 1.0, 83, 1.0);
         }
 
         if s.b[1620] {
