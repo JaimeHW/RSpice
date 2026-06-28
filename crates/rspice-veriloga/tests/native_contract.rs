@@ -314,6 +314,35 @@ endmodule
     )
 }
 
+fn transcendental_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_transcendental_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    real gain;
+    analog begin
+        x = $abstime + 0.25;
+        gain = log(x + 2.0)
+             + log10(x + 10.0)
+             + sin(x)
+             + cos(x)
+             + tan(x * 0.1)
+             + sinh(x * 0.1)
+             + cosh(x * 0.1)
+             + tanh(x)
+             + asin(x * 0.1)
+             + acos(x * 0.1)
+             + atan(x);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -925,6 +954,44 @@ fn native_device_executes_exp_limexp_assignments() {
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
             (currents[0] - (expected_gain * 2.0)).abs() < 1e-12,
+            "{name}: currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_transcendental_assignments() {
+    let model = transcendental_assignment_model();
+    let cases = [("dc-ish", 0.0), ("mid", 0.5), ("large", 1.0)];
+
+    for (name, time) in cases {
+        let mut device = VerilogADevice::try_new("TRIG1", model.clone(), &[1, 0])
+            .expect("transcendental assignment model uses native JIT");
+        assert!(device.is_using_native());
+        device.set_time(time);
+        device.update_voltages(&[1.5]);
+
+        let x = time + 0.25;
+        let expected_gain = (x + 2.0).ln()
+            + (x + 10.0).log10()
+            + x.sin()
+            + x.cos()
+            + (x * 0.1).tan()
+            + (x * 0.1).sinh()
+            + (x * 0.1).cosh()
+            + x.tanh()
+            + (x * 0.1).asin()
+            + (x * 0.1).acos()
+            + x.atan();
+        let currents = device
+            .try_evaluate()
+            .expect("native transcendental assignment evaluation succeeds");
+
+        assert_eq!(device.variable("x"), Some(x), "{name}");
+        assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
+        assert!(
+            (currents[0] - (expected_gain * 1.5)).abs() < 1e-12,
             "{name}: currents: {currents:?}"
         );
     }

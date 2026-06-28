@@ -1,5 +1,8 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
-use crate::native::abi::{rspice_exp, rspice_limexp};
+use crate::native::abi::{
+    rspice_acos, rspice_asin, rspice_atan, rspice_cos, rspice_cosh, rspice_exp, rspice_limexp,
+    rspice_log, rspice_log10, rspice_sin, rspice_sinh, rspice_tan, rspice_tanh,
+};
 use crate::native::expr::UnaryMathOp;
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
@@ -714,7 +717,18 @@ type UnaryHelper = extern "C" fn(f64) -> f64;
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
         UnaryMathOp::Exp => rspice_exp,
+        UnaryMathOp::Log => rspice_log,
+        UnaryMathOp::Log10 => rspice_log10,
+        UnaryMathOp::Sin => rspice_sin,
+        UnaryMathOp::Cos => rspice_cos,
+        UnaryMathOp::Tan => rspice_tan,
+        UnaryMathOp::Sinh => rspice_sinh,
+        UnaryMathOp::Cosh => rspice_cosh,
+        UnaryMathOp::Tanh => rspice_tanh,
         UnaryMathOp::Limexp => rspice_limexp,
+        UnaryMathOp::Asin => rspice_asin,
+        UnaryMathOp::Acos => rspice_acos,
+        UnaryMathOp::Atan => rspice_atan,
     }
 }
 
@@ -1302,9 +1316,17 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_calls_exp_limexp_helpers_and_preserves_state() {
+    fn generated_value_leaf_calls_unary_math_helpers_and_preserves_state() {
         let cases = [
             ("exp", Instruction::Exp, 0.5, runtime_exp(0.5)),
+            ("log", Instruction::Log, 2.5, runtime_log(2.5)),
+            ("log10", Instruction::Log10, 100.0, runtime_log10(100.0)),
+            ("sin", Instruction::Sin, 0.5, runtime_sin(0.5)),
+            ("cos", Instruction::Cos, 0.5, runtime_cos(0.5)),
+            ("tan", Instruction::Tan, 0.25, runtime_tan(0.25)),
+            ("sinh", Instruction::Sinh, 0.25, runtime_sinh(0.25)),
+            ("cosh", Instruction::Cosh, 0.25, runtime_cosh(0.25)),
+            ("tanh", Instruction::Tanh, 0.25, runtime_tanh(0.25)),
             (
                 "limexp-linear",
                 Instruction::Limexp,
@@ -1317,6 +1339,9 @@ mod tests {
                 -50.0,
                 runtime_limexp(-50.0),
             ),
+            ("asin", Instruction::Asin, 0.25, runtime_asin(0.25)),
+            ("acos", Instruction::Acos, 0.25, runtime_acos(0.25)),
+            ("atan", Instruction::Atan, 0.25, runtime_atan(0.25)),
         ];
 
         for (name, op, input, unary_expected) in cases {
@@ -1346,7 +1371,7 @@ mod tests {
 
             assert_eq!(
                 f(&ctx, vars.as_ptr()).to_bits(),
-                (310.0 + unary_expected + 7.0 + 2.0).to_bits(),
+                (310.0 + ((unary_expected + 7.0) + 2.0)).to_bits(),
                 "{name}"
             );
         }
@@ -1548,6 +1573,38 @@ mod tests {
         std::hint::black_box(value).exp()
     }
 
+    fn runtime_log(value: f64) -> f64 {
+        std::hint::black_box(value).ln()
+    }
+
+    fn runtime_log10(value: f64) -> f64 {
+        std::hint::black_box(value).log10()
+    }
+
+    fn runtime_sin(value: f64) -> f64 {
+        std::hint::black_box(value).sin()
+    }
+
+    fn runtime_cos(value: f64) -> f64 {
+        std::hint::black_box(value).cos()
+    }
+
+    fn runtime_tan(value: f64) -> f64 {
+        std::hint::black_box(value).tan()
+    }
+
+    fn runtime_sinh(value: f64) -> f64 {
+        std::hint::black_box(value).sinh()
+    }
+
+    fn runtime_cosh(value: f64) -> f64 {
+        std::hint::black_box(value).cosh()
+    }
+
+    fn runtime_tanh(value: f64) -> f64 {
+        std::hint::black_box(value).tanh()
+    }
+
     fn runtime_limexp(value: f64) -> f64 {
         const LIMIT: f64 = 40.0;
         let value = std::hint::black_box(value);
@@ -1559,6 +1616,18 @@ mod tests {
         } else {
             value.exp()
         }
+    }
+
+    fn runtime_asin(value: f64) -> f64 {
+        std::hint::black_box(value).asin()
+    }
+
+    fn runtime_acos(value: f64) -> f64 {
+        std::hint::black_box(value).acos()
+    }
+
+    fn runtime_atan(value: f64) -> f64 {
+        std::hint::black_box(value).atan()
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {
