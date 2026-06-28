@@ -5561,6 +5561,44 @@ fn stamp() {
             "{offset_lhs_product}"
         );
 
+        for signature in [
+            "fn store_sub_from_scalar_scaled_mul(",
+            "fn store_sub_from_scalar_scaled_mul_ad_lhs(",
+            "fn store_sub_from_scalar_scaled_mul_ad_rhs(",
+            "fn store_sub_from_scalar_scaled_mul_ad(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_sub_from_scalar_scaled_mul_components"),
+                "{body}"
+            );
+        }
+
+        let sub_scaled_mul = helper_body(&support, "fn store_sub_from_scalar_scaled_mul(");
+        assert!(
+            sub_scaled_mul.contains(
+                "self.node_derivatives[index][axis] = -(self.node_derivatives[left][axis] * right_value + left_value * self.node_derivatives[right][axis]) * scale;"
+            ),
+            "{sub_scaled_mul}"
+        );
+
+        let sub_scaled_mul_ad_rhs =
+            helper_body(&support, "fn store_sub_from_scalar_scaled_mul_ad_rhs(");
+        assert!(
+            sub_scaled_mul_ad_rhs.contains(
+                "self.node_derivatives[index][axis] = -(self.node_derivatives[left][axis] * right_value + left_value * right.node_derivatives[axis]) * scale;"
+            ),
+            "{sub_scaled_mul_ad_rhs}"
+        );
+
         let sqrt_square_add = helper_body(&support, "fn store_sqrt_square_add(");
         assert!(
             !sqrt_square_add.contains("_node_derivatives = self.node_derivatives"),
@@ -17541,30 +17579,39 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_sub_from_scalar_scaled_mul_components(&mut self, index: usize, scalar: f64, left_value: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_value: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], scale: f64) {",
-        "        self.values[index] = scalar - left_value * right_value * scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -(left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -(left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * scale; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_sub_from_scalar_scaled_mul(&mut self, index: usize, scalar: f64, left: usize, right: usize, scale: f64) {",
-        "        self.store_sub_from_scalar_scaled_mul_components(index, scalar, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], self.values[right], self.node_derivatives[right], self.branch_derivatives[right], scale);",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right];",
+        "        self.values[index] = scalar - left_value * right_value * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -(self.node_derivatives[left][axis] * right_value + left_value * self.node_derivatives[right][axis]) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -(self.branch_derivatives[left][axis] * right_value + left_value * self.branch_derivatives[right][axis]) * scale; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_from_scalar_scaled_mul_ad_lhs(&mut self, index: usize, scalar: f64, left: AdValue, right: usize, scale: f64) {",
-        "        self.store_sub_from_scalar_scaled_mul_components(index, scalar, left.value, left.node_derivatives, left.branch_derivatives, self.values[right], self.node_derivatives[right], self.branch_derivatives[right], scale);",
+        "        let left_value = left.value;",
+        "        let right_value = self.values[right];",
+        "        self.values[index] = scalar - left_value * right_value * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -(left.node_derivatives[axis] * right_value + left_value * self.node_derivatives[right][axis]) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -(left.branch_derivatives[axis] * right_value + left_value * self.branch_derivatives[right][axis]) * scale; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_from_scalar_scaled_mul_ad_rhs(&mut self, index: usize, scalar: f64, left: usize, right: AdValue, scale: f64) {",
-        "        self.store_sub_from_scalar_scaled_mul_components(index, scalar, self.values[left], self.node_derivatives[left], self.branch_derivatives[left], right.value, right.node_derivatives, right.branch_derivatives, scale);",
+        "        let left_value = self.values[left];",
+        "        let right_value = right.value;",
+        "        self.values[index] = scalar - left_value * right_value * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -(self.node_derivatives[left][axis] * right_value + left_value * right.node_derivatives[axis]) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -(self.branch_derivatives[left][axis] * right_value + left_value * right.branch_derivatives[axis]) * scale; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_sub_from_scalar_scaled_mul_ad(&mut self, index: usize, scalar: f64, left: AdValue, right: AdValue, scale: f64) {",
-        "        self.store_sub_from_scalar_scaled_mul_components(index, scalar, left.value, left.node_derivatives, left.branch_derivatives, right.value, right.node_derivatives, right.branch_derivatives, scale);",
+        "        let left_value = left.value;",
+        "        let right_value = right.value;",
+        "        self.values[index] = scalar - left_value * right_value * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -(left.node_derivatives[axis] * right_value + left_value * right.node_derivatives[axis]) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -(left.branch_derivatives[axis] * right_value + left_value * right.branch_derivatives[axis]) * scale; }",
         "    }",
         "",
         "    #[inline]",
