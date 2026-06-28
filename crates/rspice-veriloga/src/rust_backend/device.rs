@@ -466,6 +466,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_div_ln_lhs_helper_calls(source);
     source = compact_add_sub_ln_lhs_helper_calls(source);
     source = compact_mul_div_from_scalar_lhs_helper_calls(source);
+    source = compact_mul_div_helper_calls(source);
     source = compact_mul_div_scaled_inputs_helper_calls(source);
     source = compact_mul_div_scaled_product_helper_calls(source);
     source = compact_sqrt_mul_sub_operand_helper_calls(source);
@@ -1542,6 +1543,91 @@ fn compact_mul_div_from_scalar_lhs_helper_call_replacement(
         div_args[1],
         args[2].trim(),
     )?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_div_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_div_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_div_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = if let Some(div_args) = compact_ad_call_args(left, "div") {
+        if div_args.len() != 2 {
+            return None;
+        }
+        compact_index_or_mixed_mul_div_scaled_inputs_helper_line(
+            target_index,
+            right,
+            div_args[0],
+            "1.0",
+            div_args[1],
+            "1.0",
+        )?
+    } else if let Some(div_args) = compact_ad_call_args(right, "div") {
+        if div_args.len() != 2 {
+            return None;
+        }
+        compact_index_or_mixed_mul_div_scaled_inputs_helper_line(
+            target_index,
+            left,
+            div_args[0],
+            "1.0",
+            div_args[1],
+            "1.0",
+        )?
+    } else {
+        return None;
+    };
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -3680,6 +3766,38 @@ fn stamp() {
         assert!(!compact.contains("s.store_mul_ad_rhs("), "{compact}");
         assert!(!compact.contains("s.store_mul_ad_lhs("), "{compact}");
         assert!(!compact.contains("s.store_offset_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_div_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_mul_div_scaled_inputs_indices",
+            "fn store_mul_div_scaled_inputs_mixed_iaa",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(150, AdValue::div(scratch.ad_value(2), scratch.ad_value(3)), scratch.ad_value(4));
+    scratch.store_mul_ad(151, scratch.ad_value(5), AdValue::div(AdValue::sqrt(scratch.ad_value(6)), AdValue::offset(scratch.ad_value(7), params.bias)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_div_scaled_inputs_indices(150, 4, 2, 1.0, 3, 1.0);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_mul_div_scaled_inputs_mixed_iaa(151, 5, A::sqrt(s.ad_value(6)), 1.0, A::offset(s.ad_value(7), p.bias), 1.0);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::div("), "{compact}");
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
