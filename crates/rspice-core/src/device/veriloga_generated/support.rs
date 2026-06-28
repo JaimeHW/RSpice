@@ -5543,6 +5543,18 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sqrt_div_scaled_square_offset_denominator(&mut self, index: usize, source: usize, product_scale: f64, denominator_offset: f64, denominator_scale: f64) {
+        let source_value = self.v[source];
+        let source_square = source_value * source_value;
+        let denominator = (source_square + denominator_offset) * denominator_scale;
+        let reciprocal = 1.0 / denominator;
+        let quotient = source_square * product_scale * reciprocal;
+        let value = quotient.sqrt();
+        let derivative_scale = source_value * product_scale * denominator_offset * denominator_scale * reciprocal * reciprocal / value;
+        self.store_unary_scaled(index, source, value, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_sqrt_square_sum(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
@@ -18218,6 +18230,18 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + cube_dn[axis] * cube_derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + cube_db[axis] * cube_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_div_scaled_square_offset_denominator(&mut self, index: usize, source: usize, product_scale: f64, denominator_offset: f64, denominator_scale: f64) {
+        let source_value = self.v[source];
+        let source_square = source_value * source_value;
+        let denominator = (source_square + denominator_offset) * denominator_scale;
+        let reciprocal = 1.0 / denominator;
+        let quotient = source_square * product_scale * reciprocal;
+        let value = quotient.sqrt();
+        let derivative_scale = source_value * product_scale * denominator_offset * denominator_scale * reciprocal * reciprocal / value;
+        self.store_unary_scaled(index, source, value, derivative_scale);
     }
 
     #[inline]

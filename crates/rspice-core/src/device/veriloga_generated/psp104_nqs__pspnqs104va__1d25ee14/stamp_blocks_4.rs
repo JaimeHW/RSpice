@@ -5513,7 +5513,7 @@ impl Instance {
             s.store_div_scaled_inputs_indices(2646, 2643, (s.v[408] * s.v[438]), 2639, 1.0);
             s.store_div_from_scalar(2647, (0.666666666666667 * s.v[435]), 2646);
             s.store_square(2648, 2647);
-            s.store_sqrt_ad(2649, A::div_scaled_product_offset_denominator(s.ad_value(2648), s.ad_value(2648), 1.0, A::square(s.ad_value(2648)), 1.0, 1.0));
+            s.store_sqrt_div_scaled_square_offset_denominator(2649, 2648, 1.0, 1.0, 1.0);
             s.store_sqrt(2650, 2649);
             s.store_mul(2651, 2649, 2650);
             s.store_sqrt_scaled_input_ad(2654, A::div(s.ad_value(2646), s.ad_value(2650)), 0.375);
