@@ -6726,21 +6726,13 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_add_scaled_product_right_sub(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, sub_left: usize, sub_right: usize, product_scale: f64) {
         let value_raw = self.v[value];
-        let value_dn = self.dn[value];
-        let value_db = self.db[value];
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
         let sub_left_value = self.v[sub_left];
-        let sub_left_dn = self.dn[sub_left];
-        let sub_left_db = self.db[sub_left];
         let sub_right_value = self.v[sub_right];
-        let sub_right_dn = self.dn[sub_right];
-        let sub_right_db = self.db[sub_right];
         let product_right_value = sub_left_value - sub_right_value;
         self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = value_dn[axis] * value_scale + (product_left_dn[axis] * product_right_value + product_left_value * (sub_left_dn[axis] - sub_right_dn[axis])) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value_db[axis] * value_scale + (product_left_db[axis] * product_right_value + product_left_value * (sub_left_db[axis] - sub_right_db[axis])) * product_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[value][axis] * value_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * (self.dn[sub_left][axis] - self.dn[sub_right][axis])) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[value][axis] * value_scale + (self.db[product_left][axis] * product_right_value + product_left_value * (self.db[sub_left][axis] - self.db[sub_right][axis])) * product_scale; }
     }
 
     #[inline]
@@ -20943,21 +20935,13 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_add_scaled_product_right_sub(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, sub_left: usize, sub_right: usize, product_scale: f64) {
         let value_raw = self.v[value];
-        let value_dn = self.dn[value];
-        let value_db = self.db[value];
         let product_left_value = self.v[product_left];
-        let product_left_dn = self.dn[product_left];
-        let product_left_db = self.db[product_left];
         let sub_left_value = self.v[sub_left];
-        let sub_left_dn = self.dn[sub_left];
-        let sub_left_db = self.db[sub_left];
         let sub_right_value = self.v[sub_right];
-        let sub_right_dn = self.dn[sub_right];
-        let sub_right_db = self.db[sub_right];
         let product_right_value = sub_left_value - sub_right_value;
         self.v[index] = value_raw * value_scale + product_left_value * product_right_value * product_scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = value_dn[axis] * value_scale + (product_left_dn[axis] * product_right_value + product_left_value * (sub_left_dn[axis] - sub_right_dn[axis])) * product_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = value_db[axis] * value_scale + (product_left_db[axis] * product_right_value + product_left_value * (sub_left_db[axis] - sub_right_db[axis])) * product_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[value][axis] * value_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * (self.dn[sub_left][axis] - self.dn[sub_right][axis])) * product_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[value][axis] * value_scale + (self.db[product_left][axis] * product_right_value + product_left_value * (self.db[sub_left][axis] - self.db[sub_right][axis])) * product_scale; }
     }
 
     #[inline]
