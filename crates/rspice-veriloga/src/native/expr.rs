@@ -12,10 +12,16 @@ pub(crate) enum EntryKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum VoltageNode {
+    Terminal(usize),
+    Ground,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum NativeOp {
     Const(f64),
     LoadParam(usize),
-    LoadVoltage { pos: usize, neg: usize },
+    LoadVoltage { pos: VoltageNode, neg: VoltageNode },
     LoadInternalVoltage(usize),
     LoadVariable(usize),
     LoadBranchUnknown(usize),
@@ -38,7 +44,24 @@ impl NativeProgram {
         entry_kind: EntryKind,
         program: &BytecodeProgram,
     ) -> JitResult<Self> {
-        let model = model.into();
+        Self::from_bytecode_inner(model.into(), entry_kind, program, None)
+    }
+
+    pub(crate) fn from_bytecode_with_terminal_count(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        program: &BytecodeProgram,
+        terminal_count: usize,
+    ) -> JitResult<Self> {
+        Self::from_bytecode_inner(model.into(), entry_kind, program, Some(terminal_count))
+    }
+
+    fn from_bytecode_inner(
+        model: SmolStr,
+        entry_kind: EntryKind,
+        program: &BytecodeProgram,
+        terminal_count: Option<usize>,
+    ) -> JitResult<Self> {
         let mut ops = Vec::with_capacity(program.instructions.len());
         let mut depth = 0usize;
         let mut max_stack_depth = 0usize;
@@ -55,8 +78,8 @@ impl NativeProgram {
                 }
                 Instruction::PushVoltage(pos, neg) => {
                     ops.push(NativeOp::LoadVoltage {
-                        pos: *pos,
-                        neg: *neg,
+                        pos: lower_voltage_node(model.clone(), *pos, terminal_count)?,
+                        neg: lower_voltage_node(model.clone(), *neg, terminal_count)?,
                     });
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
@@ -199,6 +222,27 @@ fn stack_error(model: SmolStr, entry_kind: EntryKind, detail: String) -> JitErro
     }
 }
 
+fn lower_voltage_node(
+    model: SmolStr,
+    node: usize,
+    terminal_count: Option<usize>,
+) -> JitResult<VoltageNode> {
+    if node == usize::MAX {
+        return Ok(VoltageNode::Ground);
+    }
+
+    if let Some(terminal_count) = terminal_count {
+        if node >= terminal_count {
+            return Err(JitError::unsupported_program_op(
+                model,
+                format!("PushVoltage unified node {node}"),
+            ));
+        }
+    }
+
+    Ok(VoltageNode::Terminal(node))
+}
+
 fn instruction_name(instruction: &Instruction) -> &'static str {
     match instruction {
         Instruction::PushConst(_) => "PushConst",
@@ -302,7 +346,10 @@ mod tests {
         assert_eq!(
             lowered.ops(),
             &[
-                NativeOp::LoadVoltage { pos: 0, neg: 1 },
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
                 NativeOp::LoadParam(0),
                 NativeOp::Div,
                 NativeOp::Const(2.0),
@@ -310,6 +357,63 @@ mod tests {
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_terminal_to_ground_voltage_without_usize_sentinel() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushVoltage(0, usize::MAX)],
+        };
+
+        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program)
+            .expect("lower terminal-to-ground voltage");
+
+        assert_eq!(
+            lowered.ops(),
+            &[NativeOp::LoadVoltage {
+                pos: VoltageNode::Terminal(0),
+                neg: VoltageNode::Ground,
+            }]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_ground_to_terminal_voltage_without_usize_sentinel() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushVoltage(usize::MAX, 0)],
+        };
+
+        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program)
+            .expect("lower ground-to-terminal voltage");
+
+        assert_eq!(
+            lowered.ops(),
+            &[NativeOp::LoadVoltage {
+                pos: VoltageNode::Ground,
+                neg: VoltageNode::Terminal(0),
+            }]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowering_rejects_unified_internal_voltage_index_when_terminal_count_is_known() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushVoltage(1, usize::MAX)],
+        };
+
+        let error = NativeProgram::from_bytecode_with_terminal_count(
+            "res",
+            EntryKind::StampValue,
+            &program,
+            1,
+        )
+        .expect_err("unified internal node index is outside this native slice");
+        let msg = error.to_string();
+        assert!(msg.contains("PushVoltage"));
+        assert!(msg.contains("native JIT"));
+        assert!(msg.contains("no interpreter fallback"));
     }
 
     #[test]
