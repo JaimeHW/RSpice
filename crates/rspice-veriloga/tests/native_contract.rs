@@ -8,6 +8,7 @@
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::native::compile_native;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+use std::collections::HashMap;
 
 fn compile(source: &str) -> rspice_veriloga::CompiledModel {
     VerilogACompiler::new(CompilerOptions::default())
@@ -43,6 +44,76 @@ endmodule
     )
 }
 
+fn simple_resistor_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module rnative(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#,
+    )
+}
+
+fn assignment_fed_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module assign_native(p, n);
+    inout p, n;
+    electrical p, n;
+    real g;
+    analog begin
+        g = 0.25;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
+fn runtime_loop_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module loop_native(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nseg = 2 from [1:4];
+    integer i;
+    real total;
+    analog begin
+        total = 0.0;
+        for (i = 0; i < nseg; i = i + 1)
+            total = total + V(p, n);
+        I(p, n) <+ total;
+    end
+endmodule
+"#,
+    )
+}
+
+fn indexed_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module indexed_native(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer idx = 1 from [1:2];
+    real w[1:2];
+    analog begin
+        w[idx] = 0.25;
+        I(p, n) <+ w[idx] * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn assert_native_hard_fail_message(msg: &str) {
     assert!(
         msg.contains("native JIT"),
@@ -52,6 +123,26 @@ fn assert_native_hard_fail_message(msg: &str) {
         msg.contains("no interpreter fallback"),
         "error must state the hard-fail contract, got: {msg}"
     );
+}
+
+fn stamp_device(
+    device: &mut VerilogADevice,
+    voltages: &[f64],
+) -> (HashMap<(usize, usize), f64>, HashMap<usize, f64>) {
+    let mut matrix = HashMap::new();
+    let mut rhs = HashMap::new();
+
+    device.stamp(
+        voltages,
+        |row, col, value| {
+            *matrix.entry((row, col)).or_insert(0.0) += value;
+        },
+        |row, value| {
+            *rhs.entry(row).or_insert(0.0) += value;
+        },
+    );
+
+    (matrix, rhs)
 }
 
 fn noise_model() -> rspice_veriloga::CompiledModel {
@@ -83,6 +174,103 @@ module capjit(p, n);
 endmodule
 "#,
     )
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_compile_accepts_simple_resistor_subset() {
+    let model = simple_resistor_model();
+
+    let native = compile_native(&model).expect("x64 native JIT must compile simple resistor");
+
+    assert_eq!(native.native_stamp_count(), model.stamp_programs.len());
+    assert_eq!(
+        native.plan_stats().jacobian_entry_points,
+        model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum::<usize>()
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_stamps_simple_resistor_without_interpreter_fallback() {
+    let model = simple_resistor_model();
+    let mut device =
+        VerilogADevice::try_new("RN1", model, &[1, 0]).expect("simple resistor uses native JIT");
+    assert!(device.is_using_native());
+
+    let (matrix, rhs) = stamp_device(&mut device, &[4.0]);
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 0.5).abs() < 1e-12,
+        "matrix: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_scalar_assignment_pass() {
+    let model = assignment_fed_model();
+    let mut device = VerilogADevice::try_new("AN1", model, &[1, 0])
+        .expect("assignment-fed model uses native JIT");
+    assert!(device.is_using_native());
+
+    let (matrix, rhs) = stamp_device(&mut device, &[8.0]);
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 0.25).abs() < 1e-12,
+        "matrix: {matrix:?}"
+    );
+    assert!(
+        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
+        "rhs: {rhs:?}"
+    );
+}
+
+#[test]
+fn native_compile_rejects_runtime_loop_assignments_without_fallback() {
+    let model = runtime_loop_model();
+    assert!(
+        model
+            .assignment_steps
+            .iter()
+            .any(|step| matches!(step, rspice_veriloga::codegen::AssignmentStep::Loop { .. })),
+        "fixture must contain a runtime assignment loop"
+    );
+
+    let err = compile_native(&model).expect_err("native JIT must reject runtime assignment loops");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(msg.contains("Loop"), "error must name Loop, got: {msg}");
+}
+
+#[test]
+fn native_compile_rejects_indexed_assignments_without_fallback() {
+    let model = indexed_assignment_model();
+    assert!(
+        model.assignment_steps.iter().any(|step| matches!(
+            step,
+            rspice_veriloga::codegen::AssignmentStep::AssignIndexed { .. }
+        )),
+        "fixture must contain an indexed assignment"
+    );
+
+    let err = compile_native(&model).expect_err("native JIT must reject indexed assignments");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("AssignIndexed") || msg.contains("PushVariableDyn"),
+        "error must name indexed assignment coverage, got: {msg}"
+    );
 }
 
 #[test]

@@ -20,8 +20,8 @@ const SIGN_MASK: f64 = f64::from_bits(0x8000_0000_0000_0000);
 
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program)?;
-    compiler.emit_program()?;
+    let mut compiler = FunctionCompiler::new();
+    compiler.emit_program(program)?;
     compiler.finish_value_function()
 }
 
@@ -30,14 +30,24 @@ pub(crate) fn compile_assignment_function(
     var_index: usize,
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program)?;
-    compiler.emit_program()?;
+    let mut compiler = FunctionCompiler::new();
+    compiler.emit_program(program)?;
     compiler.finish_assignment_function(var_index)
 }
 
+pub(crate) fn compile_assignment_pass_function(
+    assignments: &[(usize, NativeProgram)],
+) -> JitResult<Vec<u8>> {
+    let mut compiler = FunctionCompiler::new();
+    for (var_index, program) in assignments {
+        compiler.emit_program(program)?;
+        compiler.emit_assignment_store(*var_index)?;
+    }
+    compiler.finish_assignment_pass_function()
+}
+
 #[derive(Debug)]
-struct FunctionCompiler<'a> {
-    program: &'a NativeProgram,
+struct FunctionCompiler {
     encoder: X64Encoder,
     depth: usize,
     literals: Vec<LiteralPatch>,
@@ -49,8 +59,16 @@ struct LiteralPatch {
     value: f64,
 }
 
-impl<'a> FunctionCompiler<'a> {
-    fn new(program: &'a NativeProgram) -> JitResult<Self> {
+impl FunctionCompiler {
+    fn new() -> Self {
+        Self {
+            encoder: X64Encoder::new(),
+            depth: 0,
+            literals: Vec::new(),
+        }
+    }
+
+    fn emit_program(&mut self, program: &NativeProgram) -> JitResult<()> {
         if program.max_stack_depth() > XMM_STACK.len() {
             return Err(register_allocation_error(format!(
                 "expression stack depth {} exceeds {} XMM registers",
@@ -59,16 +77,8 @@ impl<'a> FunctionCompiler<'a> {
             )));
         }
 
-        Ok(Self {
-            program,
-            encoder: X64Encoder::new(),
-            depth: 0,
-            literals: Vec::new(),
-        })
-    }
-
-    fn emit_program(&mut self) -> JitResult<()> {
-        for op in self.program.ops() {
+        self.depth = 0;
+        for op in program.ops() {
             match *op {
                 NativeOp::Const(value) => {
                     let dst = self.push_register()?;
@@ -127,13 +137,34 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     fn finish_assignment_function(mut self, var_index: usize) -> JitResult<Vec<u8>> {
+        self.emit_assignment_store(var_index)?;
+        self.encoder.ret();
+        self.finish_with_literals()
+    }
+
+    fn finish_assignment_pass_function(mut self) -> JitResult<Vec<u8>> {
+        self.encoder.ret();
+        self.finish_with_literals()
+    }
+
+    fn emit_assignment_store(&mut self, var_index: usize) -> JitResult<()> {
+        if self.depth != 1 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "assignment expression stack depth {}, expected 1",
+                    self.depth
+                )
+                .into(),
+            });
+        }
         self.encoder.movsd_m64_base_disp32_xmm(
             host_vars_arg_reg(),
             byte_disp(var_index)?,
             Xmm::Xmm0,
         );
-        self.encoder.ret();
-        self.finish_with_literals()
+        self.depth = 0;
+        Ok(())
     }
 
     fn push_register(&mut self) -> JitResult<Xmm> {
