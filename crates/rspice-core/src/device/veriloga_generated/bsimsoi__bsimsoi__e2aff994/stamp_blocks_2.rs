@@ -219,7 +219,7 @@ impl Instance {
         }
 
         if ((s.b[1620] && s.b[1799]) && (!s.b[1817])) {
-            s.store_mul_div_scaled_product_rhs(80, 269, s.ad_value(296), s.ad_value(78), 1.0, A::add_scaled_product(s.ad_value(51), 1.0, s.ad_value(294), s.ad_value(71), 1.0), 1.0);
+            s.store_mul_div_scaled_product_mixed_iiia(80, 269, 296, 78, 1.0, A::add_scaled_product(s.ad_value(51), 1.0, s.ad_value(294), s.ad_value(71), 1.0), 1.0);
             s.store_add_scaled_product_indices(81, 80, 1.0, 269, 74, 1.0);
         }
 
