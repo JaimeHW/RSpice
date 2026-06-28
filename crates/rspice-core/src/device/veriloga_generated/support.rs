@@ -787,20 +787,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let second_raw = self.v[second];
         let sqrt_left_raw = self.v[sqrt_left];
         let sqrt_right_raw = self.v[sqrt_right];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let sqrt_left_dn = self.dn[sqrt_left];
-        let sqrt_right_dn = self.dn[sqrt_right];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let sqrt_left_db = self.db[sqrt_left];
-        let sqrt_right_db = self.db[sqrt_right];
         let sqrt_delta = sqrt_left_raw - sqrt_right_raw;
         let root = (sqrt_delta * sqrt_delta + sqrt_offset).sqrt();
         let sqrt_derivative_scale = sqrt_delta * sqrt_scale / root;
         self.v[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + (sqrt_left_dn[axis] - sqrt_right_dn[axis]) * sqrt_derivative_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + (sqrt_left_db[axis] - sqrt_right_db[axis]) * sqrt_derivative_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + (self.dn[sqrt_left][axis] - self.dn[sqrt_right][axis]) * sqrt_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + (self.db[sqrt_left][axis] - self.db[sqrt_right][axis]) * sqrt_derivative_scale; }
     }
 
     #[inline]
@@ -15012,20 +15004,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let second_raw = self.v[second];
         let sqrt_left_raw = self.v[sqrt_left];
         let sqrt_right_raw = self.v[sqrt_right];
-        let first_dn = self.dn[first];
-        let second_dn = self.dn[second];
-        let sqrt_left_dn = self.dn[sqrt_left];
-        let sqrt_right_dn = self.dn[sqrt_right];
-        let first_db = self.db[first];
-        let second_db = self.db[second];
-        let sqrt_left_db = self.db[sqrt_left];
-        let sqrt_right_db = self.db[sqrt_right];
         let sqrt_delta = sqrt_left_raw - sqrt_right_raw;
         let root = (sqrt_delta * sqrt_delta + sqrt_offset).sqrt();
         let sqrt_derivative_scale = sqrt_delta * sqrt_scale / root;
         self.v[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (first_dn[axis] * first_scale + second_dn[axis] * second_scale) + (sqrt_left_dn[axis] - sqrt_right_dn[axis]) * sqrt_derivative_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (first_db[axis] * first_scale + second_db[axis] * second_scale) + (sqrt_left_db[axis] - sqrt_right_db[axis]) * sqrt_derivative_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[first][axis] * first_scale + self.dn[second][axis] * second_scale) + (self.dn[sqrt_left][axis] - self.dn[sqrt_right][axis]) * sqrt_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[first][axis] * first_scale + self.db[second][axis] * second_scale) + (self.db[sqrt_left][axis] - self.db[sqrt_right][axis]) * sqrt_derivative_scale; }
     }
 
     #[inline]
