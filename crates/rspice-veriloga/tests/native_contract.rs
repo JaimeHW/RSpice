@@ -281,6 +281,23 @@ endmodule
     )
 }
 
+fn absdelay_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_absdelay_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = absdelay(V(p, n), 0.5);
+        I(p, n) <+ y;
+    end
+endmodule
+"#,
+    )
+}
+
 fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1501,6 +1518,48 @@ fn native_device_executes_slew_assignments_without_fallback() {
             "time: {time}, currents: {currents:?}"
         );
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_absdelay_assignments_without_fallback() {
+    let model = absdelay_assignment_model();
+    let mut device =
+        VerilogADevice::try_new("DLY1", model, &[1, 0]).expect("absdelay model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.set_analysis_type(0);
+    device.update_voltages(&[7.0]);
+    let dc_currents = device
+        .try_evaluate()
+        .expect("native absdelay DC evaluation succeeds");
+    assert_eq!(device.variable("y"), Some(7.0));
+    assert_eq!(dc_currents[0], 7.0);
+
+    device.set_analysis_type(2);
+    for (time, voltage, expected) in [(0.0, 0.0, 0.0), (0.5, 1.0, 0.0), (1.0, 3.0, 1.0)] {
+        device.set_time(time);
+        device.update_voltages(&[voltage]);
+        let currents = device
+            .try_evaluate()
+            .expect("native absdelay transient evaluation succeeds");
+        assert!(
+            (device.variable("y").unwrap() - expected).abs() < 1e-12,
+            "time: {time}"
+        );
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
+
+    device.set_time(1.25);
+    device.update_voltages(&[5.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("native absdelay interpolation succeeds");
+    assert!((device.variable("y").unwrap() - 2.0).abs() < 1e-12);
+    assert!((currents[0] - 2.0).abs() < 1e-12);
 }
 
 #[cfg(target_arch = "x86_64")]

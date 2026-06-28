@@ -1,13 +1,13 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
-    rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_bitand, rspice_bitor,
-    rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_dynamic_variable_load_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_idtmod_wrap,
-    rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod,
-    rspice_native_loop_limit_error, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_step_native,
+    rspice_absdelay_state_native, rspice_acos, rspice_asin, rspice_atan, rspice_atan2,
+    rspice_bitand, rspice_bitor, rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh,
+    rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native, rspice_exp,
+    rspice_floor, rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log,
+    rspice_log10, rspice_mod, rspice_native_loop_limit_error, rspice_pow, rspice_shl, rspice_shr,
+    rspice_sin, rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -258,6 +258,7 @@ impl FunctionCompiler {
                 NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
                 NativeOp::TransitionState(filter_id) => self.emit_transition_state(filter_id)?,
                 NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
+                NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
                 NativeOp::WhiteNoise => self.emit_white_noise()?,
                 NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
@@ -1042,6 +1043,29 @@ impl FunctionCompiler {
         let input = XMM_STACK[self.depth - 3];
         self.emit_operand_context_filter_helper_call(input, 3, filter_id, rspice_slew_state_native);
         self.depth -= 2;
+        Ok(())
+    }
+
+    fn emit_absdelay_state(&mut self, buffer_id: usize) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "absdelay state requires stack depth 2, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+
+        let input = XMM_STACK[self.depth - 2];
+        self.emit_operand_context_filter_helper_call(
+            input,
+            2,
+            buffer_id,
+            rspice_absdelay_state_native,
+        );
+        self.depth -= 1;
         Ok(())
     }
 
@@ -1874,6 +1898,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::TimerState(_)
                 | NativeOp::TransitionState(_)
                 | NativeOp::SlewState(_)
+                | NativeOp::AbsDelayState(_)
                 | NativeOp::IdtModState(_)
         )
     })
@@ -2073,7 +2098,7 @@ mod tests {
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
-    use crate::vm::{SlewFilter, TransitionFilter};
+    use crate::vm::{DelayBuffer, SlewFilter, TransitionFilter};
     use crate::zfilter::ZiFilter;
 
     #[test]
@@ -3204,6 +3229,72 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_calls_absdelay_helper_and_preserves_stack() {
+        let program = NativeProgram::from_bytecode(
+            "x64-codegen-test",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushVoltage(0, usize::MAX),
+                    Instruction::PushConst(0.5),
+                    Instruction::AbsDelayState(0),
+                    Instruction::Add,
+                ],
+            },
+            NativeLoweringLimits::new(1, 0, 0, 0, 0),
+        )
+        .expect("lower absdelay helper program");
+        let bytes = compile_value_function(&program).expect("compile absdelay helper leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate absdelay helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut voltages = [7.0_f64];
+        let mut buffers = [DelayBuffer::default()];
+        let mut ctx = eval_context(&[], &voltages, &[], &[]);
+        ctx.temperature = 310.0;
+        ctx.delay_buffers = buffers.as_mut_ptr();
+        ctx.delay_buffers_len = buffers.len();
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            317.0_f64.to_bits(),
+            "non-transient absdelay evaluation passes input through"
+        );
+
+        ctx.analysis_type = 2;
+
+        ctx.time = 0.0;
+        voltages[0] = 0.0;
+        std::hint::black_box(voltages[0]);
+        let first = f(&ctx, std::ptr::null());
+        assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+
+        ctx.time = 0.5;
+        voltages[0] = 1.0;
+        std::hint::black_box(voltages[0]);
+        let delayed_start = f(&ctx, std::ptr::null());
+        assert_eq!(delayed_start.to_bits(), 310.0_f64.to_bits());
+
+        ctx.time = 1.0;
+        voltages[0] = 3.0;
+        std::hint::black_box(voltages[0]);
+        let delayed = f(&ctx, std::ptr::null());
+        assert!((delayed - 311.0).abs() < 1.0e-12, "delayed: {delayed}");
+
+        ctx.time = 1.25;
+        voltages[0] = 5.0;
+        std::hint::black_box(voltages[0]);
+        let interpolated = f(&ctx, std::ptr::null());
+        assert!(
+            (interpolated - 312.0).abs() < 1.0e-12,
+            "interpolated: {interpolated}"
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_computes_ordered_comparisons() {
         let cases = [
             ("gt-true", Instruction::Gt, 5.0, 3.0, 1.0),
@@ -4068,6 +4159,8 @@ mod tests {
             transition_filters_len: 0,
             slew_filters: std::ptr::null_mut(),
             slew_filters_len: 0,
+            delay_buffers: std::ptr::null_mut(),
+            delay_buffers_len: 0,
         }
     }
 

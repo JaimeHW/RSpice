@@ -1199,6 +1199,12 @@ impl VerilogADevice {
                 context.slew_filters.as_mut_ptr()
             },
             slew_filters_len: context.slew_filters.len(),
+            delay_buffers: if context.delay_buffers.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.delay_buffers.as_mut_ptr()
+            },
+            delay_buffers_len: context.delay_buffers.len(),
         }
     }
 
