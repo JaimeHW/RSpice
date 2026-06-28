@@ -3584,6 +3584,32 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_product_lhs(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, factor: usize, source: usize) {
+        let numerator_value = self.v[numerator];
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let factor_value = self.v[factor];
+        let source_value = self.v[source];
+        let reciprocal = 1.0 / denominator_value;
+        let div_value = numerator_value * numerator_scale * reciprocal;
+        let product_value = div_value * factor_value;
+        let numerator_derivative_scale = numerator_scale * reciprocal * factor_value * source_value;
+        let denominator_derivative_scale = -div_value * reciprocal * denominator_scale * factor_value * source_value;
+        let factor_derivative_scale = div_value * source_value;
+        let source_derivative_scale = product_value;
+        self.v[index] = product_value * source_value;
+        let numerator_dn = self.dn[numerator];
+        let denominator_dn = self.dn[denominator];
+        let factor_dn = self.dn[factor];
+        let source_dn = self.dn[source];
+        let numerator_db = self.db[numerator];
+        let denominator_db = self.db[denominator];
+        let factor_db = self.db[factor];
+        let source_db = self.db[source];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale + factor_dn[axis] * factor_derivative_scale + source_dn[axis] * source_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale + factor_db[axis] * factor_derivative_scale + source_db[axis] * source_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_mul_ad_product_rhs(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let source_value = self.v[source];
         let source_dn = self.dn[source];
@@ -16452,6 +16478,32 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = product_value * source_value;
         for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right.value + left.value * right.dn[axis]; self.dn[index][axis] = product_derivative * source_value + product_value * source_dn[axis]; }
         for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right.value + left.value * right.db[axis]; self.db[index][axis] = product_derivative * source_value + product_value * source_db[axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_div_scaled_inputs_product_lhs(&mut self, index: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_scale: f64, factor: usize, source: usize) {
+        let numerator_value = self.v[numerator];
+        let denominator_value = self.v[denominator] * denominator_scale;
+        let factor_value = self.v[factor];
+        let source_value = self.v[source];
+        let reciprocal = 1.0 / denominator_value;
+        let div_value = numerator_value * numerator_scale * reciprocal;
+        let product_value = div_value * factor_value;
+        let numerator_derivative_scale = numerator_scale * reciprocal * factor_value * source_value;
+        let denominator_derivative_scale = -div_value * reciprocal * denominator_scale * factor_value * source_value;
+        let factor_derivative_scale = div_value * source_value;
+        let source_derivative_scale = product_value;
+        self.v[index] = product_value * source_value;
+        let numerator_dn = self.dn[numerator];
+        let denominator_dn = self.dn[denominator];
+        let factor_dn = self.dn[factor];
+        let source_dn = self.dn[source];
+        let numerator_db = self.db[numerator];
+        let denominator_db = self.db[denominator];
+        let factor_db = self.db[factor];
+        let source_db = self.db[source];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = numerator_dn[axis] * numerator_derivative_scale + denominator_dn[axis] * denominator_derivative_scale + factor_dn[axis] * factor_derivative_scale + source_dn[axis] * source_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = numerator_db[axis] * numerator_derivative_scale + denominator_db[axis] * denominator_derivative_scale + factor_db[axis] * factor_derivative_scale + source_db[axis] * source_derivative_scale; }
     }
 
     #[inline]
