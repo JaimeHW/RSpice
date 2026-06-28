@@ -230,6 +230,23 @@ endmodule
     )
 }
 
+fn timer_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_timer_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real tick;
+    analog begin
+        tick = timer(1.0, 0.5);
+        I(p, n) <+ tick;
+    end
+endmodule
+"#,
+    )
+}
+
 fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1378,6 +1395,26 @@ fn native_device_executes_above_assignments_without_fallback() {
         .expect("native above-threshold above evaluation succeeds");
     assert_eq!(device.variable("gate"), Some(1.0));
     assert_eq!(currents[0].to_bits(), 1.0_f64.to_bits());
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_timer_assignments_without_fallback() {
+    let model = timer_assignment_model();
+    let mut device =
+        VerilogADevice::try_new("TMR1", model, &[1, 0]).expect("timer model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_analysis_type(2);
+    device.set_timestep(0.01);
+
+    for (time, expected) in [(0.75, 0.0), (1.0, 1.0), (1.25, 0.0), (1.5, 1.0)] {
+        device.set_time(time);
+        let currents = device
+            .try_evaluate()
+            .expect("native timer evaluation succeeds");
+        assert_eq!(device.variable("tick"), Some(expected), "time: {time}");
+        assert_eq!(currents[0].to_bits(), expected.to_bits(), "time: {time}");
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

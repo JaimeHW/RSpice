@@ -57,6 +57,7 @@ pub(crate) enum NativeOp {
     LimitState(usize),
     LaplaceState(usize),
     ZiState(usize),
+    TimerState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -493,6 +494,17 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::ZiState(*filter_id));
+                }
+                Instruction::TimerState(timer_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::TimerState(*timer_id));
                 }
                 Instruction::WhiteNoise => {
                     require_stack(
@@ -1619,6 +1631,78 @@ mod tests {
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_timer_state_as_native_context_event() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.5),
+                Instruction::TimerState(3),
+            ],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("timer", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("timer state has native x64 helper-call lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::Const(1.0),
+                NativeOp::Const(0.5),
+                NativeOp::TimerState(3),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowering_rejects_timer_state_without_start_and_period() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0), Instruction::TimerState(0)],
+        };
+
+        let error = NativeProgram::from_bytecode(
+            "bad-timer",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect_err("timer state requires start and period operands");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("TimerState requires stack depth 2"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_timer_state_in_restricted_entry_kinds() {
+        for (entry_kind, expected) in [
+            (EntryKind::StaticCondition, "StaticCondition TimerState"),
+            (EntryKind::ParameterDefault, "ParameterDefault TimerState"),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.5),
+                    Instruction::TimerState(0),
+                ],
+            };
+
+            let error =
+                NativeProgram::from_bytecode("bad-timer-entry", entry_kind, &program, limits(0, 0))
+                    .expect_err("timer state must stay out of restricted entries");
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
+            assert!(
+                msg.contains("no interpreter fallback"),
+                "{entry_kind:?}: got {msg}"
+            );
+        }
     }
 
     #[test]
