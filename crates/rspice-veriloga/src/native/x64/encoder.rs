@@ -36,6 +36,12 @@ pub(crate) enum Xmm {
     Xmm5,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConditionCode {
+    Above,
+    AboveOrEqual,
+}
+
 impl Xmm {
     fn code(self) -> u8 {
         match self {
@@ -45,6 +51,15 @@ impl Xmm {
             Self::Xmm3 => 3,
             Self::Xmm4 => 4,
             Self::Xmm5 => 5,
+        }
+    }
+}
+
+impl ConditionCode {
+    fn set_opcode(self) -> u8 {
+        match self {
+            Self::Above => 0x97,
+            Self::AboveOrEqual => 0x93,
         }
     }
 }
@@ -104,6 +119,12 @@ impl X64Encoder {
         self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
     }
 
+    pub(crate) fn movzx_r32_r8(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex(false, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, 0xB6]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
     pub(crate) fn cvtsi2sd_xmm_r32(&mut self, dst: Xmm, src: Gpr) {
         self.emit_u8(0xF2);
         self.emit_rex(false, dst.code(), 0, src.code());
@@ -159,6 +180,16 @@ impl X64Encoder {
 
     pub(crate) fn sqrtsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x51, dst, src);
+    }
+
+    pub(crate) fn ucomisd_xmm_xmm(&mut self, left: Xmm, right: Xmm) {
+        self.emit_sse_reg_reg(0x66, 0x2E, left, right);
+    }
+
+    pub(crate) fn setcc_r8(&mut self, condition: ConditionCode, dst: Gpr) {
+        self.emit_rex(false, 0, 0, dst.code());
+        self.emit_all(&[0x0F, condition.set_opcode()]);
+        self.emit_modrm(0b11, 0, dst.code());
     }
 
     pub(crate) fn addsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
@@ -257,7 +288,7 @@ impl X64Encoder {
 
 #[cfg(test)]
 mod tests {
-    use super::{Gpr, X64Encoder, Xmm};
+    use super::{ConditionCode, Gpr, X64Encoder, Xmm};
 
     #[cfg(all(feature = "native", target_arch = "x86_64"))]
     use crate::native::{EvalContext, runtime::ExecutableMemory};
@@ -397,6 +428,26 @@ mod tests {
             [
                 0x66, 0x48, 0x0F, 0x7E, 0xD0, 0x48, 0x0F, 0xBA, 0xF0, 0x3F, 0x66, 0x48, 0x0F, 0x6E,
                 0xD0,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_ordered_compare_to_f64_sequence() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.ucomisd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm2);
+        encoder.setcc_r8(ConditionCode::Above, Gpr::R10);
+        encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        encoder.cvtsi2sd_xmm_r32(Xmm::Xmm1, Gpr::R10);
+        encoder.ucomisd_xmm_xmm(Xmm::Xmm2, Xmm::Xmm1);
+        encoder.setcc_r8(ConditionCode::AboveOrEqual, Gpr::R10);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x66, 0x0F, 0x2E, 0xCA, 0x41, 0x0F, 0x97, 0xC2, 0x45, 0x0F, 0xB6, 0xD2, 0xF2, 0x41,
+                0x0F, 0x2A, 0xCA, 0x66, 0x0F, 0x2E, 0xD1, 0x41, 0x0F, 0x93, 0xC2,
             ]
         );
     }

@@ -40,6 +40,15 @@ pub(crate) enum NativeOp {
     Neg,
     Abs,
     Sqrt,
+    Compare(CompareOp),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompareOp {
+    Gt,
+    Lt,
+    Ge,
+    Le,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -284,6 +293,16 @@ impl NativeProgram {
                     )?;
                     ops.push(NativeOp::Sqrt);
                 }
+                Instruction::Gt | Instruction::Lt | Instruction::Ge | Instruction::Le => {
+                    pop_binary_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::Compare(compare_op(instruction)));
+                }
                 Instruction::PushCurrent(pos, neg) => {
                     let pair_index =
                         current_pair_index(model.clone(), *pos, *neg, limits.terminal_count)?;
@@ -513,6 +532,16 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
     }
 }
 
+fn compare_op(instruction: &Instruction) -> CompareOp {
+    match instruction {
+        Instruction::Gt => CompareOp::Gt,
+        Instruction::Lt => CompareOp::Lt,
+        Instruction::Ge => CompareOp::Ge,
+        Instruction::Le => CompareOp::Le,
+        _ => unreachable!("comparison lowering only accepts ordered comparison instructions"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,6 +632,40 @@ mod tests {
 
         assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, NativeOp::Abs]);
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_ordered_comparisons_as_native_binary_ops() {
+        let cases = [
+            (Instruction::Gt, CompareOp::Gt),
+            (Instruction::Lt, CompareOp::Lt),
+            (Instruction::Ge, CompareOp::Ge),
+            (Instruction::Le, CompareOp::Le),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(300.0),
+                    instruction,
+                ],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode("cmp", EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("ordered comparison has a direct native x64 lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::Const(300.0),
+                    NativeOp::Compare(expected),
+                ]
+            );
+            assert_eq!(lowered.max_stack_depth(), 2);
+        }
     }
 
     #[test]
