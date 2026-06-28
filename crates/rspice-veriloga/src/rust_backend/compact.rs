@@ -199,9 +199,13 @@ pub(crate) fn lower_scaled_rhs_multiply(
                 )
             })
         }
-        "div" if call.args.len() == 2 => Some(format!(
-            "scratch.store_mul_div_scaled_inputs_rhs({target_index}, {source}, {}, {output_scale}, {}, 1.0);",
-            call.args[0], call.args[1]
+        "div" if call.args.len() == 2 => Some(lower_mul_div_scaled_inputs_rhs(
+            target_index,
+            source,
+            call.args[0],
+            output_scale,
+            call.args[1],
+            "1.0",
         )),
         "pow" if call.args.len() == 2 => Some(format!(
             "scratch.store_mul_scaled_pow_ad_rhs({target_index}, {source}, {output_scale}, {}, {});",
@@ -254,6 +258,39 @@ fn scratch_ad_value_index(value: &str) -> Option<usize> {
         .strip_suffix(')')?
         .parse()
         .ok()
+}
+
+fn lower_mul_div_scaled_inputs_rhs(
+    target_index: usize,
+    source: usize,
+    numerator: &str,
+    numerator_scale: &str,
+    denominator: &str,
+    denominator_scale: &str,
+) -> String {
+    let (numerator_mask, numerator_arg) = index_or_ad_arg(numerator);
+    let (denominator_mask, denominator_arg) = index_or_ad_arg(denominator);
+    let mask = format!("i{numerator_mask}{denominator_mask}");
+    let helper = index_or_mixed_helper_name("store_mul_div_scaled_inputs", &mask);
+    format!(
+        "scratch.{helper}({target_index}, {source}, {numerator_arg}, {numerator_scale}, {denominator_arg}, {denominator_scale});"
+    )
+}
+
+fn index_or_ad_arg(value: &str) -> (char, String) {
+    if let Some(index) = scratch_ad_value_index(value) {
+        ('i', index.to_string())
+    } else {
+        ('a', value.to_string())
+    }
+}
+
+fn index_or_mixed_helper_name(base: &str, mask: &str) -> String {
+    if mask.bytes().all(|byte| byte == b'i') {
+        format!("{base}_indices")
+    } else {
+        format!("{base}_mixed_{mask}")
+    }
 }
 
 fn ad_call(value: &str) -> Option<CompactAdCall<'_>> {
