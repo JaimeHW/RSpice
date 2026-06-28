@@ -58,6 +58,10 @@ pub struct EvalContext {
     pub analysis_type: u8,
     /// Instance multiplicity ($mfactor)
     pub multiplicity: f64,
+    /// Z-domain sampled-data filters (mutable for candidate eval())
+    pub zi_filters: *mut crate::zfilter::ZiFilter,
+    /// Number of Z-domain filters
+    pub zi_filters_len: usize,
 }
 
 thread_local! {
@@ -407,6 +411,46 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
     }
 }
 
+/// External helper function for native x64 Z-domain sampled-data filter
+/// evaluation.
+///
+/// Argument order matches `rspice_laplace_step_native`, keeping scalar input
+/// in XMM0 and the context pointer/filter ID in integer argument registers.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid EvalContext
+/// pointer. The context must own a zi filter array whose lifetime covers the
+/// call.
+#[unsafe(export_name = "rspice_zi_step_native")]
+pub unsafe extern "C" fn rspice_zi_step_native(
+    input: f64,
+    ctx: *const EvalContext,
+    filter_id: usize,
+) -> f64 {
+    if ctx.is_null() {
+        set_native_runtime_error("native zi helper missing EvalContext; no interpreter fallback");
+        return 0.0;
+    }
+
+    let ctx = unsafe { &*ctx };
+    if ctx.zi_filters.is_null() {
+        set_native_runtime_error(format!(
+            "native zi helper missing filter storage for filter {filter_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if filter_id >= ctx.zi_filters_len {
+        set_native_runtime_error(format!(
+            "native zi helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+            ctx.zi_filters_len
+        ));
+        return 0.0;
+    }
+
+    let filters = unsafe { std::slice::from_raw_parts_mut(ctx.zi_filters, ctx.zi_filters_len) };
+    filters[filter_id].eval(input, ctx.time, ctx.analysis_type == 2)
+}
+
 /// External helper function for PushCurrent terminal-pair lookup.
 ///
 /// # Safety
@@ -437,7 +481,7 @@ pub unsafe extern "C" fn rspice_current_lookup(
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        EvalContext, clear_native_runtime_error, rspice_laplace_step_native,
+        EvalContext, clear_native_runtime_error, rspice_laplace_step_native, rspice_zi_step_native,
         take_native_runtime_error,
     };
     use std::mem::{align_of, offset_of, size_of};
@@ -469,7 +513,9 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, branch_unknowns), 176);
         assert_eq!(offset_of!(EvalContext, analysis_type), 184);
         assert_eq!(offset_of!(EvalContext, multiplicity), 192);
-        assert_eq!(size_of::<EvalContext>(), 200);
+        assert_eq!(offset_of!(EvalContext, zi_filters), 200);
+        assert_eq!(offset_of!(EvalContext, zi_filters_len), 208);
+        assert_eq!(size_of::<EvalContext>(), 216);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -493,6 +539,25 @@ mod tests {
         assert!(
             take_native_runtime_error().is_none(),
             "runtime error retrieval must clear the thread-local slot"
+        );
+    }
+
+    #[test]
+    fn zi_native_helper_records_runtime_error_for_invalid_context() {
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_zi_step_native(1.25, std::ptr::null(), 0) };
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("invalid native zi context must record an error");
+        assert!(
+            error.contains("zi") && error.contains("EvalContext"),
+            "error must identify the invalid zi context, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
         );
     }
 }

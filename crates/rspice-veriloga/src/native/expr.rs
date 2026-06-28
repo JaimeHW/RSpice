@@ -53,6 +53,7 @@ pub(crate) enum NativeOp {
     TableDerivative(usize),
     LimitState(usize),
     LaplaceState(usize),
+    ZiState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -136,6 +137,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     branch_unknown_count: usize,
     lookup_table_count: usize,
     laplace_filter_count: usize,
+    zi_filter_count: usize,
     available_current_pairs: &'a [usize],
 }
 
@@ -155,6 +157,7 @@ impl<'a> NativeLoweringLimits<'a> {
             branch_unknown_count,
             lookup_table_count: 0,
             laplace_filter_count: 0,
+            zi_filter_count: 0,
             available_current_pairs: &[],
         }
     }
@@ -169,6 +172,7 @@ impl<'a> NativeLoweringLimits<'a> {
         )
         .with_lookup_table_count(model.lookup_tables.len())
         .with_laplace_filter_count(model.laplace_filters.len())
+        .with_zi_filter_count(model.zi_filters.len())
     }
 
     pub(crate) fn with_available_current_pairs<'b>(
@@ -183,6 +187,7 @@ impl<'a> NativeLoweringLimits<'a> {
             branch_unknown_count: self.branch_unknown_count,
             lookup_table_count: self.lookup_table_count,
             laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
             available_current_pairs,
         }
     }
@@ -197,6 +202,13 @@ impl<'a> NativeLoweringLimits<'a> {
     pub(crate) fn with_laplace_filter_count(self, laplace_filter_count: usize) -> Self {
         Self {
             laplace_filter_count,
+            ..self
+        }
+    }
+
+    pub(crate) fn with_zi_filter_count(self, zi_filter_count: usize) -> Self {
+        Self {
+            zi_filter_count,
             ..self
         }
     }
@@ -440,6 +452,22 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::LaplaceState(*filter_id));
+                }
+                Instruction::ZiState(filter_id) => {
+                    validate_index(
+                        model.clone(),
+                        "ZiState filter",
+                        *filter_id,
+                        limits.zi_filter_count,
+                    )?;
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::ZiState(*filter_id));
                 }
                 Instruction::WhiteNoise => {
                     require_stack(
@@ -1445,6 +1473,45 @@ mod tests {
         .expect_err("Laplace filter id outside compiled table must fail closed");
         let msg = error.to_string();
         assert!(msg.contains("LaplaceState filter 1"), "got: {msg}");
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowers_zi_state_when_filter_count_is_known() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushTemperature, Instruction::ZiState(0)],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "zi",
+            EntryKind::StampValue,
+            &program,
+            limits(0, 0).with_zi_filter_count(1),
+        )
+        .expect("zi filter state has native helper lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[NativeOp::LoadTemperature, NativeOp::ZiState(0)]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowering_rejects_zi_state_outside_known_filters() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushTemperature, Instruction::ZiState(1)],
+        };
+
+        let error = NativeProgram::from_bytecode(
+            "bad-zi",
+            EntryKind::StampValue,
+            &program,
+            limits(0, 0).with_zi_filter_count(1),
+        )
+        .expect_err("zi filter id outside compiled table must fail closed");
+        let msg = error.to_string();
+        assert!(msg.contains("ZiState filter 1"), "got: {msg}");
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
     }
 

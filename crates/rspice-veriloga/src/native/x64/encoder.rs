@@ -862,6 +862,8 @@ mod tests {
             branch_unknowns: branch_unknowns.as_ptr(),
             analysis_type: 0,
             multiplicity: 1.0,
+            zi_filters: std::ptr::null_mut(),
+            zi_filters_len: 0,
         };
 
         let mut encoder = X64Encoder::new();

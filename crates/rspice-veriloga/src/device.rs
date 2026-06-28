@@ -1119,6 +1119,12 @@ impl VerilogADevice {
             },
             analysis_type: context.analysis_type,
             multiplicity: context.multiplicity,
+            zi_filters: if context.zi_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.zi_filters.as_mut_ptr()
+            },
+            zi_filters_len: context.zi_filters.len(),
         }
     }
 
