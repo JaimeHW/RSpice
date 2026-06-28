@@ -466,6 +466,8 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_div_ln_lhs_helper_calls(source);
     source = compact_add_sub_ln_lhs_helper_calls(source);
     source = compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_calls(source);
+    source =
+        compact_mul_shared_diff_quotient_add_product_input_product_quotient_helper_calls(source);
     source = compact_mul_div_from_scalar_lhs_helper_calls(source);
     source = compact_mul_div_helper_calls(source);
     source = compact_mul_div_scaled_inputs_helper_calls(source);
@@ -2378,6 +2380,139 @@ fn compact_mul_div_scaled_product3_div_from_scalar_sqrt_offset_helper_line(
     Some(format!(
         "scratch.store_mul_div_scaled_product3_div_from_scalar_sqrt_offset({target_index}, {product_left}, {product_middle}, {product_right}, {}, {denominator}, {}, {}, {sqrt_source}, {});",
         product_args[3], product_args[5], reciprocal_sqrt_args[0], offset_args[1]
+    ))
+}
+
+fn compact_mul_shared_diff_quotient_add_product_input_product_quotient_helper_calls(
+    source: String,
+) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_shared_diff_quotient_add_product_input_product_quotient_helper_call_replacement(
+                &source, call_start, indent,
+            )
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_shared_diff_quotient_add_product_input_product_quotient_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = compact_mul_shared_diff_quotient_add_product_input_product_quotient_helper_line(
+        target_index,
+        left,
+        right,
+    )
+    .or_else(|| {
+        compact_mul_shared_diff_quotient_add_product_input_product_quotient_helper_line(
+            target_index,
+            right,
+            left,
+        )
+    })?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_shared_diff_quotient_add_product_input_product_quotient_helper_line(
+    target_index: usize,
+    factor: &str,
+    sum: &str,
+) -> Option<String> {
+    let factor_args = compact_ad_call_args(factor, "div_scaled_inputs2")?;
+    if factor_args.len() != 6
+        || !compact_scalar_is_one(factor_args[1])
+        || !compact_scalar_is_negative_one(factor_args[3])
+        || !compact_scalar_is_one(factor_args[5])
+    {
+        return None;
+    }
+    let diff_left = compact_scratch_ad_value_index(factor_args[0])?;
+    let diff_right = compact_scratch_ad_value_index(factor_args[2])?;
+    let denominator = compact_scratch_ad_value_index(factor_args[4])?;
+
+    let sum_args = compact_ad_call_args(sum, "add_scaled_inputs3")?;
+    if sum_args.len() != 6
+        || !compact_scalar_is_one(sum_args[1])
+        || !compact_scalar_is_one(sum_args[3])
+        || !compact_scalar_is_one(sum_args[5])
+    {
+        return None;
+    }
+    let add_product_args = compact_ad_call_args(sum_args[0], "add_scaled_product")?;
+    if add_product_args.len() != 5
+        || !compact_scalar_is_one(add_product_args[1])
+        || !compact_scalar_is_one(add_product_args[4])
+    {
+        return None;
+    }
+    let sum_value = compact_scratch_ad_value_index(add_product_args[0])?;
+    let sum_product_left = compact_scratch_ad_value_index(add_product_args[2])?;
+    let sum_product_right = compact_scratch_ad_value_index(add_product_args[3])?;
+    let sum_input = compact_scratch_ad_value_index(sum_args[2])?;
+
+    let div_args = compact_ad_call_args(sum_args[4], "div_scaled_product")?;
+    if div_args.len() != 5
+        || !compact_scalar_is_one(div_args[2])
+        || !compact_scalar_is_one(div_args[4])
+    {
+        return None;
+    }
+    let div_product_left = compact_scratch_ad_value_index(div_args[0])?;
+    let sub_args = compact_ad_call_args(div_args[1], "sub")?;
+    if sub_args.len() != 2
+        || compact_scratch_ad_value_index(sub_args[0])? != diff_left
+        || compact_scratch_ad_value_index(sub_args[1])? != diff_right
+        || compact_scratch_ad_value_index(div_args[3])? != denominator
+    {
+        return None;
+    }
+
+    Some(format!(
+        "scratch.store_mul_shared_diff_quotient_add_product_input_product_quotient({target_index}, {diff_left}, {diff_right}, {denominator}, {sum_value}, {sum_product_left}, {sum_product_right}, {sum_input}, {div_product_left});"
     ))
 }
 
@@ -5623,6 +5758,31 @@ fn stamp() {
             compact.contains(
                 "s.store_mul_div_scaled_product3_div_from_scalar_sqrt_offset(231, 8, 9, 10, 1.0, 11, 1.0, 0.5, 7, 1.0);"
             ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_div_scaled_inputs2_add_product_div_product_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support
+                .contains("fn store_mul_shared_diff_quotient_add_product_input_product_quotient"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(240, AdValue::div_scaled_inputs2(scratch.ad_value(2), 1.0, scratch.ad_value(3), (-1.0), scratch.ad_value(4), 1.0), AdValue::add_scaled_inputs3(AdValue::add_scaled_product(scratch.ad_value(5), 1.0, scratch.ad_value(6), scratch.ad_value(7), 1.0), 1.0, scratch.ad_value(8), 1.0, AdValue::div_scaled_product(scratch.ad_value(9), AdValue::sub(scratch.ad_value(2), scratch.ad_value(3)), 1.0, scratch.ad_value(4), 1.0), 1.0));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_mul_shared_diff_quotient_add_product_input_product_quotient(240, 2, 3, 4, 5, 6, 7, 8, 9);"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
@@ -14035,6 +14195,59 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = left_value * right_value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * (value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale); }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * (value.branch_derivatives[axis] * value_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale); }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_shared_diff_quotient_add_product_input_product_quotient(&mut self, index: usize, diff_left: usize, diff_right: usize, denominator: usize, sum_value: usize, sum_product_left: usize, sum_product_right: usize, sum_input: usize, quotient_product_left: usize) {",
+    "        let diff_left_value = self.values[diff_left];",
+    "        let diff_right_value = self.values[diff_right];",
+    "        let denominator_value = self.values[denominator];",
+    "        let sum_value_raw = self.values[sum_value];",
+    "        let sum_product_left_value = self.values[sum_product_left];",
+    "        let sum_product_right_value = self.values[sum_product_right];",
+    "        let sum_input_value = self.values[sum_input];",
+    "        let quotient_product_left_value = self.values[quotient_product_left];",
+    "        let diff_left_node_derivatives = self.node_derivatives[diff_left];",
+    "        let diff_right_node_derivatives = self.node_derivatives[diff_right];",
+    "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+    "        let sum_value_node_derivatives = self.node_derivatives[sum_value];",
+    "        let sum_product_left_node_derivatives = self.node_derivatives[sum_product_left];",
+    "        let sum_product_right_node_derivatives = self.node_derivatives[sum_product_right];",
+    "        let sum_input_node_derivatives = self.node_derivatives[sum_input];",
+    "        let quotient_product_left_node_derivatives = self.node_derivatives[quotient_product_left];",
+    "        let diff_left_branch_derivatives = self.branch_derivatives[diff_left];",
+    "        let diff_right_branch_derivatives = self.branch_derivatives[diff_right];",
+    "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+    "        let sum_value_branch_derivatives = self.branch_derivatives[sum_value];",
+    "        let sum_product_left_branch_derivatives = self.branch_derivatives[sum_product_left];",
+    "        let sum_product_right_branch_derivatives = self.branch_derivatives[sum_product_right];",
+    "        let sum_input_branch_derivatives = self.branch_derivatives[sum_input];",
+    "        let quotient_product_left_branch_derivatives = self.branch_derivatives[quotient_product_left];",
+    "        let reciprocal = 1.0 / denominator_value;",
+    "        let diff_value = diff_left_value - diff_right_value;",
+    "        let diff_quotient = diff_value * reciprocal;",
+    "        let denominator_derivative_scale = -diff_quotient * reciprocal;",
+    "        let product_quotient = quotient_product_left_value * diff_value * reciprocal;",
+    "        let product_quotient_denominator_derivative_scale = -product_quotient * reciprocal;",
+    "        let product_sum_value = sum_value_raw + sum_product_left_value * sum_product_right_value;",
+    "        let right_value = product_sum_value + sum_input_value + product_quotient;",
+    "        self.values[index] = diff_quotient * right_value;",
+    "        for axis in 0..Instance::NODE_COUNT {",
+    "            let diff_derivative = diff_left_node_derivatives[axis] - diff_right_node_derivatives[axis];",
+    "            let left_derivative = diff_derivative * reciprocal + denominator_node_derivatives[axis] * denominator_derivative_scale;",
+    "            let product_sum_derivative = sum_value_node_derivatives[axis] + sum_product_left_node_derivatives[axis] * sum_product_right_value + sum_product_left_value * sum_product_right_node_derivatives[axis];",
+    "            let product_quotient_derivative = (quotient_product_left_node_derivatives[axis] * diff_value + quotient_product_left_value * diff_derivative) * reciprocal + denominator_node_derivatives[axis] * product_quotient_denominator_derivative_scale;",
+    "            let right_derivative = product_sum_derivative + sum_input_node_derivatives[axis] + product_quotient_derivative;",
+    "            self.node_derivatives[index][axis] = left_derivative * right_value + diff_quotient * right_derivative;",
+    "        }",
+    "        for axis in 0..Instance::BRANCH_COUNT {",
+    "            let diff_derivative = diff_left_branch_derivatives[axis] - diff_right_branch_derivatives[axis];",
+    "            let left_derivative = diff_derivative * reciprocal + denominator_branch_derivatives[axis] * denominator_derivative_scale;",
+    "            let product_sum_derivative = sum_value_branch_derivatives[axis] + sum_product_left_branch_derivatives[axis] * sum_product_right_value + sum_product_left_value * sum_product_right_branch_derivatives[axis];",
+    "            let product_quotient_derivative = (quotient_product_left_branch_derivatives[axis] * diff_value + quotient_product_left_value * diff_derivative) * reciprocal + denominator_branch_derivatives[axis] * product_quotient_denominator_derivative_scale;",
+    "            let right_derivative = product_sum_derivative + sum_input_branch_derivatives[axis] + product_quotient_derivative;",
+    "            self.branch_derivatives[index][axis] = left_derivative * right_value + diff_quotient * right_derivative;",
+    "        }",
     "    }",
     "",
     "    #[inline]",
@@ -37121,6 +37334,18 @@ fn compact_scalar_is_negative_one(value: &str) -> bool {
         value = inner.trim();
     }
     value == "-1.0" || value == "-1"
+}
+
+fn compact_scalar_is_one(value: &str) -> bool {
+    let mut value = value.trim();
+    while let Some(inner) = value
+        .strip_prefix('(')
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        value = inner.trim();
+    }
+    let value = value.strip_suffix("_f64").unwrap_or(value);
+    value == "1.0" || value == "1"
 }
 
 fn compact_scalar_same(left: &str, right: &str) -> bool {
