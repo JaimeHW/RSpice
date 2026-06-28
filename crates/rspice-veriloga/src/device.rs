@@ -30,6 +30,13 @@ use smol_str::SmolStr;
 #[cfg(feature = "native")]
 use crate::native::NativeModel;
 
+#[cfg(feature = "native")]
+enum NativeValueEntry {
+    StampValue(usize),
+    Jacobian { stamp: usize, entry: usize },
+    ReactiveJacobian { stamp: usize, entry: usize },
+}
+
 /// A Verilog-A device instance in a circuit
 ///
 /// Holds the compiled model, runtime context, and circuit connectivity.
@@ -888,7 +895,12 @@ impl VerilogADevice {
                     &mut vm,
                     &model_entry.program,
                     #[cfg(feature = "native")]
-                    native.reactive_jacobian_fn(program_idx, entry.jacobian_idx),
+                    native,
+                    #[cfg(feature = "native")]
+                    NativeValueEntry::ReactiveJacobian {
+                        stamp: program_idx,
+                        entry: entry.jacobian_idx,
+                    },
                 )?;
                 let deriv = match deriv {
                     v if v.is_finite() => v * scale,
@@ -1034,7 +1046,9 @@ impl VerilogADevice {
                 &mut vm,
                 &program.value_program,
                 #[cfg(feature = "native")]
-                native.stamp_value_fn(program_idx),
+                native,
+                #[cfg(feature = "native")]
+                NativeValueEntry::StampValue(program_idx),
             )?;
             currents.push(value);
             vm.context.currents.push(value);
@@ -1106,11 +1120,20 @@ impl VerilogADevice {
     fn run_value_program(
         vm: &mut Vm<'_>,
         _program: &crate::codegen::BytecodeProgram,
-        native_fn: crate::native::StampFn,
+        native: &NativeModel,
+        entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
-        Ok(native_fn(&ctx, vars_ptr))
+        Ok(match entry {
+            NativeValueEntry::StampValue(index) => native.run_stamp_value(index, &ctx, vars_ptr),
+            NativeValueEntry::Jacobian { stamp, entry } => {
+                native.run_jacobian(stamp, entry, &ctx, vars_ptr)
+            }
+            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
+                native.run_reactive_jacobian(stamp, entry, &ctx, vars_ptr)
+            }
+        })
     }
 
     /// Run one value-returning bytecode program.
@@ -1256,7 +1279,9 @@ impl VerilogADevice {
                 &mut vm,
                 &program.value_program,
                 #[cfg(feature = "native")]
-                native.stamp_value_fn(prog_idx),
+                native,
+                #[cfg(feature = "native")]
+                NativeValueEntry::StampValue(prog_idx),
             )?;
             let value = match value {
                 v if v.is_finite() => v,
@@ -1277,7 +1302,12 @@ impl VerilogADevice {
                     &mut vm,
                     &jac_entry.program,
                     #[cfg(feature = "native")]
-                    native.jacobian_fn(prog_idx, jac_idx),
+                    native,
+                    #[cfg(feature = "native")]
+                    NativeValueEntry::Jacobian {
+                        stamp: prog_idx,
+                        entry: jac_idx,
+                    },
                 )?;
                 let value = match value {
                     v if v.is_finite() => v,
@@ -1426,7 +1456,9 @@ impl VerilogADevice {
                 &mut vm,
                 &program.value_program,
                 #[cfg(feature = "native")]
-                native.stamp_value_fn(program_idx),
+                native,
+                #[cfg(feature = "native")]
+                NativeValueEntry::StampValue(program_idx),
             )?;
             let value = match value {
                 v if v.is_finite() => v,
@@ -1471,7 +1503,12 @@ impl VerilogADevice {
                     &mut vm,
                     &model_entry.program,
                     #[cfg(feature = "native")]
-                    native.jacobian_fn(program_idx, jacobian_entry.jacobian_idx),
+                    native,
+                    #[cfg(feature = "native")]
+                    NativeValueEntry::Jacobian {
+                        stamp: program_idx,
+                        entry: jacobian_entry.jacobian_idx,
+                    },
                 )?;
                 let deriv = match deriv {
                     v if v.is_finite() => v * scale,
@@ -1837,15 +1874,8 @@ impl DeviceBuilder {
 mod tests {
     use super::*;
     use crate::codegen::{AssignmentProgram, AssignmentStep, BytecodeProgram};
-    use crate::native::EvalContext;
     use crate::{CompilerOptions, VerilogACompiler};
     use std::sync::Arc;
-
-    extern "C" fn assign_noop(_ctx: *const EvalContext, _vars: *mut f64) {}
-
-    extern "C" fn stamp_zero(_ctx: *const EvalContext, _vars: *const f64) -> f64 {
-        0.0
-    }
 
     fn compile(source: &str) -> CompiledModel {
         VerilogACompiler::new(CompilerOptions::default())
@@ -1885,10 +1915,9 @@ mod tests {
             matrix_indices: MatrixIndices::default(),
             native_model: Arc::new(NativeModel::new_for_test(
                 0,
-                assign_noop,
-                vec![stamp_zero; num_stamp_programs],
-                vec![vec![]; num_stamp_programs],
-                vec![vec![]; num_stamp_programs],
+                num_stamp_programs,
+                vec![0; num_stamp_programs],
+                vec![0; num_stamp_programs],
             )),
             prev_discontinuity: false,
         };

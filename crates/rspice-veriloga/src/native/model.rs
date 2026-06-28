@@ -1,7 +1,26 @@
-use super::EvalContext;
+use super::runtime::ExecutableMemory;
+use super::{EvalContext, JitError, JitResult};
 
-pub type AssignmentFn = extern "C" fn(*const EvalContext, *mut f64);
-pub type StampFn = extern "C" fn(*const EvalContext, *const f64) -> f64;
+type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
+type ValueEntry = unsafe extern "C" fn(*const EvalContext, *const f64) -> f64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CodeOffset(usize);
+
+impl CodeOffset {
+    #[allow(dead_code)]
+    pub(crate) fn new(offset: usize) -> Self {
+        Self(offset)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeEntryOffsets {
+    pub assignment: CodeOffset,
+    pub stamp_values: Vec<CodeOffset>,
+    pub jacobians: Vec<Vec<CodeOffset>>,
+    pub reactive_jacobians: Vec<Vec<CodeOffset>>,
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PlanStats {
@@ -13,10 +32,8 @@ pub struct PlanStats {
 
 pub struct NativeModel {
     pub num_variables: usize,
-    assignment_fn: AssignmentFn,
-    stamp_value_fns: Vec<StampFn>,
-    jacobian_fns: Vec<Vec<StampFn>>,
-    reactive_jacobian_fns: Vec<Vec<StampFn>>,
+    image: ExecutableMemory,
+    entries: NativeEntryOffsets,
     stats: PlanStats,
 }
 
@@ -24,75 +41,153 @@ impl std::fmt::Debug for NativeModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeModel")
             .field("num_variables", &self.num_variables)
+            .field("image_len", &self.image.len())
             .field("stats", &self.stats)
             .finish()
     }
 }
 
-// Safety: NativeModel is immutable after construction. Function pointer
-// lifetimes are owned by the native image that creates this table; the first
-// foundation slice cannot construct NativeModel until that image owner lands.
+// Safety: NativeModel owns immutable executable memory and immutable entry
+// offsets. Calls use only caller-supplied EvalContext/variable pointers.
 unsafe impl Send for NativeModel {}
 unsafe impl Sync for NativeModel {}
 
 impl NativeModel {
     #[allow(dead_code)]
-    pub(crate) fn new(
+    pub(crate) fn from_executable_image(
         num_variables: usize,
-        assignment_fn: AssignmentFn,
-        stamp_value_fns: Vec<StampFn>,
-        jacobian_fns: Vec<Vec<StampFn>>,
-        reactive_jacobian_fns: Vec<Vec<StampFn>>,
-    ) -> Self {
-        let jacobian_entry_points = jacobian_fns.iter().map(Vec::len).sum();
-        let reactive_jacobian_entry_points = reactive_jacobian_fns.iter().map(Vec::len).sum();
+        image: ExecutableMemory,
+        entries: NativeEntryOffsets,
+    ) -> JitResult<Self> {
+        Self::validate_entry_offsets(&entries, image.len())?;
+
+        let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
+        let reactive_jacobian_entry_points = entries.reactive_jacobians.iter().map(Vec::len).sum();
         let stats = PlanStats {
             assignment_entry_points: 1,
-            stamp_value_entry_points: stamp_value_fns.len(),
+            stamp_value_entry_points: entries.stamp_values.len(),
             jacobian_entry_points,
             reactive_jacobian_entry_points,
         };
-        Self {
+
+        Ok(Self {
             num_variables,
-            assignment_fn,
-            stamp_value_fns,
-            jacobian_fns,
-            reactive_jacobian_fns,
+            image,
+            entries,
             stats,
-        }
+        })
     }
 
     #[cfg(test)]
-    pub fn new_for_test(
+    pub(crate) fn new_for_test(
         num_variables: usize,
-        assignment_fn: AssignmentFn,
-        stamp_value_fns: Vec<StampFn>,
-        jacobian_fns: Vec<Vec<StampFn>>,
-        reactive_jacobian_fns: Vec<Vec<StampFn>>,
+        stamp_value_entry_points: usize,
+        jacobian_entry_points: Vec<usize>,
+        reactive_jacobian_entry_points: Vec<usize>,
     ) -> Self {
-        Self::new(
-            num_variables,
-            assignment_fn,
-            stamp_value_fns,
-            jacobian_fns,
-            reactive_jacobian_fns,
-        )
+        let bytes = [
+            0xC3, // assignment: ret
+            0x66, 0x0F, 0x57, 0xC0, 0xC3, // value: xorpd xmm0,xmm0; ret
+        ];
+        let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
+        let value_entry = CodeOffset::new(1);
+        let entries = NativeEntryOffsets {
+            assignment: CodeOffset::new(0),
+            stamp_values: vec![value_entry; stamp_value_entry_points],
+            jacobians: jacobian_entry_points
+                .into_iter()
+                .map(|count| vec![value_entry; count])
+                .collect(),
+            reactive_jacobians: reactive_jacobian_entry_points
+                .into_iter()
+                .map(|count| vec![value_entry; count])
+                .collect(),
+        };
+
+        Self::from_executable_image(num_variables, image, entries)
+            .expect("publish native test model")
     }
 
-    pub fn run_assignments(&self, ctx: &EvalContext, vars: *mut f64) {
-        (self.assignment_fn)(ctx as *const EvalContext, vars);
+    #[allow(dead_code)]
+    fn validate_entry_offsets(entries: &NativeEntryOffsets, image_len: usize) -> JitResult<()> {
+        Self::validate_entry_offset(entries.assignment, image_len)?;
+        for offset in &entries.stamp_values {
+            Self::validate_entry_offset(*offset, image_len)?;
+        }
+        for stamp_entries in &entries.jacobians {
+            for offset in stamp_entries {
+                Self::validate_entry_offset(*offset, image_len)?;
+            }
+        }
+        for stamp_entries in &entries.reactive_jacobians {
+            for offset in stamp_entries {
+                Self::validate_entry_offset(*offset, image_len)?;
+            }
+        }
+        Ok(())
     }
 
-    pub fn stamp_value_fn(&self, index: usize) -> StampFn {
-        self.stamp_value_fns[index]
+    #[allow(dead_code)]
+    fn validate_entry_offset(offset: CodeOffset, image_len: usize) -> JitResult<()> {
+        if offset.0 >= image_len {
+            return Err(JitError::ExecutableMemory {
+                detail: format!(
+                    "entry offset {} outside executable image length {}",
+                    offset.0, image_len
+                )
+                .into(),
+            });
+        }
+        Ok(())
     }
 
-    pub fn jacobian_fn(&self, stamp: usize, entry: usize) -> StampFn {
-        self.jacobian_fns[stamp][entry]
+    fn entry_ptr(&self, offset: CodeOffset) -> *const u8 {
+        self.image
+            .ptr_at(offset.0)
+            .expect("validated native entry offset")
     }
 
-    pub fn reactive_jacobian_fn(&self, stamp: usize, entry: usize) -> StampFn {
-        self.reactive_jacobian_fns[stamp][entry]
+    pub(crate) fn run_assignments(&self, ctx: &EvalContext, vars: *mut f64) {
+        // Safety: from_executable_image validated this offset is inside the
+        // executable image owned by self, and the backend records it with the
+        // AssignmentEntry ABI.
+        let entry: AssignmentEntry =
+            unsafe { std::mem::transmute(self.entry_ptr(self.entries.assignment)) };
+        // Safety: callers provide pointers matching the native assignment ABI.
+        unsafe { entry(ctx as *const EvalContext, vars) };
+    }
+
+    pub(crate) fn run_stamp_value(&self, index: usize, ctx: &EvalContext, vars: *const f64) -> f64 {
+        self.run_value_entry(self.entries.stamp_values[index], ctx, vars)
+    }
+
+    pub(crate) fn run_jacobian(
+        &self,
+        stamp: usize,
+        entry: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> f64 {
+        self.run_value_entry(self.entries.jacobians[stamp][entry], ctx, vars)
+    }
+
+    pub(crate) fn run_reactive_jacobian(
+        &self,
+        stamp: usize,
+        entry: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> f64 {
+        self.run_value_entry(self.entries.reactive_jacobians[stamp][entry], ctx, vars)
+    }
+
+    fn run_value_entry(&self, offset: CodeOffset, ctx: &EvalContext, vars: *const f64) -> f64 {
+        // Safety: from_executable_image validated this offset is inside the
+        // executable image owned by self, and the backend records it with the
+        // ValueEntry ABI.
+        let entry: ValueEntry = unsafe { std::mem::transmute(self.entry_ptr(offset)) };
+        // Safety: callers provide pointers matching the native value-entry ABI.
+        unsafe { entry(ctx as *const EvalContext, vars) }
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -108,27 +203,14 @@ impl NativeModel {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::{EvalContext, NativeModel};
-
-    extern "C" fn assign_noop(_ctx: *const EvalContext, _vars: *mut f64) {}
-    extern "C" fn stamp_one(_ctx: *const EvalContext, _vars: *const f64) -> f64 {
-        1.0
-    }
-    extern "C" fn stamp_two(_ctx: *const EvalContext, _vars: *const f64) -> f64 {
-        2.0
-    }
+    use super::super::runtime::ExecutableMemory;
+    use super::{CodeOffset, EvalContext, NativeEntryOffsets, NativeModel};
 
     #[test]
     fn native_model_entry_points_are_not_optional() {
-        let model = NativeModel::new_for_test(
-            2,
-            assign_noop,
-            vec![stamp_one],
-            vec![vec![stamp_one]],
-            vec![],
-        );
+        let model = NativeModel::new_for_test(2, 1, vec![1], vec![]);
         assert_eq!(model.chunk_count(), 1);
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
@@ -137,18 +219,87 @@ mod tests {
 
     #[test]
     fn native_model_tracks_reactive_jacobian_entry_points_separately() {
-        let model = NativeModel::new(
-            2,
-            assign_noop,
-            vec![stamp_one],
-            vec![vec![stamp_one]],
-            vec![vec![stamp_two]],
-        );
+        let model = NativeModel::new_for_test(2, 1, vec![1], vec![1]);
 
         assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 1);
         assert_eq!(
-            model.reactive_jacobian_fn(0, 0)(std::ptr::null(), std::ptr::null()),
-            2.0
+            model.run_reactive_jacobian(0, 0, &empty_eval_context(), std::ptr::null()),
+            0.0
         );
+    }
+
+    #[test]
+    fn native_model_calls_entry_points_from_owned_image() {
+        let bytes = [
+            0xC3, // assignment: ret
+            0x66, 0x0F, 0x57, 0xC0, 0xC3, // stamp: xorpd xmm0,xmm0; ret
+            0x66, 0x0F, 0x57, 0xC0, 0xC3, // jacobian: xorpd xmm0,xmm0; ret
+        ];
+        let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
+        let model = NativeModel::from_executable_image(
+            0,
+            image,
+            NativeEntryOffsets {
+                assignment: CodeOffset::new(0),
+                stamp_values: vec![CodeOffset::new(1)],
+                jacobians: vec![vec![CodeOffset::new(6)]],
+                reactive_jacobians: vec![],
+            },
+        )
+        .expect("publish owned native model");
+
+        let ctx = empty_eval_context();
+        model.run_assignments(&ctx, std::ptr::null_mut());
+        assert_eq!(model.run_stamp_value(0, &ctx, std::ptr::null()), 0.0);
+        assert_eq!(model.run_jacobian(0, 0, &ctx, std::ptr::null()), 0.0);
+        assert_eq!(model.native_stamp_count(), 1);
+        assert_eq!(model.plan_stats().jacobian_entry_points, 1);
+    }
+
+    #[test]
+    fn native_model_rejects_entry_offsets_outside_owned_image() {
+        let image = ExecutableMemory::allocate(&[0xC3]).expect("allocate native test image");
+        let error = NativeModel::from_executable_image(
+            0,
+            image,
+            NativeEntryOffsets {
+                assignment: CodeOffset::new(1),
+                stamp_values: vec![],
+                jacobians: vec![],
+                reactive_jacobians: vec![],
+            },
+        )
+        .expect_err("entry at image length must be rejected");
+
+        assert!(error.to_string().contains("entry offset"));
+        assert!(error.to_string().contains("no interpreter fallback"));
+    }
+
+    fn empty_eval_context() -> EvalContext {
+        EvalContext {
+            voltages: std::ptr::null(),
+            internal_voltages: std::ptr::null(),
+            params: std::ptr::null(),
+            branch_currents: std::ptr::null(),
+            branch_currents_len: 0,
+            currents: std::ptr::null(),
+            currents_len: 0,
+            num_terminals: 0,
+            port_connected: std::ptr::null(),
+            port_connected_len: 0,
+            temperature: 0.0,
+            time: 0.0,
+            timestep: 0.0,
+            state_prev: std::ptr::null(),
+            state_values: std::ptr::null_mut(),
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+            param_given: std::ptr::null(),
+            branch_unknowns: std::ptr::null(),
+            analysis_type: 0,
+            multiplicity: 1.0,
+        }
     }
 }
