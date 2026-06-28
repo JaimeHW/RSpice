@@ -52,6 +52,8 @@ pub(crate) enum NativeOp {
     TableLookup(usize),
     TableDerivative(usize),
     LimitState(usize),
+    WhiteNoise,
+    FlickerNoise,
     DdtState(usize),
     DdtJacobian,
     IdtState(usize),
@@ -410,6 +412,27 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     ops.push(NativeOp::LimitState(*index));
+                }
+                Instruction::WhiteNoise => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::WhiteNoise);
+                }
+                Instruction::FlickerNoise => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::FlickerNoise);
                 }
                 Instruction::Neg => {
                     require_stack(
@@ -1356,6 +1379,78 @@ mod tests {
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_large_signal_noise_sources_as_native_zero_ops() {
+        let cases = [
+            (
+                "white",
+                vec![Instruction::PushTemperature, Instruction::WhiteNoise],
+                &[NativeOp::LoadTemperature, NativeOp::WhiteNoise][..],
+                1,
+            ),
+            (
+                "flicker",
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(1.0),
+                    Instruction::FlickerNoise,
+                ],
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::Const(1.0),
+                    NativeOp::FlickerNoise,
+                ][..],
+                2,
+            ),
+        ];
+
+        for (name, instructions, expected, expected_depth) in cases {
+            let program = BytecodeProgram { instructions };
+
+            let lowered = NativeProgram::from_bytecode(
+                format!("noise-{name}"),
+                EntryKind::StampValue,
+                &program,
+                limits(0, 0),
+            )
+            .expect("large-signal noise source has native x64 zero lowering");
+
+            assert_eq!(lowered.ops(), expected, "{name}");
+            assert_eq!(lowered.max_stack_depth(), expected_depth, "{name}");
+        }
+    }
+
+    #[test]
+    fn lowering_rejects_noise_sources_without_required_operands() {
+        let cases = [
+            (
+                "WhiteNoise",
+                vec![Instruction::WhiteNoise],
+                "WhiteNoise requires stack depth 1",
+            ),
+            (
+                "FlickerNoise",
+                vec![Instruction::PushTemperature, Instruction::FlickerNoise],
+                "FlickerNoise requires stack depth 2",
+            ),
+        ];
+
+        for (name, instructions, expected) in cases {
+            let program = BytecodeProgram { instructions };
+
+            let error = NativeProgram::from_bytecode(
+                "bad-noise",
+                EntryKind::StampValue,
+                &program,
+                limits(0, 0),
+            )
+            .expect_err("malformed noise bytecode must fail closed");
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{name}: got {msg}");
+            assert!(msg.contains("no interpreter fallback"), "{name}: got {msg}");
+        }
     }
 
     #[test]

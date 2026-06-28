@@ -60,13 +60,6 @@ fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
         ));
     }
 
-    if !model.noise_sources.is_empty() {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "NoiseSources",
-        ));
-    }
-
     for step in &model.assignment_steps {
         validate_assignment_coverage(model, step)?;
     }
