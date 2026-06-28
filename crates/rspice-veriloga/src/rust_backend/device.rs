@@ -5366,6 +5366,22 @@ fn stamp() {
             ),
             "{add_scaled_product_right_ad}"
         );
+
+        let mul_neg_lhs = helper_body(&support, "fn store_mul_neg_lhs(");
+        assert!(
+            !mul_neg_lhs.contains("_node_derivatives = self.node_derivatives"),
+            "{mul_neg_lhs}"
+        );
+        assert!(
+            !mul_neg_lhs.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul_neg_lhs}"
+        );
+        assert!(
+            mul_neg_lhs.contains(
+                "self.node_derivatives[index][axis] = -self.node_derivatives[left][axis] * right_value + left_value * self.node_derivatives[right][axis];"
+            ),
+            "{mul_neg_lhs}"
+        );
     }
 
     #[test]
@@ -15501,13 +15517,9 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_neg_lhs(&mut self, index: usize, left: usize, right: usize) {",
     "        let left_value = -self.values[left];",
     "        let right_value = self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
     "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; }",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -self.node_derivatives[left][axis] * right_value + left_value * self.node_derivatives[right][axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -self.branch_derivatives[left][axis] * right_value + left_value * self.branch_derivatives[right][axis]; }",
     "    }",
     "",
     "    #[inline]",
