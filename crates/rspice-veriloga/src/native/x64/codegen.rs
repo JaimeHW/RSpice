@@ -254,6 +254,7 @@ impl FunctionCompiler {
                 NativeOp::Square => self.emit_square()?,
                 NativeOp::Sqrt => self.emit_sqrt()?,
                 NativeOp::Compare(op) => self.emit_compare(op)?,
+                NativeOp::CompareConst(op, value) => self.emit_compare_const(op, value)?,
                 NativeOp::Logical(op) => self.emit_logical(op)?,
                 NativeOp::IfElse => self.emit_ifelse()?,
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
@@ -1524,6 +1525,62 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_compare_const(&mut self, op: CompareOp, value: f64) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "literal RHS comparison requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        match op {
+            CompareOp::Gt => {
+                self.emit_literal_compare(target, value);
+                self.emit_condition_result(target, ConditionCode::Above);
+            }
+            CompareOp::Ge => {
+                self.emit_literal_compare(target, value);
+                self.emit_condition_result(target, ConditionCode::AboveOrEqual);
+            }
+            CompareOp::Lt => {
+                self.emit_literal_compare(target, value);
+                self.emit_ordered_condition_result(target, ConditionCode::Below);
+            }
+            CompareOp::Le => {
+                self.emit_literal_compare(target, value);
+                self.emit_ordered_condition_result(target, ConditionCode::BelowOrEqual);
+            }
+            CompareOp::Eq => {
+                self.emit_literal_binary_op(target, value, BinaryOp::Sub);
+                self.emit_abs_register(target);
+                self.emit_literal_compare(target, BOOLEAN_EPSILON);
+                self.emit_ordered_condition_result(target, ConditionCode::Below);
+            }
+            CompareOp::Ne => {
+                self.emit_literal_binary_op(target, value, BinaryOp::Sub);
+                self.emit_abs_register(target);
+                self.emit_literal_compare(target, BOOLEAN_EPSILON);
+                self.emit_condition_result(target, ConditionCode::AboveOrEqual);
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_condition_result(&mut self, dst: Xmm, condition: ConditionCode) {
+        self.encoder.setcc_r8(condition, Gpr::R10);
+        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
+    }
+
+    fn emit_ordered_condition_result(&mut self, dst: Xmm, condition: ConditionCode) {
+        self.encoder.setcc_r8(condition, Gpr::R10);
+        self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R11);
+        self.encoder.and_r8_r8(Gpr::R10, Gpr::R11);
+        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
+    }
+
     fn emit_logical(&mut self, op: LogicalOp) -> JitResult<()> {
         match op {
             LogicalOp::And | LogicalOp::Or => self.emit_logical_binary(op),
@@ -2260,6 +2317,58 @@ mod tests {
                 unsafe { std::mem::transmute(entry) };
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.temperature = 8.0;
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_applies_constant_rhs_comparisons_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Gt, 8.0_f64, 1.0_f64),
+            (Instruction::Ge, 4.0_f64, 1.0_f64),
+            (Instruction::Lt, 2.0_f64, 1.0_f64),
+            (Instruction::Le, 4.0_f64, 1.0_f64),
+            (Instruction::Eq, 4.0_f64, 1.0_f64),
+            (Instruction::Ne, 8.0_f64, 1.0_f64),
+            (Instruction::Lt, f64::NAN, 0.0_f64),
+            (Instruction::Le, f64::NAN, 0.0_f64),
+            (Instruction::Eq, f64::NAN, 0.0_f64),
+            (Instruction::Ne, f64::NAN, 0.0_f64),
+        ];
+
+        for (instruction, input, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(4.0),
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{instruction_name} should use a literal RHS compare, not a second stack slot"
+            );
+
+            let bytes =
+                compile_value_function(&program).expect("compile literal RHS comparison leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant RHS comparison should stay helper-free"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate literal RHS comparison leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
 
             assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
         }

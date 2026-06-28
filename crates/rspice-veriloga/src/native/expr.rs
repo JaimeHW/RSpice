@@ -51,6 +51,7 @@ pub(crate) enum NativeOp {
     Square,
     Sqrt,
     Compare(CompareOp),
+    CompareConst(CompareOp, f64),
     Logical(LogicalOp),
     IfElse,
     Extremum(ExtremumOp),
@@ -685,6 +686,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_rhs_compare(&mut ops, compare_op(instruction)) {
+                        continue;
+                    }
                     ops.push(NativeOp::Compare(compare_op(instruction)));
                 }
                 Instruction::And | Instruction::Or => {
@@ -736,6 +740,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_rhs_compare(&mut ops, CompareOp::Gt) {
+                        continue;
+                    }
                     ops.push(NativeOp::Compare(CompareOp::Gt));
                 }
                 Instruction::PushCurrent(pos, neg) => {
@@ -1017,6 +1024,15 @@ fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruct
     true
 }
 
+fn lower_constant_rhs_compare(ops: &mut Vec<NativeOp>, op: CompareOp) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last().copied() else {
+        return false;
+    };
+    ops.pop();
+    ops.push(NativeOp::CompareConst(op, value));
+    true
+}
+
 fn compute_native_max_stack_depth(
     model: SmolStr,
     entry_kind: EntryKind,
@@ -1071,6 +1087,7 @@ fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::SubConst(_)
         | NativeOp::MulConst(_)
         | NativeOp::DivConst(_)
+        | NativeOp::CompareConst(_, _)
         | NativeOp::Neg
         | NativeOp::Abs
         | NativeOp::Square
@@ -1461,7 +1478,7 @@ mod tests {
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushConst(300.0),
+                    Instruction::PushVariable(0),
                     instruction,
                 ],
             };
@@ -1474,11 +1491,62 @@ mod tests {
                 lowered.ops(),
                 &[
                     NativeOp::LoadTemperature,
-                    NativeOp::Const(300.0),
+                    NativeOp::LoadVariable(0),
                     NativeOp::Compare(expected),
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_constant_rhs_comparisons_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Gt, CompareOp::Gt),
+            (Instruction::Lt, CompareOp::Lt),
+            (Instruction::Ge, CompareOp::Ge),
+            (Instruction::Le, CompareOp::Le),
+            (Instruction::Eq, CompareOp::Eq),
+            (Instruction::Ne, CompareOp::Ne),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(300.0),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "cmp-literal",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant RHS comparison has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for RHS constants"
+            );
+            assert!(
+                !lowered
+                    .ops()
+                    .iter()
+                    .any(|op| matches!(op, NativeOp::Const(value) if value.to_bits() == 300.0_f64.to_bits())),
+                "{expected:?} should consume the RHS literal in the compare op"
+            );
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::CompareConst(expected, 300.0)
+                ]
+            );
         }
     }
 
@@ -1493,7 +1561,7 @@ mod tests {
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushConst(300.0),
+                    Instruction::PushVariable(0),
                     instruction,
                 ],
             };
@@ -1506,7 +1574,7 @@ mod tests {
                 lowered.ops(),
                 &[
                     NativeOp::LoadTemperature,
-                    NativeOp::Const(300.0),
+                    NativeOp::LoadVariable(0),
                     NativeOp::Compare(expected),
                 ]
             );
@@ -1852,11 +1920,10 @@ mod tests {
             lowered.ops(),
             &[
                 NativeOp::LoadTemperature,
-                NativeOp::Const(300.0),
-                NativeOp::Compare(CompareOp::Gt),
+                NativeOp::CompareConst(CompareOp::Gt, 300.0),
             ]
         );
-        assert_eq!(lowered.max_stack_depth(), 2);
+        assert_eq!(lowered.max_stack_depth(), 1);
     }
 
     #[test]
