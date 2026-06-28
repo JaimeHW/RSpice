@@ -155,6 +155,19 @@ endmodule
     )
 }
 
+fn sqrt_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_sqrt(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ sqrt(V(p, n) * V(p, n) + 9.0);
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -561,6 +574,22 @@ fn native_device_executes_thermal_voltage_context_read() {
         (currents[0] - (thermal_voltage(315.0) * 4.0)).abs() < 1e-15,
         "currents: {currents:?}"
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_sqrt_expression() {
+    let model = sqrt_model();
+    let mut device =
+        VerilogADevice::try_new("SQ1", model, &[1, 0]).expect("sqrt model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native sqrt expression evaluation succeeds");
+
+    assert!((currents[0] - 5.0).abs() < 1e-12, "currents: {currents:?}");
 }
 
 #[cfg(target_arch = "x86_64")]
