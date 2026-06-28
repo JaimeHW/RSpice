@@ -4293,6 +4293,49 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_powi_affine_inputs_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_powi_scaled_input",
+            "fn store_powi_offset_input",
+            "fn store_powi_scale_offset_input",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(90, AdValue::powi(AdValue::scale(scratch.ad_value(2), params.scale), 3));
+    scratch.store_ad_value(91, AdValue::powi(AdValue::offset(scratch.ad_value(3), params.offset), 4));
+    scratch.store_ad_value(92, AdValue::powi(AdValue::scale_offset(scratch.ad_value(4), params.scale, params.offset), 5));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_powi_scaled_input(90, 2, p.scale, 3);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_powi_offset_input(91, 3, p.offset, 4);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_powi_scale_offset_input(92, 4, p.scale, p.offset, 5);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_powi_ad("), "{compact}");
+        assert!(!compact.contains("A::scale(s.ad_value("), "{compact}");
+        assert!(!compact.contains("A::offset(s.ad_value("), "{compact}");
+        assert!(
+            !compact.contains("A::scale_offset(s.ad_value("),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_pow_offset_exponent_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         assert!(support.contains("fn store_pow_offset_rhs"), "{support}");
@@ -23342,6 +23385,11 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
             return None;
         }
         let exponent = args[1].trim().parse::<i32>().ok()?;
+        if let Some(line) =
+            compact_powf_affine_input_store_helper_line(target_index, args[0], args[1])
+        {
+            return Some(line);
+        }
         if !compact_non_atomic_ad_value(args[0]) {
             return None;
         }
