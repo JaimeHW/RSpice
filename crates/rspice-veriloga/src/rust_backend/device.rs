@@ -16668,6 +16668,7 @@ fn generate_index_or_mixed_div_scaled_product3_helper(mask: &str) -> String {
 
 fn generate_ad_value_struct() -> String {
     [
+        "#[derive(Clone, Copy)]",
         "struct AdValue {",
         "    value: f64,",
         "    node_derivatives: [f64; Instance::NODE_COUNT],",
@@ -19167,10 +19168,13 @@ fn emit_compact_equation_stamp(
         ddt_slots,
         branch_current_unknowns: potential_branch_slots.current_slots(),
         emitted: HashMap::new(),
+        repeated_ad_counts: HashMap::new(),
+        repeated_ad_locals: HashMap::new(),
         condition_values: HashMap::new(),
         condition_counter: 0,
         lines: Vec::new(),
     };
+    emitter.repeated_ad_counts = emitter.repeated_expensive_ad_counts(equation.expression.id)?;
     let lowered = emitter.lower(equation.expression.id)?;
     for line in emitter.lines {
         out.push_str("        ");
@@ -20710,10 +20714,13 @@ fn emit_compact_assignment_statement(
         ddt_slots,
         branch_current_unknowns,
         emitted: HashMap::new(),
+        repeated_ad_counts: HashMap::new(),
+        repeated_ad_locals: HashMap::new(),
         condition_values: HashMap::new(),
         condition_counter: 0,
         lines: Vec::new(),
     };
+    emitter.repeated_ad_counts = emitter.repeated_expensive_ad_counts(assignment.expr.id)?;
 
     if emit_compact_conditional_noop_assignment(
         &mut emitter,
@@ -20830,6 +20837,8 @@ fn assignment_rhs_has_boolean_condition(
         ddt_slots,
         branch_current_unknowns,
         emitted: HashMap::new(),
+        repeated_ad_counts: HashMap::new(),
+        repeated_ad_locals: HashMap::new(),
         condition_values: HashMap::new(),
         condition_counter: 0,
         lines: Vec::new(),
@@ -31542,6 +31551,8 @@ struct CompactAdEmitter<'a> {
     ddt_slots: &'a DdtSlots,
     branch_current_unknowns: &'a HashMap<String, BranchCurrentSlot>,
     emitted: HashMap<ExprId, String>,
+    repeated_ad_counts: HashMap<String, usize>,
+    repeated_ad_locals: HashMap<String, String>,
     condition_values: HashMap<String, Option<String>>,
     condition_counter: usize,
     lines: Vec<String>,
@@ -31553,6 +31564,14 @@ impl CompactAdEmitter<'_> {
     fn lower(&mut self, id: ExprId) -> Result<String, RustBackendError> {
         if let Some(value) = self.emitted.get(&id) {
             return Ok(value.clone());
+        }
+        let repeated_key = self.repeated_expensive_ad_key(id)?;
+        if let Some(key) = repeated_key.as_deref() {
+            if let Some(local) = self.repeated_ad_locals.get(key) {
+                let local = local.clone();
+                self.emitted.insert(id, local.clone());
+                return Ok(local);
+            }
         }
         let kind = self.expression(id)?.kind.clone();
         if let Some(value) = self.inline_leaf(&kind)? {
@@ -31656,8 +31675,12 @@ impl CompactAdEmitter<'_> {
                             } else {
                                 let left = self.lower(*left)?;
                                 let right = self.lower(*right)?;
-                                compact_add_sub_scaled_ad_expressions("add", &left, &right)
-                                    .unwrap_or_else(|| format!("AdValue::add({left}, {right})"))
+                                if left == right {
+                                    format!("AdValue::scale({left}, 2.0)")
+                                } else {
+                                    compact_add_sub_scaled_ad_expressions("add", &left, &right)
+                                        .unwrap_or_else(|| format!("AdValue::add({left}, {right})"))
+                                }
                             }
                         }
                         "Sub" => {
@@ -31674,8 +31697,12 @@ impl CompactAdEmitter<'_> {
                             } else {
                                 let left = self.lower(*left)?;
                                 let right = self.lower(*right)?;
-                                compact_add_sub_scaled_ad_expressions("sub", &left, &right)
-                                    .unwrap_or_else(|| format!("AdValue::sub({left}, {right})"))
+                                if left == right {
+                                    "AdValue::constant(0.0)".to_string()
+                                } else {
+                                    compact_add_sub_scaled_ad_expressions("sub", &left, &right)
+                                        .unwrap_or_else(|| format!("AdValue::sub({left}, {right})"))
+                                }
                             }
                         }
                         "Mul" => {
@@ -31738,8 +31765,12 @@ impl CompactAdEmitter<'_> {
                             } else {
                                 let left = self.lower(*left)?;
                                 let right = self.lower(*right)?;
-                                compact_multiply_scaled_ad_expressions(&left, &right)
-                                    .unwrap_or_else(|| format!("AdValue::mul({left}, {right})"))
+                                if left == right {
+                                    format!("AdValue::square({left})")
+                                } else {
+                                    compact_multiply_scaled_ad_expressions(&left, &right)
+                                        .unwrap_or_else(|| format!("AdValue::mul({left}, {right})"))
+                                }
                             }
                         }
                         "Div" => {
@@ -31847,12 +31878,197 @@ impl CompactAdEmitter<'_> {
             } => format!("AdValue::limexp({})", self.lower(*expr)?),
             other => return Err(self.unsupported(format!("expression kind {other:?}"))),
         };
+        if let Some(key) = repeated_key {
+            self.lines.push(format!("let {base}: AdValue = {rhs};"));
+            self.emitted.insert(id, base.clone());
+            self.repeated_ad_locals.insert(key, base.clone());
+            return Ok(base);
+        }
         if rhs.len() <= COMPACT_INLINE_RHS_MAX_LEN && !compact_kind_has_side_effect(&kind) {
             return Ok(rhs);
         }
         self.lines.push(format!("let {base}: AdValue = {rhs};"));
         self.emitted.insert(id, base.clone());
         Ok(base)
+    }
+
+    fn repeated_expensive_ad_counts(
+        &self,
+        root: ExprId,
+    ) -> Result<HashMap<String, usize>, RustBackendError> {
+        let mut counts = HashMap::new();
+        self.collect_repeated_expensive_ad_counts(root, &mut counts)?;
+        counts.retain(|_, count| *count > 1);
+        Ok(counts)
+    }
+
+    fn collect_repeated_expensive_ad_counts(
+        &self,
+        id: ExprId,
+        counts: &mut HashMap<String, usize>,
+    ) -> Result<(), RustBackendError> {
+        let kind = self.expression(id)?.kind.clone();
+        if compact_kind_has_side_effect(&kind) {
+            return Ok(());
+        }
+        if let Some(key) = self.materializable_expensive_ad_key(id)? {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+
+        match kind {
+            HirExprKind::Unary { operand, .. } => {
+                self.collect_repeated_expensive_ad_counts(operand, counts)?;
+            }
+            HirExprKind::Binary { left, right, .. } => {
+                self.collect_repeated_expensive_ad_counts(left, counts)?;
+                self.collect_repeated_expensive_ad_counts(right, counts)?;
+            }
+            HirExprKind::Conditional { .. } => {
+                // Branches are counted by their isolated branch emitters so lazy
+                // conditionals do not gain work outside the guard that needs it.
+            }
+            HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+                for arg in args {
+                    self.collect_repeated_expensive_ad_counts(arg, counts)?;
+                }
+            }
+            HirExprKind::ArrayAccess { index, .. } => {
+                self.collect_repeated_expensive_ad_counts(index, counts)?;
+            }
+            HirExprKind::ArrayLiteral { elements } => {
+                for element in elements {
+                    self.collect_repeated_expensive_ad_counts(element, counts)?;
+                }
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Limexp { expr },
+            } => {
+                self.collect_repeated_expensive_ad_counts(expr, counts)?;
+            }
+            HirExprKind::NoiseSource { .. }
+            | HirExprKind::AnalogOperator { .. }
+            | HirExprKind::Laplace { .. }
+            | HirExprKind::Zi { .. }
+            | HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::Identifier { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn repeated_expensive_ad_key(&self, id: ExprId) -> Result<Option<String>, RustBackendError> {
+        let Some(key) = self.materializable_expensive_ad_key(id)? else {
+            return Ok(None);
+        };
+        Ok((self.repeated_ad_counts.get(&key).copied().unwrap_or(0) > 1).then_some(key))
+    }
+
+    fn materializable_expensive_ad_key(
+        &self,
+        id: ExprId,
+    ) -> Result<Option<String>, RustBackendError> {
+        if !self.is_expensive_pure_ad_expr(id)? || self.zero_derivative_value_expr(id)?.is_some() {
+            return Ok(None);
+        }
+        self.compact_ad_structural_key(id)
+    }
+
+    fn is_expensive_pure_ad_expr(&self, id: ExprId) -> Result<bool, RustBackendError> {
+        let kind = self.expression(id)?.kind.clone();
+        if compact_kind_has_side_effect(&kind) {
+            return Ok(false);
+        }
+        Ok(match kind {
+            HirExprKind::Binary { op, .. } => op.as_str() == "Pow",
+            HirExprKind::Call { name, .. } if expr_is_intrinsic_name(name.as_str()) => {
+                compact_intrinsic_is_expensive_ad_cse_candidate(name.as_str())
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Limexp { .. },
+            } => true,
+            _ => false,
+        })
+    }
+
+    fn compact_ad_structural_key(&self, id: ExprId) -> Result<Option<String>, RustBackendError> {
+        let kind = self.expression(id)?.kind.clone();
+        if compact_kind_has_side_effect(&kind) {
+            return Ok(None);
+        }
+        match kind {
+            HirExprKind::Number { value, .. } => Ok(Some(format!("num:{:016x}", value.to_bits()))),
+            HirExprKind::StringLiteral { value } => Ok(Some(format!("str:{value}"))),
+            HirExprKind::Identifier { name } => Ok(Some(format!("id:{name}"))),
+            HirExprKind::BranchAccess { access, pos, neg } => {
+                Ok(Some(format!("branch:{access}:{pos}:{neg:?}")))
+            }
+            HirExprKind::NamedBranchAccess { access, name } => {
+                Ok(Some(format!("named_branch:{access}:{name}")))
+            }
+            HirExprKind::Unary { op, operand } => {
+                let operand = self.compact_ad_structural_key(operand)?;
+                Ok(operand.map(|operand| format!("unary:{op}({operand})")))
+            }
+            HirExprKind::Binary { op, left, right } => {
+                let Some(left) = self.compact_ad_structural_key(left)? else {
+                    return Ok(None);
+                };
+                let Some(right) = self.compact_ad_structural_key(right)? else {
+                    return Ok(None);
+                };
+                Ok(Some(format!("binary:{op}({left},{right})")))
+            }
+            HirExprKind::Call { name, args } => {
+                let mut key = format!("call:{}(", name.to_ascii_lowercase());
+                for (index, arg) in args.iter().copied().enumerate() {
+                    let Some(arg) = self.compact_ad_structural_key(arg)? else {
+                        return Ok(None);
+                    };
+                    if index > 0 {
+                        key.push(',');
+                    }
+                    key.push_str(&arg);
+                }
+                key.push(')');
+                Ok(Some(key))
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Limexp { expr },
+            } => {
+                let Some(expr) = self.compact_ad_structural_key(expr)? else {
+                    return Ok(None);
+                };
+                Ok(Some(format!("analog:limexp({expr})")))
+            }
+            HirExprKind::ArrayAccess { array, index } => {
+                let Some(index) = self.compact_ad_structural_key(index)? else {
+                    return Ok(None);
+                };
+                Ok(Some(format!("array:{array}[{index}]")))
+            }
+            HirExprKind::ArrayLiteral { elements } => {
+                let mut key = String::from("array_literal(");
+                for (index, element) in elements.iter().copied().enumerate() {
+                    let Some(element) = self.compact_ad_structural_key(element)? else {
+                        return Ok(None);
+                    };
+                    if index > 0 {
+                        key.push(',');
+                    }
+                    key.push_str(&element);
+                }
+                key.push(')');
+                Ok(Some(key))
+            }
+            HirExprKind::Conditional { .. }
+            | HirExprKind::SystemFunction { .. }
+            | HirExprKind::NoiseSource { .. }
+            | HirExprKind::AnalogOperator { .. }
+            | HirExprKind::Laplace { .. }
+            | HirExprKind::Zi { .. } => Ok(None),
+        }
     }
 
     fn lower_conditional(
@@ -31882,10 +32098,13 @@ impl CompactAdEmitter<'_> {
             ddt_slots: self.ddt_slots,
             branch_current_unknowns: self.branch_current_unknowns,
             emitted: self.emitted.clone(),
+            repeated_ad_counts: HashMap::new(),
+            repeated_ad_locals: self.repeated_ad_locals.clone(),
             condition_values: self.condition_values.clone(),
             condition_counter: self.condition_counter,
             lines: Vec::new(),
         };
+        branch.repeated_ad_counts = branch.repeated_expensive_ad_counts(expr)?;
         let value = branch.lower(expr)?;
         self.condition_counter = branch.condition_counter;
         Ok(CompactBranch {
@@ -33906,6 +34125,32 @@ fn compact_kind_has_side_effect(kind: &HirExprKind) -> bool {
         } => true,
         _ => false,
     }
+}
+
+fn compact_intrinsic_is_expensive_ad_cse_candidate(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "sqrt"
+            | "exp"
+            | "limexp"
+            | "__rspice_limited_exp"
+            | "ln"
+            | "log"
+            | "log10"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "atan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "asinh"
+            | "acosh"
+            | "atanh"
+            | "pow"
+            | "hypot"
+            | "atan2"
+    )
 }
 
 fn compact_idt_operands(

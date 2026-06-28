@@ -2639,6 +2639,36 @@ fn rust_backend_uses_compact_ad_operation_store_helpers() {
 }
 
 #[test]
+fn rust_backend_materializes_repeated_expensive_compact_ad_subexpressions() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_repeated_expensive_ad_subexpression_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile repeated expensive AD expression");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert_eq!(
+        stamp.matches("A::powf(").count(),
+        1,
+        "repeated pow AD subexpressions should be materialized once and reused:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let assign") && stamp.contains(": A = A::powf("),
+        "the repeated expensive AD expression should be emitted as a local before the store:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_nested_ad_operation_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_nested_ad_operation_store_source())
@@ -13420,6 +13450,25 @@ module compact_ad_operation_store(p, n);
         k = gain - j;
         l = -k;
         I(p, n) <+ l;
+    end
+endmodule
+"#
+}
+
+fn compact_repeated_expensive_ad_subexpression_source() -> &'static str {
+    r#"
+module compact_repeated_expensive_ad_subexpression(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exponent = 1.7;
+    real a;
+    real b;
+    real c;
+    analog begin
+        a = V(p, n);
+        b = pow(a, exponent) + pow(a, exponent);
+        c = b + a;
+        I(p, n) <+ c;
     end
 endmodule
 "#
