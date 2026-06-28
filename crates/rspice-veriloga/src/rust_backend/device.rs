@@ -5237,6 +5237,22 @@ fn stamp() {
             ),
             "{inputs_product_mixed}"
         );
+
+        let sqrt_square_add = helper_body(&support, "fn store_sqrt_square_add(");
+        assert!(
+            !sqrt_square_add.contains("_node_derivatives = self.node_derivatives"),
+            "{sqrt_square_add}"
+        );
+        assert!(
+            !sqrt_square_add.contains("_branch_derivatives = self.branch_derivatives"),
+            "{sqrt_square_add}"
+        );
+        assert!(
+            sqrt_square_add.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[square_source][axis] * square_scale + self.node_derivatives[add_source][axis] * add_scale;"
+            ),
+            "{sqrt_square_add}"
+        );
     }
 
     #[test]
@@ -16894,13 +16910,9 @@ fn generate_scratch_operation_helpers() -> String {
     "        let value = (square_value * square_value + self.values[add_source]).sqrt();",
     "        let square_scale = square_value / value;",
     "        let add_scale = 1.0 / (2.0 * value);",
-    "        let square_node_derivatives = self.node_derivatives[square_source];",
-    "        let add_node_derivatives = self.node_derivatives[add_source];",
-    "        let square_branch_derivatives = self.branch_derivatives[square_source];",
-    "        let add_branch_derivatives = self.branch_derivatives[add_source];",
     "        self.values[index] = value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = square_node_derivatives[axis] * square_scale + add_node_derivatives[axis] * add_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = square_branch_derivatives[axis] * square_scale + add_branch_derivatives[axis] * add_scale; }",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[square_source][axis] * square_scale + self.node_derivatives[add_source][axis] * add_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[square_source][axis] * square_scale + self.branch_derivatives[add_source][axis] * add_scale; }",
     "    }",
     "",
     "    #[inline]",
