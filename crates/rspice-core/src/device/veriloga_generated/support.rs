@@ -26994,6 +26994,28 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn div_scalar_offset_div_scaled_inputs4_denominator(scalar: f64, first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, fourth: Self, fourth_scale: f64, denominator: Self, inner_denominator_scale: f64, denominator_offset: f64, denominator_scale: f64) -> Self {
+        let mut value = first;
+        let first_value = value.value * first_scale;
+        let second_value = second.value * second_scale;
+        let third_value = third.value * third_scale;
+        let fourth_value = fourth.value * fourth_scale;
+        let numerator_value = ((first_value + second_value) + third_value) + fourth_value;
+        let inner_denominator_value = denominator.value * inner_denominator_scale;
+        let inner_reciprocal = 1.0 / inner_denominator_value;
+        let inner_quotient = numerator_value * inner_reciprocal;
+        let outer_denominator_value = (inner_quotient + denominator_offset) * denominator_scale;
+        let reciprocal = 1.0 / outer_denominator_value;
+        let quotient = scalar * reciprocal;
+        let inner_denominator_derivative_scale = -inner_quotient * inner_reciprocal * inner_denominator_scale;
+        let outer_derivative_scale = -quotient * reciprocal * denominator_scale;
+        value.value = quotient;
+        for index in 0..NODE_COUNT { value.dn[index] = ((((value.dn[index] * first_scale + second.dn[index] * second_scale) + third.dn[index] * third_scale) + fourth.dn[index] * fourth_scale) * inner_reciprocal + denominator.dn[index] * inner_denominator_derivative_scale) * outer_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = ((((value.db[index] * first_scale + second.db[index] * second_scale) + third.db[index] * third_scale) + fourth.db[index] * fourth_scale) * inner_reciprocal + denominator.db[index] * inner_denominator_derivative_scale) * outer_derivative_scale; }
+        value
+    }
+
+    #[inline]
     pub(crate) fn div_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {
         let mut value = first;
         let first_value = value.value * first_scale;
