@@ -1,5 +1,5 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
-use crate::native::expr::{CompareOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
+use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
 
 const MODEL: &str = "native-x64";
@@ -154,6 +154,7 @@ impl FunctionCompiler {
                 NativeOp::Compare(op) => self.emit_compare(op)?,
                 NativeOp::Logical(op) => self.emit_logical(op)?,
                 NativeOp::IfElse => self.emit_ifelse()?,
+                NativeOp::Extremum(op) => self.emit_extremum(op)?,
             }
         }
 
@@ -420,6 +421,49 @@ impl FunctionCompiler {
         self.encoder.movq_xmm_r64(cond, Gpr::Rax);
         self.depth -= 2;
         Ok(())
+    }
+
+    fn emit_extremum(&mut self, op: ExtremumOp) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("min/max requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let left = XMM_STACK[self.depth - 2];
+        let right = XMM_STACK[self.depth - 1];
+        self.encoder.movq_r64_xmm(Gpr::Rax, left);
+        self.encoder.ucomisd_xmm_xmm(left, left);
+        self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R10);
+        self.emit_abs_zero_to_gpr(left, Gpr::R8);
+        match op {
+            ExtremumOp::Min => self.encoder.minsd_xmm_xmm(left, right),
+            ExtremumOp::Max => self.encoder.maxsd_xmm_xmm(left, right),
+        }
+        self.emit_extremum_select_left_fixup(left, right);
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_extremum_select_left_fixup(&mut self, result: Xmm, right: Xmm) {
+        self.encoder.ucomisd_xmm_xmm(right, right);
+        self.encoder.setcc_r8(ConditionCode::Parity, Gpr::R11);
+        self.encoder.and_r8_r8(Gpr::R10, Gpr::R11);
+        self.emit_abs_zero_to_gpr(result, Gpr::R9);
+        self.encoder.and_r8_r8(Gpr::R8, Gpr::R9);
+        self.encoder.or_r8_r8(Gpr::R10, Gpr::R8);
+        self.encoder.movq_r64_xmm(Gpr::R11, result);
+        self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cmovne_r64_r64(Gpr::R11, Gpr::Rax);
+        self.encoder.movq_xmm_r64(result, Gpr::R11);
+    }
+
+    fn emit_abs_zero_to_gpr(&mut self, value: Xmm, dst: Gpr) {
+        self.encoder.movq_r64_xmm(dst, value);
+        self.encoder.btr_r64_imm8(dst, 63);
+        self.encoder.test_r64_r64(dst, dst);
+        self.encoder.setcc_r8(ConditionCode::Equal, dst);
     }
 
     fn emit_voltage_load(&mut self, pos: VoltageNode, neg: VoltageNode) -> JitResult<()> {
@@ -1049,6 +1093,57 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_computes_min_max() {
+        let left_nan = f64::from_bits(0x7ff8_0000_0000_0001);
+        let right_nan = f64::from_bits(0x7ff8_0000_0000_0002);
+        let cases = [
+            ("min-left-smaller", Instruction::Min, -2.0, 5.0),
+            ("min-right-smaller", Instruction::Min, 5.0, -2.0),
+            ("min-left-nan", Instruction::Min, left_nan, 5.0),
+            ("min-right-nan", Instruction::Min, 5.0, right_nan),
+            ("min-both-nan", Instruction::Min, left_nan, right_nan),
+            ("min-left-neg-zero", Instruction::Min, -0.0, 0.0),
+            ("min-right-neg-zero", Instruction::Min, 0.0, -0.0),
+            ("max-left-larger", Instruction::Max, 5.0, -2.0),
+            ("max-right-larger", Instruction::Max, -2.0, 5.0),
+            ("max-left-nan", Instruction::Max, left_nan, 5.0),
+            ("max-right-nan", Instruction::Max, 5.0, right_nan),
+            ("max-both-nan", Instruction::Max, left_nan, right_nan),
+            ("max-left-pos-zero", Instruction::Max, 0.0, -0.0),
+            ("max-right-pos-zero", Instruction::Max, -0.0, 0.0),
+        ];
+
+        for (name, op, left, right) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    op.clone(),
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile min/max leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate min/max leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+            let expected = match op {
+                Instruction::Min => runtime_min(left, right),
+                Instruction::Max => runtime_max(left, right),
+                _ => unreachable!("min/max test cases only use min/max opcodes"),
+            };
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_runs_from_nonzero_concatenated_image_offset() {
         let program = native_program(
             EntryKind::StampValue,
@@ -1196,6 +1291,14 @@ mod tests {
             analysis_type: 0,
             multiplicity: 1.0,
         }
+    }
+
+    fn runtime_min(left: f64, right: f64) -> f64 {
+        std::hint::black_box(left).min(std::hint::black_box(right))
+    }
+
+    fn runtime_max(left: f64, right: f64) -> f64 {
+        std::hint::black_box(left).max(std::hint::black_box(right))
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {

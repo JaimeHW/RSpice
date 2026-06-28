@@ -280,6 +280,23 @@ endmodule
     )
 }
 
+fn minmax_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_minmax_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = min($temperature, 320.0) + max($temperature - 300.0, 0.0);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -831,6 +848,35 @@ fn native_device_executes_ifelse_assignments() {
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
             (currents[0] - (expected_gain * 4.0)).abs() < 1e-12,
+            "{name}: currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_minmax_assignments() {
+    let model = minmax_assignment_model();
+    let cases = [
+        ("low-temperature", 295.0, 295.0),
+        ("nominal-temperature", 315.0, 330.0),
+        ("high-temperature", 335.0, 355.0),
+    ];
+
+    for (name, temperature, expected_gain) in cases {
+        let mut device = VerilogADevice::try_new("MINMAX1", model.clone(), &[1, 0])
+            .expect("min/max assignment model uses native JIT");
+        assert!(device.is_using_native());
+        device.set_temperature(temperature);
+        device.update_voltages(&[2.0]);
+
+        let currents = device
+            .try_evaluate()
+            .expect("native min/max assignment evaluation succeeds");
+
+        assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
+        assert!(
+            (currents[0] - (expected_gain * 2.0)).abs() < 1e-12,
             "{name}: currents: {currents:?}"
         );
     }

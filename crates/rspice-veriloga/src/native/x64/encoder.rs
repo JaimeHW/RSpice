@@ -6,6 +6,8 @@ pub(crate) enum Gpr {
     Rdx,
     Rdi,
     Rsi,
+    R8,
+    R9,
     R10,
     R11,
 }
@@ -19,6 +21,8 @@ impl Gpr {
             Self::Rdx => 2,
             Self::Rsi => 6,
             Self::Rdi => 7,
+            Self::R8 => 8,
+            Self::R9 => 9,
             Self::R10 => 10,
             Self::R11 => 11,
         }
@@ -41,7 +45,9 @@ pub(crate) enum ConditionCode {
     Above,
     AboveOrEqual,
     Below,
+    Equal,
     NotParity,
+    Parity,
 }
 
 impl Xmm {
@@ -63,7 +69,9 @@ impl ConditionCode {
             Self::Above => 0x97,
             Self::AboveOrEqual => 0x93,
             Self::Below => 0x92,
+            Self::Equal => 0x94,
             Self::NotParity => 0x9B,
+            Self::Parity => 0x9A,
         }
     }
 }
@@ -218,6 +226,12 @@ impl X64Encoder {
         self.emit_modrm(0b11, src.code(), dst.code());
     }
 
+    pub(crate) fn test_r64_r64(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex(true, src.code(), 0, dst.code());
+        self.emit_u8(0x85);
+        self.emit_modrm(0b11, src.code(), dst.code());
+    }
+
     pub(crate) fn cmovne_r64_r64(&mut self, dst: Gpr, src: Gpr) {
         self.emit_rex(true, dst.code(), 0, src.code());
         self.emit_all(&[0x0F, 0x45]);
@@ -270,6 +284,14 @@ impl X64Encoder {
 
     pub fn divsd_xmm0_xmm1(&mut self) {
         self.divsd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm1);
+    }
+
+    pub(crate) fn minsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x5D, dst, src);
+    }
+
+    pub(crate) fn maxsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
+        self.emit_sse_reg_reg(0xF2, 0x5F, dst, src);
     }
 
     pub fn ret(&mut self) {
@@ -559,6 +581,51 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [0x45, 0x84, 0xD2, 0x49, 0x0F, 0x45, 0xC3]
+        );
+    }
+
+    #[test]
+    fn encodes_scalar_min_max_fixup_sequence_pieces() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.ucomisd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm1);
+        encoder.setcc_r8(ConditionCode::NotParity, Gpr::R10);
+        encoder.movq_r64_xmm(Gpr::R8, Xmm::Xmm1);
+        encoder.btr_r64_imm8(Gpr::R8, 63);
+        encoder.test_r64_r64(Gpr::R8, Gpr::R8);
+        encoder.setcc_r8(ConditionCode::Equal, Gpr::R8);
+        encoder.ucomisd_xmm_xmm(Xmm::Xmm2, Xmm::Xmm2);
+        encoder.setcc_r8(ConditionCode::Parity, Gpr::R11);
+        encoder.and_r8_r8(Gpr::R10, Gpr::R11);
+        encoder.movq_r64_xmm(Gpr::R9, Xmm::Xmm0);
+        encoder.btr_r64_imm8(Gpr::R9, 63);
+        encoder.test_r64_r64(Gpr::R9, Gpr::R9);
+        encoder.setcc_r8(ConditionCode::Equal, Gpr::R9);
+        encoder.and_r8_r8(Gpr::R8, Gpr::R9);
+        encoder.or_r8_r8(Gpr::R10, Gpr::R8);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x66, 0x0F, 0x2E, 0xC9, 0x41, 0x0F, 0x9B, 0xC2, 0x66, 0x49, 0x0F, 0x7E, 0xC8, 0x49,
+                0x0F, 0xBA, 0xF0, 0x3F, 0x4D, 0x85, 0xC0, 0x41, 0x0F, 0x94, 0xC0, 0x66, 0x0F, 0x2E,
+                0xD2, 0x41, 0x0F, 0x9A, 0xC3, 0x45, 0x20, 0xDA, 0x66, 0x49, 0x0F, 0x7E, 0xC1, 0x49,
+                0x0F, 0xBA, 0xF1, 0x3F, 0x4D, 0x85, 0xC9, 0x41, 0x0F, 0x94, 0xC1, 0x45, 0x20, 0xC8,
+                0x45, 0x08, 0xC2,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_scalar_min_max_register_ops() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.minsd_xmm_xmm(Xmm::Xmm1, Xmm::Xmm2);
+        encoder.maxsd_xmm_xmm(Xmm::Xmm3, Xmm::Xmm4);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [0xF2, 0x0F, 0x5D, 0xCA, 0xF2, 0x0F, 0x5F, 0xDC]
         );
     }
 
