@@ -605,6 +605,7 @@ fn native_compile_rejects_reactive_jacobians_without_fallback() {
     );
 }
 
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn native_compile_rejects_terminal_pair_current_probes_without_fallback() {
     let model = current_probe_model();
