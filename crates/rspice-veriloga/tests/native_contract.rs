@@ -93,6 +93,23 @@ endmodule
     )
 }
 
+fn scalar_context_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_context_scalar(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = (($temperature - 300.0) * 1.0e-3) + $abstime + $mfactor;
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn runtime_loop_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -293,6 +310,28 @@ fn native_device_executes_scalar_assignments_in_source_order() {
         rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
         "rhs: {rhs:?}"
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_scalar_simulator_context_reads() {
+    let model = scalar_context_model();
+    let mut device = VerilogADevice::try_new("CTX1", model, &[1, 0])
+        .expect("context scalar model uses native JIT");
+    device.set_temperature(310.0);
+    device.set_time(2.0);
+    device.set_multiplicity(3.0);
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("native context scalar evaluation succeeds");
+
+    assert!(
+        (currents[0] - 20.04).abs() < 1e-12,
+        "currents: {currents:?}"
+    );
+    assert!((device.variable("gain").unwrap() - 5.01).abs() < 1e-12);
 }
 
 #[cfg(target_arch = "x86_64")]

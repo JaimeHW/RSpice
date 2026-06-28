@@ -26,6 +26,9 @@ pub(crate) enum NativeOp {
     LoadInternalVoltage(usize),
     LoadVariable(usize),
     LoadBranchUnknown(usize),
+    LoadTemperature,
+    LoadTime,
+    LoadMfactor,
     Add,
     Sub,
     Mul,
@@ -95,6 +98,18 @@ impl NativeProgram {
                 }
                 Instruction::PushBranchCurrent(index) => {
                     ops.push(NativeOp::LoadBranchUnknown(*index));
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushTemperature => {
+                    ops.push(NativeOp::LoadTemperature);
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushTime => {
+                    ops.push(NativeOp::LoadTime);
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushMfactor => {
+                    ops.push(NativeOp::LoadMfactor);
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::Add => {

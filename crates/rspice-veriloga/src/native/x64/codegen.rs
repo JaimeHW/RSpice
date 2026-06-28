@@ -6,7 +6,10 @@ const MODEL: &str = "native-x64";
 const VOLTAGES_OFFSET: i32 = 0;
 const INTERNAL_VOLTAGES_OFFSET: i32 = 8;
 const PARAMS_OFFSET: i32 = 16;
+const TEMPERATURE_OFFSET: i32 = 80;
+const TIME_OFFSET: i32 = 88;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 160;
+const MFACTOR_OFFSET: i32 = 176;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const XMM_STACK: [Xmm; 6] = [
     Xmm::Xmm0,
@@ -110,6 +113,15 @@ impl FunctionCompiler {
                     self.emit_context_pointer_load(BRANCH_UNKNOWNS_OFFSET);
                     self.encoder
                         .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                }
+                NativeOp::LoadTemperature => {
+                    self.emit_context_f64_load(TEMPERATURE_OFFSET)?;
+                }
+                NativeOp::LoadTime => {
+                    self.emit_context_f64_load(TIME_OFFSET)?;
+                }
+                NativeOp::LoadMfactor => {
+                    self.emit_context_f64_load(MFACTOR_OFFSET)?;
                 }
                 NativeOp::Add => self.emit_binary_op(BinaryOp::Add)?,
                 NativeOp::Sub => self.emit_binary_op(BinaryOp::Sub)?,
@@ -280,6 +292,13 @@ impl FunctionCompiler {
             .mov_r64_m64_base_disp32(Gpr::Rax, host_ctx_arg_reg(), ctx_field_offset);
     }
 
+    fn emit_context_f64_load(&mut self, ctx_field_offset: i32) -> JitResult<()> {
+        let dst = self.push_register()?;
+        self.encoder
+            .movsd_xmm_m64_base_disp32(dst, host_ctx_arg_reg(), ctx_field_offset);
+        Ok(())
+    }
+
     fn emit_literal_load(&mut self, dst: Xmm, value: f64) {
         let displacement_offset = self.encoder.movsd_xmm_m64_rip_disp32(dst, 0);
         self.literals.push(LiteralPatch {
@@ -363,9 +382,9 @@ fn host_vars_arg_reg() -> Gpr {
 mod tests {
     use super::{compile_assignment_function, compile_value_function};
     use crate::codegen::{BytecodeProgram, Instruction};
-    use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
+    use crate::native::EvalContext;
 
     #[test]
     fn generated_value_leaf_evaluates_native_expression() {
