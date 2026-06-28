@@ -5491,6 +5491,26 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sqrt_add_scaled_square_product(&mut self, index: usize, square_source: usize, square_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let square_value = self.v[square_source];
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let value = (square_value * square_value * square_scale + product_left_value * product_right_value * product_scale).sqrt();
+        let sqrt_derivative_scale = 1.0 / (2.0 * value);
+        let square_derivative_scale = 2.0 * square_value * square_scale * sqrt_derivative_scale;
+        let product_derivative_scale = product_scale * sqrt_derivative_scale;
+        let square_dn = self.dn[square_source];
+        let product_left_dn = self.dn[product_left];
+        let product_right_dn = self.dn[product_right];
+        let square_db = self.db[square_source];
+        let product_left_db = self.db[product_left];
+        let product_right_db = self.db[product_right];
+        self.v[index] = value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_derivative_scale; }
+    }
+
+    #[inline]
     pub(crate) fn store_sqrt_square_sum(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
@@ -18114,6 +18134,26 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + input_dn[axis] * input_derivative_scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + input_db[axis] * input_derivative_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sqrt_add_scaled_square_product(&mut self, index: usize, square_source: usize, square_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
+        let square_value = self.v[square_source];
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let value = (square_value * square_value * square_scale + product_left_value * product_right_value * product_scale).sqrt();
+        let sqrt_derivative_scale = 1.0 / (2.0 * value);
+        let square_derivative_scale = 2.0 * square_value * square_scale * sqrt_derivative_scale;
+        let product_derivative_scale = product_scale * sqrt_derivative_scale;
+        let square_dn = self.dn[square_source];
+        let product_left_dn = self.dn[product_left];
+        let product_right_dn = self.dn[product_right];
+        let square_db = self.db[square_source];
+        let product_left_db = self.db[product_left];
+        let product_right_db = self.db[product_right];
+        self.v[index] = value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_derivative_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_derivative_scale; }
     }
 
     #[inline]
