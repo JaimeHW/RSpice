@@ -1065,6 +1065,48 @@ fn rust_backend_inlines_one_use_ddt_scaled_derivative_locals() {
 }
 
 #[test]
+fn rust_backend_inlines_simple_derivative_leaf_locals() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(simple_derivative_leaf_inline_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile simple derivative leaf fixture");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    let leaf_locals = stamp
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line.starts_with("let ")
+                && line.contains("_d_n")
+                && (line.contains(": f64 = p.p")
+                    || line.contains(": f64 = (-p.p")
+                    || line.contains(": f64 = 0.5;")
+                    || line.contains(": f64 = (-0.5);"))
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        leaf_locals.is_empty(),
+        "simple field and numeric derivative leaves should be inlined:\n{}\n\n{stamp}",
+        leaf_locals.join("\n")
+    );
+    assert!(stamp.contains("p.p0"), "{stamp}");
+    assert!(stamp.contains("0.5"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_named_branch_current_probes() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(named_branch_current_probe())
@@ -7800,7 +7842,8 @@ fn rust_backend_stores_zero_derivative_compact_comparison_assignments_as_values(
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
-    assert!(stamp.contains("let eq0_e3_d_n0: f64 = s.v[0];"), "{stamp}");
+    assert!(!stamp.contains("let eq0_e3_d_n0: f64 = s.v[0];"), "{stamp}");
+    assert!(stamp.contains("multiplicity * (s.v[0])"), "{stamp}");
     assert!(!stamp.contains("s.dn[0]"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -17561,6 +17604,17 @@ module ddt_scaled_derivative_inline(p0, p1, p2, p3, p4);
         I(p0, p1) <+ gain * ddt(V(p0, p1) + 0.5 * V(p2, p3) + 0.25 * V(p4, p1));
         I(p2, p3) <+ 1e-9 * ddt(V(p4, p1));
     end
+endmodule
+"#
+}
+
+fn simple_derivative_leaf_inline_source() -> &'static str {
+    r#"
+module simple_derivative_leaf_inline(p, n, a);
+    inout p, n, a;
+    electrical p, n, a;
+    parameter real gain = 2.0;
+    analog I(p, n) <+ gain * V(p, n) + 0.5 * V(a, n);
 endmodule
 "#
 }

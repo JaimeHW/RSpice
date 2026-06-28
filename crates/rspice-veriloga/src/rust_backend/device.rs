@@ -33337,13 +33337,17 @@ fn is_inline_derivative_expr(derivative: &str) -> bool {
         || derivative == "-1.0"
         || is_generated_scratch_derivative_access(derivative)
         || is_dynamic_operator_scaled_inline_derivative_expr(derivative)
+        || is_simple_inline_operand(derivative)
+        || is_negated_simple_inline_operand(derivative)
         || is_rust_identifier(derivative)
 }
 
 fn is_dynamic_operator_scaled_inline_derivative_expr(derivative: &str) -> bool {
     dynamic_operator_scaled_operand(derivative, "ddt_scale")
         .or_else(|| dynamic_operator_scaled_operand(derivative, "idt_scale"))
-        .is_some_and(is_simple_inline_operand)
+        .is_some_and(|operand| {
+            is_simple_inline_operand(operand) || is_negated_simple_inline_operand(operand)
+        })
 }
 
 fn dynamic_operator_scaled_operand<'a>(derivative: &'a str, scale: &str) -> Option<&'a str> {
@@ -33357,6 +33361,17 @@ fn is_simple_inline_operand(value: &str) -> bool {
         || is_rust_identifier(value)
         || is_simple_generated_access(value)
         || is_simple_numeric_literal(value)
+}
+
+fn is_negated_simple_inline_operand(value: &str) -> bool {
+    let value = value.trim();
+    let Some(inner) = value
+        .strip_prefix("(-")
+        .and_then(|inner| inner.strip_suffix(')'))
+    else {
+        return false;
+    };
+    is_simple_inline_operand(inner.trim())
 }
 
 fn is_constant_derivative_expr(derivative: &str) -> bool {
