@@ -3,9 +3,10 @@ use crate::native::abi::{
     rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_bitand, rspice_bitor,
     rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_idtmod_wrap,
-    rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod, rspice_pow,
-    rspice_shl, rspice_shr, rspice_sin, rspice_sinh, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_zi_step_native,
+    rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod,
+    rspice_native_loop_limit_error, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
+    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
+    rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -42,8 +43,10 @@ const CALL_FRAME_BYTES: i32 = CALL_SHADOW_BYTES + (CALL_SPILL_SLOT_COUNT * WORD_
 const CALL_SHADOW_BYTES: i32 = 32;
 #[cfg(not(windows))]
 const CALL_SHADOW_BYTES: i32 = 0;
-const INDEXED_ASSIGNMENT_LOCAL_FRAME_BYTES: i32 = 16;
+const LOCAL_SLOT_BYTES: i32 = 8;
+const LOCAL_FRAME_ALIGN_BYTES: i32 = 16;
 const INDEXED_ASSIGNMENT_SLOT_PTR_DISP: i32 = 0;
+const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
 const XMM_STACK: [Xmm; 6] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
@@ -56,7 +59,7 @@ const SIGN_MASK: f64 = f64::from_bits(0x8000_0000_0000_0000);
 
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0);
+    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0, None);
     compiler.emit_program(program)?;
     compiler.finish_value_function()
 }
@@ -66,7 +69,7 @@ pub(crate) fn compile_assignment_function(
     var_index: usize,
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0);
+    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0, None);
     compiler.emit_program(program)?;
     compiler.finish_assignment_function(var_index)
 }
@@ -84,38 +87,30 @@ pub(crate) enum NativeAssignment {
         index: NativeProgram,
         value: NativeProgram,
     },
+    Loop {
+        condition: NativeProgram,
+        body: Vec<NativeAssignment>,
+    },
 }
 
 pub(crate) fn compile_assignment_pass_function(
     assignments: &[NativeAssignment],
 ) -> JitResult<Vec<u8>> {
-    let has_indexed_assignment = assignments
-        .iter()
-        .any(|assignment| matches!(assignment, NativeAssignment::Indexed { .. }));
+    let has_indexed_assignment = assignments.iter().any(assignment_has_indexed);
+    let loop_depth = assignment_loop_depth(assignments);
     let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
-    let local_frame_bytes = if has_indexed_assignment {
-        INDEXED_ASSIGNMENT_LOCAL_FRAME_BYTES
+    let indexed_slot_bytes = if has_indexed_assignment {
+        LOCAL_SLOT_BYTES
     } else {
         0
     };
+    let loop_counter_base_disp = (loop_depth > 0).then_some(indexed_slot_bytes);
+    let local_frame_bytes = align_local_frame(indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES);
 
-    let mut compiler = FunctionCompiler::new(uses_helper_calls, local_frame_bytes);
+    let mut compiler =
+        FunctionCompiler::new(uses_helper_calls, local_frame_bytes, loop_counter_base_disp);
     for assignment in assignments {
-        match assignment {
-            NativeAssignment::Direct { var_index, program } => {
-                compiler.emit_program(program)?;
-                compiler.emit_assignment_store(*var_index)?;
-            }
-            NativeAssignment::Indexed {
-                base,
-                len,
-                lower,
-                index,
-                value,
-            } => {
-                compiler.emit_indexed_assignment(*base, *len, *lower, index, value)?;
-            }
-        }
+        compiler.emit_assignment_step(assignment, 0)?;
     }
     compiler.finish_assignment_pass_function()
 }
@@ -127,6 +122,7 @@ struct FunctionCompiler {
     literals: Vec<LiteralPatch>,
     uses_helper_calls: bool,
     local_frame_bytes: i32,
+    loop_counter_base_disp: Option<i32>,
     early_return_jumps: Vec<usize>,
 }
 
@@ -137,7 +133,11 @@ struct LiteralPatch {
 }
 
 impl FunctionCompiler {
-    fn new(uses_helper_calls: bool, local_frame_bytes: i32) -> Self {
+    fn new(
+        uses_helper_calls: bool,
+        local_frame_bytes: i32,
+        loop_counter_base_disp: Option<i32>,
+    ) -> Self {
         debug_assert_eq!(local_frame_bytes % 16, 0);
         let mut compiler = Self {
             encoder: X64Encoder::new(),
@@ -145,12 +145,17 @@ impl FunctionCompiler {
             literals: Vec::new(),
             uses_helper_calls,
             local_frame_bytes,
+            loop_counter_base_disp,
             early_return_jumps: Vec::new(),
         };
-        if compiler.uses_helper_calls || compiler.local_frame_bytes > 0 {
+        if compiler.has_prologue() {
             compiler.emit_prologue();
         }
         compiler
+    }
+
+    fn has_prologue(&self) -> bool {
+        self.uses_helper_calls || self.local_frame_bytes > 0
     }
 
     fn emit_program(&mut self, program: &NativeProgram) -> JitResult<()> {
@@ -304,7 +309,7 @@ impl FunctionCompiler {
         if self.local_frame_bytes > 0 {
             self.encoder.add_rsp_imm32(self.local_frame_bytes);
         }
-        if self.uses_helper_calls || self.local_frame_bytes > 0 {
+        if self.has_prologue() {
             self.encoder.pop_r64(Gpr::R13);
             self.encoder.pop_r64(Gpr::R12);
         }
@@ -312,7 +317,7 @@ impl FunctionCompiler {
     }
 
     fn ctx_arg_reg(&self) -> Gpr {
-        if self.uses_helper_calls {
+        if self.has_prologue() {
             saved_ctx_arg_reg()
         } else {
             entry_ctx_arg_reg()
@@ -320,7 +325,7 @@ impl FunctionCompiler {
     }
 
     fn vars_arg_reg(&self) -> Gpr {
-        if self.uses_helper_calls {
+        if self.has_prologue() {
             saved_vars_arg_reg()
         } else {
             entry_vars_arg_reg()
@@ -347,6 +352,93 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_assignment_step(
+        &mut self,
+        assignment: &NativeAssignment,
+        loop_depth: i32,
+    ) -> JitResult<()> {
+        match assignment {
+            NativeAssignment::Direct { var_index, program } => {
+                self.emit_program(program)?;
+                self.emit_assignment_store(*var_index)
+            }
+            NativeAssignment::Indexed {
+                base,
+                len,
+                lower,
+                index,
+                value,
+            } => self.emit_indexed_assignment(*base, *len, *lower, index, value),
+            NativeAssignment::Loop { condition, body } => {
+                self.emit_loop_assignment(condition, body, loop_depth)
+            }
+        }
+    }
+
+    fn emit_loop_assignment(
+        &mut self,
+        condition: &NativeProgram,
+        body: &[NativeAssignment],
+        loop_depth: i32,
+    ) -> JitResult<()> {
+        let counter_disp = self.loop_counter_disp(loop_depth)?;
+        self.encoder.movabs_r64_imm64(Gpr::R10, 0);
+        self.encoder
+            .mov_m64_base_disp32_r64(Gpr::Rsp, counter_disp, Gpr::R10);
+
+        let loop_start = self.encoder.position();
+        self.emit_program(condition)?;
+        let loop_exit = self.emit_loop_exit_if_zero()?;
+
+        for assignment in body {
+            self.emit_assignment_step(assignment, loop_depth + 1)?;
+        }
+
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R10, Gpr::Rsp, counter_disp);
+        self.encoder.add_r64_imm32(Gpr::R10, 1);
+        self.encoder
+            .mov_m64_base_disp32_r64(Gpr::Rsp, counter_disp, Gpr::R10);
+        self.encoder
+            .cmp_r64_imm32(Gpr::R10, MAX_RUNTIME_LOOP_ITERATIONS);
+        let limit_reached = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
+        self.emit_jmp_to_offset(loop_start)?;
+        self.patch_rel32_to_current(limit_reached)?;
+        self.emit_runtime_loop_limit_error_call();
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
+        self.patch_rel32_to_current(loop_exit)?;
+        Ok(())
+    }
+
+    fn loop_counter_disp(&self, loop_depth: i32) -> JitResult<i32> {
+        let Some(base_disp) = self.loop_counter_base_disp else {
+            return Err(JitError::InternalCompilerError {
+                model: MODEL.into(),
+                detail: "loop assignment emitted without loop-counter frame slot".into(),
+            });
+        };
+        Ok(base_disp + loop_depth * LOCAL_SLOT_BYTES)
+    }
+
+    fn emit_loop_exit_if_zero(&mut self) -> JitResult<usize> {
+        if self.depth != 1 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("loop condition stack depth {}, expected 1", self.depth).into(),
+            });
+        }
+
+        self.encoder.movq_r64_xmm(Gpr::R10, Xmm::Xmm0);
+        self.encoder.btr_r64_imm8(Gpr::R10, 63);
+        self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
+        let loop_exit = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.depth = 0;
+        Ok(loop_exit)
+    }
+
     fn emit_indexed_assignment(
         &mut self,
         base: usize,
@@ -355,7 +447,7 @@ impl FunctionCompiler {
         index: &NativeProgram,
         value: &NativeProgram,
     ) -> JitResult<()> {
-        debug_assert!(self.local_frame_bytes >= INDEXED_ASSIGNMENT_LOCAL_FRAME_BYTES);
+        debug_assert!(self.local_frame_bytes >= LOCAL_SLOT_BYTES);
 
         self.emit_program(index)?;
         self.emit_dynamic_variable_slot_call(base, len, lower)?;
@@ -628,6 +720,16 @@ impl FunctionCompiler {
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
         self.depth = 0;
         Ok(())
+    }
+
+    fn emit_runtime_loop_limit_error_call(&mut self) {
+        debug_assert!(self.uses_helper_calls);
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        let helper: VoidHelper = rspice_native_loop_limit_error;
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
     fn emit_binary_math(&mut self, op: BinaryMathOp) -> JitResult<()> {
@@ -1482,8 +1584,20 @@ impl FunctionCompiler {
         Ok(bytes)
     }
 
+    fn emit_jmp_to_offset(&mut self, target_offset: usize) -> JitResult<()> {
+        let displacement_offset = self.encoder.jmp_rel32_placeholder();
+        self.patch_rel32_to_offset(displacement_offset, target_offset)
+    }
+
     fn patch_rel32_to_current(&mut self, displacement_offset: usize) -> JitResult<()> {
-        let target_offset = self.encoder.position();
+        self.patch_rel32_to_offset(displacement_offset, self.encoder.position())
+    }
+
+    fn patch_rel32_to_offset(
+        &mut self,
+        displacement_offset: usize,
+        target_offset: usize,
+    ) -> JitResult<()> {
         let next_instruction_offset = displacement_offset + std::mem::size_of::<i32>();
         let displacement = i32::try_from(target_offset as isize - next_instruction_offset as isize)
             .map_err(|_| JitError::Relocation {
@@ -1514,6 +1628,7 @@ enum BinaryOp {
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
 type TernaryHelper = extern "C" fn(f64, f64, f64) -> f64;
+type VoidHelper = extern "C" fn();
 type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
 type ContextFilterHelper =
@@ -1525,6 +1640,34 @@ fn assignment_uses_helper_calls(assignment: &NativeAssignment) -> bool {
     match assignment {
         NativeAssignment::Direct { program, .. } => program_uses_helper_calls(program),
         NativeAssignment::Indexed { .. } => true,
+        NativeAssignment::Loop { .. } => true,
+    }
+}
+
+fn assignment_has_indexed(assignment: &NativeAssignment) -> bool {
+    match assignment {
+        NativeAssignment::Direct { .. } => false,
+        NativeAssignment::Indexed { .. } => true,
+        NativeAssignment::Loop { body, .. } => body.iter().any(assignment_has_indexed),
+    }
+}
+
+fn assignment_loop_depth(assignments: &[NativeAssignment]) -> i32 {
+    assignments
+        .iter()
+        .map(|assignment| match assignment {
+            NativeAssignment::Direct { .. } | NativeAssignment::Indexed { .. } => 0,
+            NativeAssignment::Loop { body, .. } => 1 + assignment_loop_depth(body),
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn align_local_frame(bytes: i32) -> i32 {
+    if bytes == 0 {
+        0
+    } else {
+        ((bytes + LOCAL_FRAME_ALIGN_BYTES - 1) / LOCAL_FRAME_ALIGN_BYTES) * LOCAL_FRAME_ALIGN_BYTES
     }
 }
 
@@ -1988,6 +2131,144 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
+    }
+
+    #[test]
+    fn generated_assignment_pass_executes_nested_loops_with_indexed_body() {
+        let assignments = [
+            NativeAssignment::Direct {
+                var_index: 0,
+                program: native_program(
+                    EntryKind::Assignment,
+                    vec![Instruction::PushConst(0.0)],
+                    0,
+                ),
+            },
+            NativeAssignment::Direct {
+                var_index: 2,
+                program: native_program(
+                    EntryKind::Assignment,
+                    vec![Instruction::PushConst(0.0)],
+                    0,
+                ),
+            },
+            NativeAssignment::Loop {
+                condition: native_program(
+                    EntryKind::Assignment,
+                    vec![
+                        Instruction::PushVariable(0),
+                        Instruction::PushConst(2.0),
+                        Instruction::Lt,
+                    ],
+                    0,
+                ),
+                body: vec![
+                    NativeAssignment::Direct {
+                        var_index: 1,
+                        program: native_program(
+                            EntryKind::Assignment,
+                            vec![Instruction::PushConst(0.0)],
+                            0,
+                        ),
+                    },
+                    NativeAssignment::Loop {
+                        condition: native_program(
+                            EntryKind::Assignment,
+                            vec![
+                                Instruction::PushVariable(1),
+                                Instruction::PushConst(2.0),
+                                Instruction::Lt,
+                            ],
+                            0,
+                        ),
+                        body: vec![
+                            NativeAssignment::Indexed {
+                                base: 3,
+                                len: 2,
+                                lower: 1,
+                                index: native_program(
+                                    EntryKind::Assignment,
+                                    vec![
+                                        Instruction::PushVariable(1),
+                                        Instruction::PushConst(1.0),
+                                        Instruction::Add,
+                                    ],
+                                    0,
+                                ),
+                                value: native_program(
+                                    EntryKind::Assignment,
+                                    vec![
+                                        Instruction::PushVariable(0),
+                                        Instruction::PushConst(10.0),
+                                        Instruction::Mul,
+                                        Instruction::PushVariable(1),
+                                        Instruction::Add,
+                                    ],
+                                    0,
+                                ),
+                            },
+                            NativeAssignment::Direct {
+                                var_index: 2,
+                                program: native_program(
+                                    EntryKind::Assignment,
+                                    vec![
+                                        Instruction::PushVariable(2),
+                                        Instruction::PushVariable(1),
+                                        Instruction::PushConst(1.0),
+                                        Instruction::Add,
+                                        Instruction::PushVariableDyn {
+                                            base: 3,
+                                            len: 2,
+                                            lower: 1,
+                                        },
+                                        Instruction::Add,
+                                    ],
+                                    0,
+                                ),
+                            },
+                            NativeAssignment::Direct {
+                                var_index: 1,
+                                program: native_program(
+                                    EntryKind::Assignment,
+                                    vec![
+                                        Instruction::PushVariable(1),
+                                        Instruction::PushConst(1.0),
+                                        Instruction::Add,
+                                    ],
+                                    0,
+                                ),
+                            },
+                        ],
+                    },
+                    NativeAssignment::Direct {
+                        var_index: 0,
+                        program: native_program(
+                            EntryKind::Assignment,
+                            vec![
+                                Instruction::PushVariable(0),
+                                Instruction::PushConst(1.0),
+                                Instruction::Add,
+                            ],
+                            0,
+                        ),
+                    },
+                ],
+            },
+        ];
+        let bytes =
+            compile_assignment_pass_function(&assignments).expect("compile loop assignment pass");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate loop assignment pass");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
+
+        let mut vars = [0.0_f64; 5];
+        let ctx = eval_context(&[], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        f(&ctx, vars.as_mut_ptr());
+
+        assert_eq!(vars, [2.0, 2.0, 22.0, 10.0, 11.0]);
+        assert!(take_native_runtime_error().is_none());
     }
 
     #[test]

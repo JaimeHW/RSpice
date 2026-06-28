@@ -87,6 +87,13 @@ fn set_native_runtime_error(message: impl Into<String>) {
     });
 }
 
+#[unsafe(export_name = "rspice_native_loop_limit_error")]
+pub extern "C" fn rspice_native_loop_limit_error() {
+    set_native_runtime_error(
+        "native runtime loop iteration limit exceeded; no interpreter fallback",
+    );
+}
+
 /// External helper function for table lookup interpolation.
 ///
 /// # Safety

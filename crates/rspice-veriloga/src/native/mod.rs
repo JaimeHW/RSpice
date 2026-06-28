@@ -64,10 +64,12 @@ fn validate_assignment_coverage(model: &CompiledModel, step: &AssignmentStep) ->
         AssignmentStep::AssignIndexed { base, len, .. } => {
             validate_assignment_range(model, *base, *len)
         }
-        AssignmentStep::Loop { .. } => Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "Loop",
-        )),
+        AssignmentStep::Loop { body, .. } => {
+            for step in body {
+                validate_assignment_coverage(model, step)?;
+            }
+            Ok(())
+        }
     }
 }
 
