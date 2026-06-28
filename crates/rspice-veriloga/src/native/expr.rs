@@ -43,6 +43,7 @@ pub(crate) enum NativeOp {
     Compare(CompareOp),
     Logical(LogicalOp),
     IfElse,
+    Extremum(ExtremumOp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +61,12 @@ pub(crate) enum LogicalOp {
     And,
     Or,
     Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExtremumOp {
+    Min,
+    Max,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -350,6 +357,16 @@ impl NativeProgram {
                     depth -= 2;
                     ops.push(NativeOp::IfElse);
                 }
+                Instruction::Min | Instruction::Max => {
+                    pop_binary_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::Extremum(extremum_op(instruction)));
+                }
                 Instruction::PushCurrent(pos, neg) => {
                     let pair_index =
                         current_pair_index(model.clone(), *pos, *neg, limits.terminal_count)?;
@@ -599,6 +616,14 @@ fn logical_op(instruction: &Instruction) -> LogicalOp {
     }
 }
 
+fn extremum_op(instruction: &Instruction) -> ExtremumOp {
+    match instruction {
+        Instruction::Min => ExtremumOp::Min,
+        Instruction::Max => ExtremumOp::Max,
+        _ => unreachable!("extremum lowering only accepts min/max instructions"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -832,6 +857,42 @@ mod tests {
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 3);
+    }
+
+    #[test]
+    fn lowers_min_max_as_native_binary_ops() {
+        let cases = [
+            (Instruction::Min, ExtremumOp::Min),
+            (Instruction::Max, ExtremumOp::Max),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(300.0),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "minmax",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("min/max have direct native x64 lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::Const(300.0),
+                    NativeOp::Extremum(expected),
+                ]
+            );
+            assert_eq!(lowered.max_stack_depth(), 2);
+        }
     }
 
     #[test]
