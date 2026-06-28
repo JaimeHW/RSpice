@@ -297,6 +297,23 @@ endmodule
     )
 }
 
+fn exp_limexp_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_exp_limexp_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = exp($abstime) + limexp(($temperature - 300.0) * 0.1);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -884,6 +901,37 @@ fn native_device_executes_minmax_assignments() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_executes_exp_limexp_assignments() {
+    let model = exp_limexp_assignment_model();
+    let cases = [
+        ("nominal", 0.5, 310.0),
+        ("linear-limited", 0.25, 750.0),
+        ("negative-limited", 0.125, -200.0),
+    ];
+
+    for (name, time, temperature) in cases {
+        let mut device = VerilogADevice::try_new("EXPLIM1", model.clone(), &[1, 0])
+            .expect("exp/limexp assignment model uses native JIT");
+        assert!(device.is_using_native());
+        device.set_time(time);
+        device.set_temperature(temperature);
+        device.update_voltages(&[2.0]);
+
+        let expected_gain = time.exp() + limexp((temperature - 300.0) * 0.1);
+        let currents = device
+            .try_evaluate()
+            .expect("native exp/limexp assignment evaluation succeeds");
+
+        assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
+        assert!(
+            (currents[0] - (expected_gain * 2.0)).abs() < 1e-12,
+            "{name}: currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_executes_param_given_and_port_connected_reads() {
     let model = flag_context_model();
 
@@ -1124,4 +1172,16 @@ fn thermal_voltage(temperature: f64) -> f64 {
     const Q_ELECTRON: f64 = 1.602176634e-19;
 
     K_BOLTZMANN * temperature / Q_ELECTRON
+}
+
+fn limexp(value: f64) -> f64 {
+    const LIMIT: f64 = 40.0;
+    if value > LIMIT {
+        let exp_limit = LIMIT.exp();
+        exp_limit * (1.0 + value - LIMIT)
+    } else if value < -LIMIT {
+        (-LIMIT).exp()
+    } else {
+        value.exp()
+    }
 }

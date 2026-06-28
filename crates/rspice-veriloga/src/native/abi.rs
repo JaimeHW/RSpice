@@ -113,6 +113,12 @@ pub extern "C" fn rspice_limexp(x: f64) -> f64 {
     }
 }
 
+/// External helper function for exponential.
+#[unsafe(export_name = "rspice_exp")]
+pub extern "C" fn rspice_exp(x: f64) -> f64 {
+    x.exp()
+}
+
 /// External helper function for Laplace state-space filter step.
 ///
 /// # Safety

@@ -1,4 +1,6 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
+use crate::native::abi::{rspice_exp, rspice_limexp};
+use crate::native::expr::UnaryMathOp;
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
 
@@ -17,6 +19,13 @@ const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
+const CALL_SPILL_SLOT_COUNT: usize = 7;
+const CALL_RESULT_SLOT: usize = 6;
+const CALL_FRAME_BYTES: i32 = CALL_SHADOW_BYTES + (CALL_SPILL_SLOT_COUNT * WORD_BYTES) as i32;
+#[cfg(windows)]
+const CALL_SHADOW_BYTES: i32 = 32;
+#[cfg(not(windows))]
+const CALL_SHADOW_BYTES: i32 = 0;
 const XMM_STACK: [Xmm; 6] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
@@ -29,7 +38,7 @@ const SIGN_MASK: f64 = f64::from_bits(0x8000_0000_0000_0000);
 
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new();
+    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program));
     compiler.emit_program(program)?;
     compiler.finish_value_function()
 }
@@ -39,7 +48,7 @@ pub(crate) fn compile_assignment_function(
     var_index: usize,
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new();
+    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program));
     compiler.emit_program(program)?;
     compiler.finish_assignment_function(var_index)
 }
@@ -47,7 +56,11 @@ pub(crate) fn compile_assignment_function(
 pub(crate) fn compile_assignment_pass_function(
     assignments: &[(usize, NativeProgram)],
 ) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new();
+    let mut compiler = FunctionCompiler::new(
+        assignments
+            .iter()
+            .any(|(_, program)| program_uses_helper_calls(program)),
+    );
     for (var_index, program) in assignments {
         compiler.emit_program(program)?;
         compiler.emit_assignment_store(*var_index)?;
@@ -60,6 +73,7 @@ struct FunctionCompiler {
     encoder: X64Encoder,
     depth: usize,
     literals: Vec<LiteralPatch>,
+    uses_helper_calls: bool,
 }
 
 #[derive(Debug)]
@@ -69,12 +83,17 @@ struct LiteralPatch {
 }
 
 impl FunctionCompiler {
-    fn new() -> Self {
-        Self {
+    fn new(uses_helper_calls: bool) -> Self {
+        let mut compiler = Self {
             encoder: X64Encoder::new(),
             depth: 0,
             literals: Vec::new(),
+            uses_helper_calls,
+        };
+        if compiler.uses_helper_calls {
+            compiler.emit_prologue();
         }
+        compiler
     }
 
     fn emit_program(&mut self, program: &NativeProgram) -> JitResult<()> {
@@ -122,7 +141,7 @@ impl FunctionCompiler {
                     let dst = self.push_register()?;
                     self.encoder.movsd_xmm_m64_base_disp32(
                         dst,
-                        host_vars_arg_reg(),
+                        self.vars_arg_reg(),
                         byte_disp(index)?,
                     );
                 }
@@ -155,6 +174,7 @@ impl FunctionCompiler {
                 NativeOp::Logical(op) => self.emit_logical(op)?,
                 NativeOp::IfElse => self.emit_ifelse()?,
                 NativeOp::Extremum(op) => self.emit_extremum(op)?,
+                NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
             }
         }
 
@@ -169,19 +189,52 @@ impl FunctionCompiler {
     }
 
     fn finish_value_function(mut self) -> JitResult<Vec<u8>> {
-        self.encoder.ret();
+        self.emit_return();
         self.finish_with_literals()
     }
 
     fn finish_assignment_function(mut self, var_index: usize) -> JitResult<Vec<u8>> {
         self.emit_assignment_store(var_index)?;
-        self.encoder.ret();
+        self.emit_return();
         self.finish_with_literals()
     }
 
     fn finish_assignment_pass_function(mut self) -> JitResult<Vec<u8>> {
-        self.encoder.ret();
+        self.emit_return();
         self.finish_with_literals()
+    }
+
+    fn emit_prologue(&mut self) {
+        self.encoder.push_r64(Gpr::R12);
+        self.encoder.push_r64(Gpr::R13);
+        self.encoder
+            .mov_r64_r64(saved_ctx_arg_reg(), entry_ctx_arg_reg());
+        self.encoder
+            .mov_r64_r64(saved_vars_arg_reg(), entry_vars_arg_reg());
+    }
+
+    fn emit_return(&mut self) {
+        if self.uses_helper_calls {
+            self.encoder.pop_r64(Gpr::R13);
+            self.encoder.pop_r64(Gpr::R12);
+        }
+        self.encoder.ret();
+    }
+
+    fn ctx_arg_reg(&self) -> Gpr {
+        if self.uses_helper_calls {
+            saved_ctx_arg_reg()
+        } else {
+            entry_ctx_arg_reg()
+        }
+    }
+
+    fn vars_arg_reg(&self) -> Gpr {
+        if self.uses_helper_calls {
+            saved_vars_arg_reg()
+        } else {
+            entry_vars_arg_reg()
+        }
     }
 
     fn emit_assignment_store(&mut self, var_index: usize) -> JitResult<()> {
@@ -196,7 +249,7 @@ impl FunctionCompiler {
             });
         }
         self.encoder.movsd_m64_base_disp32_xmm(
-            host_vars_arg_reg(),
+            self.vars_arg_reg(),
             byte_disp(var_index)?,
             Xmm::Xmm0,
         );
@@ -292,6 +345,51 @@ impl FunctionCompiler {
         let target = XMM_STACK[self.depth - 1];
         self.encoder.sqrtsd_xmm_xmm(target, target);
         Ok(())
+    }
+
+    fn emit_unary_math(&mut self, op: UnaryMathOp) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "unary math requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_unary_helper_call(target, unary_math_helper(op));
+        Ok(())
+    }
+
+    fn emit_unary_helper_call(&mut self, target: Xmm, helper: UnaryHelper) {
+        debug_assert!(self.uses_helper_calls);
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+            }
+        }
+
+        if target != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
+        }
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
     fn emit_compare(&mut self, op: CompareOp) -> JitResult<()> {
@@ -496,7 +594,7 @@ impl FunctionCompiler {
     fn emit_thermal_voltage_load(&mut self) -> JitResult<()> {
         let dst = self.push_register()?;
         self.encoder
-            .movsd_xmm_m64_base_disp32(dst, host_ctx_arg_reg(), TEMPERATURE_OFFSET);
+            .movsd_xmm_m64_base_disp32(dst, self.ctx_arg_reg(), TEMPERATURE_OFFSET);
         self.emit_literal_binary_op(dst, K_BOLTZMANN, BinaryOp::Mul);
         self.emit_literal_binary_op(dst, Q_ELECTRON, BinaryOp::Div);
         Ok(())
@@ -529,13 +627,13 @@ impl FunctionCompiler {
 
     fn emit_context_pointer_load(&mut self, ctx_field_offset: i32) {
         self.encoder
-            .mov_r64_m64_base_disp32(Gpr::Rax, host_ctx_arg_reg(), ctx_field_offset);
+            .mov_r64_m64_base_disp32(Gpr::Rax, self.ctx_arg_reg(), ctx_field_offset);
     }
 
     fn emit_context_f64_load(&mut self, ctx_field_offset: i32) -> JitResult<()> {
         let dst = self.push_register()?;
         self.encoder
-            .movsd_xmm_m64_base_disp32(dst, host_ctx_arg_reg(), ctx_field_offset);
+            .movsd_xmm_m64_base_disp32(dst, self.ctx_arg_reg(), ctx_field_offset);
         Ok(())
     }
 
@@ -611,6 +709,30 @@ enum BinaryOp {
     Div,
 }
 
+type UnaryHelper = extern "C" fn(f64) -> f64;
+
+fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
+    match op {
+        UnaryMathOp::Exp => rspice_exp,
+        UnaryMathOp::Limexp => rspice_limexp,
+    }
+}
+
+fn call_spill_disp(index: usize) -> i32 {
+    CALL_SHADOW_BYTES + (index * WORD_BYTES) as i32
+}
+
+fn call_result_disp() -> i32 {
+    call_spill_disp(CALL_RESULT_SLOT)
+}
+
+fn program_uses_helper_calls(program: &NativeProgram) -> bool {
+    program
+        .ops()
+        .iter()
+        .any(|op| matches!(op, NativeOp::UnaryMath(_)))
+}
+
 fn byte_disp(index: usize) -> JitResult<i32> {
     let byte_offset = index
         .checked_mul(WORD_BYTES)
@@ -639,23 +761,31 @@ fn register_allocation_error(detail: String) -> JitError {
     }
 }
 
+fn saved_ctx_arg_reg() -> Gpr {
+    Gpr::R12
+}
+
+fn saved_vars_arg_reg() -> Gpr {
+    Gpr::R13
+}
+
 #[cfg(windows)]
-fn host_ctx_arg_reg() -> Gpr {
+fn entry_ctx_arg_reg() -> Gpr {
     Gpr::Rcx
 }
 
 #[cfg(windows)]
-fn host_vars_arg_reg() -> Gpr {
+fn entry_vars_arg_reg() -> Gpr {
     Gpr::Rdx
 }
 
 #[cfg(not(windows))]
-fn host_ctx_arg_reg() -> Gpr {
+fn entry_ctx_arg_reg() -> Gpr {
     Gpr::Rdi
 }
 
 #[cfg(not(windows))]
-fn host_vars_arg_reg() -> Gpr {
+fn entry_vars_arg_reg() -> Gpr {
     Gpr::Rsi
 }
 
@@ -694,6 +824,34 @@ mod tests {
         let ctx = eval_context(&params, &voltages, &[], &[]);
 
         assert_eq!(f(&ctx, vars.as_ptr()), 10.0);
+    }
+
+    #[test]
+    fn generated_value_leaf_without_helper_call_omits_saved_arg_prologue() {
+        let program = native_program(EntryKind::StampValue, vec![Instruction::PushConst(1.0)], 0);
+
+        let bytes = compile_value_function(&program).expect("compile literal value function");
+
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "helper-free native leaves should not pay callee-saved prologue cost"
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_with_helper_call_emits_saved_arg_prologue() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushConst(1.0), Instruction::Exp],
+            0,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile helper-call value function");
+
+        assert!(
+            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "helper-call native leaves must preserve context and vars pointers"
+        );
     }
 
     #[test]
@@ -1144,6 +1302,91 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_calls_exp_limexp_helpers_and_preserves_state() {
+        let cases = [
+            ("exp", Instruction::Exp, 0.5, runtime_exp(0.5)),
+            (
+                "limexp-linear",
+                Instruction::Limexp,
+                45.0,
+                runtime_limexp(45.0),
+            ),
+            (
+                "limexp-negative",
+                Instruction::Limexp,
+                -50.0,
+                runtime_limexp(-50.0),
+            ),
+        ];
+
+        for (name, op, input, unary_expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(input),
+                    op,
+                    Instruction::PushVariable(0),
+                    Instruction::Add,
+                    Instruction::PushTime,
+                    Instruction::Add,
+                    Instruction::Add,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile helper-call leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate helper-call leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = 310.0;
+            ctx.time = 2.0;
+            let vars = [7.0_f64];
+
+            assert_eq!(
+                f(&ctx, vars.as_ptr()).to_bits(),
+                (310.0 + unary_expected + 7.0 + 2.0).to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_spills_max_depth_across_helper_call() {
+        let input = 0.25;
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushConst(5.0),
+                Instruction::PushConst(input),
+                Instruction::Exp,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile max-depth helper-call leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate max-depth helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (1.0 + 2.0 + 3.0 + 4.0 + 5.0 + runtime_exp(input)).to_bits()
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_runs_from_nonzero_concatenated_image_offset() {
         let program = native_program(
             EntryKind::StampValue,
@@ -1299,6 +1542,23 @@ mod tests {
 
     fn runtime_max(left: f64, right: f64) -> f64 {
         std::hint::black_box(left).max(std::hint::black_box(right))
+    }
+
+    fn runtime_exp(value: f64) -> f64 {
+        std::hint::black_box(value).exp()
+    }
+
+    fn runtime_limexp(value: f64) -> f64 {
+        const LIMIT: f64 = 40.0;
+        let value = std::hint::black_box(value);
+        if value > LIMIT {
+            let exp_limit = LIMIT.exp();
+            exp_limit * (1.0 + value - LIMIT)
+        } else if value < -LIMIT {
+            (-LIMIT).exp()
+        } else {
+            value.exp()
+        }
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {
