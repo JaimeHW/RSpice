@@ -27561,6 +27561,22 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     #[inline]
     pub(crate) fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }
     #[inline]
+    pub(crate) fn ln_offset_div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64, offset: f64) -> Self {
+        let mut value = left;
+        let left_value = value.value * left_scale;
+        let right_value = right.value * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        let raw = quotient + offset;
+        let output_derivative_scale = 1.0 / raw;
+        let left_derivative_scale = left_scale * reciprocal * output_derivative_scale;
+        let right_derivative_scale = -quotient * reciprocal * right_scale * output_derivative_scale;
+        value.value = raw.ln();
+        for index in 0..NODE_COUNT { value.dn[index] = value.dn[index] * left_derivative_scale + right.dn[index] * right_derivative_scale; }
+        for index in 0..BRANCH_COUNT { value.db[index] = value.db[index] * left_derivative_scale + right.db[index] * right_derivative_scale; }
+        value
+    }
+    #[inline]
     pub(crate) fn ln_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; Self::unary_intrinsic(arg, raw.ln(), scale / raw) }
     #[inline]
     pub(crate) fn ln_one_plus_exp_raw(raw: f64) -> (f64, f64) { if raw > 0.0 { (raw + (-raw).exp().ln_1p(), 1.0 / (1.0 + (-raw).exp())) } else { let exp = raw.exp(); (exp.ln_1p(), exp / (1.0 + exp)) } }
