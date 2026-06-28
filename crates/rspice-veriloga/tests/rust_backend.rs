@@ -1107,6 +1107,91 @@ fn rust_backend_inlines_simple_derivative_leaf_locals() {
 }
 
 #[test]
+fn rust_backend_reuses_duplicate_derivative_rhs_inside_stamp_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_repeated_product_equation_source(16))
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile repeated product equation fixture");
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    let mut rhs_counts = std::collections::HashMap::<&str, usize>::new();
+    for line in helper.lines() {
+        let line = line.trim();
+        if !line.starts_with("let ") || !line.contains("_d_n") || !line.ends_with(';') {
+            continue;
+        }
+        let Some((_, rhs)) = line.split_once(": f64 = ") else {
+            continue;
+        };
+        let rhs = rhs.trim_end_matches(';');
+        if rhs.contains("s.dn[0][0]") && rhs.contains("s.v[1]") {
+            *rhs_counts.entry(rhs).or_default() += 1;
+        }
+    }
+    let duplicate_derivative_rhs = rhs_counts
+        .iter()
+        .filter(|(_, count)| **count > 1)
+        .map(|(rhs, count)| format!("{count}x {rhs}"))
+        .collect::<Vec<_>>();
+
+    assert!(
+        duplicate_derivative_rhs.is_empty(),
+        "duplicate derivative RHS values inside a stamp helper should be computed once and reused:\n{}\n\n{helper}",
+        duplicate_derivative_rhs.join("\n")
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_hoists_duplicate_safe_derivative_rhs_from_guarded_stamp_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&chunked_guarded_repeated_product_equation_source(16))
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile guarded repeated product equation fixture");
+    let helper = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp_blocks_0.rs")
+        .expect("stamp helper file")
+        .contents
+        .as_str();
+
+    let product_derivative_rhs_count = helper
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line.starts_with("let ")
+                && line.contains("_d_n")
+                && line.contains(": f64 = ")
+                && line.contains("s.dn[0][0] * s.v[1]")
+                && line.contains("s.v[0] * s.dn[1][0]")
+        })
+        .count();
+
+    assert!(
+        product_derivative_rhs_count <= 1,
+        "safe duplicate derivative RHS values should be hoisted out of repeated guarded helper scopes:\n{helper}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_named_branch_current_probes() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(named_branch_current_probe())
@@ -16825,6 +16910,56 @@ module chunked_equations(p, n);
     );
     for index in 0..count {
         source.push_str(&format!("        I(p, n) <+ v * {}.0;\n", index + 1));
+    }
+    source.push_str(
+        r#"    end
+endmodule
+"#,
+    );
+    source
+}
+
+fn chunked_repeated_product_equation_source(count: usize) -> String {
+    assert!(count > 8);
+    let mut source = String::from(
+        r#"
+module chunked_repeated_product_equations(p, n, a, b);
+    inout p, n, a, b;
+    electrical p, n, a, b;
+    real x;
+    real y;
+    analog begin
+        x = V(p, n);
+        y = V(a, b);
+"#,
+    );
+    for _ in 0..count {
+        source.push_str("        I(p, n) <+ x * y;\n");
+    }
+    source.push_str(
+        r#"    end
+endmodule
+"#,
+    );
+    source
+}
+
+fn chunked_guarded_repeated_product_equation_source(count: usize) -> String {
+    assert!(count > 8);
+    let mut source = String::from(
+        r#"
+module chunked_guarded_repeated_product_equations(p, n, a, b);
+    inout p, n, a, b;
+    electrical p, n, a, b;
+    real x;
+    real y;
+    analog begin
+        x = V(p, n);
+        y = V(a, b);
+"#,
+    );
+    for _ in 0..count {
+        source.push_str("        I(p, n) <+ (V(p, n) > 0.0) ? (x * y) : 0.0;\n");
     }
     source.push_str(
         r#"    end

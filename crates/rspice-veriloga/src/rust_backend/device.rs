@@ -439,6 +439,9 @@ fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
         helper.contents = compact_generated_stamp_surface(std::mem::take(&mut helper.contents));
         helper.contents =
             compact_generated_stamp_helper_surface(std::mem::take(&mut helper.contents));
+        helper.contents = reuse_duplicate_derivative_locals_in_helper_methods(std::mem::take(
+            &mut helper.contents,
+        ));
     }
     files
 }
@@ -495,6 +498,82 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
         source = source.replace(from, to);
     }
     merge_adjacent_simple_if_blocks(cache_context_reads(source))
+}
+
+fn reuse_duplicate_derivative_locals_in_helper_methods(source: String) -> String {
+    let mut rewritten = String::with_capacity(source.len());
+    let mut method = String::new();
+    let mut in_method = false;
+    let mut method_depth = 0usize;
+    let mut saw_method_body = false;
+
+    for line in source.lines() {
+        if !in_method {
+            if line.starts_with("    pub(super) fn ") {
+                in_method = true;
+                method.clear();
+                method_depth = 0;
+                saw_method_body = false;
+            } else {
+                rewritten.push_str(line);
+                rewritten.push('\n');
+                continue;
+            }
+        }
+
+        method.push_str(line);
+        method.push('\n');
+
+        let previous_depth = method_depth;
+        method_depth = update_generated_helper_brace_depth(method_depth, line);
+        if method_depth > previous_depth {
+            saw_method_body = true;
+        }
+
+        if saw_method_body && method_depth == 0 {
+            rewritten.push_str(&reuse_duplicate_derivative_locals_in_helper_method(&method));
+            method.clear();
+            in_method = false;
+        }
+    }
+
+    if in_method {
+        rewritten.push_str(&method);
+    }
+
+    rewritten
+}
+
+fn reuse_duplicate_derivative_locals_in_helper_method(method: &str) -> String {
+    let lines = method.lines().collect::<Vec<_>>();
+    let Some(body_open_line) = lines.iter().position(|line| line.trim_end().ends_with('{')) else {
+        return method.to_string();
+    };
+    let Some(body_close_line) = lines.len().checked_sub(1) else {
+        return method.to_string();
+    };
+    if body_open_line >= body_close_line {
+        return method.to_string();
+    }
+
+    let mut body = String::new();
+    for line in &lines[body_open_line + 1..body_close_line] {
+        body.push_str(line);
+        body.push('\n');
+    }
+    let body = reuse_duplicate_derivative_locals_in_helper_block(&body);
+
+    let mut rewritten = String::with_capacity(method.len());
+    for line in &lines[..=body_open_line] {
+        rewritten.push_str(line);
+        rewritten.push('\n');
+    }
+    rewritten.push_str(&body);
+    for line in &lines[body_close_line..] {
+        rewritten.push_str(line);
+        rewritten.push('\n');
+    }
+    rewritten
 }
 
 fn compact_immediate_generated_ad_local_stores(source: String) -> String {
@@ -1916,9 +1995,136 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        compact_generated_stamp_surface, generate_scratch_operation_helpers,
-        render_runtime_support_module, should_cache_compact_condition,
+        compact_generated_stamp_surface, duplicate_hoistable_derivative_rhs,
+        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
+        render_runtime_support_module, reuse_duplicate_derivative_locals_in_helper_block,
+        should_cache_compact_condition,
     };
+
+    #[test]
+    fn recognizes_safe_duplicate_derivative_rhs_for_helper_hoisting() {
+        let rhs = "((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]))";
+        assert!(is_hoistable_generated_derivative_rhs(rhs));
+        assert!(is_hoistable_generated_derivative_rhs(
+            "(p.p0 * s.rdn[200][0])"
+        ));
+
+        let block = "\
+        let eq0_e5_d_n0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));\n\
+        let eq1_e13_d_n0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));\n";
+        assert_eq!(
+            duplicate_hoistable_derivative_rhs(block),
+            vec![rhs.to_string()]
+        );
+    }
+
+    #[test]
+    fn hoists_duplicate_derivatives_after_node_voltage_context_reads() {
+        let block = "\
+        let nv0 = ctx.node_voltage(nodes[0]);\n\
+        let nv1 = ctx.node_voltage(nodes[1]);\n\
+        let (eq0_d_n0,) = {\n\
+    if s.b[0] {\n\
+        let eq0_e5_d_n0: f64 = (s.dn[0][0] * (nv0 - nv1));\n\
+        (eq0_e5_d_n0,)\n\
+    } else {\n\
+        (0.0,)\n\
+    }\n\
+};\n\
+        let (eq1_d_n0,) = {\n\
+    if s.b[0] {\n\
+        let eq1_e13_d_n0: f64 = (s.dn[0][0] * (nv0 - nv1));\n\
+        (eq1_e13_d_n0,)\n\
+    } else {\n\
+        (0.0,)\n\
+    }\n\
+};\n";
+        let rewritten = reuse_duplicate_derivative_locals_in_helper_block(block);
+
+        let nv1_offset = rewritten.find("let nv1 =").expect("nv1 context read");
+        let alias_offset = rewritten
+            .find("let __rspice_deriv_cse_0: f64 = (s.dn[0][0] * (nv0 - nv1));")
+            .expect("node-voltage dependent CSE alias");
+        assert!(
+            nv1_offset < alias_offset,
+            "CSE aliases that depend on node-voltage locals must be emitted after context reads:\n{rewritten}"
+        );
+        assert!(!rewritten.contains("let eq0_e5_d_n0"), "{rewritten}");
+        assert!(!rewritten.contains("let eq1_e13_d_n0"), "{rewritten}");
+        assert!(rewritten.contains("(__rspice_deriv_cse_0,)"), "{rewritten}");
+    }
+
+    #[test]
+    fn hoists_safe_duplicate_derivatives_across_guarded_helper_scopes() {
+        let block = "\
+        let (eq0_d_n0,) = {\n\
+    if s.b[0] {\n\
+        let eq0_e5_d_n0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));\n\
+        (eq0_e5_d_n0,)\n\
+    } else {\n\
+        (0.0,)\n\
+    }\n\
+};\n\
+        let (eq1_d_n0,) = {\n\
+    if s.b[0] {\n\
+        let eq1_e13_d_n0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));\n\
+        (eq1_e13_d_n0,)\n\
+    } else {\n\
+        (0.0,)\n\
+    }\n\
+};\n";
+        let rewritten = reuse_duplicate_derivative_locals_in_helper_block(block);
+
+        assert!(
+            rewritten.contains(
+                "let __rspice_deriv_cse_0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));"
+            ),
+            "{rewritten}"
+        );
+        assert!(!rewritten.contains("let eq0_e5_d_n0"), "{rewritten}");
+        assert!(!rewritten.contains("let eq1_e13_d_n0"), "{rewritten}");
+        assert!(rewritten.contains("(__rspice_deriv_cse_0,)"), "{rewritten}");
+    }
+
+    #[test]
+    fn cascades_duplicate_derivative_hoisting_through_new_cse_aliases() {
+        let block = "\
+        let (eq0_d_n0,) = {\n\
+    if s.b[0] {\n\
+        let eq0_e5_d_n0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));\n\
+        let eq0_e6_d_n0: f64 = (eq0_e5_d_n0 * p.p1);\n\
+        (eq0_e6_d_n0,)\n\
+    } else {\n\
+        (0.0,)\n\
+    }\n\
+};\n\
+        let (eq1_d_n0,) = {\n\
+    if s.b[0] {\n\
+        let eq1_e13_d_n0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));\n\
+        let eq1_e14_d_n0: f64 = (eq1_e13_d_n0 * p.p1);\n\
+        (eq1_e14_d_n0,)\n\
+    } else {\n\
+        (0.0,)\n\
+    }\n\
+};\n";
+        let rewritten = reuse_duplicate_derivative_locals_in_helper_block(block);
+
+        assert!(
+            rewritten.contains(
+                "let __rspice_deriv_cse_0: f64 = ((s.dn[0][0] * s.v[1]) + (s.v[0] * s.dn[1][0]));"
+            ),
+            "{rewritten}"
+        );
+        assert!(
+            rewritten.contains("let __rspice_deriv_cse_1: f64 = (__rspice_deriv_cse_0 * p.p1);"),
+            "{rewritten}"
+        );
+        assert!(!rewritten.contains("let eq0_e5_d_n0"), "{rewritten}");
+        assert!(!rewritten.contains("let eq0_e6_d_n0"), "{rewritten}");
+        assert!(!rewritten.contains("let eq1_e13_d_n0"), "{rewritten}");
+        assert!(!rewritten.contains("let eq1_e14_d_n0"), "{rewritten}");
+        assert!(rewritten.contains("(__rspice_deriv_cse_1,)"), "{rewritten}");
+    }
 
     #[test]
     fn caches_only_expensive_compact_condition_shapes() {
@@ -19541,6 +19747,332 @@ fn split_marked_equation_chunks(
     );
 
     *out = rewritten;
+}
+
+fn reuse_duplicate_derivative_locals_in_helper_block(block: &str) -> String {
+    let mut rewritten = block.to_string();
+    for _ in 0..64 {
+        let next = reuse_duplicate_derivative_locals_in_helper_block_once(&rewritten);
+        if next == rewritten {
+            return rewritten;
+        }
+        rewritten = next;
+    }
+    rewritten
+}
+
+fn reuse_duplicate_derivative_locals_in_helper_block_once(block: &str) -> String {
+    let hoisted_rhs = duplicate_hoistable_derivative_rhs(block);
+    let next_alias_index = next_generated_derivative_cse_alias_index(block);
+    let hoisted_aliases = hoisted_rhs
+        .iter()
+        .enumerate()
+        .map(|(index, rhs)| {
+            (
+                rhs.clone(),
+                format!("__rspice_deriv_cse_{}", next_alias_index + index),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut rhs_aliases = HashMap::<String, String>::new();
+    let mut local_aliases = HashMap::<String, String>::new();
+    let mut rewritten = String::with_capacity(block.len());
+    let mut brace_depth = 0usize;
+    let mut inserted_hoisted_aliases = false;
+
+    for line in block.lines() {
+        let line = replace_generated_local_aliases(line, &local_aliases);
+        if !inserted_hoisted_aliases && !is_generated_helper_hoist_prefix_line(line.as_ref()) {
+            push_generated_derivative_cse_alias_assignments(
+                &mut rewritten,
+                &hoisted_rhs,
+                &hoisted_aliases,
+            );
+            inserted_hoisted_aliases = true;
+        }
+        let top_level = brace_depth == 0;
+        if let Some((local, rhs)) = parse_generated_f64_local_assignment(line.as_ref())
+            && is_generated_derivative_local(local)
+        {
+            let rhs_key = rhs.trim().to_string();
+            if let Some(alias) = hoisted_aliases.get(&rhs_key) {
+                local_aliases.insert(local.to_string(), alias.clone());
+                brace_depth = update_generated_helper_brace_depth(brace_depth, line.as_ref());
+                continue;
+            }
+            if top_level && is_reusable_generated_f64_rhs(rhs) {
+                if let Some(alias) = rhs_aliases.get(&rhs_key) {
+                    local_aliases.insert(local.to_string(), alias.clone());
+                    brace_depth = update_generated_helper_brace_depth(brace_depth, line.as_ref());
+                    continue;
+                }
+                rhs_aliases.insert(rhs_key, local.to_string());
+            }
+        }
+
+        brace_depth = update_generated_helper_brace_depth(brace_depth, line.as_ref());
+        rewritten.push_str(line.as_ref());
+        rewritten.push('\n');
+    }
+
+    if !inserted_hoisted_aliases {
+        push_generated_derivative_cse_alias_assignments(
+            &mut rewritten,
+            &hoisted_rhs,
+            &hoisted_aliases,
+        );
+    }
+
+    rewritten
+}
+
+fn push_generated_derivative_cse_alias_assignments(
+    out: &mut String,
+    hoisted_rhs: &[String],
+    hoisted_aliases: &HashMap<String, String>,
+) {
+    for rhs in hoisted_rhs {
+        let alias = hoisted_aliases
+            .get(rhs)
+            .expect("hoisted RHS must have an assigned alias");
+        out.push_str(&format!("        let {alias}: f64 = {rhs};\n"));
+    }
+}
+
+fn is_generated_derivative_cse_alias_assignment(line: &str) -> bool {
+    parse_generated_f64_local_assignment(line)
+        .map(|(local, _)| generated_derivative_cse_alias_index(local).is_some())
+        .unwrap_or(false)
+}
+
+fn is_generated_helper_hoist_prefix_line(line: &str) -> bool {
+    line.trim().is_empty()
+        || is_generated_derivative_cse_alias_assignment(line)
+        || is_generated_node_voltage_context_read(line)
+}
+
+fn is_generated_node_voltage_context_read(line: &str) -> bool {
+    let Some((local, rhs)) = parse_generated_local_assignment(line) else {
+        return false;
+    };
+    local.strip_prefix("nv").is_some_and(|suffix| {
+        !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+    }) && rhs.starts_with("ctx.node_voltage(")
+}
+
+fn next_generated_derivative_cse_alias_index(block: &str) -> usize {
+    block
+        .lines()
+        .filter_map(|line| {
+            let (local, _) = parse_generated_f64_local_assignment(line)?;
+            generated_derivative_cse_alias_index(local)
+        })
+        .max()
+        .map(|index| index + 1)
+        .unwrap_or(0)
+}
+
+fn generated_derivative_cse_alias_index(local: &str) -> Option<usize> {
+    let suffix = local.strip_prefix("__rspice_deriv_cse_")?;
+    suffix.parse().ok()
+}
+
+fn duplicate_hoistable_derivative_rhs(block: &str) -> Vec<String> {
+    let mut counts = HashMap::<String, usize>::new();
+    let mut order = Vec::<String>::new();
+
+    for line in block.lines() {
+        let Some((local, rhs)) = parse_generated_f64_local_assignment(line) else {
+            continue;
+        };
+        if !is_generated_derivative_local(local) || !is_hoistable_generated_derivative_rhs(rhs) {
+            continue;
+        }
+        let rhs = rhs.trim().to_string();
+        if !counts.contains_key(&rhs) {
+            order.push(rhs.clone());
+        }
+        *counts.entry(rhs).or_default() += 1;
+    }
+
+    order
+        .into_iter()
+        .filter(|rhs| counts.get(rhs).copied().unwrap_or(0) > 1)
+        .collect()
+}
+
+fn parse_generated_f64_local_assignment(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+    let rest = line.strip_prefix("let ")?;
+    let (local, rhs) = rest.split_once(": f64 = ")?;
+    if !is_rust_identifier(local) {
+        return None;
+    }
+    let rhs = rhs.strip_suffix(';')?.trim();
+    Some((local, rhs))
+}
+
+fn parse_generated_local_assignment(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+    let rest = line.strip_prefix("let ")?;
+    let (local, rhs) = rest.split_once(" = ")?;
+    if !is_rust_identifier(local) {
+        return None;
+    }
+    let rhs = rhs.strip_suffix(';')?.trim();
+    Some((local, rhs))
+}
+
+fn is_generated_derivative_local(local: &str) -> bool {
+    local.contains("_d_n") || local.contains("_d_b")
+}
+
+fn is_reusable_generated_f64_rhs(rhs: &str) -> bool {
+    let rhs = rhs.trim();
+    !rhs.is_empty()
+        && !rhs.contains('{')
+        && !rhs.contains('}')
+        && !rhs.contains(';')
+        && !rhs.contains("stamper")
+}
+
+fn is_hoistable_generated_derivative_rhs(rhs: &str) -> bool {
+    let rhs = rhs.trim();
+    if !is_reusable_generated_f64_rhs(rhs)
+        || rhs.contains('/')
+        || rhs.contains(',')
+        || rhs.contains("::")
+        || !rhs.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'_' | b'.' | b'[' | b']' | b'(' | b')' | b'+' | b'-' | b'*' | b' ' | b'\t'
+                )
+        })
+    {
+        return false;
+    }
+
+    let mut token_start = None;
+    for (index, ch) in rhs.char_indices() {
+        if is_rust_identifier_char(ch) {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+            continue;
+        }
+        if let Some(start) = token_start.take() {
+            let token = &rhs[start..index];
+            if !is_allowed_hoistable_derivative_token(token) {
+                return false;
+            }
+        }
+    }
+    if let Some(start) = token_start {
+        let token = &rhs[start..];
+        if !is_allowed_hoistable_derivative_token(token) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn is_allowed_hoistable_derivative_token(token: &str) -> bool {
+    if token.is_empty() || token.as_bytes()[0].is_ascii_digit() {
+        return true;
+    }
+    matches!(
+        token,
+        "s" | "scratch"
+            | "p"
+            | "params"
+            | "v"
+            | "b"
+            | "dn"
+            | "db"
+            | "rv"
+            | "rdn"
+            | "rdb"
+            | "ddt_scale"
+            | "idt_scale"
+            | "time"
+            | "timestep"
+            | "multiplicity"
+            | "LIMEXP_MAX"
+            | "THERMAL_VOLTAGE_PER_K"
+    ) || token.strip_prefix('p').is_some_and(|suffix| {
+        !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+    }) || token.strip_prefix("nv").is_some_and(|suffix| {
+        !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+    }) || generated_derivative_cse_alias_index(token).is_some()
+}
+
+fn update_generated_helper_brace_depth(mut depth: usize, line: &str) -> usize {
+    for byte in line.bytes() {
+        match byte {
+            b'{' => depth = depth.saturating_add(1),
+            b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth
+}
+
+fn replace_generated_local_aliases<'a>(
+    line: &'a str,
+    aliases: &HashMap<String, String>,
+) -> Cow<'a, str> {
+    if aliases.is_empty() {
+        return Cow::Borrowed(line);
+    }
+
+    let mut rewritten = String::with_capacity(line.len());
+    let mut changed = false;
+    let mut token_start = None;
+    for (index, ch) in line.char_indices() {
+        if is_rust_identifier_char(ch) {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+            continue;
+        }
+
+        if let Some(start) = token_start.take() {
+            changed |= push_alias_rewritten_segment(line, start, index, aliases, &mut rewritten);
+        }
+        rewritten.push(ch);
+    }
+    if let Some(start) = token_start {
+        changed |= push_alias_rewritten_segment(line, start, line.len(), aliases, &mut rewritten);
+    }
+
+    if changed {
+        Cow::Owned(rewritten)
+    } else {
+        Cow::Borrowed(line)
+    }
+}
+
+fn push_alias_rewritten_segment(
+    line: &str,
+    start: usize,
+    end: usize,
+    aliases: &HashMap<String, String>,
+    rewritten: &mut String,
+) -> bool {
+    let token = &line[start..end];
+    if let Some(alias) = aliases.get(token) {
+        rewritten.push_str(alias);
+        true
+    } else {
+        rewritten.push_str(token);
+        false
+    }
+}
+
+fn is_rust_identifier_char(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn emit_stamp_helper_method(
