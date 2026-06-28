@@ -98,6 +98,19 @@ impl X64Encoder {
         self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
     }
 
+    pub(crate) fn movzx_r32_m8_base_disp32(&mut self, dst: Gpr, base: Gpr, disp: i32) {
+        self.emit_rex(false, dst.code(), 0, base.code());
+        self.emit_all(&[0x0F, 0xB6]);
+        self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
+    }
+
+    pub(crate) fn cvtsi2sd_xmm_r32(&mut self, dst: Xmm, src: Gpr) {
+        self.emit_u8(0xF2);
+        self.emit_rex(false, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, 0x2A]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
     pub(crate) fn movsd_m64_base_disp32_xmm(&mut self, base: Gpr, disp: i32, src: Xmm) {
         self.emit_u8(0xF2);
         self.emit_rex(false, src.code(), 0, base.code());
@@ -196,7 +209,7 @@ mod tests {
     use super::{Gpr, X64Encoder, Xmm};
 
     #[cfg(all(feature = "native", target_arch = "x86_64"))]
-    use crate::native::{EvalContext, runtime::ExecutableMemory};
+    use crate::native::{runtime::ExecutableMemory, EvalContext};
 
     #[test]
     fn encodes_mov_eax_imm32_ret() {
@@ -236,9 +249,7 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [
-                0x48, 0x8B, 0x81, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
-            ]
+            [0x48, 0x8B, 0x81, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,]
         );
     }
 
@@ -251,9 +262,19 @@ mod tests {
 
         assert_eq!(
             encoder.into_bytes(),
-            [
-                0x48, 0x8B, 0x87, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,
-            ]
+            [0x48, 0x8B, 0x87, 16, 0, 0, 0, 0xF2, 0x0F, 0x10, 0x80, 24, 0, 0, 0, 0xC3,]
+        );
+    }
+
+    #[test]
+    fn encodes_u8_flag_load_and_f64_conversion() {
+        let mut encoder = X64Encoder::new();
+        encoder.movzx_r32_m8_base_disp32(Gpr::R10, Gpr::Rax, 8);
+        encoder.cvtsi2sd_xmm_r32(Xmm::Xmm0, Gpr::R10);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [0x44, 0x0F, 0xB6, 0x90, 8, 0, 0, 0, 0xF2, 0x41, 0x0F, 0x2A, 0xC2,]
         );
     }
 

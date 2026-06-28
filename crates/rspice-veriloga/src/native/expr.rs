@@ -22,6 +22,8 @@ pub(crate) enum VoltageNode {
 pub(crate) enum NativeOp {
     Const(f64),
     LoadParam(usize),
+    LoadParamGiven(usize),
+    LoadPortConnected(usize),
     LoadVoltage { pos: VoltageNode, neg: VoltageNode },
     LoadInternalVoltage(usize),
     LoadVariable(usize),
@@ -63,6 +65,14 @@ impl NativeProgram {
                 }
                 Instruction::PushParam(index) => {
                     ops.push(NativeOp::LoadParam(*index));
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushParamGiven(index) => {
+                    ops.push(NativeOp::LoadParamGiven(*index));
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushPortConnected(index) => {
+                    ops.push(NativeOp::LoadPortConnected(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushVoltage(pos, neg) => {

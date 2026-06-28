@@ -110,6 +110,24 @@ endmodule
     )
 }
 
+fn flag_context_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_context_flags(p, n, opt);
+    inout p, n, opt;
+    electrical p, n, opt;
+    parameter real rknob = 2.0 from (0:inf);
+    real gain;
+    analog begin
+        gain = ($param_given(rknob) + $port_connected(opt)) * 0.5;
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
 fn runtime_loop_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -332,6 +350,27 @@ fn native_device_executes_scalar_simulator_context_reads() {
         "currents: {currents:?}"
     );
     assert!((device.variable("gain").unwrap() - 5.01).abs() < 1e-12);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_param_given_and_port_connected_reads() {
+    let model = flag_context_model();
+
+    let mut omitted = VerilogADevice::try_new("FLG1", model.clone(), &[1, 0])
+        .expect("flag model uses native JIT");
+    omitted.update_voltages(&[2.0]);
+    assert_eq!(omitted.try_evaluate().unwrap()[0], 0.0);
+    assert_eq!(omitted.variable("gain"), Some(0.0));
+
+    let mut connected =
+        VerilogADevice::try_new("FLG2", model, &[1, 0, 0]).expect("flag model uses native JIT");
+    assert!(connected.set_parameter("rknob", 2.0));
+    connected.update_voltages(&[2.0]);
+
+    let currents = connected.try_evaluate().unwrap();
+    assert!((currents[0] - 2.0).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(connected.variable("gain"), Some(1.0));
 }
 
 #[cfg(target_arch = "x86_64")]
