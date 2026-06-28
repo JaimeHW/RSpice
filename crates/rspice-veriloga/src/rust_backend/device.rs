@@ -5253,6 +5253,22 @@ fn stamp() {
             ),
             "{sqrt_square_add}"
         );
+
+        let mul3_lhs = helper_body(&support, "fn store_mul3_lhs(");
+        assert!(
+            !mul3_lhs.contains("_node_derivatives = self.node_derivatives"),
+            "{mul3_lhs}"
+        );
+        assert!(
+            !mul3_lhs.contains("_branch_derivatives = self.branch_derivatives"),
+            "{mul3_lhs}"
+        );
+        assert!(
+            mul3_lhs.contains(
+                "let product_derivative = self.node_derivatives[left][axis] * middle_value + left_value * self.node_derivatives[middle][axis]; self.node_derivatives[index][axis] = product_derivative * right_value + product_value * self.node_derivatives[right][axis];"
+            ),
+            "{mul3_lhs}"
+        );
     }
 
     #[test]
@@ -14625,16 +14641,10 @@ fn generate_scratch_operation_helpers() -> String {
     "        let left_value = self.values[left];",
     "        let middle_value = self.values[middle];",
     "        let right_value = self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let middle_node_derivatives = self.node_derivatives[middle];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let middle_branch_derivatives = self.branch_derivatives[middle];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
     "        let product_value = left_value * middle_value;",
     "        self.values[index] = product_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = left_node_derivatives[axis] * middle_value + left_value * middle_node_derivatives[axis]; self.node_derivatives[index][axis] = product_derivative * right_value + product_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left_branch_derivatives[axis] * middle_value + left_value * middle_branch_derivatives[axis]; self.branch_derivatives[index][axis] = product_derivative * right_value + product_value * right_branch_derivatives[axis]; }",
+    "        for axis in 0..Instance::NODE_COUNT { let product_derivative = self.node_derivatives[left][axis] * middle_value + left_value * self.node_derivatives[middle][axis]; self.node_derivatives[index][axis] = product_derivative * right_value + product_value * self.node_derivatives[right][axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let product_derivative = self.branch_derivatives[left][axis] * middle_value + left_value * self.branch_derivatives[middle][axis]; self.branch_derivatives[index][axis] = product_derivative * right_value + product_value * self.branch_derivatives[right][axis]; }",
     "    }",
     "",
     "    #[inline]",
