@@ -4027,19 +4027,13 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let nested_right_value = value_scalar - value_value * value_scale;
         let nested_value = value_left_value * nested_right_value * value_output_scale;
         let right_value = scalar - nested_value;
-        let left_dn = self.dn[left];
-        let value_left_dn = self.dn[value_left];
-        let value_dn = self.dn[value];
-        let left_db = self.db[left];
-        let value_left_db = self.db[value_left];
-        let value_db = self.db[value];
         let scaled_left_value = left_value * output_scale;
         let scaled_right_value = right_value * output_scale;
         let value_left_derivative_scale = nested_right_value * value_output_scale;
         let value_derivative_scale = value_left_value * value_scale * value_output_scale;
         self.v[index] = left_value * scaled_right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * scaled_right_value - scaled_left_value * (value_left_dn[axis] * value_left_derivative_scale - value_dn[axis] * value_derivative_scale); }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * scaled_right_value - scaled_left_value * (value_left_db[axis] * value_left_derivative_scale - value_db[axis] * value_derivative_scale); }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * scaled_right_value - scaled_left_value * (self.dn[value_left][axis] * value_left_derivative_scale - self.dn[value][axis] * value_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * scaled_right_value - scaled_left_value * (self.db[value_left][axis] * value_left_derivative_scale - self.db[value][axis] * value_derivative_scale); }
     }
 
     #[inline]
@@ -18228,19 +18222,13 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let nested_right_value = value_scalar - value_value * value_scale;
         let nested_value = value_left_value * nested_right_value * value_output_scale;
         let right_value = scalar - nested_value;
-        let left_dn = self.dn[left];
-        let value_left_dn = self.dn[value_left];
-        let value_dn = self.dn[value];
-        let left_db = self.db[left];
-        let value_left_db = self.db[value_left];
-        let value_db = self.db[value];
         let scaled_left_value = left_value * output_scale;
         let scaled_right_value = right_value * output_scale;
         let value_left_derivative_scale = nested_right_value * value_output_scale;
         let value_derivative_scale = value_left_value * value_scale * value_output_scale;
         self.v[index] = left_value * scaled_right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * scaled_right_value - scaled_left_value * (value_left_dn[axis] * value_left_derivative_scale - value_dn[axis] * value_derivative_scale); }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * scaled_right_value - scaled_left_value * (value_left_db[axis] * value_left_derivative_scale - value_db[axis] * value_derivative_scale); }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * scaled_right_value - scaled_left_value * (self.dn[value_left][axis] * value_left_derivative_scale - self.dn[value][axis] * value_derivative_scale); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * scaled_right_value - scaled_left_value * (self.db[value_left][axis] * value_left_derivative_scale - self.db[value][axis] * value_derivative_scale); }
     }
 
     #[inline]
