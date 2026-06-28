@@ -395,6 +395,105 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()), -6.25);
     }
 
+    #[test]
+    fn generated_value_leaf_handles_internal_branch_sub_and_neg() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushInternalVoltage(1),
+                Instruction::PushBranchCurrent(0),
+                Instruction::Sub,
+                Instruction::Neg,
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile negated internal expression");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate negated internal leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let internal_voltages = [0.0_f64, 9.0_f64];
+        let branch_unknowns = [4.0_f64];
+        let ctx = eval_context(&[], &[], &internal_voltages, &branch_unknowns);
+
+        assert_eq!(f(&ctx, std::ptr::null()), -5.0);
+    }
+
+    #[test]
+    fn generated_value_leaf_runs_from_nonzero_concatenated_image_offset() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(12.0),
+                Instruction::PushConst(0.5),
+                Instruction::Add,
+            ],
+            0,
+        );
+        let function = compile_value_function(&program).expect("compile literal value function");
+        let prefix = [0xC3_u8];
+        let mut image = prefix.to_vec();
+        image.extend_from_slice(&function);
+
+        let memory = ExecutableMemory::allocate(&image).expect("allocate concatenated image");
+        let entry = memory
+            .ptr_at(prefix.len())
+            .expect("entry point inside concatenated image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()), 12.5);
+    }
+
+    #[test]
+    fn rejects_variable_index_that_exceeds_disp32_range() {
+        let too_large_index = (i32::MAX as usize / std::mem::size_of::<f64>()) + 1;
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushVariable(too_large_index)],
+            0,
+        );
+
+        let error = compile_value_function(&program)
+            .expect_err("large variable index must not truncate displacement");
+
+        assert!(matches!(error, crate::native::JitError::Encoding { .. }));
+        assert!(error.to_string().contains("disp32"));
+    }
+
+    #[test]
+    fn rejects_neg_when_no_scratch_xmm_register_is_available() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushConst(5.0),
+                Instruction::PushConst(6.0),
+                Instruction::Neg,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            0,
+        );
+
+        let error = compile_value_function(&program)
+            .expect_err("neg at full stack depth must require scratch register");
+
+        assert!(matches!(
+            error,
+            crate::native::JitError::RegisterAllocation { .. }
+        ));
+        assert!(error.to_string().contains("scratch"));
+    }
+
     fn native_program(
         entry_kind: EntryKind,
         instructions: Vec<Instruction>,
