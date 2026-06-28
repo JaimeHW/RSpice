@@ -138,7 +138,7 @@ impl VerilogADevice {
 
     /// Checked constructor for callers that can surface dependent-parameter
     /// default failures as diagnostics instead of panicking or accepting a
-    /// zero fallback.
+    /// zero default.
     pub fn try_new(
         name: impl Into<SmolStr>,
         model: impl Into<std::sync::Arc<CompiledModel>>,
@@ -816,7 +816,7 @@ impl VerilogADevice {
                     &mut vm,
                     &model_entry.program,
                     #[cfg(feature = "native")]
-                    native.jacobian_fn(program_idx, entry.jacobian_idx),
+                    native.reactive_jacobian_fn(program_idx, entry.jacobian_idx),
                 )?;
                 let deriv = match deriv {
                     v if v.is_finite() => v * scale,
@@ -917,10 +917,9 @@ impl VerilogADevice {
 
     /// Evaluate the device: compute branch current
     ///
-    /// Returns the current for each branch equation. Assignments and stamp
-    /// values run on native code where it compiled, the interpreter
-    /// everywhere else — both paths share the same variable storage and
-    /// activation guards.
+    /// Returns the current for each branch equation. Native builds require
+    /// complete assignment and stamp-value entry points; non-native builds run
+    /// the bytecode programs.
     pub fn evaluate(&mut self) -> Vec<f64> {
         self.try_evaluate().unwrap_or_else(|err| {
             panic!(
@@ -1460,6 +1459,29 @@ impl VerilogADevice {
 
     /// Checked noise-source evaluation path for callers that can surface
     /// runtime model diagnostics instead of panicking or dropping sources.
+    #[cfg(feature = "native")]
+    pub fn try_noise_sources(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<Vec<EvaluatedNoiseSource>, VmError> {
+        self.try_update_all_voltages(circuit_voltages)?;
+
+        if !self.model.noise_sources.is_empty() {
+            return Err(VmError::NativeJit(
+                crate::native::JitError::unsupported_native_coverage(
+                    self.model.name.clone(),
+                    "NoiseSources",
+                )
+                .to_string(),
+            ));
+        }
+
+        Ok(Vec::new())
+    }
+
+    /// Checked noise-source evaluation path for callers that can surface
+    /// runtime model diagnostics instead of panicking or dropping sources.
+    #[cfg(not(feature = "native"))]
     pub fn try_noise_sources(
         &mut self,
         circuit_voltages: &[f64],
@@ -1469,17 +1491,10 @@ impl VerilogADevice {
         let context = &mut self.context;
         let model = &self.model;
         let program_active = &self.program_active;
-        #[cfg(feature = "native")]
-        let native = self.native_model.as_ref();
 
         context.clear_currents();
         let mut vm = Vm::new(context);
-        Self::run_assignment_pass(
-            &mut vm,
-            model,
-            #[cfg(feature = "native")]
-            native,
-        )?;
+        Self::run_assignment_pass(&mut vm, model)?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -1499,7 +1514,8 @@ impl VerilogADevice {
             {
                 continue;
             }
-            let psd = vm.execute(&source.psd_program)?;
+            let psd_program = &source.psd_program;
+            let psd = vm.execute(psd_program)?;
             if !psd.is_finite() {
                 continue;
             }

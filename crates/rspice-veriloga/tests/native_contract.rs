@@ -6,6 +6,7 @@
 #![cfg(feature = "native")]
 
 use rspice_veriloga::device::VerilogADevice;
+use rspice_veriloga::native::compile_native;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 fn compile(source: &str) -> rspice_veriloga::CompiledModel {
@@ -50,6 +51,78 @@ fn assert_native_hard_fail_message(msg: &str) {
     assert!(
         msg.contains("no interpreter fallback"),
         "error must state the hard-fail contract, got: {msg}"
+    );
+}
+
+fn noise_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module noisy(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) * 1.0e-3 + white_noise(1.0e-18, "thermal");
+    end
+endmodule
+"#,
+    )
+}
+
+fn reactive_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module capjit(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1.0e-12;
+    analog begin
+        I(p, n) <+ ddt(c * V(p, n));
+    end
+endmodule
+"#,
+    )
+}
+
+#[test]
+fn native_compile_rejects_noise_sources_without_fallback() {
+    let model = noise_model();
+    assert!(
+        !model.noise_sources.is_empty(),
+        "fixture must contain a compiled noise source"
+    );
+
+    let err =
+        compile_native(&model).expect_err("native JIT must reject unsupported noise coverage");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("NoiseSources"),
+        "error must name unsupported noise coverage, got: {msg}"
+    );
+}
+
+#[test]
+fn native_compile_rejects_reactive_jacobians_without_fallback() {
+    let model = reactive_model();
+    assert!(
+        model
+            .stamp_programs
+            .iter()
+            .any(|stamp| !stamp.reactive_jacobians.is_empty()),
+        "fixture must contain compiled reactive Jacobians"
+    );
+
+    let err =
+        compile_native(&model).expect_err("native JIT must reject unsupported reactive coverage");
+    let msg = err.to_string();
+
+    assert_native_hard_fail_message(&msg);
+    assert!(
+        msg.contains("ReactiveJacobians"),
+        "error must name unsupported reactive coverage, got: {msg}"
     );
 }
 

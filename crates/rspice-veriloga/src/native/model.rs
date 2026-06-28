@@ -8,6 +8,7 @@ pub struct PlanStats {
     pub assignment_entry_points: usize,
     pub stamp_value_entry_points: usize,
     pub jacobian_entry_points: usize,
+    pub reactive_jacobian_entry_points: usize,
 }
 
 pub struct NativeModel {
@@ -15,6 +16,7 @@ pub struct NativeModel {
     assignment_fn: AssignmentFn,
     stamp_value_fns: Vec<StampFn>,
     jacobian_fns: Vec<Vec<StampFn>>,
+    reactive_jacobian_fns: Vec<Vec<StampFn>>,
     stats: PlanStats,
 }
 
@@ -34,25 +36,47 @@ unsafe impl Send for NativeModel {}
 unsafe impl Sync for NativeModel {}
 
 impl NativeModel {
-    pub fn new_for_test(
+    #[allow(dead_code)]
+    pub(crate) fn new(
         num_variables: usize,
         assignment_fn: AssignmentFn,
         stamp_value_fns: Vec<StampFn>,
         jacobian_fns: Vec<Vec<StampFn>>,
+        reactive_jacobian_fns: Vec<Vec<StampFn>>,
     ) -> Self {
         let jacobian_entry_points = jacobian_fns.iter().map(Vec::len).sum();
+        let reactive_jacobian_entry_points = reactive_jacobian_fns.iter().map(Vec::len).sum();
         let stats = PlanStats {
             assignment_entry_points: 1,
             stamp_value_entry_points: stamp_value_fns.len(),
             jacobian_entry_points,
+            reactive_jacobian_entry_points,
         };
         Self {
             num_variables,
             assignment_fn,
             stamp_value_fns,
             jacobian_fns,
+            reactive_jacobian_fns,
             stats,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test(
+        num_variables: usize,
+        assignment_fn: AssignmentFn,
+        stamp_value_fns: Vec<StampFn>,
+        jacobian_fns: Vec<Vec<StampFn>>,
+        reactive_jacobian_fns: Vec<Vec<StampFn>>,
+    ) -> Self {
+        Self::new(
+            num_variables,
+            assignment_fn,
+            stamp_value_fns,
+            jacobian_fns,
+            reactive_jacobian_fns,
+        )
     }
 
     pub fn run_assignments(&self, ctx: &EvalContext, vars: *mut f64) {
@@ -65,6 +89,10 @@ impl NativeModel {
 
     pub fn jacobian_fn(&self, stamp: usize, entry: usize) -> StampFn {
         self.jacobian_fns[stamp][entry]
+    }
+
+    pub fn reactive_jacobian_fn(&self, stamp: usize, entry: usize) -> StampFn {
+        self.reactive_jacobian_fns[stamp][entry]
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -88,13 +116,39 @@ mod tests {
     extern "C" fn stamp_one(_ctx: *const EvalContext, _vars: *const f64) -> f64 {
         1.0
     }
+    extern "C" fn stamp_two(_ctx: *const EvalContext, _vars: *const f64) -> f64 {
+        2.0
+    }
 
     #[test]
     fn native_model_entry_points_are_not_optional() {
-        let model =
-            NativeModel::new_for_test(2, assign_noop, vec![stamp_one], vec![vec![stamp_one]]);
+        let model = NativeModel::new_for_test(
+            2,
+            assign_noop,
+            vec![stamp_one],
+            vec![vec![stamp_one]],
+            vec![],
+        );
         assert_eq!(model.chunk_count(), 1);
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
+        assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 0);
+    }
+
+    #[test]
+    fn native_model_tracks_reactive_jacobian_entry_points_separately() {
+        let model = NativeModel::new(
+            2,
+            assign_noop,
+            vec![stamp_one],
+            vec![vec![stamp_one]],
+            vec![vec![stamp_two]],
+        );
+
+        assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 1);
+        assert_eq!(
+            model.reactive_jacobian_fn(0, 0)(std::ptr::null(), std::ptr::null()),
+            2.0
+        );
     }
 }
