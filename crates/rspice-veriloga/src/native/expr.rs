@@ -43,25 +43,9 @@ impl NativeProgram {
         model: impl Into<SmolStr>,
         entry_kind: EntryKind,
         program: &BytecodeProgram,
-    ) -> JitResult<Self> {
-        Self::from_bytecode_inner(model.into(), entry_kind, program, None)
-    }
-
-    pub(crate) fn from_bytecode_with_terminal_count(
-        model: impl Into<SmolStr>,
-        entry_kind: EntryKind,
-        program: &BytecodeProgram,
         terminal_count: usize,
     ) -> JitResult<Self> {
-        Self::from_bytecode_inner(model.into(), entry_kind, program, Some(terminal_count))
-    }
-
-    fn from_bytecode_inner(
-        model: SmolStr,
-        entry_kind: EntryKind,
-        program: &BytecodeProgram,
-        terminal_count: Option<usize>,
-    ) -> JitResult<Self> {
+        let model = model.into();
         let mut ops = Vec::with_capacity(program.instructions.len());
         let mut depth = 0usize;
         let mut max_stack_depth = 0usize;
@@ -225,19 +209,17 @@ fn stack_error(model: SmolStr, entry_kind: EntryKind, detail: String) -> JitErro
 fn lower_voltage_node(
     model: SmolStr,
     node: usize,
-    terminal_count: Option<usize>,
+    terminal_count: usize,
 ) -> JitResult<VoltageNode> {
     if node == usize::MAX {
         return Ok(VoltageNode::Ground);
     }
 
-    if let Some(terminal_count) = terminal_count {
-        if node >= terminal_count {
-            return Err(JitError::unsupported_program_op(
-                model,
-                format!("PushVoltage unified node {node}"),
-            ));
-        }
+    if node >= terminal_count {
+        return Err(JitError::unsupported_program_op(
+            model,
+            format!("PushVoltage unified node {node}"),
+        ));
     }
 
     Ok(VoltageNode::Terminal(node))
@@ -340,7 +322,7 @@ mod tests {
             ],
         };
 
-        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program)
+        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, 2)
             .expect("lower supported program");
 
         assert_eq!(
@@ -365,7 +347,7 @@ mod tests {
             instructions: vec![Instruction::PushVoltage(0, usize::MAX)],
         };
 
-        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program)
+        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, 1)
             .expect("lower terminal-to-ground voltage");
 
         assert_eq!(
@@ -384,7 +366,7 @@ mod tests {
             instructions: vec![Instruction::PushVoltage(usize::MAX, 0)],
         };
 
-        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program)
+        let lowered = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, 1)
             .expect("lower ground-to-terminal voltage");
 
         assert_eq!(
@@ -403,13 +385,8 @@ mod tests {
             instructions: vec![Instruction::PushVoltage(1, usize::MAX)],
         };
 
-        let error = NativeProgram::from_bytecode_with_terminal_count(
-            "res",
-            EntryKind::StampValue,
-            &program,
-            1,
-        )
-        .expect_err("unified internal node index is outside this native slice");
+        let error = NativeProgram::from_bytecode("res", EntryKind::StampValue, &program, 1)
+            .expect_err("unified internal node index is outside this native slice");
         let msg = error.to_string();
         assert!(msg.contains("PushVoltage"));
         assert!(msg.contains("native JIT"));
@@ -422,7 +399,7 @@ mod tests {
             instructions: vec![Instruction::PushCurrent(0, 1)],
         };
 
-        let error = NativeProgram::from_bytecode("probe", EntryKind::StampValue, &program)
+        let error = NativeProgram::from_bytecode("probe", EntryKind::StampValue, &program, 0)
             .expect_err("current probe is outside this slice");
         let msg = error.to_string();
         assert!(msg.contains("PushCurrent"));
@@ -436,7 +413,7 @@ mod tests {
             instructions: vec![Instruction::Add],
         };
 
-        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program)
+        let error = NativeProgram::from_bytecode("bad", EntryKind::StampValue, &program, 0)
             .expect_err("binary op without operands must fail");
         assert!(error.to_string().contains("stack"));
     }
