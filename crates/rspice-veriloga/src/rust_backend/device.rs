@@ -5523,6 +5523,22 @@ fn stamp() {
             ),
             "{mul_ad_product_lhs}"
         );
+
+        let sub_div_same_denominator = helper_body(&support, "fn store_sub_div_same_denominator(");
+        assert!(
+            !sub_div_same_denominator.contains("_node_derivatives = self.node_derivatives"),
+            "{sub_div_same_denominator}"
+        );
+        assert!(
+            !sub_div_same_denominator.contains("_branch_derivatives = self.branch_derivatives"),
+            "{sub_div_same_denominator}"
+        );
+        assert!(
+            sub_div_same_denominator.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[left][axis] - self.node_derivatives[right][axis]) * reciprocal + self.node_derivatives[denominator][axis] * denominator_scale;"
+            ),
+            "{sub_div_same_denominator}"
+        );
     }
 
     #[test]
@@ -12414,18 +12430,12 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_value = self.values[left];",
         "        let right_value = self.values[right];",
         "        let denominator_value = self.values[denominator];",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let denominator_node_derivatives = self.node_derivatives[denominator];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
-        "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
         "        let reciprocal = 1.0 / denominator_value;",
         "        let delta = left_value - right_value;",
         "        let denominator_scale = -delta * reciprocal * reciprocal;",
         "        self.values[index] = delta * reciprocal;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] - right_node_derivatives[axis]) * reciprocal + denominator_node_derivatives[axis] * denominator_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] - right_branch_derivatives[axis]) * reciprocal + denominator_branch_derivatives[axis] * denominator_scale; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (self.node_derivatives[left][axis] - self.node_derivatives[right][axis]) * reciprocal + self.node_derivatives[denominator][axis] * denominator_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (self.branch_derivatives[left][axis] - self.branch_derivatives[right][axis]) * reciprocal + self.branch_derivatives[denominator][axis] * denominator_scale; }",
         "    }",
         "",
         "    #[inline]",
