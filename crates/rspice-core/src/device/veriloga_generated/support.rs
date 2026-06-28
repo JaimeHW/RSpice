@@ -26920,6 +26920,22 @@ impl<const NODE_COUNT: usize, const BRANCH_COUNT: usize> AdValue<NODE_COUNT, BRA
     }
 
     #[inline]
+    pub(crate) fn mul_sub_from_scalar_rhs_div_scaled_inputs_lhs(left: Self, left_scale: f64, right: Self, right_scale: f64, scalar: f64, value: Self) -> Self {
+        let mut result = left;
+        let left_value = result.value * left_scale;
+        let right_value = right.value * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        let rhs_value = scalar - value.value;
+        let left_derivative_scale = left_scale * reciprocal * rhs_value;
+        let right_derivative_scale = -quotient * reciprocal * right_scale * rhs_value;
+        result.value = quotient * rhs_value;
+        for index in 0..NODE_COUNT { result.dn[index] = result.dn[index] * left_derivative_scale + right.dn[index] * right_derivative_scale - value.dn[index] * quotient; }
+        for index in 0..BRANCH_COUNT { result.db[index] = result.db[index] * left_derivative_scale + right.db[index] * right_derivative_scale - value.db[index] * quotient; }
+        result
+    }
+
+    #[inline]
     pub(crate) fn mul_sub_from_scalar_lhs_scaled_output(scalar: f64, value: Self, right: Self, scale: f64) -> Self {
         let mut result = value;
         let left_value = scalar - result.value;
