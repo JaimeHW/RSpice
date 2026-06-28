@@ -15,9 +15,9 @@
 //!
 //! # Native Compilation
 //!
-//! When the `native` feature is enabled, supported model fragments can compile
-//! through the Cranelift JIT for higher throughput. Unsupported fragments fall
-//! back to the bytecode VM interpreter.
+//! When the `native` feature is enabled, model construction requires a complete
+//! native JIT image. Unsupported native compilation returns a typed error rather
+//! than silently running the bytecode VM interpreter.
 //!
 //! The native path is a performance backend, not a separate public ABI. Keep all
 //! raw-pointer and Send/Sync safety reasoning in the native module and require a
@@ -62,18 +62,19 @@ pub struct VerilogADevice {
     branch_active: Vec<bool>,
     /// Pre-computed matrix indices for O(1) stamping
     matrix_indices: MatrixIndices,
-    /// Native compiled model (if compilation succeeded)
+    /// Native compiled model. In native mode this is required: construction
+    /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
-    native_model: Option<std::sync::Arc<NativeModel>>,
+    native_model: std::sync::Arc<NativeModel>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
 }
 
 // Safety: VerilogADevice owns per-instance VmContext and solver mapping state.
-// The optional NativeModel is shared through Arc and is immutable after JIT
-// construction; it owns its JITModule for the lifetime of its function
-// pointers. Calls supply mutable evaluation state through the device instance,
-// so cloned devices used by line-search probes do not share VmContext mutation.
+// The NativeModel is shared through Arc and immutable after native image
+// construction. Calls supply mutable evaluation state through the device
+// instance, so cloned devices used by line-search probes do not share
+// VmContext mutation.
 #[cfg(feature = "native")]
 unsafe impl Send for VerilogADevice {}
 #[cfg(feature = "native")]
@@ -178,7 +179,7 @@ impl VerilogADevice {
 
         // Attempt native compilation (if feature enabled)
         #[cfg(feature = "native")]
-        let native_model = Self::try_native_compile(&model);
+        let native_model = Self::try_native_compile(&model)?;
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
@@ -284,7 +285,7 @@ impl VerilogADevice {
         }
     }
 
-    /// Attempt to compile the model to native code using Cranelift JIT.
+    /// Attempt to compile the model to native code.
     ///
     /// Compilations are shared process-wide per model `Arc`: a thousand
     /// instances of one model compile once. The result (including a
@@ -293,11 +294,11 @@ impl VerilogADevice {
     #[cfg(feature = "native")]
     fn try_native_compile(
         model: &std::sync::Arc<CompiledModel>,
-    ) -> Option<std::sync::Arc<NativeModel>> {
-        use crate::native::try_compile_native;
+    ) -> Result<std::sync::Arc<NativeModel>, VmError> {
+        use crate::native::compile_native;
         use std::sync::{Arc, Mutex, Weak};
 
-        type CacheEntry = (Weak<CompiledModel>, Option<Arc<NativeModel>>);
+        type CacheEntry = (Weak<CompiledModel>, Result<Arc<NativeModel>, String>);
         static NATIVE_CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
 
         let mut cache = NATIVE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -306,25 +307,33 @@ impl VerilogADevice {
             .iter()
             .find(|(weak, _)| weak.as_ptr() == Arc::as_ptr(model))
         {
-            return cached.clone();
+            return cached.clone().map_err(VmError::NativeJit);
         }
 
-        let compiled = match try_compile_native(model) {
-            Some(native) => {
+        let compiled = match compile_native(model) {
+            Ok(native) => {
                 log::info!("[JIT] Model '{}' compiled to native code", model.name);
                 #[cfg(debug_assertions)]
                 eprintln!("[JIT] Model '{}' compiled to native code", model.name);
-                Some(std::sync::Arc::new(native))
+                Ok(std::sync::Arc::new(native))
             }
-            None => {
-                log::debug!("[JIT] Model '{}' using interpreter", model.name);
+            Err(error) => {
+                let msg = error.to_string();
+                log::warn!(
+                    "[JIT] Native compilation failed for '{}': {}",
+                    model.name,
+                    msg
+                );
                 #[cfg(debug_assertions)]
-                eprintln!("[JIT] Model '{}' using interpreter", model.name);
-                None
+                eprintln!(
+                    "[JIT] Native compilation failed for '{}': {}",
+                    model.name, msg
+                );
+                Err(msg)
             }
         };
         cache.push((Arc::downgrade(model), compiled.clone()));
-        compiled
+        compiled.map_err(VmError::NativeJit)
     }
 
     /// Check if this device is using native compiled code
@@ -334,14 +343,7 @@ impl VerilogADevice {
     /// the VM interpreter.
     #[cfg(feature = "native")]
     pub fn is_using_native(&self) -> bool {
-        self.native_model.is_some()
-    }
-
-    /// Drop the native code path so every program runs on the bytecode
-    /// interpreter (used to pin native/interpreter equivalence in tests)
-    #[cfg(feature = "native")]
-    pub fn force_interpreter(&mut self) {
-        self.native_model = None;
+        true
     }
 
     /// Set the instance multiplicity (`m=` / $mfactor): the device stamps
@@ -377,16 +379,13 @@ impl VerilogADevice {
     /// Number of native assignment chunks the JIT produced for this model
     #[cfg(feature = "native")]
     pub fn native_chunk_count(&self) -> usize {
-        self.native_model.as_ref().map_or(0, |n| n.chunk_count())
+        self.native_model.chunk_count()
     }
 
-    /// Hybrid-plan composition (diagnostics; zeroes when interpreted)
+    /// Native entry-point composition diagnostics.
     #[cfg(feature = "native")]
     pub fn native_plan_stats(&self) -> crate::native::PlanStats {
-        self.native_model
-            .as_ref()
-            .map(|n| n.plan_stats())
-            .unwrap_or_default()
+        self.native_model.plan_stats()
     }
 
     /// Check if this device is using native compiled code
@@ -787,7 +786,7 @@ impl VerilogADevice {
         let matrix_indices = &self.matrix_indices;
         let program_active = &self.program_active;
         #[cfg(feature = "native")]
-        let native = self.native_model.as_deref();
+        let native = self.native_model.as_ref();
 
         context.clear_currents();
 
@@ -817,7 +816,7 @@ impl VerilogADevice {
                     &mut vm,
                     &model_entry.program,
                     #[cfg(feature = "native")]
-                    None,
+                    native.jacobian_fn(program_idx, entry.jacobian_idx),
                 )?;
                 let deriv = match deriv {
                     v if v.is_finite() => v * scale,
@@ -943,7 +942,7 @@ impl VerilogADevice {
 
         let program_active = &self.program_active;
         #[cfg(feature = "native")]
-        let native = self.native_model.as_deref();
+        let native = self.native_model.as_ref();
         let mut vm = Vm::new(&mut self.context);
         Self::run_assignment_pass(
             &mut vm,
@@ -963,7 +962,7 @@ impl VerilogADevice {
                 &mut vm,
                 &program.value_program,
                 #[cfg(feature = "native")]
-                native.and_then(|n| n.stamp_value_fn(program_idx)),
+                native.stamp_value_fn(program_idx),
             )?;
             currents.push(value);
             vm.context.currents.push(value);
@@ -1030,90 +1029,50 @@ impl VerilogADevice {
         }
     }
 
-    /// Run one value-returning program: native function when one compiled,
-    /// otherwise the interpreter.
+    /// Run one value-returning native entry point.
+    #[cfg(feature = "native")]
+    fn run_value_program(
+        vm: &mut Vm<'_>,
+        _program: &crate::codegen::BytecodeProgram,
+        native_fn: crate::native::StampFn,
+    ) -> Result<f64, VmError> {
+        let ctx = Self::eval_context_from(vm.context);
+        let vars_ptr = vm.context.variables.as_ptr();
+        Ok(native_fn(&ctx, vars_ptr))
+    }
+
+    /// Run one value-returning bytecode program.
+    #[cfg(not(feature = "native"))]
     fn run_value_program(
         vm: &mut Vm<'_>,
         program: &crate::codegen::BytecodeProgram,
-        #[cfg(feature = "native")] native_fn: Option<crate::native::StampFn>,
     ) -> Result<f64, VmError> {
-        #[cfg(feature = "native")]
-        if let Some(f) = native_fn {
-            let ctx = Self::eval_context_from(vm.context);
-            let vars_ptr = vm.context.variables.as_ptr();
-            return Ok(f(&ctx, vars_ptr));
-        }
         vm.execute(program)
     }
 
-    /// Execute the assignment pass: the native hybrid plan when one
-    /// exists, the interpreter otherwise.
+    /// Execute the assignment pass through the required native entry point.
+    #[cfg(feature = "native")]
     fn run_assignment_pass(
         vm: &mut Vm<'_>,
         model: &CompiledModel,
-        #[cfg(feature = "native")] native: Option<&NativeModel>,
+        native: &NativeModel,
     ) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
-        #[cfg(feature = "native")]
-        if let Some(native) = native {
-            return Self::execute_assignment_plan(
-                vm,
-                native,
-                &native.plan,
-                &model.assignment_steps,
-            );
-        }
-        Self::execute_assignment_steps(vm, &model.assignment_steps)
+        let ctx = Self::eval_context_from(vm.context);
+        let vars_ptr = vm.context.variables.as_mut_ptr();
+        native.run_assignments(&ctx, vars_ptr);
+        Ok(())
     }
 
-    /// Walk the hybrid plan: native chunks write straight into the shared
-    /// variable storage; refused steps and loop conditions interpret.
-    #[cfg(feature = "native")]
-    fn execute_assignment_plan(
-        vm: &mut Vm<'_>,
-        native: &NativeModel,
-        plan: &[crate::native::PlanStep],
-        steps: &[crate::codegen::AssignmentStep],
-    ) -> Result<(), VmError> {
-        use crate::native::PlanStep;
-        for step in plan {
-            match step {
-                PlanStep::Chunk { id, .. } => {
-                    let ctx = Self::eval_context_from(vm.context);
-                    let vars_ptr = vm.context.variables.as_mut_ptr();
-                    native.run_chunk(*id, &ctx, vars_ptr);
-                }
-                PlanStep::Interpret { from, to } => {
-                    Self::execute_assignment_steps(vm, &steps[*from..*to])?;
-                }
-                PlanStep::Loop { index, body } => {
-                    let Some(crate::codegen::AssignmentStep::Loop {
-                        condition,
-                        body: body_steps,
-                    }) = steps.get(*index)
-                    else {
-                        continue;
-                    };
-                    let mut iterations = 0usize;
-                    loop {
-                        let active = vm.execute(condition)?;
-                        if active == 0.0 {
-                            break;
-                        }
-                        Self::execute_assignment_plan(vm, native, body, body_steps)?;
-                        iterations += 1;
-                        if iterations >= Self::MAX_RUNTIME_LOOP_ITERATIONS {
-                            return Err(VmError::InvalidInstruction(
-                                "runtime loop iteration limit exceeded",
-                            ));
-                        }
-                    }
-                }
-            }
+    /// Execute the assignment pass through the bytecode interpreter.
+    #[cfg(not(feature = "native"))]
+    fn run_assignment_pass(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
         }
-        Ok(())
+        Self::execute_assignment_steps(vm, &model.assignment_steps)
     }
 
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
@@ -1198,7 +1157,7 @@ impl VerilogADevice {
         let context = &mut self.context;
         let model = &self.model;
         #[cfg(feature = "native")]
-        let native = self.native_model.as_deref();
+        let native = self.native_model.as_ref();
 
         context.clear_currents();
         context.currents.reserve(model.stamp_programs.len());
@@ -1222,7 +1181,7 @@ impl VerilogADevice {
                 &mut vm,
                 &program.value_program,
                 #[cfg(feature = "native")]
-                native.and_then(|n| n.stamp_value_fn(prog_idx)),
+                native.stamp_value_fn(prog_idx),
             )?;
             let value = match value {
                 v if v.is_finite() => v,
@@ -1243,7 +1202,7 @@ impl VerilogADevice {
                     &mut vm,
                     &jac_entry.program,
                     #[cfg(feature = "native")]
-                    native.and_then(|n| n.jacobian_fn(prog_idx, jac_idx)),
+                    native.jacobian_fn(prog_idx, jac_idx),
                 )?;
                 let value = match value {
                     v if v.is_finite() => v,
@@ -1304,7 +1263,7 @@ impl VerilogADevice {
         let model = &self.model;
         let matrix_indices = &self.matrix_indices;
         #[cfg(feature = "native")]
-        let native = self.native_model.as_deref();
+        let native = self.native_model.as_ref();
         // Instance multiplicity: m parallel copies scale every flow
         // (current) stamp by m; potential and constraint rows stay
         // per-copy, as do probed currents and internal node voltages
@@ -1392,7 +1351,7 @@ impl VerilogADevice {
                 &mut vm,
                 &program.value_program,
                 #[cfg(feature = "native")]
-                native.and_then(|n| n.stamp_value_fn(program_idx)),
+                native.stamp_value_fn(program_idx),
             )?;
             let value = match value {
                 v if v.is_finite() => v,
@@ -1437,7 +1396,7 @@ impl VerilogADevice {
                     &mut vm,
                     &model_entry.program,
                     #[cfg(feature = "native")]
-                    native.and_then(|n| n.jacobian_fn(program_idx, jacobian_entry.jacobian_idx)),
+                    native.jacobian_fn(program_idx, jacobian_entry.jacobian_idx),
                 )?;
                 let deriv = match deriv {
                     v if v.is_finite() => v * scale,
@@ -1511,7 +1470,7 @@ impl VerilogADevice {
         let model = &self.model;
         let program_active = &self.program_active;
         #[cfg(feature = "native")]
-        let native = self.native_model.as_deref();
+        let native = self.native_model.as_ref();
 
         context.clear_currents();
         let mut vm = Vm::new(context);

@@ -63,7 +63,10 @@ impl std::fmt::Display for JitError {
                 "model {model}: native JIT relocation failed: {detail}; no interpreter fallback"
             ),
             JitError::ExecutableMemory { detail } => {
-                write!(f, "native JIT executable memory failed: {detail}; no interpreter fallback")
+                write!(
+                    f,
+                    "native JIT executable memory failed: {detail}; no interpreter fallback"
+                )
             }
             JitError::AbiMismatch { model, detail } => write!(
                 f,

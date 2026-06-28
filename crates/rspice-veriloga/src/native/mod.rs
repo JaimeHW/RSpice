@@ -11,11 +11,11 @@ mod target;
 pub mod x64;
 
 pub use abi::{
-    rspice_current_lookup, rspice_laplace_step, rspice_limexp, rspice_limit, rspice_table_lookup,
-    EvalContext,
+    EvalContext, rspice_current_lookup, rspice_laplace_step, rspice_limexp, rspice_limit,
+    rspice_table_lookup,
 };
 pub use error::{JitError, JitResult};
-pub use model::{AssignmentFn, NativeModel, PlanStats, PlanStep, StampFn};
+pub use model::{AssignmentFn, NativeModel, PlanStats, StampFn};
 pub use runtime::ExecutableMemory;
 pub use target::{Architecture, TargetSpec};
 
@@ -33,22 +33,5 @@ pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
             target: target.display_name().into(),
             reason: "AArch64 backend boundary exists but is not enabled".into(),
         }),
-    }
-}
-
-/// Compatibility shim for the pre-foundation device integration. New native
-/// callers must use [`compile_native`] so unsupported coverage is surfaced as
-/// a typed hard-fail error.
-pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
-    match compile_native(model) {
-        Ok(native) => Some(native),
-        Err(error) => {
-            log::debug!(
-                "[JIT] Native compilation failed for '{}': {}",
-                model.name,
-                error
-            );
-            None
-        }
     }
 }
