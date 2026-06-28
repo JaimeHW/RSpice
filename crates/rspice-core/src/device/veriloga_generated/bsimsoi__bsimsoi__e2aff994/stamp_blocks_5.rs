@@ -1977,15 +1977,15 @@ impl Instance {
             s.copy_ad(394, 389);
             s.copy_ad(395, 388);
             s.copy_ad(393, 387);
-            s.store_neg_ad(392, A::add_scaled_inputs3(s.ad_value(393), 1.0, s.ad_value(395), 1.0, s.ad_value(394), 1.0));
+            s.store_add_scaled_inputs3_indices(392, 393, (-1.0), 395, (-1.0), 394, (-1.0));
             s.store_neg_ad(398, A::scale(s.ad_value(439), p.p45));
             s.store_neg_ad(399, A::sub_scaled_inputs(s.ad_value(438), p.p45, s.ad_value(439), p.p45));
             s.store_neg_ad(397, A::scale(s.ad_value(440), p.p45));
-            s.store_neg_ad(396, A::add_scaled_inputs3(s.ad_value(397), 1.0, s.ad_value(399), 1.0, s.ad_value(398), 1.0));
+            s.store_add_scaled_inputs3_indices(396, 397, (-1.0), 399, (-1.0), 398, (-1.0));
             s.store_neg_ad(389, A::sub(A::scale(s.ad_value(439), p.p45), s.ad_value(389)));
-            s.store_neg_ad(388, A::add_scaled_inputs3(s.ad_value(438), p.p45, s.ad_value(388), (-1.0), s.ad_value(439), (-p.p45)));
+            s.store_add_scaled_inputs3_indices(388, 438, (-p.p45), 388, (-(-1.0)), 439, (-(-p.p45)));
             s.store_neg_ad(387, A::sub(A::scale(s.ad_value(440), p.p45), s.ad_value(387)));
-            s.store_neg_ad(390, A::add_scaled_inputs3(s.ad_value(387), 1.0, s.ad_value(388), 1.0, s.ad_value(389), 1.0));
+            s.store_add_scaled_inputs3_indices(390, 387, (-1.0), 388, (-1.0), 389, (-1.0));
         }
 
         s.b[1989] = (!param_given[867]);
@@ -2023,7 +2023,7 @@ impl Instance {
 
         if (!s.b[1620]) {
             s.store_mul_scaled_voltage(421, 379, (((-p.p2) * s.v[188]) * p.p874), ctx, nodes, Some(9), Some(10));
-            s.store_neg_ad(422, A::add_scaled_inputs3(s.ad_value(423), 1.0, s.ad_value(424), 1.0, s.ad_value(421), 1.0));
+            s.store_add_scaled_inputs3_indices(422, 423, (-1.0), 424, (-1.0), 421, (-1.0));
             s.store_scalar(1035, ((s.v[261] - (2.0 * s.v[196])) - p.p1394));
             s.store_offset(1036, 1035, (2.0 * p.p1393));
         }

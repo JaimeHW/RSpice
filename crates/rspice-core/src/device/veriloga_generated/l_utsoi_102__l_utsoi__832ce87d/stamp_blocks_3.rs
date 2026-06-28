@@ -3861,7 +3861,7 @@ impl Instance {
 
         s.store_scaled_mul(359, 13, 359, p.p32);
 
-        s.store_neg_ad(360, A::add_scaled_inputs3(s.ad_value(357), 1.0, s.ad_value(358), 1.0, s.ad_value(359), 1.0));
+        s.store_add_scaled_inputs3_indices(360, 357, (-1.0), 358, (-1.0), 359, (-1.0));
 
         s.store_scaled_mul(375, 13, 375, p.p32);
 

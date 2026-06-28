@@ -2002,7 +2002,7 @@ impl Instance {
             s.store_add_scaled_inputs3_indices(916, 915, 1.0, 938, 1.0, 937, 1.0);
             s.store_add_scaled_inputs4_indices(917, 1006, 1.0, 938, (-1.0), 937, -1.0, 939, -1.0);
             s.copy_ad(920, 939);
-            s.store_neg_ad(918, A::add_scaled_inputs4(s.ad_value(916), 1.0, s.ad_value(919), 1.0, s.ad_value(917), 1.0, s.ad_value(920), 1.0));
+            s.store_add_scaled_inputs4_indices(918, 916, (-1.0), 919, (-1.0), 917, (-1.0), 920, (-1.0));
         }
 
         s.b[1420] = (p.p61 == 3.0);
@@ -2481,7 +2481,7 @@ impl Instance {
             s.store_add_scaled_inputs4_indices(916, 916, 1.0, 938, 1.0, 937, 1.0, 1006, -1.0);
             s.store_add_scaled_inputs4_indices(917, 1006, 1.0, 938, (-1.0), 937, -1.0, 939, -1.0);
             s.copy_ad(920, 939);
-            s.store_neg_ad(918, A::add_scaled_inputs4(s.ad_value(916), 1.0, s.ad_value(917), 1.0, s.ad_value(920), 1.0, s.ad_value(919), 1.0));
+            s.store_add_scaled_inputs4_indices(918, 916, (-1.0), 917, (-1.0), 920, (-1.0), 919, (-1.0));
         }
 
         if ((!s.b[1402]) && (!s.b[1420])) {

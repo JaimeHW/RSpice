@@ -4209,9 +4209,9 @@ impl Instance {
 
         s.store_offset_sub_scaled_inputs(227, s.ad_value(168), (2.0 / p.p1146), s.ad_value(226), 1.0, (-((2.0 / p.p1146) * ((2.0) as f64).ln())));
 
-        s.store_neg_ad(218, A::add_scaled_inputs3(s.ad_value(224), 1.0, s.ad_value(226), 0.5, s.ad_value(227), (-0.5)));
+        s.store_add_scaled_inputs3_indices(218, 224, (-1.0), 226, (-0.5), 227, (-(-0.5)));
 
-        s.store_neg_ad(241, A::add_scaled_inputs3(s.ad_value(232), 1.0, s.ad_value(226), 0.5, s.ad_value(227), (-0.5)));
+        s.store_add_scaled_inputs3_indices(241, 232, (-1.0), 226, (-0.5), 227, (-(-0.5)));
 
         s.store_add_scaled_inputs3_indices(220, 234, 1.0, 227, 0.5, 226, (-0.5));
 

@@ -4095,7 +4095,7 @@ impl Instance {
             s.store_add_scaled_inputs3_mixed_aii(1915, A::add_scaled_products(A::add(s.ad_value(827), s.ad_value(835)), s.ad_value(815), 1.0, s.ad_value(836), A::add(s.ad_value(815), s.ad_value(816)), 1.0), 1.0, 2723, 1.0, 2724, 1.0);
         }
 
-        s.store_neg_ad(839, A::add_scaled_inputs3(s.ad_value(840), 1.0, s.ad_value(841), 1.0, s.ad_value(842), 1.0));
+        s.store_add_scaled_inputs3_indices(839, 840, (-1.0), 841, (-1.0), 842, (-1.0));
 
         s.store_add(843, 843, 1894);
 

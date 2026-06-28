@@ -864,7 +864,7 @@ impl Instance {
             s.store_add_scaled_product_mixed_aia(1911, A::mul_sub_from_scalar_rhs(s.ad_value(580), 1.0, s.ad_value(2526)), p.p30, 583, A::sub(s.ad_value(827), s.ad_value(2518)), p.p30);
         }
 
-        s.store_neg_ad(844, A::add_scaled_inputs3(s.ad_value(845), 1.0, s.ad_value(846), 1.0, s.ad_value(847), 1.0));
+        s.store_add_scaled_inputs3_indices(844, 845, (-1.0), 846, (-1.0), 847, (-1.0));
 
         s.store_add(848, 848, 1898);
 

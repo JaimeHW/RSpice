@@ -4880,7 +4880,7 @@ impl Instance {
 
         s.store_offset_sub_scaled_inputs(76, s.ad_value(13), (2.0 / p.p956), s.ad_value(75), 1.0, (-((2.0 / p.p956) * ((2.0) as f64).ln())));
 
-        s.store_neg_ad(62, A::add_scaled_inputs3(s.ad_value(72), 1.0, s.ad_value(75), 0.5, s.ad_value(76), (-0.5)));
+        s.store_add_scaled_inputs3_indices(62, 72, (-1.0), 75, (-0.5), 76, (-(-0.5)));
 
         s.store_scale(12, 74, p.p956);
 
@@ -4900,7 +4900,7 @@ impl Instance {
 
         s.store_offset_sub_scaled_inputs(76, s.ad_value(13), (2.0 / p.p956), s.ad_value(74), 1.0, (-((2.0 / p.p956) * ((2.0) as f64).ln())));
 
-        s.store_neg_ad(61, A::add_scaled_inputs3(s.ad_value(70), 1.0, s.ad_value(74), 0.5, s.ad_value(76), (-0.5)));
+        s.store_add_scaled_inputs3_indices(61, 70, (-1.0), 74, (-0.5), 76, (-(-0.5)));
 
         s.store_tanh_ad(12, A::div_scaled_inputs(s.ad_value(56), p.p1123, s.ad_value(393), 1.0));
 

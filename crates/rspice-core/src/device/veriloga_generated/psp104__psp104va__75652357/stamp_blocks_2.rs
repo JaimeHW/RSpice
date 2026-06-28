@@ -4023,7 +4023,7 @@ impl Instance {
         s.b[2708] = (s.v[301] > 0.0);
         s.v[2708] = if s.b[2708] { 1.0 } else { 0.0 };
 
-        s.store_neg_ad(844, A::add_scaled_inputs3(s.ad_value(845), 1.0, s.ad_value(846), 1.0, s.ad_value(847), 1.0));
+        s.store_add_scaled_inputs3_indices(844, 845, (-1.0), 846, (-1.0), 847, (-1.0));
 
         s.store_add(848, 848, 1898);
 

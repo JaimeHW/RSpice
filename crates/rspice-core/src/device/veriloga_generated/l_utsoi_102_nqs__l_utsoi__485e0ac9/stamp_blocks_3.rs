@@ -3900,7 +3900,7 @@ impl Instance {
 
         s.copy_ad(1776, 363);
 
-        s.store_neg_ad(364, A::add_scaled_inputs3(s.ad_value(361), 1.0, s.ad_value(362), 1.0, s.ad_value(363), 1.0));
+        s.store_add_scaled_inputs3_indices(364, 361, (-1.0), 362, (-1.0), 363, (-1.0));
 
         s.b[1777] = (s.v[334] < 0.0);
         s.v[1777] = if s.b[1777] { 1.0 } else { 0.0 };
@@ -3915,7 +3915,7 @@ impl Instance {
 
         s.store_scaled_mul(363, 13, 363, p.p32);
 
-        s.store_neg_ad(364, A::add_scaled_inputs3(s.ad_value(361), 1.0, s.ad_value(362), 1.0, s.ad_value(363), 1.0));
+        s.store_add_scaled_inputs3_indices(364, 361, (-1.0), 362, (-1.0), 363, (-1.0));
 
         s.store_scaled_mul(379, 13, 379, p.p32);
 

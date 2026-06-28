@@ -1126,7 +1126,7 @@ impl Instance {
             s.store_scalar(573, 0.0);
             s.store_add(594, 23, 586);
             s.store_add(198, 24, 584);
-            s.store_neg_ad(554, A::add_scaled_inputs3(s.ad_value(23), 1.0, s.ad_value(24), 1.0, s.ad_value(25), 1.0));
+            s.store_add_scaled_inputs3_indices(554, 23, (-1.0), 24, (-1.0), 25, (-1.0));
             s.store_add(196, 554, 581);
         }
 
@@ -1136,7 +1136,7 @@ impl Instance {
             s.store_scalar(263, 0.0);
             s.store_add(594, 23, 586);
             s.store_add(198, 25, 585);
-            s.store_neg_ad(554, A::add_scaled_inputs3(s.ad_value(23), 1.0, s.ad_value(24), 1.0, s.ad_value(25), 1.0));
+            s.store_add_scaled_inputs3_indices(554, 23, (-1.0), 24, (-1.0), 25, (-1.0));
             s.store_add(196, 554, 581);
         }
 

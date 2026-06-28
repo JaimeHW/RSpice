@@ -1733,7 +1733,7 @@ impl Instance {
 
         s.store_mul_neg_lhs(197, 199, 193);
 
-        s.store_neg_ad(198, A::add_scaled_inputs3(s.ad_value(195), 1.0, s.ad_value(196), 1.0, s.ad_value(197), 1.0));
+        s.store_add_scaled_inputs3_indices(198, 195, (-1.0), 196, (-1.0), 197, (-1.0));
 
         s.b[1586] = (!param_given[666]);
         s.v[1586] = if s.b[1586] { 1.0 } else { 0.0 };

@@ -2324,7 +2324,7 @@ impl Instance {
             s.store_scalar(916, ((-((s.v[903] * p.p13) * 1.6021918e-19)) * p.p545));
             s.store_mul_ad_product_rhs(917, 912, s.ad_value(928), A::sub(A::exp(A::div_from_scalar((-p.p545), s.ad_value(912))), A::exp(A::div_scaled_inputs(s.ad_value(933), -1.0, s.ad_value(912), 1.0))));
             s.store_mul_ad_product_rhs(918, 912, s.ad_value(929), A::offset(A::exp(A::div_scaled_inputs(A::sub_from_scalar(p.p545, s.ad_value(933)), -1.0, s.ad_value(912), 1.0)), (-1.0)));
-            s.store_neg_ad(919, A::add_scaled_inputs3(s.ad_value(916), 1.0, s.ad_value(917), 1.0, s.ad_value(918), 1.0));
+            s.store_add_scaled_inputs3_indices(919, 916, (-1.0), 917, (-1.0), 918, (-1.0));
             s.store_add_scaled_inputs(65, 65, 1.0, 919, s.v[365]);
         }
 
@@ -3687,7 +3687,7 @@ impl Instance {
             s.copy_ad(19, 701);
             s.copy_ad(18, 700);
             s.copy_ad(741, 702);
-            s.store_neg_ad(20, A::add_scaled_inputs3(s.ad_value(700), 1.0, s.ad_value(701), 1.0, s.ad_value(702), 1.0));
+            s.store_add_scaled_inputs3_indices(20, 700, (-1.0), 701, (-1.0), 702, (-1.0));
             s.copy_ad(280, 709);
             s.copy_ad(281, 710);
             s.copy_ad(400, 699);
@@ -3702,7 +3702,7 @@ impl Instance {
             s.copy_ad(19, 702);
             s.copy_ad(18, 700);
             s.copy_ad(741, 701);
-            s.store_neg_ad(20, A::add_scaled_inputs3(s.ad_value(700), 1.0, s.ad_value(701), 1.0, s.ad_value(702), 1.0));
+            s.store_add_scaled_inputs3_indices(20, 700, (-1.0), 701, (-1.0), 702, (-1.0));
             s.store_scalar(280, 0.0);
             s.store_scalar(281, 0.0);
             s.store_scalar(400, 0.0);
@@ -3718,7 +3718,7 @@ impl Instance {
 
         s.store_add(741, 741, 812);
 
-        s.store_neg_ad(20, A::add_scaled_inputs3(s.ad_value(18), 1.0, s.ad_value(19), 1.0, s.ad_value(741), 1.0));
+        s.store_add_scaled_inputs3_indices(20, 18, (-1.0), 19, (-1.0), 741, (-1.0));
 
         s.copy_ad(299, 703);
 
@@ -3728,7 +3728,7 @@ impl Instance {
 
         s.copy_ad(743, 705);
 
-        s.store_neg_ad(744, A::add_scaled_inputs3(s.ad_value(705), 1.0, s.ad_value(706), 1.0, s.ad_value(707), 1.0));
+        s.store_add_scaled_inputs3_indices(744, 705, (-1.0), 706, (-1.0), 707, (-1.0));
 
         s.b[3396] = (p.p53 > 0.0);
         s.v[3396] = if s.b[3396] { 1.0 } else { 0.0 };
