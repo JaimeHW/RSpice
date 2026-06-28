@@ -1995,10 +1995,10 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        compact_generated_stamp_surface, duplicate_hoistable_derivative_rhs,
-        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
-        render_runtime_support_module, reuse_duplicate_derivative_locals_in_helper_block,
-        should_cache_compact_condition,
+        compact_div_from_scalar_offset_denominator, compact_generated_stamp_surface,
+        duplicate_hoistable_derivative_rhs, generate_scratch_operation_helpers,
+        is_hoistable_generated_derivative_rhs, render_runtime_support_module,
+        reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
     };
 
     #[test]
@@ -3656,6 +3656,29 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_div_from_scalar_offset_div_scaled_inputs4_denominator_as_fused_expression() {
+        let support = render_runtime_support_module();
+        assert!(
+            support.contains("fn div_scalar_offset_div_scaled_inputs4_denominator"),
+            "missing fused div-from-scalar offset div-scaled-inputs4 helper"
+        );
+
+        let denominator = "AdValue::offset(AdValue::div_scaled_inputs4(scratch.ad_value(33), 1.0, scratch.ad_value(41), (-1.0), scratch.ad_value(30), 1.0, scratch.ad_value(20), -1.0, AdValue::add(AdValue::div_scaled_value_by_product(scratch.ad_value(63), (scratch.values[54] * scratch.values[39]), AdValue::scale(scratch.ad_value(45), scratch.values[47]), scratch.ad_value(63), 1.0), scratch.ad_value(44)), 1.0), 0.5)";
+
+        let compact = compact_div_from_scalar_offset_denominator("3.0", denominator)
+            .expect("offset denominator should compact");
+
+        assert_eq!(
+            compact,
+            "AdValue::div_scalar_offset_div_scaled_inputs4_denominator(3.0, scratch.ad_value(33), 1.0, scratch.ad_value(41), (-1.0), scratch.ad_value(30), 1.0, scratch.ad_value(20), -1.0, AdValue::add(AdValue::div_scaled_value_by_product(scratch.ad_value(63), (scratch.values[54] * scratch.values[39]), AdValue::scale(scratch.ad_value(45), scratch.values[47]), scratch.ad_value(63), 1.0), scratch.ad_value(44)), 1.0, 0.5, 1.0)"
+        );
+        assert!(
+            !compact.contains("div_scalar_offset_denominator"),
+            "{compact}"
+        );
     }
 
     #[test]
@@ -18022,6 +18045,28 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn div_scalar_offset_div_scaled_inputs4_denominator(scalar: f64, first: Self, first_scale: f64, second: Self, second_scale: f64, third: Self, third_scale: f64, fourth: Self, fourth_scale: f64, denominator: Self, inner_denominator_scale: f64, denominator_offset: f64, denominator_scale: f64) -> Self {",
+        "        let mut value = first;",
+        "        let first_value = value.value * first_scale;",
+        "        let second_value = second.value * second_scale;",
+        "        let third_value = third.value * third_scale;",
+        "        let fourth_value = fourth.value * fourth_scale;",
+        "        let numerator_value = ((first_value + second_value) + third_value) + fourth_value;",
+        "        let inner_denominator_value = denominator.value * inner_denominator_scale;",
+        "        let inner_reciprocal = 1.0 / inner_denominator_value;",
+        "        let inner_quotient = numerator_value * inner_reciprocal;",
+        "        let outer_denominator_value = (inner_quotient + denominator_offset) * denominator_scale;",
+        "        let reciprocal = 1.0 / outer_denominator_value;",
+        "        let quotient = scalar * reciprocal;",
+        "        let inner_denominator_derivative_scale = -inner_quotient * inner_reciprocal * inner_denominator_scale;",
+        "        let outer_derivative_scale = -quotient * reciprocal * denominator_scale;",
+        "        value.value = quotient;",
+        "        for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = ((((value.node_derivatives[index] * first_scale + second.node_derivatives[index] * second_scale) + third.node_derivatives[index] * third_scale) + fourth.node_derivatives[index] * fourth_scale) * inner_reciprocal + denominator.node_derivatives[index] * inner_denominator_derivative_scale) * outer_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = ((((value.branch_derivatives[index] * first_scale + second.branch_derivatives[index] * second_scale) + third.branch_derivatives[index] * third_scale) + fourth.branch_derivatives[index] * fourth_scale) * inner_reciprocal + denominator.branch_derivatives[index] * inner_denominator_derivative_scale) * outer_derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn div_scaled_inputs_product(first: Self, first_scale: f64, second: Self, second_scale: f64, product_left: Self, product_right: Self, product_scale: f64, denominator: Self, denominator_scale: f64) -> Self {",
         "        let mut value = first;",
         "        let first_value = value.value * first_scale;",
@@ -30340,6 +30385,24 @@ fn compact_offset_denominator_ad_expression(value: &str) -> Option<(&str, String
 fn compact_div_from_scalar_offset_denominator(scalar: &str, denominator: &str) -> Option<String> {
     let (denominator, denominator_offset, denominator_scale) =
         compact_offset_denominator_ad_expression(denominator)?;
+    if let Some(args) = compact_ad_call_args(denominator, "div_scaled_inputs4") {
+        if args.len() != 10 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scalar_offset_div_scaled_inputs4_denominator({scalar}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {denominator_offset}, {denominator_scale})",
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+            args[6],
+            args[7],
+            args[8],
+            args[9]
+        ));
+    }
     Some(format!(
         "AdValue::div_scalar_offset_denominator({scalar}, {denominator}, {denominator_offset}, {denominator_scale})"
     ))
@@ -31921,6 +31984,30 @@ fn compact_scale_ad_value_expression(value: &str, scale: &str) -> Option<String>
             args[1],
             args[2],
             args[3]
+        ));
+    }
+
+    if let Some(args) =
+        compact_ad_call_args(value, "div_scalar_offset_div_scaled_inputs4_denominator")
+    {
+        if args.len() != 13 {
+            return None;
+        }
+        return Some(format!(
+            "AdValue::div_scalar_offset_div_scaled_inputs4_denominator({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+            compact_scalar_mul(args[0], scale),
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+            args[6],
+            args[7],
+            args[8],
+            args[9],
+            args[10],
+            args[11],
+            args[12]
         ));
     }
 
