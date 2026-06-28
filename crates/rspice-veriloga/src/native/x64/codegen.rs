@@ -239,6 +239,7 @@ impl FunctionCompiler {
                 NativeOp::Div => self.emit_binary_op(BinaryOp::Div)?,
                 NativeOp::Neg => self.emit_neg()?,
                 NativeOp::Abs => self.emit_abs()?,
+                NativeOp::Square => self.emit_square()?,
                 NativeOp::Sqrt => self.emit_sqrt()?,
                 NativeOp::Compare(op) => self.emit_compare(op)?,
                 NativeOp::Logical(op) => self.emit_logical(op)?,
@@ -551,6 +552,19 @@ impl FunctionCompiler {
 
         let target = XMM_STACK[self.depth - 1];
         self.emit_abs_register(target);
+        Ok(())
+    }
+
+    fn emit_square(&mut self) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "square requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.encoder.mulsd_xmm_xmm(target, target);
         Ok(())
     }
 
@@ -2178,6 +2192,37 @@ mod tests {
             bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
             "helper-call native leaves must preserve context and vars pointers"
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_squares_constant_power_without_helper_call() {
+        for instruction in [Instruction::Pow, Instruction::FnPow] {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(2.0),
+                    instruction,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile square power leaf");
+
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant-square power should not pay helper-call prologue cost"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate square power native leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = -3.0;
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 9.0_f64.to_bits());
+        }
     }
 
     #[test]

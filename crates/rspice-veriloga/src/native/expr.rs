@@ -44,6 +44,7 @@ pub(crate) enum NativeOp {
     Div,
     Neg,
     Abs,
+    Square,
     Sqrt,
     Compare(CompareOp),
     Logical(LogicalOp),
@@ -400,7 +401,20 @@ impl NativeProgram {
                     depth -= 1;
                     ops.push(NativeOp::Div);
                 }
-                Instruction::Pow | Instruction::FnPow | Instruction::Atan2 | Instruction::Mod => {
+                Instruction::Pow | Instruction::FnPow => {
+                    pop_binary_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                    )?;
+                    depth -= 1;
+                    if lower_constant_square_power(&mut ops) {
+                        continue;
+                    }
+                    ops.push(NativeOp::BinaryMath(BinaryMathOp::Pow));
+                }
+                Instruction::Atan2 | Instruction::Mod => {
                     pop_binary_stack(
                         model.clone(),
                         entry_kind,
@@ -772,10 +786,13 @@ impl NativeProgram {
                 format!("final stack depth {depth}, expected 1"),
             ));
         }
+        let optimized_max_stack_depth =
+            compute_native_max_stack_depth(model.clone(), entry_kind, &ops)?;
+        debug_assert!(optimized_max_stack_depth <= max_stack_depth);
 
         Ok(Self {
             ops,
-            max_stack_depth,
+            max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies,
         })
     }
@@ -993,6 +1010,104 @@ fn validate_range(
     }
 
     Ok(())
+}
+
+fn lower_constant_square_power(ops: &mut Vec<NativeOp>) -> bool {
+    let Some(last) = ops.last_mut() else {
+        return false;
+    };
+    if matches!(*last, NativeOp::Const(value) if value.to_bits() == 2.0_f64.to_bits()) {
+        *last = NativeOp::Square;
+        true
+    } else {
+        false
+    }
+}
+
+fn compute_native_max_stack_depth(
+    model: SmolStr,
+    entry_kind: EntryKind,
+    ops: &[NativeOp],
+) -> JitResult<usize> {
+    let mut depth = 0usize;
+    let mut max_stack_depth = 0usize;
+
+    for op in ops {
+        let (pops, pushes) = native_op_stack_effect(op);
+        if depth < pops {
+            return Err(stack_error(
+                model.clone(),
+                entry_kind,
+                format!("optimized native op {op:?} requires stack depth {pops}, found {depth}"),
+            ));
+        }
+        depth = depth - pops + pushes;
+        max_stack_depth = max_stack_depth.max(depth);
+    }
+
+    if depth != 1 {
+        return Err(stack_error(
+            model,
+            entry_kind,
+            format!("optimized native stack depth {depth}, expected 1"),
+        ));
+    }
+
+    Ok(max_stack_depth)
+}
+
+fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
+    match op {
+        NativeOp::Const(_)
+        | NativeOp::LoadParam(_)
+        | NativeOp::LoadParamGiven(_)
+        | NativeOp::LoadPortConnected(_)
+        | NativeOp::LoadVoltage { .. }
+        | NativeOp::LoadCurrent(_)
+        | NativeOp::LoadInternalVoltage(_)
+        | NativeOp::LoadVariable(_)
+        | NativeOp::LoadBranchUnknown(_)
+        | NativeOp::LoadTemperature
+        | NativeOp::LoadThermalVoltage
+        | NativeOp::LoadTime
+        | NativeOp::Analysis(_)
+        | NativeOp::LoadMfactor => (0, 1),
+
+        NativeOp::LoadVariableDyn { .. }
+        | NativeOp::Neg
+        | NativeOp::Abs
+        | NativeOp::Square
+        | NativeOp::Sqrt
+        | NativeOp::Logical(LogicalOp::Not)
+        | NativeOp::UnaryMath(_)
+        | NativeOp::TableLookup(_)
+        | NativeOp::TableDerivative(_)
+        | NativeOp::LaplaceState(_)
+        | NativeOp::ZiState(_)
+        | NativeOp::WhiteNoise
+        | NativeOp::DdtState(_)
+        | NativeOp::DdtJacobian
+        | NativeOp::IdtJacobian => (1, 1),
+
+        NativeOp::Add
+        | NativeOp::Sub
+        | NativeOp::Mul
+        | NativeOp::Div
+        | NativeOp::Compare(_)
+        | NativeOp::Logical(LogicalOp::And | LogicalOp::Or)
+        | NativeOp::Extremum(_)
+        | NativeOp::BinaryMath(_)
+        | NativeOp::IntegerBinary(_)
+        | NativeOp::LimitState(_)
+        | NativeOp::TimerState(_)
+        | NativeOp::AbsDelayState(_)
+        | NativeOp::CrossState(_)
+        | NativeOp::FlickerNoise
+        | NativeOp::IdtState(_) => (2, 1),
+
+        NativeOp::SlewState(_) | NativeOp::IfElse => (3, 1),
+        NativeOp::TransitionState(_) | NativeOp::IdtModState(_) => (4, 1),
+    }
 }
 
 fn stack_error(model: SmolStr, entry_kind: EntryKind, detail: String) -> JitError {
@@ -1510,17 +1625,17 @@ mod tests {
     #[test]
     fn lowers_binary_math_functions_as_native_binary_math_ops() {
         let cases = [
-            (Instruction::Pow, BinaryMathOp::Pow),
-            (Instruction::FnPow, BinaryMathOp::Pow),
-            (Instruction::Atan2, BinaryMathOp::Atan2),
-            (Instruction::Mod, BinaryMathOp::Mod),
+            (Instruction::Pow, 2.25, BinaryMathOp::Pow),
+            (Instruction::FnPow, 2.25, BinaryMathOp::Pow),
+            (Instruction::Atan2, 2.0, BinaryMathOp::Atan2),
+            (Instruction::Mod, 2.0, BinaryMathOp::Mod),
         ];
 
-        for (instruction, expected) in cases {
+        for (instruction, exponent, expected) in cases {
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(exponent),
                     instruction,
                 ],
             };
@@ -1533,11 +1648,38 @@ mod tests {
                 lowered.ops(),
                 &[
                     NativeOp::LoadTemperature,
-                    NativeOp::Const(2.0),
+                    NativeOp::Const(exponent),
                     NativeOp::BinaryMath(expected),
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_constant_square_power_as_native_square_op() {
+        for instruction in [Instruction::Pow, Instruction::FnPow] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(2.0),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "square",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant-square power has direct native x64 lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::LoadTemperature, NativeOp::Square]
+            );
+            assert_eq!(lowered.max_stack_depth(), 1);
         }
     }
 
