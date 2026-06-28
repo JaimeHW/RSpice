@@ -3517,6 +3517,45 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_div_scaled_inputs_square_rhs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_div_scaled_inputs_square_rhs",
+            "fn store_div_scaled_inputs_square_ad_rhs",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(180, AdValue::div_scaled_inputs(scratch.ad_value(2), params.left_scale, AdValue::square(scratch.ad_value(3)), params.right_scale));
+    scratch.store_ad_value(181, AdValue::div_scaled_inputs(scratch.ad_value(4), params.left_scale, AdValue::square(AdValue::offset(scratch.ad_value(5), params.offset)), params.right_scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_div_scaled_inputs_square_rhs(180, 2, p.left_scale, 3, p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_scaled_inputs_square_ad_rhs(181, 4, p.left_scale, A::offset(s.ad_value(5), p.offset), p.right_scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_div_scaled_inputs_mixed_ia("),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::square("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
     fn rewrites_wide_div_scaled_inputs_rvalue_stores_as_index_or_mixed_direct_stores() {
         let support = generate_scratch_operation_helpers();
         for helper in [
@@ -9689,6 +9728,37 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
         "        self.store_div_scaled_inputs_components(index, left.value, left.node_derivatives, left.branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_scaled_inputs_square_rhs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
+        "        let denominator = right_raw * right_raw * right_scale;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = left_raw * left_scale * reciprocal;",
+        "        let left_derivative_scale = left_scale * reciprocal;",
+        "        let right_derivative_scale = -quotient * reciprocal * right_scale * 2.0 * right_raw;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_scaled_inputs_square_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64) {",
+        "        let left_raw = self.values[left];",
+        "        let right_raw = self.values[right];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.store_div_scaled_inputs_square_rhs_components(index, left_raw, left_node_derivatives, left_branch_derivatives, left_scale, right_raw, right_node_derivatives, right_branch_derivatives, right_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_scaled_inputs_square_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue, right_scale: f64) {",
+        "        let left_raw = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        self.store_div_scaled_inputs_square_rhs_components(index, left_raw, left_node_derivatives, left_branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
         "    }",
         "",
         "    #[inline]",
@@ -22658,6 +22728,15 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_inputs")
         && args.len() == 4
     {
+        if let Some(line) = compact_div_scaled_inputs_square_rhs_store_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+        ) {
+            return Some(line);
+        }
         if let Some(line) = compact_index_or_mixed_scaled_inputs_helper_line(
             target_index,
             "store_div_scaled_inputs",
@@ -23918,6 +23997,30 @@ fn compact_div_square_rhs_store_helper_line(
     let right = compact_scratch_or_non_atomic_ad_arg(args[0])?;
     Some(format!(
         "scratch.store_div_square_ad_rhs({target_index}, {left}, {right});"
+    ))
+}
+
+fn compact_div_scaled_inputs_square_rhs_store_helper_line(
+    target_index: usize,
+    left: &str,
+    left_scale: &str,
+    right: &str,
+    right_scale: &str,
+) -> Option<String> {
+    let left = compact_scratch_ad_value_index(left)?;
+    let args = compact_ad_call_args(right, "square")?;
+    if args.len() != 1 {
+        return None;
+    }
+    if let Some(right) = compact_scratch_ad_value_index(args[0]) {
+        return Some(format!(
+            "scratch.store_div_scaled_inputs_square_rhs({target_index}, {left}, {left_scale}, {right}, {right_scale});"
+        ));
+    }
+
+    let right = compact_scratch_or_non_atomic_ad_arg(args[0])?;
+    Some(format!(
+        "scratch.store_div_scaled_inputs_square_ad_rhs({target_index}, {left}, {left_scale}, {right}, {right_scale});"
     ))
 }
 
