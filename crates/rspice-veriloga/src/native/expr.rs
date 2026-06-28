@@ -59,6 +59,7 @@ pub(crate) enum NativeOp {
     ZiState(usize),
     TimerState(usize),
     TransitionState(usize),
+    SlewState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -517,6 +518,17 @@ impl NativeProgram {
                     )?;
                     depth -= 3;
                     ops.push(NativeOp::TransitionState(*filter_id));
+                }
+                Instruction::SlewState(filter_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        3,
+                    )?;
+                    depth -= 2;
+                    ops.push(NativeOp::SlewState(*filter_id));
                 }
                 Instruction::WhiteNoise => {
                     require_stack(
@@ -1805,6 +1817,81 @@ mod tests {
                 limits(0, 0),
             )
             .expect_err("transition state must stay out of restricted entries");
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
+            assert!(
+                msg.contains("no interpreter fallback"),
+                "{entry_kind:?}: got {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_slew_state_as_native_context_filter() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::SlewState(4),
+            ],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("slew", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("slew state has native x64 helper-call lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(2.0),
+                NativeOp::Const(3.0),
+                NativeOp::SlewState(4),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 3);
+    }
+
+    #[test]
+    fn lowering_rejects_slew_state_without_all_operands() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(2.0),
+                Instruction::SlewState(0),
+            ],
+        };
+
+        let error =
+            NativeProgram::from_bytecode("bad-slew", EntryKind::Assignment, &program, limits(0, 0))
+                .expect_err("slew state requires input, positive slew, and negative slew operands");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("SlewState requires stack depth 3"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_slew_state_in_restricted_entry_kinds() {
+        for (entry_kind, expected) in [
+            (EntryKind::StaticCondition, "StaticCondition SlewState"),
+            (EntryKind::ParameterDefault, "ParameterDefault SlewState"),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(3.0),
+                    Instruction::SlewState(0),
+                ],
+            };
+
+            let error =
+                NativeProgram::from_bytecode("bad-slew-entry", entry_kind, &program, limits(0, 0))
+                    .expect_err("slew state must stay out of restricted entries");
             let msg = error.to_string();
             assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
             assert!(

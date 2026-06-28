@@ -66,6 +66,10 @@ pub struct EvalContext {
     pub transition_filters: *mut crate::vm::TransitionFilter,
     /// Number of transition filters
     pub transition_filters_len: usize,
+    /// Slew-rate filters (mutable for slew(...) evaluation)
+    pub slew_filters: *mut crate::vm::SlewFilter,
+    /// Number of slew-rate filters
+    pub slew_filters_len: usize,
 }
 
 thread_local! {
@@ -570,6 +574,71 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     )
 }
 
+/// External helper function for native x64 slew-rate filters.
+///
+/// `operands` points to three contiguous f64 values emitted by the JIT in VM
+/// stack order: input, max positive slew, and max negative slew. Passing a
+/// pointer keeps helper-call ABI handling identical to `transition(...)`.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid EvalContext
+/// pointer and a valid three-element operand slice. Invalid pointers are
+/// reported through the native runtime error channel; native mode never
+/// dispatches the bytecode interpreter for recovery.
+#[unsafe(export_name = "rspice_slew_state_native")]
+pub unsafe extern "C" fn rspice_slew_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    filter_id: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_runtime_error("native slew helper missing operands; no interpreter fallback");
+        return 0.0;
+    }
+    if ctx.is_null() {
+        set_native_runtime_error("native slew helper missing EvalContext; no interpreter fallback");
+        return 0.0;
+    }
+
+    let operands = unsafe { std::slice::from_raw_parts(operands, 3) };
+    let input = operands[0];
+    let max_pos_slew = operands[1];
+    let max_neg_slew = operands[2];
+    let ctx = unsafe { &*ctx };
+
+    if ctx.analysis_type != 2 {
+        return input;
+    }
+
+    if ctx.slew_filters.is_null() {
+        set_native_runtime_error(format!(
+            "native slew helper missing filter storage for filter {filter_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if filter_id >= ctx.slew_filters_len {
+        set_native_runtime_error(format!(
+            "native slew helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+            ctx.slew_filters_len
+        ));
+        return 0.0;
+    }
+
+    let max_pos = if max_pos_slew.is_finite() && max_pos_slew > 0.0 {
+        max_pos_slew
+    } else {
+        f64::INFINITY
+    };
+    let max_neg = if max_neg_slew.is_finite() && max_neg_slew > 0.0 {
+        max_neg_slew
+    } else {
+        f64::INFINITY
+    };
+
+    let filters = unsafe { std::slice::from_raw_parts_mut(ctx.slew_filters, ctx.slew_filters_len) };
+    filters[filter_id].update(input, ctx.time, max_pos, max_neg)
+}
+
 /// External helper function for native x64 runtime-indexed variable reads.
 ///
 /// `base_ptr` points at the first element of the array variable run. The helper
@@ -697,10 +766,11 @@ pub unsafe extern "C" fn rspice_current_lookup(
 mod tests {
     use super::{
         EvalContext, clear_native_runtime_error, rspice_dynamic_variable_load_native,
-        rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_timer_state_native,
-        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
+        rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_slew_state_native,
+        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
+        take_native_runtime_error,
     };
-    use crate::vm::TransitionFilter;
+    use crate::vm::{SlewFilter, TransitionFilter};
     use std::mem::{align_of, offset_of, size_of};
 
     #[test]
@@ -734,7 +804,9 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, zi_filters_len), 208);
         assert_eq!(offset_of!(EvalContext, transition_filters), 216);
         assert_eq!(offset_of!(EvalContext, transition_filters_len), 224);
-        assert_eq!(size_of::<EvalContext>(), 232);
+        assert_eq!(offset_of!(EvalContext, slew_filters), 232);
+        assert_eq!(offset_of!(EvalContext, slew_filters_len), 240);
+        assert_eq!(size_of::<EvalContext>(), 248);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -828,6 +900,8 @@ mod tests {
             zi_filters_len: 0,
             transition_filters: std::ptr::null_mut(),
             transition_filters_len: 0,
+            slew_filters: std::ptr::null_mut(),
+            slew_filters_len: 0,
         };
 
         assert_eq!(
@@ -962,6 +1036,102 @@ mod tests {
     }
 
     #[test]
+    fn slew_native_helper_records_runtime_error_for_invalid_pointers() {
+        let operands = [1.0, 2.0, 2.0];
+        clear_native_runtime_error();
+
+        let missing_operands =
+            unsafe { rspice_slew_state_native(std::ptr::null(), std::ptr::null(), 0) };
+
+        assert_eq!(missing_operands.to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("invalid native slew operands must record an error");
+        assert!(
+            error.contains("slew") && error.contains("operands"),
+            "error must identify the invalid slew operands, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+
+        clear_native_runtime_error();
+        let missing_ctx =
+            unsafe { rspice_slew_state_native(operands.as_ptr(), std::ptr::null(), 0) };
+
+        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("invalid native slew context must record an error");
+        assert!(
+            error.contains("slew") && error.contains("EvalContext"),
+            "error must identify the invalid slew context, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn slew_native_helper_passes_input_through_outside_transient() {
+        let operands = [1.25, 2.0, 2.0];
+        let ctx = empty_eval_context();
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 7) };
+
+        assert_eq!(value.to_bits(), 1.25_f64.to_bits());
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn slew_native_helper_hard_fails_missing_transient_storage() {
+        let operands = [1.0, 2.0, 2.0];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing slew storage must hard-fail");
+        assert!(
+            error.contains("slew") && error.contains("filter storage"),
+            "error must identify missing slew storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn slew_native_helper_uses_vm_slew_filter_state() {
+        let operands = [10.0, 2.0, 2.0];
+        let mut filters = [SlewFilter::default()];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.slew_filters = filters.as_mut_ptr();
+        ctx.slew_filters_len = filters.len();
+        clear_native_runtime_error();
+
+        ctx.time = 0.0;
+        assert_eq!(
+            unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+
+        ctx.time = 0.5;
+        let mid = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
+        assert!((mid - 1.0).abs() < 1.0e-12, "mid slew: {mid}");
+
+        ctx.time = 1.0;
+        let done = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
+        assert!((done - 2.0).abs() < 1.0e-12, "done slew: {done}");
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
     fn dynamic_variable_helper_loads_rounded_index_and_reports_bounds_errors() {
         let values = [2.0, 4.0, 8.0];
         clear_native_runtime_error();
@@ -1048,6 +1218,8 @@ mod tests {
             zi_filters_len: 0,
             transition_filters: std::ptr::null_mut(),
             transition_filters_len: 0,
+            slew_filters: std::ptr::null_mut(),
+            slew_filters_len: 0,
         }
     }
 }

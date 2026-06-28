@@ -1193,6 +1193,12 @@ impl VerilogADevice {
                 context.transition_filters.as_mut_ptr()
             },
             transition_filters_len: context.transition_filters.len(),
+            slew_filters: if context.slew_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.slew_filters.as_mut_ptr()
+            },
+            slew_filters_len: context.slew_filters.len(),
         }
     }
 

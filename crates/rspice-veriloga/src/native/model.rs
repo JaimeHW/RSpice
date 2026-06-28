@@ -509,6 +509,8 @@ mod tests {
             zi_filters_len: 0,
             transition_filters: std::ptr::null_mut(),
             transition_filters_len: 0,
+            slew_filters: std::ptr::null_mut(),
+            slew_filters_len: 0,
         }
     }
 }
