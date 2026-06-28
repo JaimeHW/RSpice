@@ -85,7 +85,7 @@ button works. Platform differences are set in `Cargo.toml`:
 
 - **Desktop** (`cfg(not(target_arch = "wasm32"))`): `rspice-core` with
   default features (parallel + SIMD solver paths) plus `veriloga-native`
-  (Cranelift JIT for Verilog-A devices); multi-threaded tokio runtime.
+  (RSpice-owned native JIT contract for Verilog-A devices; full JIT or typed construction error); multi-threaded tokio runtime.
 - **wasm32**: `rspice-core` with `default-features = false` and the
   `veriloga` + `wasm` features — interpreted Verilog-A, no rayon/SIMD;
   current-thread tokio runtime; `web-sys`/`wasm-bindgen` for the DOM.

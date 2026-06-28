@@ -211,7 +211,7 @@ only.
 | `parallel` | yes | rayon + portable-atomic for parallel solver paths (`solver/parallel.rs`) |
 | `simd` | yes | `wide`-based SIMD kernels (`simd/` module, `device/batch/`) |
 | `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus serde/bincode/blake3/dirs for the compiled-model cache |
-| `veriloga-native` | no | Native-only Cranelift JIT performance backend for supported Verilog-A fragments (implies `veriloga`); unsupported fragments fall back to the interpreter, and any expansion of the raw-pointer boundary requires a targeted safety review |
+| `veriloga-native` | no | RSpice-owned native JIT for Verilog-A devices; requested native mode is full JIT or typed construction error |
 | `veriloga-builtins` | no | Build-time generated Rust devices from bundled Verilog-A sources; uses `build.rs` to materialize `src/device/veriloga_generated/` and compile a generated registry. Feature-gated until CMC model qualification and product gates are explicit |
 | `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
 | `ffi` | no | Experimental `libloading` integration for dynamically loaded external device models; not a production-stable device ABI until the callback ownership, library lifetime, and stamping contracts are audited |

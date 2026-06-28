@@ -115,7 +115,6 @@ Everything is permissive. Non-(pure MIT/Apache) entries worth tracking:
 | `numpy` 0.23 (rspice-python) | BSD-2-Clause | Attribution in NOTICE. |
 | `libloading` (rspice-core, optional) | ISC | Permissive. |
 | `winit` 0.30 (rspice-ui) | Apache-2.0 (only) | Apache NOTICE-preservation applies (winit ships no NOTICE file). |
-| `cranelift*` 0.115 (rspice-veriloga, optional) | Apache-2.0 WITH LLVM-exception | Permissive. |
 | `wide`, `bytemuck`, `raw-window-handle` | Zlib OR Apache-2.0 OR MIT | MIT option exercised. |
 | `blake3` (optional) | CC0-1.0 OR Apache-2.0 (OR Apache-2.0 WITH LLVM-exception) | Permissive. |
 | `pollster` | Apache-2.0/MIT | dual. |

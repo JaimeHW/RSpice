@@ -215,7 +215,7 @@ coverage; it is not a substitute for importing the extension in pytest.
 
 ### Verilog-A
 
-`rspice-veriloga` compiles behavioral modules through a parser, semantic analysis, canonical IR, and bytecode VM pipeline, with optional native code generation via a Cranelift JIT (the `native` feature). It also owns the Rust backend used by `rspice-core`'s feature-gated generated built-ins, so packages under [models/veriloga/cmc/](models/veriloga/cmc/) can be qualified as generated native Rust devices instead of hand-written ports. External models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
+`rspice-veriloga` compiles behavioral modules through parser, semantic analysis, canonical IR, and bytecode VM paths, with a native JIT feature under replacement by the RSpice-owned x64-first backend. When native JIT mode is requested, model construction is full native JIT or a typed error; it does not fall back to the interpreter. It also owns the Rust backend used by `rspice-core`'s feature-gated generated built-ins, so packages under [models/veriloga/cmc/](models/veriloga/cmc/) can be qualified as generated native Rust devices instead of hand-written ports. External models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
 
 ## Validation
 
