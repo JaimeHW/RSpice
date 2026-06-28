@@ -6852,14 +6852,10 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_div_scaled_product_add_scaled_denominator_components(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left_value: f64, denominator_left_dn: [f64; NODE_COUNT], denominator_left_db: [f64; BRANCH_COUNT], denominator_left_scale: f64, denominator_right_value: f64, denominator_right_dn: [f64; NODE_COUNT], denominator_right_db: [f64; BRANCH_COUNT], denominator_right_scale: f64, denominator_scale: f64) {
+    pub(crate) fn store_div_scaled_product_add_scaled_denominator(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_left_scale: f64, denominator_right: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right_scale: f64, denominator_scale: f64) {
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
-        let denominator_raw = denominator_left_value * denominator_left_scale + denominator_right_value * denominator_right_scale;
+        let denominator_raw = denominator_left.value * denominator_left_scale + denominator_right.value * denominator_right_scale;
         let denominator_value = denominator_raw * denominator_scale;
         let reciprocal = 1.0 / denominator_value;
         let product_value = product_left_value * product_right_value;
@@ -6868,13 +6864,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let product_derivative_scale = product_scale * reciprocal;
         let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
         self.v[index] = quotient;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_derivative_scale + (denominator_left_dn[axis] * denominator_left_scale + denominator_right_dn[axis] * denominator_right_scale) * denominator_derivative_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_derivative_scale + (denominator_left_db[axis] * denominator_left_scale + denominator_right_db[axis] * denominator_right_scale) * denominator_derivative_scale; }
-    }
-
-    #[inline]
-    pub(crate) fn store_div_scaled_product_add_scaled_denominator(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_left_scale: f64, denominator_right: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right_scale: f64, denominator_scale: f64) {
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left.value, denominator_left.dn, denominator_left.db, denominator_left_scale, denominator_right.value, denominator_right.dn, denominator_right.db, denominator_right_scale, denominator_scale);
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (denominator_left.dn[axis] * denominator_left_scale + denominator_right.dn[axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (denominator_left.db[axis] * denominator_left_scale + denominator_right.db[axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
     #[inline]
@@ -13032,31 +13023,55 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_div_scaled_product_add_scaled_denominator_mixed_ai(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_left_scale: f64, denominator_right: usize, denominator_right_scale: f64, denominator_scale: f64) {
-        let denominator_right_value = self.v[denominator_right];
-        let denominator_right_dn = self.dn[denominator_right];
-        let denominator_right_db = self.db[denominator_right];
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left.value, denominator_left.dn, denominator_left.db, denominator_left_scale, denominator_right_value, denominator_right_dn, denominator_right_db, denominator_right_scale, denominator_scale);
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let denominator_raw = denominator_left.value * denominator_left_scale + self.v[denominator_right] * denominator_right_scale;
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (denominator_left.dn[axis] * denominator_left_scale + self.dn[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (denominator_left.db[axis] * denominator_left_scale + self.db[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
 
     #[inline]
     pub(crate) fn store_div_scaled_product_add_scaled_denominator_mixed_ia(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: usize, denominator_left_scale: f64, denominator_right: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right_scale: f64, denominator_scale: f64) {
-        let denominator_left_value = self.v[denominator_left];
-        let denominator_left_dn = self.dn[denominator_left];
-        let denominator_left_db = self.db[denominator_left];
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left_value, denominator_left_dn, denominator_left_db, denominator_left_scale, denominator_right.value, denominator_right.dn, denominator_right.db, denominator_right_scale, denominator_scale);
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let denominator_raw = self.v[denominator_left] * denominator_left_scale + denominator_right.value * denominator_right_scale;
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (self.dn[denominator_left][axis] * denominator_left_scale + denominator_right.dn[axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (self.db[denominator_left][axis] * denominator_left_scale + denominator_right.db[axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
 
     #[inline]
     pub(crate) fn store_div_scaled_product_add_scaled_denominator_indices(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: usize, denominator_left_scale: f64, denominator_right: usize, denominator_right_scale: f64, denominator_scale: f64) {
-        let denominator_left_value = self.v[denominator_left];
-        let denominator_left_dn = self.dn[denominator_left];
-        let denominator_left_db = self.db[denominator_left];
-        let denominator_right_value = self.v[denominator_right];
-        let denominator_right_dn = self.dn[denominator_right];
-        let denominator_right_db = self.db[denominator_right];
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left_value, denominator_left_dn, denominator_left_db, denominator_left_scale, denominator_right_value, denominator_right_dn, denominator_right_db, denominator_right_scale, denominator_scale);
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let denominator_raw = self.v[denominator_left] * denominator_left_scale + self.v[denominator_right] * denominator_right_scale;
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (self.dn[denominator_left][axis] * denominator_left_scale + self.dn[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (self.db[denominator_left][axis] * denominator_left_scale + self.db[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
 
@@ -21630,14 +21645,10 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
-    pub(crate) fn store_div_scaled_product_add_scaled_denominator_components(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left_value: f64, denominator_left_dn: [f64; NODE_COUNT], denominator_left_db: [f64; BRANCH_COUNT], denominator_left_scale: f64, denominator_right_value: f64, denominator_right_dn: [f64; NODE_COUNT], denominator_right_db: [f64; BRANCH_COUNT], denominator_right_scale: f64, denominator_scale: f64) {
+    pub(crate) fn store_div_scaled_product_add_scaled_denominator(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_left_scale: f64, denominator_right: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right_scale: f64, denominator_scale: f64) {
         let product_left_value = self.v[product_left];
         let product_right_value = self.v[product_right];
-        let product_left_dn = self.dn[product_left];
-        let product_right_dn = self.dn[product_right];
-        let product_left_db = self.db[product_left];
-        let product_right_db = self.db[product_right];
-        let denominator_raw = denominator_left_value * denominator_left_scale + denominator_right_value * denominator_right_scale;
+        let denominator_raw = denominator_left.value * denominator_left_scale + denominator_right.value * denominator_right_scale;
         let denominator_value = denominator_raw * denominator_scale;
         let reciprocal = 1.0 / denominator_value;
         let product_value = product_left_value * product_right_value;
@@ -21646,13 +21657,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let product_derivative_scale = product_scale * reciprocal;
         let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
         self.v[index] = quotient;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (product_left_dn[axis] * product_right_value + product_left_value * product_right_dn[axis]) * product_derivative_scale + (denominator_left_dn[axis] * denominator_left_scale + denominator_right_dn[axis] * denominator_right_scale) * denominator_derivative_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (product_left_db[axis] * product_right_value + product_left_value * product_right_db[axis]) * product_derivative_scale + (denominator_left_db[axis] * denominator_left_scale + denominator_right_db[axis] * denominator_right_scale) * denominator_derivative_scale; }
-    }
-
-    #[inline]
-    pub(crate) fn store_div_scaled_product_add_scaled_denominator(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_left_scale: f64, denominator_right: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right_scale: f64, denominator_scale: f64) {
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left.value, denominator_left.dn, denominator_left.db, denominator_left_scale, denominator_right.value, denominator_right.dn, denominator_right.db, denominator_right_scale, denominator_scale);
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (denominator_left.dn[axis] * denominator_left_scale + denominator_right.dn[axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (denominator_left.db[axis] * denominator_left_scale + denominator_right.db[axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
     #[inline]
@@ -27810,31 +27816,55 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_div_scaled_product_add_scaled_denominator_mixed_ai(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_left_scale: f64, denominator_right: usize, denominator_right_scale: f64, denominator_scale: f64) {
-        let denominator_right_value = self.v[denominator_right];
-        let denominator_right_dn = self.dn[denominator_right];
-        let denominator_right_db = self.db[denominator_right];
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left.value, denominator_left.dn, denominator_left.db, denominator_left_scale, denominator_right_value, denominator_right_dn, denominator_right_db, denominator_right_scale, denominator_scale);
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let denominator_raw = denominator_left.value * denominator_left_scale + self.v[denominator_right] * denominator_right_scale;
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (denominator_left.dn[axis] * denominator_left_scale + self.dn[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (denominator_left.db[axis] * denominator_left_scale + self.db[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
 
     #[inline]
     pub(crate) fn store_div_scaled_product_add_scaled_denominator_mixed_ia(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: usize, denominator_left_scale: f64, denominator_right: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right_scale: f64, denominator_scale: f64) {
-        let denominator_left_value = self.v[denominator_left];
-        let denominator_left_dn = self.dn[denominator_left];
-        let denominator_left_db = self.db[denominator_left];
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left_value, denominator_left_dn, denominator_left_db, denominator_left_scale, denominator_right.value, denominator_right.dn, denominator_right.db, denominator_right_scale, denominator_scale);
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let denominator_raw = self.v[denominator_left] * denominator_left_scale + denominator_right.value * denominator_right_scale;
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (self.dn[denominator_left][axis] * denominator_left_scale + denominator_right.dn[axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (self.db[denominator_left][axis] * denominator_left_scale + denominator_right.db[axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
 
     #[inline]
     pub(crate) fn store_div_scaled_product_add_scaled_denominator_indices(&mut self, index: usize, product_left: usize, product_right: usize, product_scale: f64, denominator_left: usize, denominator_left_scale: f64, denominator_right: usize, denominator_right_scale: f64, denominator_scale: f64) {
-        let denominator_left_value = self.v[denominator_left];
-        let denominator_left_dn = self.dn[denominator_left];
-        let denominator_left_db = self.db[denominator_left];
-        let denominator_right_value = self.v[denominator_right];
-        let denominator_right_dn = self.dn[denominator_right];
-        let denominator_right_db = self.db[denominator_right];
-        self.store_div_scaled_product_add_scaled_denominator_components(index, product_left, product_right, product_scale, denominator_left_value, denominator_left_dn, denominator_left_db, denominator_left_scale, denominator_right_value, denominator_right_dn, denominator_right_db, denominator_right_scale, denominator_scale);
+        let product_left_value = self.v[product_left];
+        let product_right_value = self.v[product_right];
+        let denominator_raw = self.v[denominator_left] * denominator_left_scale + self.v[denominator_right] * denominator_right_scale;
+        let denominator_value = denominator_raw * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.v[index] = quotient;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_derivative_scale + (self.dn[denominator_left][axis] * denominator_left_scale + self.dn[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_derivative_scale + (self.db[denominator_left][axis] * denominator_left_scale + self.db[denominator_right][axis] * denominator_right_scale) * denominator_derivative_scale; }
     }
 
 
