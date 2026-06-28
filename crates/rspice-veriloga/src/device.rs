@@ -31,6 +31,7 @@ use smol_str::SmolStr;
 use crate::native::NativeModel;
 
 #[cfg(feature = "native")]
+#[derive(Clone, Copy)]
 enum NativeValueEntry {
     StampValue(usize),
     Jacobian { stamp: usize, entry: usize },
@@ -1123,6 +1124,17 @@ impl VerilogADevice {
         native: &NativeModel,
         entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
+        let current_pairs = match entry {
+            NativeValueEntry::StampValue(index) => native.stamp_value_current_pairs(index),
+            NativeValueEntry::Jacobian { stamp, entry } => {
+                native.jacobian_current_pairs(stamp, entry)
+            }
+            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
+                native.reactive_jacobian_current_pairs(stamp, entry)
+            }
+        };
+        Self::validate_native_current_pairs(vm.context, current_pairs)?;
+
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
         Ok(match entry {
@@ -1134,6 +1146,30 @@ impl VerilogADevice {
                 native.run_reactive_jacobian(stamp, entry, &ctx, vars_ptr)
             }
         })
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_current_pairs(
+        context: &VmContext,
+        current_pairs: &[usize],
+    ) -> Result<(), VmError> {
+        if current_pairs.is_empty() {
+            return Ok(());
+        }
+
+        let terminal_count = context.terminal_count();
+        if terminal_count == 0 {
+            return Err(VmError::InvalidInstruction(
+                "missing terminal-pair current slot",
+            ));
+        }
+        for pair_index in current_pairs {
+            let pos = pair_index / terminal_count;
+            let neg = pair_index % terminal_count;
+            context.try_current(pos, neg)?;
+        }
+
+        Ok(())
     }
 
     /// Run one value-returning bytecode program.

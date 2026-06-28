@@ -6,6 +6,7 @@ const MODEL: &str = "native-x64";
 const VOLTAGES_OFFSET: i32 = 0;
 const INTERNAL_VOLTAGES_OFFSET: i32 = 8;
 const PARAMS_OFFSET: i32 = 16;
+const BRANCH_CURRENTS_OFFSET: i32 = 24;
 const PORT_CONNECTED_OFFSET: i32 = 64;
 const TEMPERATURE_OFFSET: i32 = 80;
 const TIME_OFFSET: i32 = 88;
@@ -103,6 +104,12 @@ impl FunctionCompiler {
                 }
                 NativeOp::LoadVoltage { pos, neg } => {
                     self.emit_voltage_load(pos, neg)?;
+                }
+                NativeOp::LoadCurrent(pair_index) => {
+                    let dst = self.push_register()?;
+                    self.emit_context_pointer_load(BRANCH_CURRENTS_OFFSET);
+                    self.encoder
+                        .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(pair_index)?);
                 }
                 NativeOp::LoadInternalVoltage(index) => {
                     let dst = self.push_register()?;
@@ -410,9 +417,9 @@ fn host_vars_arg_reg() -> Gpr {
 mod tests {
     use super::{compile_assignment_function, compile_value_function};
     use crate::codegen::{BytecodeProgram, Instruction};
-    use crate::native::expr::{EntryKind, NativeProgram};
-    use crate::native::runtime::ExecutableMemory;
     use crate::native::EvalContext;
+    use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
+    use crate::native::runtime::ExecutableMemory;
 
     #[test]
     fn generated_value_leaf_evaluates_native_expression() {
@@ -550,6 +557,34 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_loads_terminal_pair_current_probe() {
+        let available_current_pairs = [2];
+        let program = native_program_with_available_current_pairs(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushCurrent(1, 0),
+                Instruction::PushConst(0.25),
+                Instruction::Mul,
+            ],
+            2,
+            &available_current_pairs,
+        );
+        let bytes = compile_value_function(&program).expect("compile current probe leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate current probe leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let branch_currents = [f64::NAN, 4.0_f64, -4.0_f64, f64::NAN];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.branch_currents = branch_currents.as_ptr();
+        ctx.branch_currents_len = branch_currents.len();
+        ctx.num_terminals = 2;
+
+        assert_eq!(f(&ctx, std::ptr::null()), -1.0);
+    }
+
+    #[test]
     fn generated_value_leaf_runs_from_nonzero_concatenated_image_offset() {
         let program = native_program(
             EntryKind::StampValue,
@@ -579,11 +614,15 @@ mod tests {
     #[test]
     fn rejects_variable_index_that_exceeds_disp32_range() {
         let too_large_index = (i32::MAX as usize / std::mem::size_of::<f64>()) + 1;
-        let program = native_program(
+        let program = NativeProgram::from_bytecode(
+            "x64-codegen-test",
             EntryKind::StampValue,
-            vec![Instruction::PushVariable(too_large_index)],
-            0,
-        );
+            &BytecodeProgram {
+                instructions: vec![Instruction::PushVariable(too_large_index)],
+            },
+            NativeLoweringLimits::new(0, 0, 0, too_large_index + 1, 0),
+        )
+        .expect("large variable index is valid IR before x64 disp32 lowering");
 
         let error = compile_value_function(&program)
             .expect_err("large variable index must not truncate displacement");
@@ -641,8 +680,23 @@ mod tests {
             "x64-codegen-test",
             entry_kind,
             &BytecodeProgram { instructions },
-            terminal_count,
-            internal_node_count,
+            NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8),
+        )
+        .expect("lower bytecode to native program")
+    }
+
+    fn native_program_with_available_current_pairs(
+        entry_kind: EntryKind,
+        instructions: Vec<Instruction>,
+        terminal_count: usize,
+        available_current_pairs: &[usize],
+    ) -> NativeProgram {
+        NativeProgram::from_bytecode(
+            "x64-codegen-test",
+            entry_kind,
+            &BytecodeProgram { instructions },
+            NativeLoweringLimits::new(terminal_count, 0, 8, 8, 8)
+                .with_available_current_pairs(available_current_pairs),
         )
         .expect("lower bytecode to native program")
     }
