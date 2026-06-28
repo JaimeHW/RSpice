@@ -3685,12 +3685,10 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_mul_ad_product_rhs(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let source_value = self.v[source];
-        let source_dn = self.dn[source];
-        let source_db = self.db[source];
         let product_value = left.value * right.value;
         self.v[index] = source_value * product_value;
-        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right.value + left.value * right.dn[axis]; self.dn[index][axis] = source_dn[axis] * product_value + source_value * product_derivative; }
-        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right.value + left.value * right.db[axis]; self.db[index][axis] = source_db[axis] * product_value + source_value * product_derivative; }
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right.value + left.value * right.dn[axis]; self.dn[index][axis] = self.dn[source][axis] * product_value + source_value * product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right.value + left.value * right.db[axis]; self.db[index][axis] = self.db[source][axis] * product_value + source_value * product_derivative; }
     }
 
     #[inline]
@@ -17904,12 +17902,10 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_mul_ad_product_rhs(&mut self, index: usize, source: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let source_value = self.v[source];
-        let source_dn = self.dn[source];
-        let source_db = self.db[source];
         let product_value = left.value * right.value;
         self.v[index] = source_value * product_value;
-        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right.value + left.value * right.dn[axis]; self.dn[index][axis] = source_dn[axis] * product_value + source_value * product_derivative; }
-        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right.value + left.value * right.db[axis]; self.db[index][axis] = source_db[axis] * product_value + source_value * product_derivative; }
+        for axis in 0..NODE_COUNT { let product_derivative = left.dn[axis] * right.value + left.value * right.dn[axis]; self.dn[index][axis] = self.dn[source][axis] * product_value + source_value * product_derivative; }
+        for axis in 0..BRANCH_COUNT { let product_derivative = left.db[axis] * right.value + left.value * right.db[axis]; self.db[index][axis] = self.db[source][axis] * product_value + source_value * product_derivative; }
     }
 
     #[inline]
