@@ -5539,6 +5539,38 @@ fn stamp() {
             ),
             "{sub_div_same_denominator}"
         );
+
+        let sub_div_rhs_indices = helper_body(&support, "fn store_sub_div_rhs_indices(");
+        assert!(
+            !sub_div_rhs_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{sub_div_rhs_indices}"
+        );
+        assert!(
+            !sub_div_rhs_indices.contains("_branch_derivatives = self.branch_derivatives"),
+            "{sub_div_rhs_indices}"
+        );
+        assert!(
+            !sub_div_rhs_indices.contains("store_sub_div_rhs_components"),
+            "{sub_div_rhs_indices}"
+        );
+        assert!(
+            sub_div_rhs_indices.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - (self.node_derivatives[numerator][axis] * reciprocal + self.node_derivatives[denominator][axis] * denominator_derivative_scale);"
+            ),
+            "{sub_div_rhs_indices}"
+        );
+
+        let sub_div_rhs_ad = helper_body(&support, "fn store_sub_div_rhs_ad(");
+        assert!(
+            !sub_div_rhs_ad.contains("store_sub_div_rhs_components"),
+            "{sub_div_rhs_ad}"
+        );
+        assert!(
+            sub_div_rhs_ad.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - (numerator.node_derivatives[axis] * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale);"
+            ),
+            "{sub_div_rhs_ad}"
+        );
     }
 
     #[test]
@@ -14264,7 +14296,13 @@ fn generate_scratch_operation_helpers() -> String {
         "",
         "    #[inline]",
         "    fn store_sub_div_rhs_ad(&mut self, index: usize, left: usize, numerator: AdValue, denominator: AdValue) {",
-        "        self.store_sub_div_rhs_components(index, left, numerator.value, numerator.node_derivatives, numerator.branch_derivatives, denominator.value, denominator.node_derivatives, denominator.branch_derivatives);",
+        "        let left_value = self.values[left];",
+        "        let reciprocal = 1.0 / denominator.value;",
+        "        let quotient = numerator.value * reciprocal;",
+        "        let denominator_derivative_scale = -quotient * reciprocal;",
+        "        self.values[index] = left_value - quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - (numerator.node_derivatives[axis] * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale); }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] - (numerator.branch_derivatives[axis] * reciprocal + denominator.branch_derivatives[axis] * denominator_derivative_scale); }",
         "    }",
         "",
         "    #[inline]",
@@ -18525,6 +18563,30 @@ fn mixed_helper_component_args(mask: &str, index: usize, operand: &str) -> Strin
     }
 }
 
+fn mixed_helper_value_expr(mask: &str, index: usize, operand: &str) -> String {
+    if mask.as_bytes()[index] == b'i' {
+        format!("self.values[{operand}]")
+    } else {
+        format!("{operand}.value")
+    }
+}
+
+fn mixed_helper_node_derivative_expr(mask: &str, index: usize, operand: &str) -> String {
+    if mask.as_bytes()[index] == b'i' {
+        format!("self.node_derivatives[{operand}][axis]")
+    } else {
+        format!("{operand}.node_derivatives[axis]")
+    }
+}
+
+fn mixed_helper_branch_derivative_expr(mask: &str, index: usize, operand: &str) -> String {
+    if mask.as_bytes()[index] == b'i' {
+        format!("self.branch_derivatives[{operand}][axis]")
+    } else {
+        format!("{operand}.branch_derivatives[axis]")
+    }
+}
+
 fn generate_mixed_add_scaled_product_helper(mask: &str) -> String {
     let operands = ["value", "product_left", "product_right"];
     let locals = mixed_helper_component_locals(mask, &operands);
@@ -19070,17 +19132,27 @@ fn generate_index_or_mixed_add_scaled_inputs3_sqrt_first_helper(mask: &str) -> S
 }
 
 fn generate_index_or_mixed_sub_div_rhs_helper(mask: &str) -> String {
-    let operands = ["numerator", "denominator"];
     let helper = index_or_mixed_helper_name("store_sub_div_rhs", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let numerator = mixed_helper_component_args(mask, 0, "numerator");
-    let denominator = mixed_helper_component_args(mask, 1, "denominator");
+    let numerator_value = mixed_helper_value_expr(mask, 0, "numerator");
+    let denominator_value = mixed_helper_value_expr(mask, 1, "denominator");
+    let numerator_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "numerator");
+    let denominator_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "denominator");
+    let numerator_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "numerator");
+    let denominator_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "denominator");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, left: usize, numerator: {numerator_ty}, denominator: {denominator_ty}) {{
-{locals}        self.store_sub_div_rhs_components(index, left, {numerator}, {denominator});
+        let left_value = self.values[left];
+        let numerator_value = {numerator_value};
+        let denominator_value = {denominator_value};
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal;
+        self.values[index] = left_value - quotient;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = self.node_derivatives[left][axis] - ({numerator_node_derivative} * reciprocal + {denominator_node_derivative} * denominator_derivative_scale); }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] - ({numerator_branch_derivative} * reciprocal + {denominator_branch_derivative} * denominator_derivative_scale); }}
     }}
 "#,
         numerator_ty = mixed_helper_type(mask, 0),
