@@ -543,6 +543,19 @@ endmodule
     )
 }
 
+fn idtmod_current_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_idtmod_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ idtmod(1.0, 0.0, 1.0);
+endmodule
+"#,
+    )
+}
+
 fn current_probe_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1315,6 +1328,47 @@ fn native_device_executes_idt_current_and_jacobian_without_fallback() {
         (rhs.get(&0).copied().unwrap_or_default() + 0.5).abs() < 1e-15,
         "rhs: {rhs:?}"
     );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_idtmod_current_without_fallback() {
+    let model = idtmod_current_model();
+    let mut device =
+        VerilogADevice::try_new("IMOD1", model, &[1, 0]).expect("idtmod model uses native JIT");
+    assert!(device.is_using_native());
+
+    device.update_voltages(&[0.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("native idtmod DC evaluation succeeds")[0]
+            .to_bits(),
+        0.0_f64.to_bits()
+    );
+    device.advance_state();
+
+    device.set_analysis_type(2);
+    device.set_timestep(0.25);
+    let mut phases = Vec::new();
+    for _ in 0..6 {
+        device.update_voltages(&[0.0]);
+        phases.push(
+            device
+                .try_evaluate()
+                .expect("native idtmod transient evaluation succeeds")[0],
+        );
+        device.advance_state();
+    }
+
+    let expected = [0.25, 0.5, 0.75, 0.0, 0.25, 0.5];
+    assert_eq!(phases.len(), expected.len());
+    for (index, (got, want)) in phases.iter().zip(expected).enumerate() {
+        assert!(
+            (got - want).abs() < 1.0e-12,
+            "phase {index}: got {got}, want {want}, all {phases:?}"
+        );
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

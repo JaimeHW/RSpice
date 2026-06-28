@@ -99,6 +99,17 @@ pub unsafe extern "C" fn rspice_limit(
     prev_value + limited_delta
 }
 
+/// External helper function for idtmod wrapping.
+#[unsafe(export_name = "rspice_idtmod_wrap")]
+pub extern "C" fn rspice_idtmod_wrap(raw: f64, modulus: f64, offset: f64) -> f64 {
+    if modulus > 0.0 {
+        let phase = (raw - offset).rem_euclid(modulus);
+        offset + phase
+    } else {
+        raw
+    }
+}
+
 /// External helper function for limited exponential.
 #[unsafe(export_name = "rspice_limexp")]
 pub extern "C" fn rspice_limexp(x: f64) -> f64 {
