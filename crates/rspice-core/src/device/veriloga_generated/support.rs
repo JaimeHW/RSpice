@@ -2766,39 +2766,27 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_add(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value + right_value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] + self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_sub(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value - right_value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] - right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] - right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] - self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] - self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_mul(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value * right_value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * right_value + left_value * self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * right_value + left_value * self.db[right][axis]; }
     }
 
     #[inline]
@@ -2811,16 +2799,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_div(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         let reciprocal = 1.0 / right_value;
         let quotient = left_value * reciprocal;
         let right_scale = -quotient * reciprocal;
         self.v[index] = quotient;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * reciprocal + right_dn[axis] * right_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * reciprocal + right_db[axis] * right_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * reciprocal + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * reciprocal + self.db[right][axis] * right_scale; }
     }
 
     #[inline]
@@ -5566,13 +5550,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_scaled_mul(&mut self, index: usize, left: usize, right: usize, scale: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value * right_value * scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_value + left_value * right_dn[axis]) * scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_value + left_value * right_db[axis]) * scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[left][axis] * right_value + left_value * self.dn[right][axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[left][axis] * right_value + left_value * self.db[right][axis]) * scale; }
     }
 
     #[inline]
@@ -5587,71 +5567,51 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_scaled_div(&mut self, index: usize, left: usize, right: usize, scale: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         let reciprocal = 1.0 / right_value;
         let quotient = left_value * reciprocal;
         let right_scale = -quotient * reciprocal;
         self.v[index] = quotient * scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * reciprocal + right_dn[axis] * right_scale) * scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * reciprocal + right_db[axis] * right_scale) * scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[left][axis] * reciprocal + self.dn[right][axis] * right_scale) * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[left][axis] * reciprocal + self.db[right][axis] * right_scale) * scale; }
     }
 
     #[inline]
     pub(crate) fn store_offset_add(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value + right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] + self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_sub(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value - right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] - right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] - right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] - self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] - self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_mul(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value * right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * right_value + left_value * self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * right_value + left_value * self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_div(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         let reciprocal = 1.0 / right_value;
         let quotient = left_value * reciprocal;
         let right_scale = -quotient * reciprocal;
         self.v[index] = quotient + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * reciprocal + right_dn[axis] * right_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * reciprocal + right_db[axis] * right_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * reciprocal + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * reciprocal + self.db[right][axis] * right_scale; }
     }
 
     #[inline]
@@ -6781,11 +6741,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_unary_scaled(&mut self, index: usize, source: usize, value: f64, derivative_scale: f64) {
-        let dn = self.dn[source];
-        let db = self.db[source];
         self.v[index] = value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = derivative_scale * dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = derivative_scale * db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = derivative_scale * self.dn[source][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = derivative_scale * self.db[source][axis]; }
     }
 
 
@@ -16971,39 +16929,27 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_add(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value + right_value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] + self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_sub(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value - right_value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] - right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] - right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] - self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] - self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_mul(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value * right_value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * right_value + left_value * self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * right_value + left_value * self.db[right][axis]; }
     }
 
     #[inline]
@@ -17016,16 +16962,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_div(&mut self, index: usize, left: usize, right: usize) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         let reciprocal = 1.0 / right_value;
         let quotient = left_value * reciprocal;
         let right_scale = -quotient * reciprocal;
         self.v[index] = quotient;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * reciprocal + right_dn[axis] * right_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * reciprocal + right_db[axis] * right_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * reciprocal + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * reciprocal + self.db[right][axis] * right_scale; }
     }
 
     #[inline]
@@ -19771,13 +19713,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_scaled_mul(&mut self, index: usize, left: usize, right: usize, scale: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value * right_value * scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_value + left_value * right_dn[axis]) * scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_value + left_value * right_db[axis]) * scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[left][axis] * right_value + left_value * self.dn[right][axis]) * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[left][axis] * right_value + left_value * self.db[right][axis]) * scale; }
     }
 
     #[inline]
@@ -19792,71 +19730,51 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_scaled_div(&mut self, index: usize, left: usize, right: usize, scale: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         let reciprocal = 1.0 / right_value;
         let quotient = left_value * reciprocal;
         let right_scale = -quotient * reciprocal;
         self.v[index] = quotient * scale;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * reciprocal + right_dn[axis] * right_scale) * scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * reciprocal + right_db[axis] * right_scale) * scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = (self.dn[left][axis] * reciprocal + self.dn[right][axis] * right_scale) * scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = (self.db[left][axis] * reciprocal + self.db[right][axis] * right_scale) * scale; }
     }
 
     #[inline]
     pub(crate) fn store_offset_add(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value + right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] + self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_sub(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value - right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] - right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] - right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] - self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] - self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_mul(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         self.v[index] = left_value * right_value + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * right_value + left_value * right_dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * right_value + left_value * right_db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * right_value + left_value * self.dn[right][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * right_value + left_value * self.db[right][axis]; }
     }
 
     #[inline]
     pub(crate) fn store_offset_div(&mut self, index: usize, left: usize, right: usize, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
-        let left_dn = self.dn[left];
-        let right_dn = self.dn[right];
-        let left_db = self.db[left];
-        let right_db = self.db[right];
         let reciprocal = 1.0 / right_value;
         let quotient = left_value * reciprocal;
         let right_scale = -quotient * reciprocal;
         self.v[index] = quotient + offset;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * reciprocal + right_dn[axis] * right_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * reciprocal + right_db[axis] * right_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] * reciprocal + self.dn[right][axis] * right_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] * reciprocal + self.db[right][axis] * right_scale; }
     }
 
     #[inline]
@@ -20986,11 +20904,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_unary_scaled(&mut self, index: usize, source: usize, value: f64, derivative_scale: f64) {
-        let dn = self.dn[source];
-        let db = self.db[source];
         self.v[index] = value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = derivative_scale * dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = derivative_scale * db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = derivative_scale * self.dn[source][axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = derivative_scale * self.db[source][axis]; }
     }
 
 
