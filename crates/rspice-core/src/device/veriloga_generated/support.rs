@@ -5846,13 +5846,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let value = (square_value * square_value + self.v[add_source]).sqrt();
         let square_scale = square_value / value;
         let add_scale = 1.0 / (2.0 * value);
-        let square_dn = self.dn[square_source];
-        let add_dn = self.dn[add_source];
-        let square_db = self.db[square_source];
-        let add_db = self.db[add_source];
         self.v[index] = value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_scale + add_dn[axis] * add_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_scale + add_db[axis] * add_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[square_source][axis] * square_scale + self.dn[add_source][axis] * add_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[square_source][axis] * square_scale + self.db[add_source][axis] * add_scale; }
     }
 
     #[inline]
@@ -20120,13 +20116,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let value = (square_value * square_value + self.v[add_source]).sqrt();
         let square_scale = square_value / value;
         let add_scale = 1.0 / (2.0 * value);
-        let square_dn = self.dn[square_source];
-        let add_dn = self.dn[add_source];
-        let square_db = self.db[square_source];
-        let add_db = self.db[add_source];
         self.v[index] = value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = square_dn[axis] * square_scale + add_dn[axis] * add_scale; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = square_db[axis] * square_scale + add_db[axis] * add_scale; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[square_source][axis] * square_scale + self.dn[add_source][axis] * add_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[square_source][axis] * square_scale + self.db[add_source][axis] * add_scale; }
     }
 
     #[inline]
