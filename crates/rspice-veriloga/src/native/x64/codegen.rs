@@ -95,9 +95,7 @@ impl FunctionCompiler {
                 }
                 NativeOp::LoadInternalVoltage(index) => {
                     let dst = self.push_register()?;
-                    self.emit_context_pointer_load(INTERNAL_VOLTAGES_OFFSET);
-                    self.encoder
-                        .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                    self.emit_internal_voltage_load(dst, index)?;
                 }
                 NativeOp::LoadVariable(index) => {
                     let dst = self.push_register()?;
@@ -444,8 +442,43 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_handles_unified_internal_voltage_pairs() {
+        let terminals = [10.0_f64, 4.0_f64];
+        let internals = [7.0_f64, 3.0_f64];
+        let cases = [
+            ("terminal-internal", Instruction::PushVoltage(0, 2), 3.0_f64),
+            (
+                "ground-internal",
+                Instruction::PushVoltage(usize::MAX, 2),
+                -7.0_f64,
+            ),
+            (
+                "internal-ground",
+                Instruction::PushVoltage(3, usize::MAX),
+                3.0_f64,
+            ),
+            ("internal-internal", Instruction::PushVoltage(2, 3), 4.0_f64),
+        ];
+
+        for (name, instruction, expected) in cases {
+            let program =
+                native_program_with_internals(EntryKind::StampValue, vec![instruction], 2, 2);
+            let bytes =
+                compile_value_function(&program).expect("compile unified internal voltage leaf");
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate unified internal voltage leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &terminals, &internals, &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_handles_internal_branch_sub_and_neg() {
-        let program = native_program(
+        let program = native_program_with_internals(
             EntryKind::StampValue,
             vec![
                 Instruction::PushInternalVoltage(1),
@@ -454,6 +487,7 @@ mod tests {
                 Instruction::Neg,
             ],
             0,
+            2,
         );
         let bytes = compile_value_function(&program).expect("compile negated internal expression");
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate negated internal leaf");
@@ -547,12 +581,21 @@ mod tests {
         instructions: Vec<Instruction>,
         terminal_count: usize,
     ) -> NativeProgram {
+        native_program_with_internals(entry_kind, instructions, terminal_count, 0)
+    }
+
+    fn native_program_with_internals(
+        entry_kind: EntryKind,
+        instructions: Vec<Instruction>,
+        terminal_count: usize,
+        internal_node_count: usize,
+    ) -> NativeProgram {
         NativeProgram::from_bytecode(
             "x64-codegen-test",
             entry_kind,
             &BytecodeProgram { instructions },
             terminal_count,
-            0,
+            internal_node_count,
         )
         .expect("lower bytecode to native program")
     }
