@@ -2776,11 +2776,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_add_ad_rhs(&mut self, index: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let left_value = self.v[left];
-        let left_dn = self.dn[left];
-        let left_db = self.db[left];
         self.v[index] = left_value + right.value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right.dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right.db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] + right.db[axis]; }
     }
 
     #[inline]
@@ -17003,11 +17001,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn store_add_ad_rhs(&mut self, index: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
         let left_value = self.v[left];
-        let left_dn = self.dn[left];
-        let left_db = self.db[left];
         self.v[index] = left_value + right.value;
-        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] + right.dn[axis]; }
-        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] + right.db[axis]; }
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + right.dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = self.db[left][axis] + right.db[axis]; }
     }
 
     #[inline]
