@@ -58,6 +58,7 @@ pub(crate) enum NativeOp {
     LaplaceState(usize),
     ZiState(usize),
     TimerState(usize),
+    TransitionState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -505,6 +506,17 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     ops.push(NativeOp::TimerState(*timer_id));
+                }
+                Instruction::TransitionState(filter_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        4,
+                    )?;
+                    depth -= 3;
+                    ops.push(NativeOp::TransitionState(*filter_id));
                 }
                 Instruction::WhiteNoise => {
                     require_stack(
@@ -1696,6 +1708,103 @@ mod tests {
             let error =
                 NativeProgram::from_bytecode("bad-timer-entry", entry_kind, &program, limits(0, 0))
                     .expect_err("timer state must stay out of restricted entries");
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
+            assert!(
+                msg.contains("no interpreter fallback"),
+                "{entry_kind:?}: got {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_transition_state_as_native_context_filter() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(0.2),
+                Instruction::PushConst(0.4),
+                Instruction::PushConst(0.4),
+                Instruction::TransitionState(3),
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "transition",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect("transition state has native x64 helper-call lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(0.2),
+                NativeOp::Const(0.4),
+                NativeOp::Const(0.4),
+                NativeOp::TransitionState(3),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 4);
+    }
+
+    #[test]
+    fn lowering_rejects_transition_state_without_all_operands() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(0.2),
+                Instruction::PushConst(0.4),
+                Instruction::TransitionState(0),
+            ],
+        };
+
+        let error = NativeProgram::from_bytecode(
+            "bad-transition",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect_err("transition state requires input, delay, rise, and fall operands");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("TransitionState requires stack depth 4"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_transition_state_in_restricted_entry_kinds() {
+        for (entry_kind, expected) in [
+            (
+                EntryKind::StaticCondition,
+                "StaticCondition TransitionState",
+            ),
+            (
+                EntryKind::ParameterDefault,
+                "ParameterDefault TransitionState",
+            ),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.2),
+                    Instruction::PushConst(0.4),
+                    Instruction::PushConst(0.4),
+                    Instruction::TransitionState(0),
+                ],
+            };
+
+            let error = NativeProgram::from_bytecode(
+                "bad-transition-entry",
+                entry_kind,
+                &program,
+                limits(0, 0),
+            )
+            .expect_err("transition state must stay out of restricted entries");
             let msg = error.to_string();
             assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
             assert!(

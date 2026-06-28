@@ -6,7 +6,7 @@ use crate::native::abi::{
     rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod,
     rspice_native_loop_limit_error, rspice_pow, rspice_shl, rspice_shr, rspice_sin, rspice_sinh,
     rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
-    rspice_timer_state_native, rspice_zi_step_native,
+    rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -255,6 +255,7 @@ impl FunctionCompiler {
                 NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
                 NativeOp::ZiState(filter_id) => self.emit_zi_state(filter_id)?,
                 NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
+                NativeOp::TransitionState(filter_id) => self.emit_transition_state(filter_id)?,
                 NativeOp::WhiteNoise => self.emit_white_noise()?,
                 NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
@@ -1005,6 +1006,24 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_transition_state(&mut self, filter_id: usize) -> JitResult<()> {
+        if self.depth < 4 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "transition state requires stack depth 4, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+
+        let input = XMM_STACK[self.depth - 4];
+        self.emit_transition_helper_call(input, filter_id, rspice_transition_state_native);
+        self.depth -= 3;
+        Ok(())
+    }
+
     fn emit_ddt_state(&mut self, state_index: usize) -> JitResult<()> {
         if self.depth == 0 {
             return Err(JitError::Encoding {
@@ -1302,6 +1321,50 @@ impl FunctionCompiler {
         }
         self.encoder
             .movsd_xmm_m64_base_disp32(start, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+    }
+
+    fn emit_transition_helper_call(
+        &mut self,
+        input: Xmm,
+        filter_id: usize,
+        helper: TransitionHelper,
+    ) {
+        debug_assert!(self.uses_helper_calls);
+        let input_slot = xmm_stack_slot(input);
+        debug_assert!(input_slot + 3 < self.depth);
+
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+        }
+
+        self.encoder
+            .mov_r64_r64(transition_operands_arg_reg(), Gpr::R11);
+        let operands_disp = call_spill_disp(input_slot);
+        if operands_disp != 0 {
+            self.encoder
+                .add_r64_imm32(transition_operands_arg_reg(), operands_disp);
+        }
+        self.encoder
+            .mov_r64_r64(transition_ctx_arg_reg(), self.ctx_arg_reg());
+        self.encoder
+            .movabs_r64_imm64(transition_id_arg_reg(), filter_id as u64);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(input_slot).enumerate() {
+            self.encoder
+                .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(input, Gpr::R11, call_result_disp());
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -1687,6 +1750,8 @@ type TableHelper =
 type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 type TimerHelper = unsafe extern "C" fn(f64, f64, *const crate::native::EvalContext) -> f64;
+type TransitionHelper =
+    unsafe extern "C" fn(*const f64, *const crate::native::EvalContext, usize) -> f64;
 type DynamicVariableHelper = unsafe extern "C" fn(f64, *const f64, usize, i64) -> f64;
 type DynamicVariableSlotHelper = unsafe extern "C" fn(f64, *mut f64, usize, i64) -> *mut f64;
 
@@ -1784,6 +1849,7 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::LaplaceState(_)
                 | NativeOp::ZiState(_)
                 | NativeOp::TimerState(_)
+                | NativeOp::TransitionState(_)
                 | NativeOp::IdtModState(_)
         )
     })
@@ -1913,6 +1979,36 @@ fn timer_ctx_arg_reg() -> Gpr {
 }
 
 #[cfg(windows)]
+fn transition_operands_arg_reg() -> Gpr {
+    Gpr::Rcx
+}
+
+#[cfg(windows)]
+fn transition_ctx_arg_reg() -> Gpr {
+    Gpr::Rdx
+}
+
+#[cfg(windows)]
+fn transition_id_arg_reg() -> Gpr {
+    Gpr::R8
+}
+
+#[cfg(not(windows))]
+fn transition_operands_arg_reg() -> Gpr {
+    Gpr::Rdi
+}
+
+#[cfg(not(windows))]
+fn transition_ctx_arg_reg() -> Gpr {
+    Gpr::Rsi
+}
+
+#[cfg(not(windows))]
+fn transition_id_arg_reg() -> Gpr {
+    Gpr::Rdx
+}
+
+#[cfg(windows)]
 fn dynamic_variable_base_arg_reg() -> Gpr {
     Gpr::Rdx
 }
@@ -1953,6 +2049,7 @@ mod tests {
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
+    use crate::vm::TransitionFilter;
     use crate::zfilter::ZiFilter;
 
     #[test]
@@ -2980,6 +3077,58 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_calls_transition_helper_and_preserves_stack() {
+        let program = NativeProgram::from_bytecode(
+            "x64-codegen-test",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.2),
+                    Instruction::PushConst(0.4),
+                    Instruction::PushConst(0.4),
+                    Instruction::TransitionState(0),
+                    Instruction::Add,
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 0, 0),
+        )
+        .expect("lower transition helper program");
+        let bytes = compile_value_function(&program).expect("compile transition helper leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate transition helper leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut filters = [TransitionFilter::default()];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 310.0;
+        ctx.transition_filters = filters.as_mut_ptr();
+        ctx.transition_filters_len = filters.len();
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            311.0_f64.to_bits(),
+            "non-transient transition evaluation passes input through"
+        );
+
+        ctx.analysis_type = 2;
+
+        ctx.time = 1.0;
+        let first = f(&ctx, std::ptr::null());
+        assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+
+        ctx.time = 1.4;
+        let mid = f(&ctx, std::ptr::null());
+        assert!((mid - 310.5).abs() < 1.0e-12, "mid transition: {mid}");
+
+        ctx.time = 1.6;
+        let done = f(&ctx, std::ptr::null());
+        assert!((done - 311.0).abs() < 1.0e-12, "done transition: {done}");
+    }
+
+    #[test]
     fn generated_value_leaf_computes_ordered_comparisons() {
         let cases = [
             ("gt-true", Instruction::Gt, 5.0, 3.0, 1.0),
@@ -3840,6 +3989,8 @@ mod tests {
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,
+            transition_filters: std::ptr::null_mut(),
+            transition_filters_len: 0,
         }
     }
 

@@ -62,6 +62,10 @@ pub struct EvalContext {
     pub zi_filters: *mut crate::zfilter::ZiFilter,
     /// Number of Z-domain filters
     pub zi_filters_len: usize,
+    /// Transition filters (mutable for transition(...) evaluation)
+    pub transition_filters: *mut crate::vm::TransitionFilter,
+    /// Number of transition filters
+    pub transition_filters_len: usize,
 }
 
 thread_local! {
@@ -498,6 +502,74 @@ pub unsafe extern "C" fn rspice_timer_state_native(
     }
 }
 
+/// External helper function for native x64 transition filters.
+///
+/// `operands` points to four contiguous f64 values emitted by the JIT in VM
+/// stack order: input, delay, rise time, and fall time. Passing a pointer keeps
+/// the x64 ABI simple on Windows, where four scalar arguments would force the
+/// context and filter id onto the stack.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid EvalContext
+/// pointer and a valid four-element operand slice. Invalid pointers are
+/// reported through the native runtime error channel; native mode never
+/// dispatches the bytecode interpreter for recovery.
+#[unsafe(export_name = "rspice_transition_state_native")]
+pub unsafe extern "C" fn rspice_transition_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    filter_id: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_runtime_error(
+            "native transition helper missing operands; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    if ctx.is_null() {
+        set_native_runtime_error(
+            "native transition helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+
+    let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
+    let input = operands[0];
+    let delay = operands[1];
+    let rise_time = operands[2];
+    let fall_time = operands[3];
+    let ctx = unsafe { &*ctx };
+
+    if ctx.analysis_type != 2 {
+        return input;
+    }
+
+    if ctx.transition_filters.is_null() {
+        set_native_runtime_error(format!(
+            "native transition helper missing filter storage for filter {filter_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if filter_id >= ctx.transition_filters_len {
+        set_native_runtime_error(format!(
+            "native transition helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+            ctx.transition_filters_len
+        ));
+        return 0.0;
+    }
+
+    let filters = unsafe {
+        std::slice::from_raw_parts_mut(ctx.transition_filters, ctx.transition_filters_len)
+    };
+    filters[filter_id].update(
+        input,
+        ctx.time,
+        delay.max(0.0),
+        rise_time.max(0.0),
+        fall_time.max(0.0),
+    )
+}
+
 /// External helper function for native x64 runtime-indexed variable reads.
 ///
 /// `base_ptr` points at the first element of the array variable run. The helper
@@ -626,8 +698,9 @@ mod tests {
     use super::{
         EvalContext, clear_native_runtime_error, rspice_dynamic_variable_load_native,
         rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_timer_state_native,
-        rspice_zi_step_native, take_native_runtime_error,
+        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
     };
+    use crate::vm::TransitionFilter;
     use std::mem::{align_of, offset_of, size_of};
 
     #[test]
@@ -659,7 +732,9 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, multiplicity), 192);
         assert_eq!(offset_of!(EvalContext, zi_filters), 200);
         assert_eq!(offset_of!(EvalContext, zi_filters_len), 208);
-        assert_eq!(size_of::<EvalContext>(), 216);
+        assert_eq!(offset_of!(EvalContext, transition_filters), 216);
+        assert_eq!(offset_of!(EvalContext, transition_filters_len), 224);
+        assert_eq!(size_of::<EvalContext>(), 232);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -751,6 +826,8 @@ mod tests {
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,
+            transition_filters: std::ptr::null_mut(),
+            transition_filters_len: 0,
         };
 
         assert_eq!(
@@ -786,6 +863,102 @@ mod tests {
             0.0_f64.to_bits(),
             "non-positive timer period should never fire"
         );
+    }
+
+    #[test]
+    fn transition_native_helper_records_runtime_error_for_invalid_pointers() {
+        let operands = [1.0, 0.2, 0.4, 0.4];
+        clear_native_runtime_error();
+
+        let missing_operands =
+            unsafe { rspice_transition_state_native(std::ptr::null(), std::ptr::null(), 0) };
+
+        assert_eq!(missing_operands.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error()
+            .expect("invalid native transition operands must record an error");
+        assert!(
+            error.contains("transition") && error.contains("operands"),
+            "error must identify the invalid transition operands, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+
+        clear_native_runtime_error();
+        let missing_ctx =
+            unsafe { rspice_transition_state_native(operands.as_ptr(), std::ptr::null(), 0) };
+
+        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error()
+            .expect("invalid native transition context must record an error");
+        assert!(
+            error.contains("transition") && error.contains("EvalContext"),
+            "error must identify the invalid transition context, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn transition_native_helper_passes_input_through_outside_transient() {
+        let operands = [1.25, 0.2, 0.4, 0.4];
+        let ctx = empty_eval_context();
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 7) };
+
+        assert_eq!(value.to_bits(), 1.25_f64.to_bits());
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn transition_native_helper_hard_fails_missing_transient_storage() {
+        let operands = [1.0, 0.2, 0.4, 0.4];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        clear_native_runtime_error();
+
+        let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing transition storage must hard-fail");
+        assert!(
+            error.contains("transition") && error.contains("filter storage"),
+            "error must identify missing transition storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn transition_native_helper_uses_vm_transition_filter_state() {
+        let operands = [1.0, 0.2, 0.4, 0.4];
+        let mut filters = [TransitionFilter::default()];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.transition_filters = filters.as_mut_ptr();
+        ctx.transition_filters_len = filters.len();
+        clear_native_runtime_error();
+
+        ctx.time = 1.0;
+        assert_eq!(
+            unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+
+        ctx.time = 1.4;
+        let mid = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
+        assert!((mid - 0.5).abs() < 1.0e-12, "mid transition: {mid}");
+
+        ctx.time = 1.6;
+        let done = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
+        assert!((done - 1.0).abs() < 1.0e-12, "done transition: {done}");
+        assert!(take_native_runtime_error().is_none());
     }
 
     #[test]
@@ -842,5 +1015,39 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
+    }
+
+    fn empty_eval_context() -> EvalContext {
+        EvalContext {
+            voltages: std::ptr::null(),
+            internal_voltages: std::ptr::null(),
+            params: std::ptr::null(),
+            branch_currents: std::ptr::null(),
+            branch_currents_len: 0,
+            currents: std::ptr::null(),
+            currents_len: 0,
+            num_terminals: 0,
+            port_connected: std::ptr::null(),
+            port_connected_len: 0,
+            temperature: 0.0,
+            time: 0.0,
+            timestep: 0.0,
+            state_prev: std::ptr::null(),
+            state_values: std::ptr::null_mut(),
+            state_initialized: std::ptr::null_mut(),
+            state_initialized_len: 0,
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+            param_given: std::ptr::null(),
+            branch_unknowns: std::ptr::null(),
+            analysis_type: 0,
+            multiplicity: 1.0,
+            zi_filters: std::ptr::null_mut(),
+            zi_filters_len: 0,
+            transition_filters: std::ptr::null_mut(),
+            transition_filters_len: 0,
+        }
     }
 }

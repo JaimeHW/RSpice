@@ -1187,6 +1187,12 @@ impl VerilogADevice {
                 context.zi_filters.as_mut_ptr()
             },
             zi_filters_len: context.zi_filters.len(),
+            transition_filters: if context.transition_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.transition_filters.as_mut_ptr()
+            },
+            transition_filters_len: context.transition_filters.len(),
         }
     }
 
