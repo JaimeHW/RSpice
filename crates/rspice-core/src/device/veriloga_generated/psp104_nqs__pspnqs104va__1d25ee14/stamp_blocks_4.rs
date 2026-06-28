@@ -4993,8 +4993,8 @@ impl Instance {
         }
 
         if s.b[2601] {
-            s.store_add_scaled_product_right_ad(2372, 2368, 1.0, 271, A::sub(s.ad_value(2370), s.ad_value(2368)), 1.0);
-            s.store_add_scaled_product_right_ad(2373, 2367, 1.0, 271, A::sub(s.ad_value(2371), s.ad_value(2367)), 1.0);
+            s.store_add_scaled_product_right_sub(2372, 2368, 1.0, 271, 2370, 2368, 1.0);
+            s.store_add_scaled_product_right_sub(2373, 2367, 1.0, 271, 2371, 2367, 1.0);
             s.store_add_scaled_inputs3_mixed_aii(2374, A::add_scaled_product(s.ad_value(1887), 1.0, s.ad_value(1888), s.ad_value(1891), (-1.0)), 1.0, 1903, (-1.0), 1893, (-0.5));
             s.store_add_scaled_inputs3_indices(2375, 1887, 1.0, 2374, (-1.0), 1892, -1.0);
             s.store_add_scaled_inputs3_indices(2376, 1893, 1.0, 2374, 1.0, 826, -1.0);

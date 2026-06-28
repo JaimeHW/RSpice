@@ -3860,7 +3860,7 @@ impl Instance {
         }
 
         if ((s.b[3396] && s.b[3398]) && (!s.b[3399])) {
-            s.store_add_scaled_product_right_ad(745, 729, 1.0, 683, A::sub(s.ad_value(733), s.ad_value(729)), 1.0);
+            s.store_add_scaled_product_right_sub(745, 729, 1.0, 683, 733, 729, 1.0);
         }
 
         if (s.b[3396] && (!s.b[3398])) {
@@ -5919,7 +5919,7 @@ impl Instance {
             s.copy_ad(336, 335);
         }
 
-        s.store_add_scaled_product_right_ad(586, 586, 1.0, 336, A::sub(s.ad_value(773), s.ad_value(622)), 1.0 / (s.v[582]));
+        s.store_add_scaled_product_right_sub(586, 586, 1.0, 336, 773, 622, 1.0 / (s.v[582]));
 
         s.store_scale(166, 586, 1.6021918e-19);
 

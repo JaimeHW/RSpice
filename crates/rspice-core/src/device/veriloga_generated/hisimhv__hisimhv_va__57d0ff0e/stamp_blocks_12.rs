@@ -3755,7 +3755,7 @@ impl Instance {
         }
 
         if ((s.b[3400] && s.b[3402]) && (!s.b[3403])) {
-            s.store_add_scaled_product_right_ad(745, 729, 1.0, 683, A::sub(s.ad_value(733), s.ad_value(729)), 1.0);
+            s.store_add_scaled_product_right_sub(745, 729, 1.0, 683, 733, 729, 1.0);
         }
 
         if (s.b[3400] && (!s.b[3402])) {

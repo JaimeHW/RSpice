@@ -113,7 +113,7 @@ impl Instance {
             s.store_sub(871, 771, 772);
             s.store_mul(805, 791, 779);
             s.store_add_scaled_product_value_ad(807, A::div_scaled_inputs(s.ad_value(787), 1.0, s.ad_value(779), 2.302585092994046), 1.0, 790, 870, 1.0);
-            s.store_add_scaled_product_right_ad(808, 786, 1.0, 797, A::sub(s.ad_value(777), s.ad_value(778)), 1.0);
+            s.store_add_scaled_product_right_sub(808, 786, 1.0, 797, 777, 778, 1.0);
             s.store_pow_ad(826, A::div(s.ad_value(777), s.ad_value(778)), s.ad_value(799));
         }
 
@@ -822,7 +822,7 @@ impl Instance {
             s.store_sub(1018, 918, 919);
             s.store_mul(952, 938, 926);
             s.store_add_scaled_product_value_ad(954, A::div_scaled_inputs(s.ad_value(934), 1.0, s.ad_value(926), 2.302585092994046), 1.0, 937, 1017, 1.0);
-            s.store_add_scaled_product_right_ad(955, 933, 1.0, 944, A::sub(s.ad_value(924), s.ad_value(925)), 1.0);
+            s.store_add_scaled_product_right_sub(955, 933, 1.0, 944, 924, 925, 1.0);
             s.store_pow_ad(973, A::div(s.ad_value(924), s.ad_value(925)), s.ad_value(946));
         }
 
@@ -1543,7 +1543,7 @@ impl Instance {
             s.store_sub(1165, 1065, 1066);
             s.store_mul(1099, 1085, 1073);
             s.store_add_scaled_product_value_ad(1101, A::div_scaled_inputs(s.ad_value(1081), 1.0, s.ad_value(1073), 2.302585092994046), 1.0, 1084, 1164, 1.0);
-            s.store_add_scaled_product_right_ad(1102, 1080, 1.0, 1091, A::sub(s.ad_value(1071), s.ad_value(1072)), 1.0);
+            s.store_add_scaled_product_right_sub(1102, 1080, 1.0, 1091, 1071, 1072, 1.0);
             s.store_pow_ad(1120, A::div(s.ad_value(1071), s.ad_value(1072)), s.ad_value(1093));
         }
 
@@ -2255,7 +2255,7 @@ impl Instance {
             s.store_sub(1312, 1212, 1213);
             s.store_mul(1246, 1232, 1220);
             s.store_add_scaled_product_value_ad(1248, A::div_scaled_inputs(s.ad_value(1228), 1.0, s.ad_value(1220), 2.302585092994046), 1.0, 1231, 1311, 1.0);
-            s.store_add_scaled_product_right_ad(1249, 1227, 1.0, 1238, A::sub(s.ad_value(1218), s.ad_value(1219)), 1.0);
+            s.store_add_scaled_product_right_sub(1249, 1227, 1.0, 1238, 1218, 1219, 1.0);
             s.store_pow_ad(1267, A::div(s.ad_value(1218), s.ad_value(1219)), s.ad_value(1240));
         }
 
@@ -2970,7 +2970,7 @@ impl Instance {
             s.store_sub(1459, 1359, 1360);
             s.store_mul(1393, 1379, 1367);
             s.store_add_scaled_product_value_ad(1395, A::div_scaled_inputs(s.ad_value(1375), 1.0, s.ad_value(1367), 2.302585092994046), 1.0, 1378, 1458, 1.0);
-            s.store_add_scaled_product_right_ad(1396, 1374, 1.0, 1385, A::sub(s.ad_value(1365), s.ad_value(1366)), 1.0);
+            s.store_add_scaled_product_right_sub(1396, 1374, 1.0, 1385, 1365, 1366, 1.0);
             s.store_pow_ad(1414, A::div(s.ad_value(1365), s.ad_value(1366)), s.ad_value(1387));
         }
 

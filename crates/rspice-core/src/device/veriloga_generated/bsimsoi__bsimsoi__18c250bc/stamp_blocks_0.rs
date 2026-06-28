@@ -3853,7 +3853,7 @@ impl Instance {
 
         s.store_div_from_scalar(852, 2.2361, 943);
 
-        s.store_add_scaled_product_right_ad(963, 828, 1.0, 852, A::sub(s.ad_value(962), s.ad_value(841)), (-1.0));
+        s.store_add_scaled_product_right_sub(963, 828, 1.0, 852, 962, 841, (-1.0));
 
         s.store_exp_mul_scaled_lhs_indices(843, 382, 2.0, 822);
 
@@ -4028,7 +4028,7 @@ impl Instance {
 
         s.store_div_from_scalar(852, 2.2361, 943);
 
-        s.store_add_scaled_product_right_ad(1072, 1054, 1.0, 852, A::sub(s.ad_value(1045), s.ad_value(1044)), (-1.0));
+        s.store_add_scaled_product_right_sub(1072, 1054, 1.0, 852, 1045, 1044, (-1.0));
 
         s.store_exp_mul_scaled_lhs_indices(843, 382, 2.0, 822);
 

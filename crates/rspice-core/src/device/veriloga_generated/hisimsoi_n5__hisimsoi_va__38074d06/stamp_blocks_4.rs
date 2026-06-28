@@ -65,7 +65,7 @@ impl Instance {
         }
 
         if (((p.p24 != 0.0) && s.b[1604]) && (s.v[266] != 0.0)) {
-            s.store_add_scaled_product_right_ad(268, 268, 1.0, 269, A::sub(s.ad_value(158), s.ad_value(157)), -1.0);
+            s.store_add_scaled_product_right_sub(268, 268, 1.0, 269, 158, 157, -1.0);
         }
 
         if ((p.p24 != 0.0) && s.b[1604]) {

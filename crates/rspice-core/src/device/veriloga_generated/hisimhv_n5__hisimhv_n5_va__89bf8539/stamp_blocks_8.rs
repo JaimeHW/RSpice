@@ -4518,7 +4518,7 @@ impl Instance {
                 s.store_scalar(97, (150.0 + 1.0));
             }
             if (((s.b[1441] && (s.b[1443] && (!s.b[1442]))) && (!s.b[2028])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product_right_ad(1868, 2026, 1.0, 185, A::sub(s.ad_value(1913), s.ad_value(983)), 1.0);
+                s.store_add_scaled_product_right_sub(1868, 2026, 1.0, 185, 1913, 983, 1.0);
                 s.store_sub(1869, 2027, 185);
                 s.store_div_scaled_inputs_indices(1880, 1868, -1.0, 1869, 1.0);
             }

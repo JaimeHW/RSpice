@@ -1712,8 +1712,8 @@ impl Instance {
         }
 
         if s.b[2507] {
-            s.store_add_scaled_product_right_ad(2278, 2274, 1.0, 269, A::sub(s.ad_value(2276), s.ad_value(2274)), 1.0);
-            s.store_add_scaled_product_right_ad(2279, 2273, 1.0, 269, A::sub(s.ad_value(2277), s.ad_value(2273)), 1.0);
+            s.store_add_scaled_product_right_sub(2278, 2274, 1.0, 269, 2276, 2274, 1.0);
+            s.store_add_scaled_product_right_sub(2279, 2273, 1.0, 269, 2277, 2273, 1.0);
             s.store_add_scaled_inputs3_mixed_aii(2280, A::add_scaled_product(s.ad_value(1871), 1.0, s.ad_value(1872), s.ad_value(1875), (-1.0)), 1.0, 1887, (-1.0), 1877, (-0.5));
             s.store_add_scaled_inputs3_indices(2281, 1871, 1.0, 2280, (-1.0), 1876, -1.0);
             s.store_add_scaled_inputs3_indices(2282, 1877, 1.0, 2280, 1.0, 815, -1.0);

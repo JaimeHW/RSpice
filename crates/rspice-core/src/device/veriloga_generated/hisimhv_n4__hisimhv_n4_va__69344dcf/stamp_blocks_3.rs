@@ -476,7 +476,7 @@ impl Instance {
 };
             s.v[98] = assign48900_body146_e72870;
             if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2248])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product_right_ad(2096, 2095, 1.0, 185, A::sub(s.ad_value(85), s.ad_value(2086)), 1.0);
+                s.store_add_scaled_product_right_sub(2096, 2095, 1.0, 185, 85, 2086, 1.0);
                 s.store_sub(2097, 2122, 185);
                 s.copy_ad(2098, 2124);
                 s.store_sub(2099, 2089, 2133);
@@ -1771,7 +1771,7 @@ impl Instance {
 };
             s.v[97] = assign52430_body10_e79572;
             if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product_right_ad(2096, 2318, 1.0, 185, A::sub(s.ad_value(2320), s.ad_value(983)), 1.0);
+                s.store_add_scaled_product_right_sub(2096, 2318, 1.0, 185, 2320, 983, 1.0);
                 s.store_sub(2097, 2121, 185);
                 s.store_div_scaled_inputs_indices(2108, 2096, -1.0, 2097, 1.0);
             }
@@ -2500,7 +2500,7 @@ impl Instance {
 };
             s.v[97] = assign54010_body10_e82957;
             if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2324])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product_right_ad(2096, 2318, 1.0, 185, A::sub(s.ad_value(2320), s.ad_value(983)), 1.0);
+                s.store_add_scaled_product_right_sub(2096, 2318, 1.0, 185, 2320, 983, 1.0);
                 s.store_sub(2097, 2121, 185);
                 s.store_div_scaled_inputs_indices(2108, 2096, -1.0, 2097, 1.0);
             }
@@ -3535,7 +3535,7 @@ impl Instance {
 };
             s.v[97] = assign56320_body9_e87515;
             if (((s.b[1439] && (s.b[1442] && (!(s.b[1440] || s.b[1441])))) && (!s.b[2391])) && (s.v[79] == 0.0)) {
-                s.store_add_scaled_product_right_ad(2096, 2153, 1.0, 185, A::sub(s.ad_value(2155), s.ad_value(2152)), -1.0);
+                s.store_add_scaled_product_right_sub(2096, 2153, 1.0, 185, 2155, 2152, -1.0);
                 s.store_add(2097, 185, 2154);
                 s.store_div_scaled_inputs_indices(2108, 2096, -1.0, 2097, 1.0);
             }

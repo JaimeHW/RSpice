@@ -2118,7 +2118,7 @@ impl Instance {
         if ((s.b[1523] && s.b[1524]) && s.b[1525]) {
             s.store_div(168, 521, 539);
             s.store_offset_limited_exp(169, 168, (-1.0));
-            s.store_add_scaled_product_right_ad(170, 542, 1.0, 541, A::sub(s.ad_value(521), s.ad_value(543)), 1.0);
+            s.store_add_scaled_product_right_sub(170, 542, 1.0, 541, 521, 543, 1.0);
         }
 
         s.b[1526] = (s.v[521] <= s.v[546]);
@@ -2196,7 +2196,7 @@ impl Instance {
         if ((s.b[1523] && s.b[1533]) && s.b[1534]) {
             s.store_div(168, 522, 540);
             s.store_offset_limited_exp(169, 168, (-1.0));
-            s.store_add_scaled_product_right_ad(170, 549, 1.0, 548, A::sub(s.ad_value(522), s.ad_value(550)), 1.0);
+            s.store_add_scaled_product_right_sub(170, 549, 1.0, 548, 522, 550, 1.0);
         }
 
         s.b[1535] = (s.v[522] <= s.v[553]);
