@@ -60,6 +60,7 @@ pub(crate) enum NativeOp {
     TimerState(usize),
     TransitionState(usize),
     SlewState(usize),
+    AbsDelayState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -529,6 +530,17 @@ impl NativeProgram {
                     )?;
                     depth -= 2;
                     ops.push(NativeOp::SlewState(*filter_id));
+                }
+                Instruction::AbsDelayState(buffer_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::AbsDelayState(*buffer_id));
                 }
                 Instruction::WhiteNoise => {
                     require_stack(
@@ -1892,6 +1904,85 @@ mod tests {
             let error =
                 NativeProgram::from_bytecode("bad-slew-entry", entry_kind, &program, limits(0, 0))
                     .expect_err("slew state must stay out of restricted entries");
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
+            assert!(
+                msg.contains("no interpreter fallback"),
+                "{entry_kind:?}: got {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_absdelay_state_as_native_context_buffer() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(0.5),
+                Instruction::AbsDelayState(5),
+            ],
+        };
+
+        let lowered =
+            NativeProgram::from_bytecode("absdelay", EntryKind::Assignment, &program, limits(0, 0))
+                .expect("absdelay state has native x64 helper-call lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(0.5),
+                NativeOp::AbsDelayState(5),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowering_rejects_absdelay_state_without_value_and_delay() {
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushTemperature, Instruction::AbsDelayState(0)],
+        };
+
+        let error = NativeProgram::from_bytecode(
+            "bad-absdelay",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect_err("absdelay state requires input and delay operands");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("AbsDelayState requires stack depth 2"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn lowering_rejects_absdelay_state_in_restricted_entry_kinds() {
+        for (entry_kind, expected) in [
+            (EntryKind::StaticCondition, "StaticCondition AbsDelayState"),
+            (
+                EntryKind::ParameterDefault,
+                "ParameterDefault AbsDelayState",
+            ),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.5),
+                    Instruction::AbsDelayState(0),
+                ],
+            };
+
+            let error = NativeProgram::from_bytecode(
+                "bad-absdelay-entry",
+                entry_kind,
+                &program,
+                limits(0, 0),
+            )
+            .expect_err("absdelay state must stay out of restricted entries");
             let msg = error.to_string();
             assert!(msg.contains(expected), "{entry_kind:?}: got {msg}");
             assert!(
