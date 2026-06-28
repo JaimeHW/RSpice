@@ -212,6 +212,18 @@ impl X64Encoder {
         self.emit_modrm(0b11, src.code(), dst.code());
     }
 
+    pub(crate) fn test_r8_r8(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex_for_byte_operands(false, src.code(), 0, dst.code(), true, true);
+        self.emit_u8(0x84);
+        self.emit_modrm(0b11, src.code(), dst.code());
+    }
+
+    pub(crate) fn cmovne_r64_r64(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex(true, dst.code(), 0, src.code());
+        self.emit_all(&[0x0F, 0x45]);
+        self.emit_modrm(0b11, dst.code(), src.code());
+    }
+
     pub(crate) fn addsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
         self.emit_sse_reg_reg(0xF2, 0x58, dst, src);
     }
@@ -534,6 +546,19 @@ mod tests {
                 0x40, 0x0F, 0x97, 0xC6, 0x40, 0x0F, 0x93, 0xC7, 0x40, 0x20, 0xFE, 0x40, 0x08, 0xF7,
                 0x40, 0x0F, 0xB6, 0xF7, 0x40, 0x0F, 0xB6, 0xFE,
             ]
+        );
+    }
+
+    #[test]
+    fn encodes_ifelse_select_sequence_pieces() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.test_r8_r8(Gpr::R10, Gpr::R10);
+        encoder.cmovne_r64_r64(Gpr::Rax, Gpr::R11);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [0x45, 0x84, 0xD2, 0x49, 0x0F, 0x45, 0xC3]
         );
     }
 
