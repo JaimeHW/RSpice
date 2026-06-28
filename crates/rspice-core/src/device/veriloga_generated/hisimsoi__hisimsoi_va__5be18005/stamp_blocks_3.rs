@@ -2705,7 +2705,7 @@ impl Instance {
             if (s.v[1326] > 0.0) {
                 s.store_sqrt(1326, 1326);
             } else {
-                s.store_neg_ad(1326, A::sqrt_scaled_input(s.ad_value(1326), -1.0));
+                s.store_scaled_sqrt_scaled_input(1326, 1326, -1.0, -1.0);
             }
         }
 
