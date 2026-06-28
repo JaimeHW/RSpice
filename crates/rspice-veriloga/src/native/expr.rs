@@ -45,6 +45,7 @@ pub(crate) enum NativeOp {
     IfElse,
     Extremum(ExtremumOp),
     UnaryMath(UnaryMathOp),
+    BinaryMath(BinaryMathOp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +86,12 @@ pub(crate) enum UnaryMathOp {
     Asin,
     Acos,
     Atan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BinaryMathOp {
+    Pow,
+    Atan2,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -298,6 +305,16 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     ops.push(NativeOp::Div);
+                }
+                Instruction::Pow | Instruction::FnPow | Instruction::Atan2 => {
+                    pop_binary_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::BinaryMath(binary_math_op(instruction)));
                 }
                 Instruction::Neg => {
                     require_stack(
@@ -683,6 +700,14 @@ fn unary_math_op(instruction: &Instruction) -> UnaryMathOp {
     }
 }
 
+fn binary_math_op(instruction: &Instruction) -> BinaryMathOp {
+    match instruction {
+        Instruction::Pow | Instruction::FnPow => BinaryMathOp::Pow,
+        Instruction::Atan2 => BinaryMathOp::Atan2,
+        _ => unreachable!("binary math lowering only accepts supported binary math instructions"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -986,6 +1011,39 @@ mod tests {
                 &[NativeOp::LoadTemperature, NativeOp::UnaryMath(expected)]
             );
             assert_eq!(lowered.max_stack_depth(), 1);
+        }
+    }
+
+    #[test]
+    fn lowers_binary_math_functions_as_native_binary_math_ops() {
+        let cases = [
+            (Instruction::Pow, BinaryMathOp::Pow),
+            (Instruction::FnPow, BinaryMathOp::Pow),
+            (Instruction::Atan2, BinaryMathOp::Atan2),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(2.0),
+                    instruction,
+                ],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode("math", EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("binary math functions have native x64 helper-call lowering");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::Const(2.0),
+                    NativeOp::BinaryMath(expected),
+                ]
+            );
+            assert_eq!(lowered.max_stack_depth(), 2);
         }
     }
 

@@ -185,6 +185,18 @@ pub extern "C" fn rspice_atan(x: f64) -> f64 {
     x.atan()
 }
 
+/// External helper function for power.
+#[unsafe(export_name = "rspice_pow")]
+pub extern "C" fn rspice_pow(base: f64, exponent: f64) -> f64 {
+    base.powf(exponent)
+}
+
+/// External helper function for two-argument arctangent.
+#[unsafe(export_name = "rspice_atan2")]
+pub extern "C" fn rspice_atan2(y: f64, x: f64) -> f64 {
+    y.atan2(x)
+}
+
 /// External helper function for Laplace state-space filter step.
 ///
 /// # Safety
