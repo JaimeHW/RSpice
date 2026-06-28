@@ -1997,6 +1997,7 @@ mod compact_generated_stamp_surface_tests {
     use super::{
         compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
         compact_generated_stamp_surface, compact_limited_exp_div_scaled_inputs_expression,
+        compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
         duplicate_hoistable_derivative_rhs, generate_scratch_operation_helpers,
         is_hoistable_generated_derivative_rhs, render_runtime_support_module,
         reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
@@ -5204,6 +5205,27 @@ fn stamp() {
         assert_eq!(
             compact,
             "AdValue::limited_exp_div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale)"
+        );
+    }
+
+    #[test]
+    fn rewrites_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_as_fused_expression() {
+        let support = render_runtime_support_module();
+        assert!(
+            support.contains("fn mul_sub_from_scalar_rhs_div_scaled_inputs_lhs("),
+            "missing fused multiply divided-input lhs helper"
+        );
+
+        let compact = compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression(
+            "AdValue::div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale)",
+            "params.scalar",
+            "scratch.ad_value(4)",
+        )
+        .expect("divided lhs should compact");
+
+        assert_eq!(
+            compact,
+            "AdValue::mul_sub_from_scalar_rhs_div_scaled_inputs_lhs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale, params.scalar, scratch.ad_value(4))"
         );
     }
 
@@ -17985,6 +18007,22 @@ fn generate_ad_value_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn mul_sub_from_scalar_rhs_div_scaled_inputs_lhs(left: Self, left_scale: f64, right: Self, right_scale: f64, scalar: f64, value: Self) -> Self {",
+        "        let mut result = left;",
+        "        let left_value = result.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let rhs_value = scalar - value.value;",
+        "        let left_derivative_scale = left_scale * reciprocal * rhs_value;",
+        "        let right_derivative_scale = -quotient * reciprocal * right_scale * rhs_value;",
+        "        result.value = quotient * rhs_value;",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale - value.node_derivatives[index] * quotient; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * left_derivative_scale + right.branch_derivatives[index] * right_derivative_scale - value.branch_derivatives[index] * quotient; }",
+        "        result",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn mul_sub_from_scalar_lhs_scaled_output(scalar: f64, value: Self, right: Self, scale: f64) -> Self {",
         "        let mut result = value;",
         "        let left_value = scalar - result.value;",
@@ -30631,6 +30669,21 @@ fn compact_exp_div_scaled_inputs_expression(value: &str) -> Option<String> {
     ))
 }
 
+fn compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression(
+    left: &str,
+    scalar: &str,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(left, "div_scaled_inputs")?;
+    if args.len() != 4 {
+        return None;
+    }
+    Some(format!(
+        "AdValue::mul_sub_from_scalar_rhs_div_scaled_inputs_lhs({}, {}, {}, {}, {scalar}, {value})",
+        args[0], args[1], args[2], args[3]
+    ))
+}
+
 struct CompactAffineTerm<'a> {
     value: &'a str,
     scale: String,
@@ -31218,10 +31271,13 @@ fn compact_multiply_sub_from_scalar_ad_expression(
             return None;
         }
         return if compact_scalar_same(output_scale, "1.0") {
-            Some(format!(
-                "AdValue::mul_sub_from_scalar_rhs({left}, {}, {})",
-                args[0], args[1]
-            ))
+            compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression(left, args[0], args[1])
+                .or_else(|| {
+                    Some(format!(
+                        "AdValue::mul_sub_from_scalar_rhs({left}, {}, {})",
+                        args[0], args[1]
+                    ))
+                })
         } else {
             Some(format!(
                 "AdValue::mul_sub_from_scalar_rhs_scaled_output({left}, {}, {}, {output_scale})",
