@@ -6119,6 +6119,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_neg_powf_add_input(&mut self, index: usize, left: usize, right: usize, exponent: f64) {
+        let base = self.v[left] + self.v[right];
+        let output = base.powf(exponent);
+        let derivative_scale = -AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, 1.0, 0.0);
+        self.store_unary_add_scaled(index, left, right, -output, derivative_scale);
+    }
+
+    #[inline]
     pub(crate) fn store_powf_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: f64) {
         let base = self.v[source] * input_scale;
         let value = base.powf(exponent);
@@ -18622,6 +18630,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn store_neg_add(&mut self, index: usize, left: usize, right: usize) {
         let value = -(self.v[left] + self.v[right]);
         self.store_unary_add_scaled(index, left, right, value, -1.0);
+    }
+
+    #[inline]
+    pub(crate) fn store_neg_powf_add_input(&mut self, index: usize, left: usize, right: usize, exponent: f64) {
+        let base = self.v[left] + self.v[right];
+        let output = base.powf(exponent);
+        let derivative_scale = -AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative(output, base, exponent, 1.0, 0.0);
+        self.store_unary_add_scaled(index, left, right, -output, derivative_scale);
     }
 
     #[inline]
