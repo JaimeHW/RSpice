@@ -10,16 +10,8 @@ pub struct PlanStats {
     pub jacobian_entry_points: usize,
 }
 
-#[derive(Debug)]
-pub enum PlanStep {
-    Chunk { id: usize, from: usize, to: usize },
-    Interpret { from: usize, to: usize },
-    Loop { index: usize, body: Vec<PlanStep> },
-}
-
 pub struct NativeModel {
     pub num_variables: usize,
-    pub plan: Vec<PlanStep>,
     assignment_fn: AssignmentFn,
     stamp_value_fns: Vec<StampFn>,
     jacobian_fns: Vec<Vec<StampFn>>,
@@ -41,22 +33,6 @@ impl std::fmt::Debug for NativeModel {
 unsafe impl Send for NativeModel {}
 unsafe impl Sync for NativeModel {}
 
-pub trait NativeFnAccessor {
-    fn from_entry_point(f: StampFn) -> Self;
-}
-
-impl NativeFnAccessor for StampFn {
-    fn from_entry_point(f: StampFn) -> Self {
-        f
-    }
-}
-
-impl NativeFnAccessor for Option<StampFn> {
-    fn from_entry_point(f: StampFn) -> Self {
-        Some(f)
-    }
-}
-
 impl NativeModel {
     pub fn new_for_test(
         num_variables: usize,
@@ -72,11 +48,6 @@ impl NativeModel {
         };
         Self {
             num_variables,
-            plan: vec![PlanStep::Chunk {
-                id: 0,
-                from: 0,
-                to: 0,
-            }],
             assignment_fn,
             stamp_value_fns,
             jacobian_fns,
@@ -88,18 +59,12 @@ impl NativeModel {
         (self.assignment_fn)(ctx as *const EvalContext, vars);
     }
 
-    pub fn run_chunk(&self, chunk: usize, ctx: &EvalContext, vars: *mut f64) {
-        if chunk == 0 {
-            self.run_assignments(ctx, vars);
-        }
+    pub fn stamp_value_fn(&self, index: usize) -> StampFn {
+        self.stamp_value_fns[index]
     }
 
-    pub fn stamp_value_fn<T: NativeFnAccessor>(&self, index: usize) -> T {
-        T::from_entry_point(self.stamp_value_fns[index])
-    }
-
-    pub fn jacobian_fn<T: NativeFnAccessor>(&self, stamp: usize, entry: usize) -> T {
-        T::from_entry_point(self.jacobian_fns[stamp][entry])
+    pub fn jacobian_fn(&self, stamp: usize, entry: usize) -> StampFn {
+        self.jacobian_fns[stamp][entry]
     }
 
     pub fn chunk_count(&self) -> usize {
