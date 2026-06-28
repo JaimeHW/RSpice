@@ -162,9 +162,8 @@ impl Instance {
         let (eq4_e64, eq4_e64_d_n4,) = {
     if s.b[148] {
         let eq4_e61: f64 = (p.p36 * (nv4 - 0.0));
-        let eq4_e61_d_n4: f64 = p.p36;
         let eq4_e62: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, eq4_e61);
-        (eq4_e62, (eq4_e61_d_n4 * ddt_scale),)
+        (eq4_e62, (p.p36 * ddt_scale),)
     } else {
         (0.0, 0.0,)
     }
@@ -215,8 +214,7 @@ impl Instance {
         let (eq7_e81, eq7_e81_d_n4,) = {
     if (!s.b[148]) {
         let eq7_e79: f64 = ((nv4 - 0.0) * 1000000000.0);
-        let eq7_e79_d_n4: f64 = 1000000000.0;
-        (eq7_e79, eq7_e79_d_n4,)
+        (eq7_e79, 1000000000.0,)
     } else {
         (0.0, 0.0,)
     }
@@ -248,9 +246,8 @@ impl Instance {
         let (eq4_e64, eq4_e64_d_n4, eq4_e64_q,) = {
     if s.b[148] {
         let eq4_e61: f64 = (p.p36 * (nv4 - 0.0));
-        let eq4_e61_d_n4: f64 = p.p36;
         let eq4_e62_q: f64 = eq4_e61;
-        (eq4_e61, eq4_e61_d_n4, eq4_e62_q,)
+        (eq4_e61, p.p36, eq4_e62_q,)
     } else {
         (0.0, 0.0, 0.0,)
     }

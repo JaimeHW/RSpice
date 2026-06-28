@@ -294,9 +294,8 @@ impl Instance {
         let (eq223_e2771, eq223_e2771_d_n4, eq223_e2771_q,) = {
     if s.b[610] {
         let eq223_e2768: f64 = ((nv4 - 0.0) * p.p33);
-        let eq223_e2768_d_n4: f64 = p.p33;
         let eq223_e2769_q: f64 = eq223_e2768;
-        (eq223_e2768, eq223_e2768_d_n4, eq223_e2769_q,)
+        (eq223_e2768, p.p33, eq223_e2769_q,)
     } else {
         (0.0, 0.0, 0.0,)
     }

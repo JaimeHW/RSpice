@@ -6826,11 +6826,10 @@ impl Instance {
         let eq217_e2707: f64 = (p.p4 * p.p5);
         let eq217_e2709: f64 = (eq217_e2707 * p.p220);
         let eq217_e2711: f64 = (eq217_e2709 * (nv1 - nv2));
-        let eq217_e2711_d_n2: f64 = (-eq217_e2709);
         let eq217_e2712_q: f64 = eq217_e2711;
         let eq217_e2713: f64 = (p.p7 * eq217_e2711);
         let eq217_e2713_d_n1: f64 = (p.p7 * eq217_e2709);
-        let eq217_e2713_d_n2: f64 = (p.p7 * eq217_e2711_d_n2);
+        let eq217_e2713_d_n2: f64 = (p.p7 * (-eq217_e2709));
         let eq217_e2713_q: f64 = (p.p7 * eq217_e2712_q);
         stamper.stamp_current_reactive_node2(
             Some(nodes[1]),

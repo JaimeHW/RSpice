@@ -381,9 +381,8 @@ impl Instance {
         Self::stamp_transient_equations_block_7(ctx, stamper, s, p, nodes, multiplicity);
         Self::stamp_transient_equations_block_8(ctx, stamper, s, p, nodes, multiplicity);
         let eq38_e1270: f64 = (s.v[4] * bi7);
-        let eq38_e1270_d_b7: f64 = s.v[4];
         let eq38_e1272: f64 = (eq38_e1270 * s.v[2]);
-        let eq38_e1272_d_b7: f64 = (eq38_e1270_d_b7 * s.v[2]);
+        let eq38_e1272_d_b7: f64 = (s.v[4] * s.v[2]);
         let eq38_value: f64 = eq38_e1272;
         stamper.stamp_potential_branch1_local(
             7,
@@ -393,9 +392,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_9(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq40_e1283: f64 = (s.v[4] * bi9);
-        let eq40_e1283_d_b9: f64 = s.v[4];
         let eq40_e1285: f64 = (eq40_e1283 * s.v[2]);
-        let eq40_e1285_d_b9: f64 = (eq40_e1283_d_b9 * s.v[2]);
+        let eq40_e1285_d_b9: f64 = (s.v[4] * s.v[2]);
         let eq40_value: f64 = eq40_e1285;
         stamper.stamp_potential_branch1_local(
             9,
@@ -405,9 +403,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_10(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq42_e1296: f64 = (s.v[4] * bi11);
-        let eq42_e1296_d_b11: f64 = s.v[4];
         let eq42_e1298: f64 = (eq42_e1296 * s.v[2]);
-        let eq42_e1298_d_b11: f64 = (eq42_e1296_d_b11 * s.v[2]);
+        let eq42_e1298_d_b11: f64 = (s.v[4] * s.v[2]);
         let eq42_value: f64 = eq42_e1298;
         stamper.stamp_potential_branch1_local(
             11,
@@ -417,9 +414,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_11(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq44_e1309: f64 = (s.v[4] * bi13);
-        let eq44_e1309_d_b13: f64 = s.v[4];
         let eq44_e1311: f64 = (eq44_e1309 * s.v[2]);
-        let eq44_e1311_d_b13: f64 = (eq44_e1309_d_b13 * s.v[2]);
+        let eq44_e1311_d_b13: f64 = (s.v[4] * s.v[2]);
         let eq44_value: f64 = eq44_e1311;
         stamper.stamp_potential_branch1_local(
             13,
@@ -429,9 +425,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_12(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq46_e1322: f64 = (s.v[4] * bi15);
-        let eq46_e1322_d_b15: f64 = s.v[4];
         let eq46_e1324: f64 = (eq46_e1322 * s.v[2]);
-        let eq46_e1324_d_b15: f64 = (eq46_e1322_d_b15 * s.v[2]);
+        let eq46_e1324_d_b15: f64 = (s.v[4] * s.v[2]);
         let eq46_value: f64 = eq46_e1324;
         stamper.stamp_potential_branch1_local(
             15,
@@ -441,9 +436,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_13(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq48_e1335: f64 = (s.v[4] * bi17);
-        let eq48_e1335_d_b17: f64 = s.v[4];
         let eq48_e1337: f64 = (eq48_e1335 * s.v[2]);
-        let eq48_e1337_d_b17: f64 = (eq48_e1335_d_b17 * s.v[2]);
+        let eq48_e1337_d_b17: f64 = (s.v[4] * s.v[2]);
         let eq48_value: f64 = eq48_e1337;
         stamper.stamp_potential_branch1_local(
             17,
@@ -453,9 +447,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_14(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq50_e1348: f64 = (s.v[4] * bi19);
-        let eq50_e1348_d_b19: f64 = s.v[4];
         let eq50_e1350: f64 = (eq50_e1348 * s.v[2]);
-        let eq50_e1350_d_b19: f64 = (eq50_e1348_d_b19 * s.v[2]);
+        let eq50_e1350_d_b19: f64 = (s.v[4] * s.v[2]);
         let eq50_value: f64 = eq50_e1350;
         stamper.stamp_potential_branch1_local(
             19,
@@ -465,9 +458,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_15(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq52_e1361: f64 = (s.v[4] * bi21);
-        let eq52_e1361_d_b21: f64 = s.v[4];
         let eq52_e1363: f64 = (eq52_e1361 * s.v[2]);
-        let eq52_e1363_d_b21: f64 = (eq52_e1361_d_b21 * s.v[2]);
+        let eq52_e1363_d_b21: f64 = (s.v[4] * s.v[2]);
         let eq52_value: f64 = eq52_e1363;
         stamper.stamp_potential_branch1_local(
             21,
@@ -477,9 +469,8 @@ impl Instance {
         );
         Self::stamp_transient_equations_block_16(stamper, s, ddt_active, idt_scale, idt_state_current, idt_state_previous, idt_state_initialized);
         let eq54_e1374: f64 = (s.v[4] * bi23);
-        let eq54_e1374_d_b23: f64 = s.v[4];
         let eq54_e1376: f64 = (eq54_e1374 * s.v[2]);
-        let eq54_e1376_d_b23: f64 = (eq54_e1374_d_b23 * s.v[2]);
+        let eq54_e1376_d_b23: f64 = (s.v[4] * s.v[2]);
         let eq54_value: f64 = eq54_e1376;
         stamper.stamp_potential_branch1_local(
             23,
@@ -560,6 +551,5 @@ impl Instance {
         Self::stamp_reactive_equations_block_1(stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_2(ctx, stamper, s, p, nodes, branches, multiplicity);
         Self::stamp_reactive_equations_block_3(ctx, stamper, s, p, nodes, branches, multiplicity);
-        Self::stamp_reactive_equations_block_4(ctx, stamper, s, p, nodes, branches, multiplicity);
     }
 }
