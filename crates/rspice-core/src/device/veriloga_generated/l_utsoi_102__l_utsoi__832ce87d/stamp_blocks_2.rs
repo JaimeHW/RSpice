@@ -472,7 +472,7 @@ impl Instance {
             s.store_scalar(56, p.p286);
             s.store_scalar(57, p.p287);
             s.store_scalar(58, p.p288);
-            s.store_mul_ad(548, A::mul3(s.ad_value(583), A::scale_offset(A::powf(s.ad_value(575), p.p291), p.p290, p.p289), A::scale_offset(s.ad_value(576), p.p292, 1.0)), A::scale_offset(s.ad_value(577), p.p293, 1.0));
+            s.store_mul_product3_mixed_aiaa(548, A::scale_offset(s.ad_value(577), p.p293, 1.0), 583, A::scale_offset(A::powf(s.ad_value(575), p.p291), p.p290, p.p289), A::scale_offset(s.ad_value(576), p.p292, 1.0), 1.0);
             s.store_max_with_scalar(195, 548, 0.0);
             s.store_mul3_ad_scaled_output(60, A::scale_offset(s.ad_value(575), p.p295, 1.0), A::scale_offset(s.ad_value(576), p.p296, 1.0), A::scale_offset(s.ad_value(577), p.p297, 1.0), p.p294);
             s.store_scalar(61, p.p298);

@@ -2514,7 +2514,7 @@ impl Instance {
 
         if ((!s.b[643]) && s.b[644]) {
             s.store_div_scaled_inputs_indices(35, 103, -1.0, 155, 1.0);
-            s.store_mul_ad(211, A::mul3(s.ad_value(34), s.ad_value(155), s.ad_value(214)), A::limited_exp(s.ad_value(35)));
+            s.store_mul_product3_mixed_aiii(211, A::limited_exp(s.ad_value(35)), 34, 155, 214, 1.0);
         }
 
         if ((!s.b[643]) && (!s.b[644])) {
