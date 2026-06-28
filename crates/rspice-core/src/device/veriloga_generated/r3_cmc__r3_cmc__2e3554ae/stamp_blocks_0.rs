@@ -2111,17 +2111,9 @@ impl Instance {
             multiplicity,
         );
         let eq9_e181: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[96]);
-        let eq9_e181_d_n0: f64 = (s.dn[96][0] * ddt_scale);
-        let eq9_e181_d_n1: f64 = (s.dn[96][1] * ddt_scale);
-        let eq9_e181_d_n2: f64 = (s.dn[96][2] * ddt_scale);
-        let eq9_e181_d_n3: f64 = (s.dn[96][3] * ddt_scale);
-        let eq9_e181_d_n4: f64 = (s.dn[96][4] * ddt_scale);
-        let eq9_e181_d_n5: f64 = (s.dn[96][5] * ddt_scale);
-        let eq9_e181_d_b0: f64 = (s.db[96][0] * ddt_scale);
-        let eq9_e181_d_b1: f64 = (s.db[96][1] * ddt_scale);
         let eq9_value: f64 = eq9_e181;
-        let eq9_node_derivatives: [f64; 6] = [eq9_e181_d_n0, eq9_e181_d_n1, eq9_e181_d_n2, eq9_e181_d_n3, eq9_e181_d_n4, eq9_e181_d_n5];
-        let eq9_branch_derivatives: [f64; 2] = [eq9_e181_d_b0, eq9_e181_d_b1];
+        let eq9_node_derivatives: [f64; 6] = [(s.dn[96][0] * ddt_scale), (s.dn[96][1] * ddt_scale), (s.dn[96][2] * ddt_scale), (s.dn[96][3] * ddt_scale), (s.dn[96][4] * ddt_scale), (s.dn[96][5] * ddt_scale)];
+        let eq9_branch_derivatives: [f64; 2] = [(s.db[96][0] * ddt_scale), (s.db[96][1] * ddt_scale)];
         stamper.stamp_current_dense_local(
             Some(1),
             Some(4),
@@ -2131,17 +2123,9 @@ impl Instance {
             multiplicity,
         );
         let eq10_e183: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, s.v[97]);
-        let eq10_e183_d_n0: f64 = (s.dn[97][0] * ddt_scale);
-        let eq10_e183_d_n1: f64 = (s.dn[97][1] * ddt_scale);
-        let eq10_e183_d_n2: f64 = (s.dn[97][2] * ddt_scale);
-        let eq10_e183_d_n3: f64 = (s.dn[97][3] * ddt_scale);
-        let eq10_e183_d_n4: f64 = (s.dn[97][4] * ddt_scale);
-        let eq10_e183_d_n5: f64 = (s.dn[97][5] * ddt_scale);
-        let eq10_e183_d_b0: f64 = (s.db[97][0] * ddt_scale);
-        let eq10_e183_d_b1: f64 = (s.db[97][1] * ddt_scale);
         let eq10_value: f64 = eq10_e183;
-        let eq10_node_derivatives: [f64; 6] = [eq10_e183_d_n0, eq10_e183_d_n1, eq10_e183_d_n2, eq10_e183_d_n3, eq10_e183_d_n4, eq10_e183_d_n5];
-        let eq10_branch_derivatives: [f64; 2] = [eq10_e183_d_b0, eq10_e183_d_b1];
+        let eq10_node_derivatives: [f64; 6] = [(s.dn[97][0] * ddt_scale), (s.dn[97][1] * ddt_scale), (s.dn[97][2] * ddt_scale), (s.dn[97][3] * ddt_scale), (s.dn[97][4] * ddt_scale), (s.dn[97][5] * ddt_scale)];
+        let eq10_branch_derivatives: [f64; 2] = [(s.db[97][0] * ddt_scale), (s.db[97][1] * ddt_scale)];
         stamper.stamp_current_dense_local(
             Some(1),
             Some(5),
@@ -2151,17 +2135,9 @@ impl Instance {
             multiplicity,
         );
         let eq11_e185: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, s.v[98]);
-        let eq11_e185_d_n0: f64 = (s.dn[98][0] * ddt_scale);
-        let eq11_e185_d_n1: f64 = (s.dn[98][1] * ddt_scale);
-        let eq11_e185_d_n2: f64 = (s.dn[98][2] * ddt_scale);
-        let eq11_e185_d_n3: f64 = (s.dn[98][3] * ddt_scale);
-        let eq11_e185_d_n4: f64 = (s.dn[98][4] * ddt_scale);
-        let eq11_e185_d_n5: f64 = (s.dn[98][5] * ddt_scale);
-        let eq11_e185_d_b0: f64 = (s.db[98][0] * ddt_scale);
-        let eq11_e185_d_b1: f64 = (s.db[98][1] * ddt_scale);
         let eq11_value: f64 = eq11_e185;
-        let eq11_node_derivatives: [f64; 6] = [eq11_e185_d_n0, eq11_e185_d_n1, eq11_e185_d_n2, eq11_e185_d_n3, eq11_e185_d_n4, eq11_e185_d_n5];
-        let eq11_branch_derivatives: [f64; 2] = [eq11_e185_d_b0, eq11_e185_d_b1];
+        let eq11_node_derivatives: [f64; 6] = [(s.dn[98][0] * ddt_scale), (s.dn[98][1] * ddt_scale), (s.dn[98][2] * ddt_scale), (s.dn[98][3] * ddt_scale), (s.dn[98][4] * ddt_scale), (s.dn[98][5] * ddt_scale)];
+        let eq11_branch_derivatives: [f64; 2] = [(s.db[98][0] * ddt_scale), (s.db[98][1] * ddt_scale)];
         stamper.stamp_current_dense_local(
             Some(3),
             None,

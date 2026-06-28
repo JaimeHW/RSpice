@@ -283,14 +283,13 @@ impl Instance {
         Self::stamp_transient_block_31(s, p);
 
         Self::stamp_transient_equations_block_0(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
-        Self::stamp_transient_equations_block_1(stamper, s, p, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq30_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(5),
             None,
             multiplicity * (eq30_value),
         );
-        Self::stamp_transient_equations_block_2(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
+        Self::stamp_transient_equations_block_1(ctx, stamper, s, nodes, multiplicity, ddt_active, ddt_scale, ddt_state_current, ddt_state_previous, ddt_state_initialized);
         let eq36_value: f64 = 0.0;
         stamper.stamp_current_const_local(
             Some(7),

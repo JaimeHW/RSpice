@@ -5464,6 +5464,11 @@ impl Instance {
         s: &mut Scratch,
         nodes: &[usize; Instance::NODE_COUNT],
         multiplicity: f64,
+        ddt_active: bool,
+        ddt_scale: f64,
+        ddt_state_current: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_previous: &mut [f64; Instance::DDT_STATE_COUNT],
+        ddt_state_initialized: &mut [bool; Instance::DDT_STATE_COUNT],
     ) {
         let nv5 = ctx.node_voltage(nodes[5]);
         let nv6 = ctx.node_voltage(nodes[6]);
@@ -5949,6 +5954,33 @@ impl Instance {
             multiplicity * (eq11_value),
             &eq11_node_derivatives,
             &eq11_branch_derivatives,
+            multiplicity,
+        );
+        let eq12_e873: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[223]);
+        let eq12_e874: f64 = (s.v[212] * eq12_e873);
+        let eq12_e874_d_n0: f64 = ((s.dn[212][0] * eq12_e873) + (s.v[212] * (s.dn[223][0] * ddt_scale)));
+        let eq12_e874_d_n1: f64 = ((s.dn[212][1] * eq12_e873) + (s.v[212] * (s.dn[223][1] * ddt_scale)));
+        let eq12_e874_d_n2: f64 = ((s.dn[212][2] * eq12_e873) + (s.v[212] * (s.dn[223][2] * ddt_scale)));
+        let eq12_e874_d_n3: f64 = ((s.dn[212][3] * eq12_e873) + (s.v[212] * (s.dn[223][3] * ddt_scale)));
+        let eq12_e874_d_n4: f64 = ((s.dn[212][4] * eq12_e873) + (s.v[212] * (s.dn[223][4] * ddt_scale)));
+        let eq12_e874_d_n5: f64 = ((s.dn[212][5] * eq12_e873) + (s.v[212] * (s.dn[223][5] * ddt_scale)));
+        let eq12_e874_d_n6: f64 = ((s.dn[212][6] * eq12_e873) + (s.v[212] * (s.dn[223][6] * ddt_scale)));
+        let eq12_e874_d_n7: f64 = ((s.dn[212][7] * eq12_e873) + (s.v[212] * (s.dn[223][7] * ddt_scale)));
+        let eq12_e874_d_n8: f64 = ((s.dn[212][8] * eq12_e873) + (s.v[212] * (s.dn[223][8] * ddt_scale)));
+        let eq12_e874_d_b0: f64 = ((s.db[212][0] * eq12_e873) + (s.v[212] * (s.db[223][0] * ddt_scale)));
+        let eq12_e874_d_b1: f64 = ((s.db[212][1] * eq12_e873) + (s.v[212] * (s.db[223][1] * ddt_scale)));
+        let eq12_e874_d_b2: f64 = ((s.db[212][2] * eq12_e873) + (s.v[212] * (s.db[223][2] * ddt_scale)));
+        let eq12_e874_d_b3: f64 = ((s.db[212][3] * eq12_e873) + (s.v[212] * (s.db[223][3] * ddt_scale)));
+        let eq12_e874_d_b4: f64 = ((s.db[212][4] * eq12_e873) + (s.v[212] * (s.db[223][4] * ddt_scale)));
+        let eq12_value: f64 = eq12_e874;
+        let eq12_node_derivatives: [f64; 9] = [eq12_e874_d_n0, eq12_e874_d_n1, eq12_e874_d_n2, eq12_e874_d_n3, eq12_e874_d_n4, eq12_e874_d_n5, eq12_e874_d_n6, eq12_e874_d_n7, eq12_e874_d_n8];
+        let eq12_branch_derivatives: [f64; 5] = [eq12_e874_d_b0, eq12_e874_d_b1, eq12_e874_d_b2, eq12_e874_d_b3, eq12_e874_d_b4];
+        stamper.stamp_current_dense_local(
+            Some(5),
+            Some(6),
+            multiplicity * (eq12_value),
+            &eq12_node_derivatives,
+            &eq12_branch_derivatives,
             multiplicity,
         );
     }

@@ -2827,22 +2827,8 @@ impl Instance {
             multiplicity,
         );
         let eq20_e159: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[123]);
-        let eq20_e159_d_n0: f64 = (s.dn[123][0] * ddt_scale);
-        let eq20_e159_d_n1: f64 = (s.dn[123][1] * ddt_scale);
-        let eq20_e159_d_n2: f64 = (s.dn[123][2] * ddt_scale);
-        let eq20_e159_d_n3: f64 = (s.dn[123][3] * ddt_scale);
-        let eq20_e159_d_n4: f64 = (s.dn[123][4] * ddt_scale);
-        let eq20_e159_d_n5: f64 = (s.dn[123][5] * ddt_scale);
-        let eq20_e159_d_n6: f64 = (s.dn[123][6] * ddt_scale);
-        let eq20_e159_d_n7: f64 = (s.dn[123][7] * ddt_scale);
-        let eq20_e159_d_n8: f64 = (s.dn[123][8] * ddt_scale);
-        let eq20_e159_d_n9: f64 = (s.dn[123][9] * ddt_scale);
-        let eq20_e159_d_n10: f64 = (s.dn[123][10] * ddt_scale);
-        let eq20_e159_d_n11: f64 = (s.dn[123][11] * ddt_scale);
-        let eq20_e159_d_n12: f64 = (s.dn[123][12] * ddt_scale);
-        let eq20_e159_d_n13: f64 = (s.dn[123][13] * ddt_scale);
         let eq20_value: f64 = eq20_e159;
-        let eq20_node_derivatives: [f64; 14] = [eq20_e159_d_n0, eq20_e159_d_n1, eq20_e159_d_n2, eq20_e159_d_n3, eq20_e159_d_n4, eq20_e159_d_n5, eq20_e159_d_n6, eq20_e159_d_n7, eq20_e159_d_n8, eq20_e159_d_n9, eq20_e159_d_n10, eq20_e159_d_n11, eq20_e159_d_n12, eq20_e159_d_n13];
+        let eq20_node_derivatives: [f64; 14] = [(s.dn[123][0] * ddt_scale), (s.dn[123][1] * ddt_scale), (s.dn[123][2] * ddt_scale), (s.dn[123][3] * ddt_scale), (s.dn[123][4] * ddt_scale), (s.dn[123][5] * ddt_scale), (s.dn[123][6] * ddt_scale), (s.dn[123][7] * ddt_scale), (s.dn[123][8] * ddt_scale), (s.dn[123][9] * ddt_scale), (s.dn[123][10] * ddt_scale), (s.dn[123][11] * ddt_scale), (s.dn[123][12] * ddt_scale), (s.dn[123][13] * ddt_scale)];
         let eq20_branch_derivatives: [f64; 0] = [];
         stamper.stamp_current_dense_local(
             Some(8),
@@ -2853,22 +2839,8 @@ impl Instance {
             multiplicity,
         );
         let eq21_e161: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 1, s.v[124]);
-        let eq21_e161_d_n0: f64 = (s.dn[124][0] * ddt_scale);
-        let eq21_e161_d_n1: f64 = (s.dn[124][1] * ddt_scale);
-        let eq21_e161_d_n2: f64 = (s.dn[124][2] * ddt_scale);
-        let eq21_e161_d_n3: f64 = (s.dn[124][3] * ddt_scale);
-        let eq21_e161_d_n4: f64 = (s.dn[124][4] * ddt_scale);
-        let eq21_e161_d_n5: f64 = (s.dn[124][5] * ddt_scale);
-        let eq21_e161_d_n6: f64 = (s.dn[124][6] * ddt_scale);
-        let eq21_e161_d_n7: f64 = (s.dn[124][7] * ddt_scale);
-        let eq21_e161_d_n8: f64 = (s.dn[124][8] * ddt_scale);
-        let eq21_e161_d_n9: f64 = (s.dn[124][9] * ddt_scale);
-        let eq21_e161_d_n10: f64 = (s.dn[124][10] * ddt_scale);
-        let eq21_e161_d_n11: f64 = (s.dn[124][11] * ddt_scale);
-        let eq21_e161_d_n12: f64 = (s.dn[124][12] * ddt_scale);
-        let eq21_e161_d_n13: f64 = (s.dn[124][13] * ddt_scale);
         let eq21_value: f64 = eq21_e161;
-        let eq21_node_derivatives: [f64; 14] = [eq21_e161_d_n0, eq21_e161_d_n1, eq21_e161_d_n2, eq21_e161_d_n3, eq21_e161_d_n4, eq21_e161_d_n5, eq21_e161_d_n6, eq21_e161_d_n7, eq21_e161_d_n8, eq21_e161_d_n9, eq21_e161_d_n10, eq21_e161_d_n11, eq21_e161_d_n12, eq21_e161_d_n13];
+        let eq21_node_derivatives: [f64; 14] = [(s.dn[124][0] * ddt_scale), (s.dn[124][1] * ddt_scale), (s.dn[124][2] * ddt_scale), (s.dn[124][3] * ddt_scale), (s.dn[124][4] * ddt_scale), (s.dn[124][5] * ddt_scale), (s.dn[124][6] * ddt_scale), (s.dn[124][7] * ddt_scale), (s.dn[124][8] * ddt_scale), (s.dn[124][9] * ddt_scale), (s.dn[124][10] * ddt_scale), (s.dn[124][11] * ddt_scale), (s.dn[124][12] * ddt_scale), (s.dn[124][13] * ddt_scale)];
         let eq21_branch_derivatives: [f64; 0] = [];
         stamper.stamp_current_dense_local(
             Some(7),
@@ -2879,22 +2851,8 @@ impl Instance {
             multiplicity,
         );
         let eq22_e163: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 2, s.v[125]);
-        let eq22_e163_d_n0: f64 = (s.dn[125][0] * ddt_scale);
-        let eq22_e163_d_n1: f64 = (s.dn[125][1] * ddt_scale);
-        let eq22_e163_d_n2: f64 = (s.dn[125][2] * ddt_scale);
-        let eq22_e163_d_n3: f64 = (s.dn[125][3] * ddt_scale);
-        let eq22_e163_d_n4: f64 = (s.dn[125][4] * ddt_scale);
-        let eq22_e163_d_n5: f64 = (s.dn[125][5] * ddt_scale);
-        let eq22_e163_d_n6: f64 = (s.dn[125][6] * ddt_scale);
-        let eq22_e163_d_n7: f64 = (s.dn[125][7] * ddt_scale);
-        let eq22_e163_d_n8: f64 = (s.dn[125][8] * ddt_scale);
-        let eq22_e163_d_n9: f64 = (s.dn[125][9] * ddt_scale);
-        let eq22_e163_d_n10: f64 = (s.dn[125][10] * ddt_scale);
-        let eq22_e163_d_n11: f64 = (s.dn[125][11] * ddt_scale);
-        let eq22_e163_d_n12: f64 = (s.dn[125][12] * ddt_scale);
-        let eq22_e163_d_n13: f64 = (s.dn[125][13] * ddt_scale);
         let eq22_value: f64 = eq22_e163;
-        let eq22_node_derivatives: [f64; 14] = [eq22_e163_d_n0, eq22_e163_d_n1, eq22_e163_d_n2, eq22_e163_d_n3, eq22_e163_d_n4, eq22_e163_d_n5, eq22_e163_d_n6, eq22_e163_d_n7, eq22_e163_d_n8, eq22_e163_d_n9, eq22_e163_d_n10, eq22_e163_d_n11, eq22_e163_d_n12, eq22_e163_d_n13];
+        let eq22_node_derivatives: [f64; 14] = [(s.dn[125][0] * ddt_scale), (s.dn[125][1] * ddt_scale), (s.dn[125][2] * ddt_scale), (s.dn[125][3] * ddt_scale), (s.dn[125][4] * ddt_scale), (s.dn[125][5] * ddt_scale), (s.dn[125][6] * ddt_scale), (s.dn[125][7] * ddt_scale), (s.dn[125][8] * ddt_scale), (s.dn[125][9] * ddt_scale), (s.dn[125][10] * ddt_scale), (s.dn[125][11] * ddt_scale), (s.dn[125][12] * ddt_scale), (s.dn[125][13] * ddt_scale)];
         let eq22_branch_derivatives: [f64; 0] = [];
         stamper.stamp_current_dense_local(
             Some(8),
@@ -2905,22 +2863,8 @@ impl Instance {
             multiplicity,
         );
         let eq23_e165: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 3, s.v[126]);
-        let eq23_e165_d_n0: f64 = (s.dn[126][0] * ddt_scale);
-        let eq23_e165_d_n1: f64 = (s.dn[126][1] * ddt_scale);
-        let eq23_e165_d_n2: f64 = (s.dn[126][2] * ddt_scale);
-        let eq23_e165_d_n3: f64 = (s.dn[126][3] * ddt_scale);
-        let eq23_e165_d_n4: f64 = (s.dn[126][4] * ddt_scale);
-        let eq23_e165_d_n5: f64 = (s.dn[126][5] * ddt_scale);
-        let eq23_e165_d_n6: f64 = (s.dn[126][6] * ddt_scale);
-        let eq23_e165_d_n7: f64 = (s.dn[126][7] * ddt_scale);
-        let eq23_e165_d_n8: f64 = (s.dn[126][8] * ddt_scale);
-        let eq23_e165_d_n9: f64 = (s.dn[126][9] * ddt_scale);
-        let eq23_e165_d_n10: f64 = (s.dn[126][10] * ddt_scale);
-        let eq23_e165_d_n11: f64 = (s.dn[126][11] * ddt_scale);
-        let eq23_e165_d_n12: f64 = (s.dn[126][12] * ddt_scale);
-        let eq23_e165_d_n13: f64 = (s.dn[126][13] * ddt_scale);
         let eq23_value: f64 = eq23_e165;
-        let eq23_node_derivatives: [f64; 14] = [eq23_e165_d_n0, eq23_e165_d_n1, eq23_e165_d_n2, eq23_e165_d_n3, eq23_e165_d_n4, eq23_e165_d_n5, eq23_e165_d_n6, eq23_e165_d_n7, eq23_e165_d_n8, eq23_e165_d_n9, eq23_e165_d_n10, eq23_e165_d_n11, eq23_e165_d_n12, eq23_e165_d_n13];
+        let eq23_node_derivatives: [f64; 14] = [(s.dn[126][0] * ddt_scale), (s.dn[126][1] * ddt_scale), (s.dn[126][2] * ddt_scale), (s.dn[126][3] * ddt_scale), (s.dn[126][4] * ddt_scale), (s.dn[126][5] * ddt_scale), (s.dn[126][6] * ddt_scale), (s.dn[126][7] * ddt_scale), (s.dn[126][8] * ddt_scale), (s.dn[126][9] * ddt_scale), (s.dn[126][10] * ddt_scale), (s.dn[126][11] * ddt_scale), (s.dn[126][12] * ddt_scale), (s.dn[126][13] * ddt_scale)];
         let eq23_branch_derivatives: [f64; 0] = [];
         stamper.stamp_current_dense_local(
             Some(8),
@@ -2931,22 +2875,8 @@ impl Instance {
             multiplicity,
         );
         let eq24_e167: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 4, s.v[127]);
-        let eq24_e167_d_n0: f64 = (s.dn[127][0] * ddt_scale);
-        let eq24_e167_d_n1: f64 = (s.dn[127][1] * ddt_scale);
-        let eq24_e167_d_n2: f64 = (s.dn[127][2] * ddt_scale);
-        let eq24_e167_d_n3: f64 = (s.dn[127][3] * ddt_scale);
-        let eq24_e167_d_n4: f64 = (s.dn[127][4] * ddt_scale);
-        let eq24_e167_d_n5: f64 = (s.dn[127][5] * ddt_scale);
-        let eq24_e167_d_n6: f64 = (s.dn[127][6] * ddt_scale);
-        let eq24_e167_d_n7: f64 = (s.dn[127][7] * ddt_scale);
-        let eq24_e167_d_n8: f64 = (s.dn[127][8] * ddt_scale);
-        let eq24_e167_d_n9: f64 = (s.dn[127][9] * ddt_scale);
-        let eq24_e167_d_n10: f64 = (s.dn[127][10] * ddt_scale);
-        let eq24_e167_d_n11: f64 = (s.dn[127][11] * ddt_scale);
-        let eq24_e167_d_n12: f64 = (s.dn[127][12] * ddt_scale);
-        let eq24_e167_d_n13: f64 = (s.dn[127][13] * ddt_scale);
         let eq24_value: f64 = eq24_e167;
-        let eq24_node_derivatives: [f64; 14] = [eq24_e167_d_n0, eq24_e167_d_n1, eq24_e167_d_n2, eq24_e167_d_n3, eq24_e167_d_n4, eq24_e167_d_n5, eq24_e167_d_n6, eq24_e167_d_n7, eq24_e167_d_n8, eq24_e167_d_n9, eq24_e167_d_n10, eq24_e167_d_n11, eq24_e167_d_n12, eq24_e167_d_n13];
+        let eq24_node_derivatives: [f64; 14] = [(s.dn[127][0] * ddt_scale), (s.dn[127][1] * ddt_scale), (s.dn[127][2] * ddt_scale), (s.dn[127][3] * ddt_scale), (s.dn[127][4] * ddt_scale), (s.dn[127][5] * ddt_scale), (s.dn[127][6] * ddt_scale), (s.dn[127][7] * ddt_scale), (s.dn[127][8] * ddt_scale), (s.dn[127][9] * ddt_scale), (s.dn[127][10] * ddt_scale), (s.dn[127][11] * ddt_scale), (s.dn[127][12] * ddt_scale), (s.dn[127][13] * ddt_scale)];
         let eq24_branch_derivatives: [f64; 0] = [];
         stamper.stamp_current_dense_local(
             Some(7),
@@ -2957,22 +2887,8 @@ impl Instance {
             multiplicity,
         );
         let eq27_e173: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 7, s.v[128]);
-        let eq27_e173_d_n0: f64 = (s.dn[128][0] * ddt_scale);
-        let eq27_e173_d_n1: f64 = (s.dn[128][1] * ddt_scale);
-        let eq27_e173_d_n2: f64 = (s.dn[128][2] * ddt_scale);
-        let eq27_e173_d_n3: f64 = (s.dn[128][3] * ddt_scale);
-        let eq27_e173_d_n4: f64 = (s.dn[128][4] * ddt_scale);
-        let eq27_e173_d_n5: f64 = (s.dn[128][5] * ddt_scale);
-        let eq27_e173_d_n6: f64 = (s.dn[128][6] * ddt_scale);
-        let eq27_e173_d_n7: f64 = (s.dn[128][7] * ddt_scale);
-        let eq27_e173_d_n8: f64 = (s.dn[128][8] * ddt_scale);
-        let eq27_e173_d_n9: f64 = (s.dn[128][9] * ddt_scale);
-        let eq27_e173_d_n10: f64 = (s.dn[128][10] * ddt_scale);
-        let eq27_e173_d_n11: f64 = (s.dn[128][11] * ddt_scale);
-        let eq27_e173_d_n12: f64 = (s.dn[128][12] * ddt_scale);
-        let eq27_e173_d_n13: f64 = (s.dn[128][13] * ddt_scale);
         let eq27_value: f64 = eq27_e173;
-        let eq27_node_derivatives: [f64; 14] = [eq27_e173_d_n0, eq27_e173_d_n1, eq27_e173_d_n2, eq27_e173_d_n3, eq27_e173_d_n4, eq27_e173_d_n5, eq27_e173_d_n6, eq27_e173_d_n7, eq27_e173_d_n8, eq27_e173_d_n9, eq27_e173_d_n10, eq27_e173_d_n11, eq27_e173_d_n12, eq27_e173_d_n13];
+        let eq27_node_derivatives: [f64; 14] = [(s.dn[128][0] * ddt_scale), (s.dn[128][1] * ddt_scale), (s.dn[128][2] * ddt_scale), (s.dn[128][3] * ddt_scale), (s.dn[128][4] * ddt_scale), (s.dn[128][5] * ddt_scale), (s.dn[128][6] * ddt_scale), (s.dn[128][7] * ddt_scale), (s.dn[128][8] * ddt_scale), (s.dn[128][9] * ddt_scale), (s.dn[128][10] * ddt_scale), (s.dn[128][11] * ddt_scale), (s.dn[128][12] * ddt_scale), (s.dn[128][13] * ddt_scale)];
         let eq27_branch_derivatives: [f64; 0] = [];
         stamper.stamp_current_dense_local(
             Some(11),
@@ -2983,22 +2899,8 @@ impl Instance {
             multiplicity,
         );
         let eq30_e179: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 10, s.v[142]);
-        let eq30_e179_d_n0: f64 = (s.dn[142][0] * ddt_scale);
-        let eq30_e179_d_n1: f64 = (s.dn[142][1] * ddt_scale);
-        let eq30_e179_d_n2: f64 = (s.dn[142][2] * ddt_scale);
-        let eq30_e179_d_n3: f64 = (s.dn[142][3] * ddt_scale);
-        let eq30_e179_d_n4: f64 = (s.dn[142][4] * ddt_scale);
-        let eq30_e179_d_n5: f64 = (s.dn[142][5] * ddt_scale);
-        let eq30_e179_d_n6: f64 = (s.dn[142][6] * ddt_scale);
-        let eq30_e179_d_n7: f64 = (s.dn[142][7] * ddt_scale);
-        let eq30_e179_d_n8: f64 = (s.dn[142][8] * ddt_scale);
-        let eq30_e179_d_n9: f64 = (s.dn[142][9] * ddt_scale);
-        let eq30_e179_d_n10: f64 = (s.dn[142][10] * ddt_scale);
-        let eq30_e179_d_n11: f64 = (s.dn[142][11] * ddt_scale);
-        let eq30_e179_d_n12: f64 = (s.dn[142][12] * ddt_scale);
-        let eq30_e179_d_n13: f64 = (s.dn[142][13] * ddt_scale);
         let eq30_value: f64 = eq30_e179;
-        let eq30_node_derivatives: [f64; 14] = [eq30_e179_d_n0, eq30_e179_d_n1, eq30_e179_d_n2, eq30_e179_d_n3, eq30_e179_d_n4, eq30_e179_d_n5, eq30_e179_d_n6, eq30_e179_d_n7, eq30_e179_d_n8, eq30_e179_d_n9, eq30_e179_d_n10, eq30_e179_d_n11, eq30_e179_d_n12, eq30_e179_d_n13];
+        let eq30_node_derivatives: [f64; 14] = [(s.dn[142][0] * ddt_scale), (s.dn[142][1] * ddt_scale), (s.dn[142][2] * ddt_scale), (s.dn[142][3] * ddt_scale), (s.dn[142][4] * ddt_scale), (s.dn[142][5] * ddt_scale), (s.dn[142][6] * ddt_scale), (s.dn[142][7] * ddt_scale), (s.dn[142][8] * ddt_scale), (s.dn[142][9] * ddt_scale), (s.dn[142][10] * ddt_scale), (s.dn[142][11] * ddt_scale), (s.dn[142][12] * ddt_scale), (s.dn[142][13] * ddt_scale)];
         let eq30_branch_derivatives: [f64; 0] = [];
         stamper.stamp_current_dense_local(
             Some(4),

@@ -178,10 +178,7 @@ impl Instance {
         let (eq4_e72, eq4_e72_d_n0, eq4_e72_d_n1, eq4_e72_d_n2,) = {
     if (p.p7 != 0.0) {
         let eq4_e70: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, s.v[45]);
-        let eq4_e70_d_n0: f64 = (s.dn[45][0] * ddt_scale);
-        let eq4_e70_d_n1: f64 = (s.dn[45][1] * ddt_scale);
-        let eq4_e70_d_n2: f64 = (s.dn[45][2] * ddt_scale);
-        (eq4_e70, eq4_e70_d_n0, eq4_e70_d_n1, eq4_e70_d_n2,)
+        (eq4_e70, (s.dn[45][0] * ddt_scale), (s.dn[45][1] * ddt_scale), (s.dn[45][2] * ddt_scale),)
     } else {
         (0.0, 0.0, 0.0, 0.0,)
     }

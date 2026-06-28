@@ -164,8 +164,7 @@ impl Instance {
         let eq4_e61: f64 = (p.p36 * (nv4 - 0.0));
         let eq4_e61_d_n4: f64 = p.p36;
         let eq4_e62: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_initialized, ddt_active, ddt_scale, 0, eq4_e61);
-        let eq4_e62_d_n4: f64 = (eq4_e61_d_n4 * ddt_scale);
-        (eq4_e62, eq4_e62_d_n4,)
+        (eq4_e62, (eq4_e61_d_n4 * ddt_scale),)
     } else {
         (0.0, 0.0,)
     }
