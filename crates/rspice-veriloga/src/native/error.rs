@@ -6,6 +6,7 @@ pub type JitResult<T> = Result<T, JitError>;
 pub enum JitError {
     UnsupportedTarget { target: SmolStr, reason: SmolStr },
     UnsupportedCanonicalOp { model: SmolStr, op: SmolStr },
+    UnsupportedNativeCoverage { model: SmolStr, feature: SmolStr },
     InvalidCanonicalIr { model: SmolStr, detail: SmolStr },
     Lowering { model: SmolStr, detail: SmolStr },
     Verifier { model: SmolStr, detail: SmolStr },
@@ -25,6 +26,16 @@ impl JitError {
             op: SmolStr::new("EvaluateEquation"),
         }
     }
+
+    pub fn unsupported_native_coverage(
+        model: impl Into<SmolStr>,
+        feature: impl Into<SmolStr>,
+    ) -> Self {
+        Self::UnsupportedNativeCoverage {
+            model: model.into(),
+            feature: feature.into(),
+        }
+    }
 }
 
 impl std::fmt::Display for JitError {
@@ -37,6 +48,10 @@ impl std::fmt::Display for JitError {
             JitError::UnsupportedCanonicalOp { model, op } => write!(
                 f,
                 "model {model}: native JIT does not support canonical op {op}; no interpreter fallback"
+            ),
+            JitError::UnsupportedNativeCoverage { model, feature } => write!(
+                f,
+                "model {model}: native JIT does not support {feature}; no interpreter fallback"
             ),
             JitError::InvalidCanonicalIr { model, detail } => write!(
                 f,
@@ -94,6 +109,14 @@ mod tests {
     fn unsupported_op_error_names_hard_fail_contract() {
         let msg = JitError::unsupported_current_optir("rjit").to_string();
         assert!(msg.contains("EvaluateEquation"));
+        assert!(msg.contains("no interpreter fallback"));
+    }
+
+    #[test]
+    fn unsupported_coverage_error_names_hard_fail_contract() {
+        let msg = JitError::unsupported_native_coverage("rjit", "NoiseSources").to_string();
+        assert!(msg.contains("NoiseSources"));
+        assert!(msg.contains("native JIT"));
         assert!(msg.contains("no interpreter fallback"));
     }
 }

@@ -26,6 +26,7 @@ pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
         target: "unknown".into(),
         reason: "host architecture is not supported".into(),
     })?;
+    validate_native_coverage(model)?;
 
     match target.arch {
         Architecture::X64 => Err(JitError::unsupported_current_optir(model.name.clone())),
@@ -34,4 +35,26 @@ pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
             reason: "AArch64 backend boundary exists but is not enabled".into(),
         }),
     }
+}
+
+fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
+    if !model.noise_sources.is_empty() {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "NoiseSources",
+        ));
+    }
+
+    if model
+        .stamp_programs
+        .iter()
+        .any(|stamp| !stamp.reactive_jacobians.is_empty())
+    {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "ReactiveJacobians",
+        ));
+    }
+
+    Ok(())
 }
