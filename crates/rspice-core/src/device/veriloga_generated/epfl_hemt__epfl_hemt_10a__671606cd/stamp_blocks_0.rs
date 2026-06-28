@@ -8827,7 +8827,7 @@ impl Instance {
 
         s.store_div_scaled_offset_numerator(104, s.ad_value(87), ((4.0) * ((p.p16 / p.p17))), ((p.p17) * ((p.p16 / p.p17))), A::offset(s.ad_value(80), 1.0), 1.0);
 
-        s.store_mul_ad(105, A::sub(s.ad_value(23), s.ad_value(20)), A::sqrt(A::offset(A::div_scaled_inputs(s.ad_value(104), 4.0, s.ad_value(89), 1.0), 1.0)));
+        s.store_mul_sub_mixed_aii(105, A::sqrt(A::offset(A::div_scaled_inputs(s.ad_value(104), 4.0, s.ad_value(89), 1.0), 1.0)), 23, 20);
 
         s.store_sqrt_ad(106, A::add_scaled_square_product(A::add(s.ad_value(105), s.ad_value(89)), 1.0, s.ad_value(104), s.ad_value(89), 4.0));
 

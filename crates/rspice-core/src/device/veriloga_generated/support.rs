@@ -3771,6 +3771,53 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_add_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let add_value = left_value + right_value;
+        self.v[index] = factor_value * add_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = factor_dn[axis] * add_value + factor_value * (left_dn[axis] + right_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = factor_db[axis] * add_value + factor_value * (left_db[axis] + right_db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_add(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_sub_by_sub(&mut self, index: usize, left_left: usize, left_right: usize, right_left: usize, right_right: usize) {
+        let left_left_value = self.v[left_left];
+        let left_right_value = self.v[left_right];
+        let right_left_value = self.v[right_left];
+        let right_right_value = self.v[right_right];
+        let left_left_dn = self.dn[left_left];
+        let left_right_dn = self.dn[left_right];
+        let right_left_dn = self.dn[right_left];
+        let right_right_dn = self.dn[right_right];
+        let left_left_db = self.db[left_left];
+        let left_right_db = self.db[left_right];
+        let right_left_db = self.db[right_left];
+        let right_right_db = self.db[right_right];
+        let left_delta = left_left_value - left_right_value;
+        let right_delta = right_left_value - right_right_value;
+        self.v[index] = left_delta * right_delta;
+        for axis in 0..NODE_COUNT { let left_derivative = left_left_dn[axis] - left_right_dn[axis]; let right_derivative = right_left_dn[axis] - right_right_dn[axis]; self.dn[index][axis] = left_derivative * right_delta + left_delta * right_derivative; }
+        for axis in 0..BRANCH_COUNT { let left_derivative = left_left_db[axis] - left_right_db[axis]; let right_derivative = right_left_db[axis] - right_right_db[axis]; self.db[index][axis] = left_derivative * right_delta + left_delta * right_derivative; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_sub_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let sub_value = left_value - right_value;
+        self.v[index] = factor_value * sub_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = factor_dn[axis] * sub_value + factor_value * (left_dn[axis] - right_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = factor_db[axis] * sub_value + factor_value * (left_db[axis] - right_db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_sub(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_add_lhs(&mut self, index: usize, left: usize, middle: usize, right: usize) {
         let left_value = self.v[left];
         let middle_value = self.v[middle];
@@ -12417,6 +12464,162 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let exponent_dn = self.dn[exponent];
         let exponent_db = self.db[exponent];
         self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: usize) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: usize) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_iaa(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_iaa(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_iai(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_iai(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_iia(&mut self, index: usize, factor: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_iia(&mut self, index: usize, factor: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_indices(&mut self, index: usize, factor: usize, left: usize, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_indices(&mut self, index: usize, factor: usize, left: usize, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right_value, right_dn, right_db);
     }
 
 
@@ -17620,6 +17823,53 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_add_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let add_value = left_value + right_value;
+        self.v[index] = factor_value * add_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = factor_dn[axis] * add_value + factor_value * (left_dn[axis] + right_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = factor_db[axis] * add_value + factor_value * (left_db[axis] + right_db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_add(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_sub_by_sub(&mut self, index: usize, left_left: usize, left_right: usize, right_left: usize, right_right: usize) {
+        let left_left_value = self.v[left_left];
+        let left_right_value = self.v[left_right];
+        let right_left_value = self.v[right_left];
+        let right_right_value = self.v[right_right];
+        let left_left_dn = self.dn[left_left];
+        let left_right_dn = self.dn[left_right];
+        let right_left_dn = self.dn[right_left];
+        let right_right_dn = self.dn[right_right];
+        let left_left_db = self.db[left_left];
+        let left_right_db = self.db[left_right];
+        let right_left_db = self.db[right_left];
+        let right_right_db = self.db[right_right];
+        let left_delta = left_left_value - left_right_value;
+        let right_delta = right_left_value - right_right_value;
+        self.v[index] = left_delta * right_delta;
+        for axis in 0..NODE_COUNT { let left_derivative = left_left_dn[axis] - left_right_dn[axis]; let right_derivative = right_left_dn[axis] - right_right_dn[axis]; self.dn[index][axis] = left_derivative * right_delta + left_delta * right_derivative; }
+        for axis in 0..BRANCH_COUNT { let left_derivative = left_left_db[axis] - left_right_db[axis]; let right_derivative = right_left_db[axis] - right_right_db[axis]; self.db[index][axis] = left_derivative * right_delta + left_delta * right_derivative; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_sub_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], left_value: f64, left_dn: [f64; NODE_COUNT], left_db: [f64; BRANCH_COUNT], right_value: f64, right_dn: [f64; NODE_COUNT], right_db: [f64; BRANCH_COUNT]) {
+        let sub_value = left_value - right_value;
+        self.v[index] = factor_value * sub_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = factor_dn[axis] * sub_value + factor_value * (left_dn[axis] - right_dn[axis]); }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = factor_db[axis] * sub_value + factor_value * (left_db[axis] - right_db[axis]); }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_sub(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_add_lhs(&mut self, index: usize, left: usize, middle: usize, right: usize) {
         let left_value = self.v[left];
         let middle_value = self.v[middle];
@@ -26266,6 +26516,162 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let exponent_dn = self.dn[exponent];
         let exponent_db = self.db[exponent];
         self.store_mul_pow_components(index, factor_value, factor_dn, factor_db, base_value, base_dn, base_db, exponent_value, exponent_dn, exponent_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_aai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_aia(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: usize) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_aii(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, left: usize, right: usize) {
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor.value, factor.dn, factor.db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_iaa(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_iaa(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_iai(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_iai(&mut self, index: usize, factor: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left.value, left.dn, left.db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_mixed_iia(&mut self, index: usize, factor: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_mixed_iia(&mut self, index: usize, factor: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right.value, right.dn, right.db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_add_indices(&mut self, index: usize, factor: usize, left: usize, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_add_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_sub_indices(&mut self, index: usize, factor: usize, left: usize, right: usize) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let left_value = self.v[left];
+        let left_dn = self.dn[left];
+        let left_db = self.db[left];
+        let right_value = self.v[right];
+        let right_dn = self.dn[right];
+        let right_db = self.db[right];
+        self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right_value, right_dn, right_db);
     }
 
 
