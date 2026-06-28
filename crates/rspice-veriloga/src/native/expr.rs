@@ -73,7 +73,18 @@ pub(crate) enum ExtremumOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UnaryMathOp {
     Exp,
+    Log,
+    Log10,
+    Sin,
+    Cos,
+    Tan,
+    Sinh,
+    Cosh,
+    Tanh,
     Limexp,
+    Asin,
+    Acos,
+    Atan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,7 +329,19 @@ impl NativeProgram {
                     )?;
                     ops.push(NativeOp::Sqrt);
                 }
-                Instruction::Exp | Instruction::Limexp => {
+                Instruction::Exp
+                | Instruction::Log
+                | Instruction::Log10
+                | Instruction::Sin
+                | Instruction::Cos
+                | Instruction::Tan
+                | Instruction::Sinh
+                | Instruction::Cosh
+                | Instruction::Tanh
+                | Instruction::Limexp
+                | Instruction::Asin
+                | Instruction::Acos
+                | Instruction::Atan => {
                     require_stack(
                         model.clone(),
                         entry_kind,
@@ -644,7 +667,18 @@ fn extremum_op(instruction: &Instruction) -> ExtremumOp {
 fn unary_math_op(instruction: &Instruction) -> UnaryMathOp {
     match instruction {
         Instruction::Exp => UnaryMathOp::Exp,
+        Instruction::Log => UnaryMathOp::Log,
+        Instruction::Log10 => UnaryMathOp::Log10,
+        Instruction::Sin => UnaryMathOp::Sin,
+        Instruction::Cos => UnaryMathOp::Cos,
+        Instruction::Tan => UnaryMathOp::Tan,
+        Instruction::Sinh => UnaryMathOp::Sinh,
+        Instruction::Cosh => UnaryMathOp::Cosh,
+        Instruction::Tanh => UnaryMathOp::Tanh,
         Instruction::Limexp => UnaryMathOp::Limexp,
+        Instruction::Asin => UnaryMathOp::Asin,
+        Instruction::Acos => UnaryMathOp::Acos,
+        Instruction::Atan => UnaryMathOp::Atan,
         _ => unreachable!("unary math lowering only accepts supported unary math instructions"),
     }
 }
@@ -921,10 +955,21 @@ mod tests {
     }
 
     #[test]
-    fn lowers_exp_limexp_as_native_unary_math_ops() {
+    fn lowers_transcendental_functions_as_native_unary_math_ops() {
         let cases = [
             (Instruction::Exp, UnaryMathOp::Exp),
+            (Instruction::Log, UnaryMathOp::Log),
+            (Instruction::Log10, UnaryMathOp::Log10),
+            (Instruction::Sin, UnaryMathOp::Sin),
+            (Instruction::Cos, UnaryMathOp::Cos),
+            (Instruction::Tan, UnaryMathOp::Tan),
+            (Instruction::Sinh, UnaryMathOp::Sinh),
+            (Instruction::Cosh, UnaryMathOp::Cosh),
+            (Instruction::Tanh, UnaryMathOp::Tanh),
             (Instruction::Limexp, UnaryMathOp::Limexp),
+            (Instruction::Asin, UnaryMathOp::Asin),
+            (Instruction::Acos, UnaryMathOp::Acos),
+            (Instruction::Atan, UnaryMathOp::Atan),
         ];
 
         for (instruction, expected) in cases {
@@ -934,7 +979,7 @@ mod tests {
 
             let lowered =
                 NativeProgram::from_bytecode("math", EntryKind::Assignment, &program, limits(0, 0))
-                    .expect("exp/limexp have direct native x64 helper-call lowering");
+                    .expect("transcendental functions have native x64 helper-call lowering");
 
             assert_eq!(
                 lowered.ops(),

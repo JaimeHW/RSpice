@@ -119,6 +119,72 @@ pub extern "C" fn rspice_exp(x: f64) -> f64 {
     x.exp()
 }
 
+/// External helper function for natural logarithm.
+#[unsafe(export_name = "rspice_log")]
+pub extern "C" fn rspice_log(x: f64) -> f64 {
+    x.ln()
+}
+
+/// External helper function for base-10 logarithm.
+#[unsafe(export_name = "rspice_log10")]
+pub extern "C" fn rspice_log10(x: f64) -> f64 {
+    x.log10()
+}
+
+/// External helper function for sine.
+#[unsafe(export_name = "rspice_sin")]
+pub extern "C" fn rspice_sin(x: f64) -> f64 {
+    x.sin()
+}
+
+/// External helper function for cosine.
+#[unsafe(export_name = "rspice_cos")]
+pub extern "C" fn rspice_cos(x: f64) -> f64 {
+    x.cos()
+}
+
+/// External helper function for tangent.
+#[unsafe(export_name = "rspice_tan")]
+pub extern "C" fn rspice_tan(x: f64) -> f64 {
+    x.tan()
+}
+
+/// External helper function for hyperbolic sine.
+#[unsafe(export_name = "rspice_sinh")]
+pub extern "C" fn rspice_sinh(x: f64) -> f64 {
+    x.sinh()
+}
+
+/// External helper function for hyperbolic cosine.
+#[unsafe(export_name = "rspice_cosh")]
+pub extern "C" fn rspice_cosh(x: f64) -> f64 {
+    x.cosh()
+}
+
+/// External helper function for hyperbolic tangent.
+#[unsafe(export_name = "rspice_tanh")]
+pub extern "C" fn rspice_tanh(x: f64) -> f64 {
+    x.tanh()
+}
+
+/// External helper function for arcsine.
+#[unsafe(export_name = "rspice_asin")]
+pub extern "C" fn rspice_asin(x: f64) -> f64 {
+    x.asin()
+}
+
+/// External helper function for arccosine.
+#[unsafe(export_name = "rspice_acos")]
+pub extern "C" fn rspice_acos(x: f64) -> f64 {
+    x.acos()
+}
+
+/// External helper function for arctangent.
+#[unsafe(export_name = "rspice_atan")]
+pub extern "C" fn rspice_atan(x: f64) -> f64 {
+    x.atan()
+}
+
 /// External helper function for Laplace state-space filter step.
 ///
 /// # Safety
