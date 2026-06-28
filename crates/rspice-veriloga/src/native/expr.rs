@@ -42,6 +42,10 @@ pub(crate) enum NativeOp {
     Sub,
     Mul,
     Div,
+    AddConst(f64),
+    SubConst(f64),
+    MulConst(f64),
+    DivConst(f64),
     Neg,
     Abs,
     Square,
@@ -361,7 +365,7 @@ impl NativeProgram {
                     ops.push(NativeOp::LoadMfactor);
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
-                Instruction::Add => {
+                Instruction::Add | Instruction::Sub | Instruction::Mul | Instruction::Div => {
                     pop_binary_stack(
                         model.clone(),
                         entry_kind,
@@ -369,37 +373,10 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
-                    ops.push(NativeOp::Add);
-                }
-                Instruction::Sub => {
-                    pop_binary_stack(
-                        model.clone(),
-                        entry_kind,
-                        instruction_name(instruction),
-                        depth,
-                    )?;
-                    depth -= 1;
-                    ops.push(NativeOp::Sub);
-                }
-                Instruction::Mul => {
-                    pop_binary_stack(
-                        model.clone(),
-                        entry_kind,
-                        instruction_name(instruction),
-                        depth,
-                    )?;
-                    depth -= 1;
-                    ops.push(NativeOp::Mul);
-                }
-                Instruction::Div => {
-                    pop_binary_stack(
-                        model.clone(),
-                        entry_kind,
-                        instruction_name(instruction),
-                        depth,
-                    )?;
-                    depth -= 1;
-                    ops.push(NativeOp::Div);
+                    if lower_constant_rhs_arithmetic(&mut ops, instruction) {
+                        continue;
+                    }
+                    ops.push(arithmetic_op(instruction));
                 }
                 Instruction::Pow | Instruction::FnPow => {
                     pop_binary_stack(
@@ -1024,6 +1001,22 @@ fn lower_constant_square_power(ops: &mut Vec<NativeOp>) -> bool {
     }
 }
 
+fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruction) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last().copied() else {
+        return false;
+    };
+    let op = match instruction {
+        Instruction::Add => NativeOp::AddConst(value),
+        Instruction::Sub => NativeOp::SubConst(value),
+        Instruction::Mul => NativeOp::MulConst(value),
+        Instruction::Div => NativeOp::DivConst(value),
+        _ => return false,
+    };
+    ops.pop();
+    ops.push(op);
+    true
+}
+
 fn compute_native_max_stack_depth(
     model: SmolStr,
     entry_kind: EntryKind,
@@ -1074,6 +1067,10 @@ fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LoadMfactor => (0, 1),
 
         NativeOp::LoadVariableDyn { .. }
+        | NativeOp::AddConst(_)
+        | NativeOp::SubConst(_)
+        | NativeOp::MulConst(_)
+        | NativeOp::DivConst(_)
         | NativeOp::Neg
         | NativeOp::Abs
         | NativeOp::Square
@@ -1302,6 +1299,16 @@ fn binary_math_op(instruction: &Instruction) -> BinaryMathOp {
     }
 }
 
+fn arithmetic_op(instruction: &Instruction) -> NativeOp {
+    match instruction {
+        Instruction::Add => NativeOp::Add,
+        Instruction::Sub => NativeOp::Sub,
+        Instruction::Mul => NativeOp::Mul,
+        Instruction::Div => NativeOp::Div,
+        _ => unreachable!("arithmetic lowering only accepts add/sub/mul/div instructions"),
+    }
+}
+
 fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
     match instruction {
         Instruction::Shl => IntegerBinaryOp::Shl,
@@ -1347,11 +1354,46 @@ mod tests {
                 },
                 NativeOp::LoadParam(0),
                 NativeOp::Div,
-                NativeOp::Const(2.0),
-                NativeOp::Mul,
+                NativeOp::MulConst(2.0),
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_constant_rhs_arithmetic_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Add, NativeOp::AddConst(4.0)),
+            (Instruction::Sub, NativeOp::SubConst(4.0)),
+            (Instruction::Mul, NativeOp::MulConst(4.0)),
+            (Instruction::Div, NativeOp::DivConst(4.0)),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushTemperature,
+                    Instruction::PushConst(4.0),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-rhs",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant RHS arithmetic has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for RHS constants"
+            );
+            assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
+        }
     }
 
     #[test]
