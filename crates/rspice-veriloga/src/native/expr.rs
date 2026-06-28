@@ -49,6 +49,8 @@ pub(crate) enum NativeOp {
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
     IntegerBinary(IntegerBinaryOp),
+    TableLookup(usize),
+    TableDerivative(usize),
     DdtState(usize),
     DdtJacobian,
     IdtState(usize),
@@ -128,6 +130,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     parameter_count: usize,
     variable_count: usize,
     branch_unknown_count: usize,
+    lookup_table_count: usize,
     available_current_pairs: &'a [usize],
 }
 
@@ -145,6 +148,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count,
             variable_count,
             branch_unknown_count,
+            lookup_table_count: 0,
             available_current_pairs: &[],
         }
     }
@@ -157,6 +161,7 @@ impl<'a> NativeLoweringLimits<'a> {
             model.num_variables,
             model.branch_sources.len(),
         )
+        .with_lookup_table_count(model.lookup_tables.len())
     }
 
     pub(crate) fn with_available_current_pairs<'b>(
@@ -169,7 +174,15 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             branch_unknown_count: self.branch_unknown_count,
+            lookup_table_count: self.lookup_table_count,
             available_current_pairs,
+        }
+    }
+
+    pub(crate) fn with_lookup_table_count(self, lookup_table_count: usize) -> Self {
+        Self {
+            lookup_table_count,
+            ..self
         }
     }
 }
@@ -353,6 +366,38 @@ impl NativeProgram {
                     )?;
                     depth -= 1;
                     ops.push(NativeOp::IntegerBinary(integer_binary_op(instruction)));
+                }
+                Instruction::TableLookup(table_id) => {
+                    validate_index(
+                        model.clone(),
+                        "TableLookup table",
+                        *table_id,
+                        limits.lookup_table_count,
+                    )?;
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::TableLookup(*table_id));
+                }
+                Instruction::TableDerivative(table_id) => {
+                    validate_index(
+                        model.clone(),
+                        "TableDerivative table",
+                        *table_id,
+                        limits.lookup_table_count,
+                    )?;
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::TableDerivative(*table_id));
                 }
                 Instruction::Neg => {
                     require_stack(
@@ -820,6 +865,7 @@ mod tests {
 
     fn limits(terminal_count: usize, internal_node_count: usize) -> NativeLoweringLimits<'static> {
         NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
+            .with_lookup_table_count(8)
     }
 
     #[test]
@@ -1188,6 +1234,64 @@ mod tests {
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn lowers_table_model_ops_as_native_table_ops() {
+        let cases = [
+            (Instruction::TableLookup(2), NativeOp::TableLookup(2)),
+            (
+                Instruction::TableDerivative(3),
+                NativeOp::TableDerivative(3),
+            ),
+        ];
+
+        for (instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushTemperature, instruction],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "table",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0).with_lookup_table_count(4),
+            )
+            .expect("table model ops have native x64 helper-call lowering");
+
+            assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
+            assert_eq!(lowered.max_stack_depth(), 1);
+        }
+    }
+
+    #[test]
+    fn lowering_rejects_table_model_ops_outside_known_tables() {
+        let cases = [
+            (
+                "TableLookup",
+                Instruction::TableLookup(1),
+                "TableLookup table 1",
+            ),
+            (
+                "TableDerivative",
+                Instruction::TableDerivative(1),
+                "TableDerivative table 1",
+            ),
+        ];
+
+        for (name, instruction, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushTemperature, instruction],
+            };
+            let limits = NativeLoweringLimits::new(0, 0, 0, 0, 0).with_lookup_table_count(1);
+
+            let error =
+                NativeProgram::from_bytecode("bad", EntryKind::Assignment, &program, limits)
+                    .expect_err("table id outside registered lookup tables must fail closed");
+            let msg = error.to_string();
+            assert!(msg.contains(expected), "{name}: got {msg}");
+            assert!(msg.contains("no interpreter fallback"), "{name}: got {msg}");
         }
     }
 
