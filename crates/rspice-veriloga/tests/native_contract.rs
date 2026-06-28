@@ -264,6 +264,23 @@ endmodule
     )
 }
 
+fn slew_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_slew_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = slew(V(p, n), 2.0, 2.0);
+        I(p, n) <+ y;
+    end
+endmodule
+"#,
+    )
+}
+
 fn thermal_voltage_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1449,6 +1466,32 @@ fn native_device_executes_transition_assignments_without_fallback() {
         let currents = device
             .try_evaluate()
             .expect("native transition evaluation succeeds");
+        assert!(
+            (device.variable("y").unwrap() - expected).abs() < 1e-12,
+            "time: {time}"
+        );
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_slew_assignments_without_fallback() {
+    let model = slew_assignment_model();
+    let mut device =
+        VerilogADevice::try_new("SLW1", model, &[1, 0]).expect("slew model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_analysis_type(2);
+    device.update_voltages(&[10.0]);
+
+    for (time, expected) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
+        device.set_time(time);
+        let currents = device
+            .try_evaluate()
+            .expect("native slew evaluation succeeds");
         assert!(
             (device.variable("y").unwrap() - expected).abs() < 1e-12,
             "time: {time}"
