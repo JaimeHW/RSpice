@@ -51,6 +51,7 @@ pub(crate) enum NativeOp {
     DdtJacobian,
     IdtState(usize),
     IdtJacobian,
+    IdtModState(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -413,6 +414,17 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::IdtJacobian);
+                }
+                Instruction::IdtModState(index) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        4,
+                    )?;
+                    depth -= 3;
+                    ops.push(NativeOp::IdtModState(*index));
                 }
                 Instruction::Gt
                 | Instruction::Lt

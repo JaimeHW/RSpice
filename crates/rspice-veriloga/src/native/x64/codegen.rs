@@ -1,8 +1,8 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
     rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_cos, rspice_cosh, rspice_exp,
-    rspice_limexp, rspice_log, rspice_log10, rspice_pow, rspice_sin, rspice_sinh, rspice_tan,
-    rspice_tanh,
+    rspice_idtmod_wrap, rspice_limexp, rspice_log, rspice_log10, rspice_pow, rspice_sin,
+    rspice_sinh, rspice_tan, rspice_tanh,
 };
 use crate::native::expr::{BinaryMathOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -188,6 +188,7 @@ impl FunctionCompiler {
                 NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
                 NativeOp::IdtState(index) => self.emit_idt_state(index)?,
                 NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
+                NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
             }
         }
 
@@ -514,6 +515,52 @@ impl FunctionCompiler {
         self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Mul)
     }
 
+    fn emit_idtmod_state(&mut self, state_index: usize) -> JitResult<()> {
+        if self.depth < 4 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("idtmod state requires stack depth 4, found {}", self.depth).into(),
+            });
+        }
+
+        let value = XMM_STACK[self.depth - 4];
+        let ic = XMM_STACK[self.depth - 3];
+        let modulus = XMM_STACK[self.depth - 2];
+        let offset = XMM_STACK[self.depth - 1];
+        let scratch = self.scratch_register()?;
+        let state_disp = byte_disp(state_index)?;
+
+        self.encoder
+            .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
+        self.encoder.movq_r64_xmm(Gpr::R11, scratch);
+        self.emit_abs_register(scratch);
+        self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
+
+        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
+        self.encoder.movsd_xmm_xmm(value, ic);
+        self.emit_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
+        self.emit_state_value_store(state_disp, value)?;
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(non_dc_path)?;
+        self.emit_context_pointer_load(STATE_PREV_OFFSET);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let skip_previous_load = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.encoder
+            .movsd_xmm_m64_base_disp32(ic, Gpr::Rax, state_disp);
+        self.patch_rel32_to_current(skip_previous_load)?;
+
+        self.encoder.movq_xmm_r64(scratch, Gpr::R11);
+        self.encoder.mulsd_xmm_xmm(value, scratch);
+        self.encoder.addsd_xmm_xmm(value, ic);
+        self.emit_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
+        self.emit_state_value_store(state_disp, value)?;
+
+        self.patch_rel32_to_current(done)?;
+        self.depth -= 3;
+        Ok(())
+    }
+
     fn emit_timestep_guarded_scale(
         &mut self,
         target: Xmm,
@@ -582,6 +629,58 @@ impl FunctionCompiler {
         }
         self.encoder
             .movsd_xmm_m64_base_disp32(left, Gpr::R11, call_result_disp());
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+    }
+
+    fn emit_ternary_helper_call(
+        &mut self,
+        target: Xmm,
+        arg1: Xmm,
+        arg2: Xmm,
+        helper: TernaryHelper,
+    ) {
+        debug_assert!(self.uses_helper_calls);
+        debug_assert!(xmm_stack_slot(target) < self.depth);
+        debug_assert!(xmm_stack_slot(arg1) < self.depth);
+        debug_assert!(xmm_stack_slot(arg2) < self.depth);
+
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            self.encoder
+                .movsd_m64_base_disp32_xmm(Gpr::R11, call_spill_disp(index), register);
+        }
+
+        self.encoder.movsd_xmm_m64_base_disp32(
+            Xmm::Xmm0,
+            Gpr::R11,
+            call_spill_disp(xmm_stack_slot(target)),
+        );
+        self.encoder.movsd_xmm_m64_base_disp32(
+            Xmm::Xmm1,
+            Gpr::R11,
+            call_spill_disp(xmm_stack_slot(arg1)),
+        );
+        self.encoder.movsd_xmm_m64_base_disp32(
+            Xmm::Xmm2,
+            Gpr::R11,
+            call_spill_disp(xmm_stack_slot(arg2)),
+        );
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rsp);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::R11, call_result_disp(), Xmm::Xmm0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::R11, call_spill_disp(index));
+            }
+        }
+        self.encoder
+            .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
     }
 
@@ -916,6 +1015,7 @@ enum BinaryOp {
 
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
+type TernaryHelper = extern "C" fn(f64, f64, f64) -> f64;
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
@@ -951,10 +1051,19 @@ fn call_result_disp() -> i32 {
 }
 
 fn program_uses_helper_calls(program: &NativeProgram) -> bool {
-    program
-        .ops()
+    program.ops().iter().any(|op| {
+        matches!(
+            op,
+            NativeOp::UnaryMath(_) | NativeOp::BinaryMath(_) | NativeOp::IdtModState(_)
+        )
+    })
+}
+
+fn xmm_stack_slot(register: Xmm) -> usize {
+    XMM_STACK
         .iter()
-        .any(|op| matches!(op, NativeOp::UnaryMath(_) | NativeOp::BinaryMath(_)))
+        .position(|candidate| *candidate == register)
+        .expect("register belongs to native XMM stack")
 }
 
 fn byte_disp(index: usize) -> JitResult<i32> {
@@ -1373,6 +1482,96 @@ mod tests {
 
         ctx.timestep = f64::NAN;
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_idtmod_state_and_records_wrapped_integral() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.25),
+                Instruction::IdtModState(1),
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile idtmod state leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate idtmod state leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let vars = [2.0_f64];
+
+        let previous_state = [0.0_f64, 0.9_f64];
+        let mut state_values = [0.0_f64, 0.0_f64];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        ctx.state_values = state_values.as_mut_ptr();
+
+        let value = f(&ctx, vars.as_ptr());
+        assert!((value - 0.4).abs() < 1.0e-12, "value: {value}");
+        assert!(
+            (state_values[1] - 0.4).abs() < 1.0e-12,
+            "state: {state_values:?}"
+        );
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.0;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 1.0e-20;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = f64::NAN;
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.25;
+        ctx.state_prev = std::ptr::null();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 1.0_f64.to_bits());
+
+        let unwrapped_program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.25),
+                Instruction::IdtModState(1),
+            ],
+            0,
+        );
+        let unwrapped_bytes =
+            compile_value_function(&unwrapped_program).expect("compile idtmod unwrapped leaf");
+        let unwrapped_memory =
+            ExecutableMemory::allocate(&unwrapped_bytes).expect("allocate idtmod unwrapped leaf");
+        let unwrapped_entry = unwrapped_memory
+            .ptr_at(0)
+            .expect("entry point inside unwrapped image");
+        let unwrapped: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(unwrapped_entry) };
+
+        state_values[1] = f64::NAN;
+        ctx.timestep = 0.25;
+        ctx.state_prev = previous_state.as_ptr();
+        let unwrapped_value = unwrapped(&ctx, vars.as_ptr());
+        assert!(
+            (unwrapped_value - 1.4).abs() < 1.0e-12,
+            "unwrapped value: {unwrapped_value}"
+        );
+        assert!(
+            (state_values[1] - 1.4).abs() < 1.0e-12,
+            "unwrapped state: {state_values:?}"
+        );
     }
 
     #[test]
