@@ -85,22 +85,21 @@ impl NativeModel {
         jacobian_entry_points: Vec<usize>,
         reactive_jacobian_entry_points: Vec<usize>,
     ) -> Self {
-        let bytes = [
-            0xC3, // assignment: ret
-            0x66, 0x0F, 0x57, 0xC0, 0xC3, // value: xorpd xmm0,xmm0; ret
-        ];
+        let mut bytes = vec![0xC3]; // assignment: ret
+        let stamp_entry = append_test_value_stub(&mut bytes, 1);
+        let jacobian_entry = append_test_value_stub(&mut bytes, 2);
+        let reactive_jacobian_entry = append_test_value_stub(&mut bytes, 3);
         let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
-        let value_entry = CodeOffset::new(1);
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
-            stamp_values: vec![value_entry; stamp_value_entry_points],
+            stamp_values: vec![stamp_entry; stamp_value_entry_points],
             jacobians: jacobian_entry_points
                 .into_iter()
-                .map(|count| vec![value_entry; count])
+                .map(|count| vec![jacobian_entry; count])
                 .collect(),
             reactive_jacobians: reactive_jacobian_entry_points
                 .into_iter()
-                .map(|count| vec![value_entry; count])
+                .map(|count| vec![reactive_jacobian_entry; count])
                 .collect(),
         };
 
@@ -203,10 +202,20 @@ impl NativeModel {
     }
 }
 
+#[cfg(test)]
+fn append_test_value_stub(bytes: &mut Vec<u8>, value: u32) -> CodeOffset {
+    let offset = CodeOffset::new(bytes.len());
+    // mov eax, imm32; cvtsi2sd xmm0, eax; ret
+    bytes.push(0xB8);
+    bytes.extend_from_slice(&value.to_le_bytes());
+    bytes.extend_from_slice(&[0xF2, 0x0F, 0x2A, 0xC0, 0xC3]);
+    offset
+}
+
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::super::runtime::ExecutableMemory;
-    use super::{CodeOffset, EvalContext, NativeEntryOffsets, NativeModel};
+    use super::{CodeOffset, EvalContext, NativeEntryOffsets, NativeModel, append_test_value_stub};
 
     #[test]
     fn native_model_entry_points_are_not_optional() {
@@ -223,37 +232,49 @@ mod tests {
 
         assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 1);
         assert_eq!(
+            model.run_stamp_value(0, &empty_eval_context(), std::ptr::null()),
+            1.0
+        );
+        assert_eq!(
+            model.run_jacobian(0, 0, &empty_eval_context(), std::ptr::null()),
+            2.0
+        );
+        assert_eq!(
             model.run_reactive_jacobian(0, 0, &empty_eval_context(), std::ptr::null()),
-            0.0
+            3.0
         );
     }
 
     #[test]
     fn native_model_calls_entry_points_from_owned_image() {
-        let bytes = [
-            0xC3, // assignment: ret
-            0x66, 0x0F, 0x57, 0xC0, 0xC3, // stamp: xorpd xmm0,xmm0; ret
-            0x66, 0x0F, 0x57, 0xC0, 0xC3, // jacobian: xorpd xmm0,xmm0; ret
-        ];
+        let mut bytes = vec![0xC3]; // assignment: ret
+        let stamp_entry = append_test_value_stub(&mut bytes, 1);
+        let jacobian_entry = append_test_value_stub(&mut bytes, 2);
+        let reactive_jacobian_entry = append_test_value_stub(&mut bytes, 3);
         let image = ExecutableMemory::allocate(&bytes).expect("allocate native test image");
         let model = NativeModel::from_executable_image(
             0,
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
-                stamp_values: vec![CodeOffset::new(1)],
-                jacobians: vec![vec![CodeOffset::new(6)]],
-                reactive_jacobians: vec![],
+                stamp_values: vec![stamp_entry],
+                jacobians: vec![vec![jacobian_entry]],
+                reactive_jacobians: vec![vec![reactive_jacobian_entry]],
             },
         )
         .expect("publish owned native model");
 
         let ctx = empty_eval_context();
         model.run_assignments(&ctx, std::ptr::null_mut());
-        assert_eq!(model.run_stamp_value(0, &ctx, std::ptr::null()), 0.0);
-        assert_eq!(model.run_jacobian(0, 0, &ctx, std::ptr::null()), 0.0);
+        assert_eq!(model.run_stamp_value(0, &ctx, std::ptr::null()), 1.0);
+        assert_eq!(model.run_jacobian(0, 0, &ctx, std::ptr::null()), 2.0);
+        assert_eq!(
+            model.run_reactive_jacobian(0, 0, &ctx, std::ptr::null()),
+            3.0
+        );
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
+        assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 1);
     }
 
     #[test]
