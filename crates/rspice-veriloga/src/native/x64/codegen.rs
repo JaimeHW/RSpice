@@ -2,10 +2,10 @@ use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
     rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_bitand, rspice_bitor,
     rspice_bitxor, rspice_ceil, rspice_cos, rspice_cosh, rspice_dynamic_variable_load_native,
-    rspice_exp, rspice_floor, rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp,
-    rspice_log, rspice_log10, rspice_mod, rspice_pow, rspice_shl, rspice_shr, rspice_sin,
-    rspice_sinh, rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan,
-    rspice_tanh, rspice_zi_step_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_idtmod_wrap,
+    rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10, rspice_mod, rspice_pow,
+    rspice_shl, rspice_shr, rspice_sin, rspice_sinh, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -42,6 +42,8 @@ const CALL_FRAME_BYTES: i32 = CALL_SHADOW_BYTES + (CALL_SPILL_SLOT_COUNT * WORD_
 const CALL_SHADOW_BYTES: i32 = 32;
 #[cfg(not(windows))]
 const CALL_SHADOW_BYTES: i32 = 0;
+const INDEXED_ASSIGNMENT_LOCAL_FRAME_BYTES: i32 = 16;
+const INDEXED_ASSIGNMENT_SLOT_PTR_DISP: i32 = 0;
 const XMM_STACK: [Xmm; 6] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
@@ -54,7 +56,7 @@ const SIGN_MASK: f64 = f64::from_bits(0x8000_0000_0000_0000);
 
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program));
+    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0);
     compiler.emit_program(program)?;
     compiler.finish_value_function()
 }
@@ -64,22 +66,56 @@ pub(crate) fn compile_assignment_function(
     var_index: usize,
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program));
+    let mut compiler = FunctionCompiler::new(program_uses_helper_calls(program), 0);
     compiler.emit_program(program)?;
     compiler.finish_assignment_function(var_index)
 }
 
+#[derive(Debug)]
+pub(crate) enum NativeAssignment {
+    Direct {
+        var_index: usize,
+        program: NativeProgram,
+    },
+    Indexed {
+        base: usize,
+        len: usize,
+        lower: i64,
+        index: NativeProgram,
+        value: NativeProgram,
+    },
+}
+
 pub(crate) fn compile_assignment_pass_function(
-    assignments: &[(usize, NativeProgram)],
+    assignments: &[NativeAssignment],
 ) -> JitResult<Vec<u8>> {
-    let mut compiler = FunctionCompiler::new(
-        assignments
-            .iter()
-            .any(|(_, program)| program_uses_helper_calls(program)),
-    );
-    for (var_index, program) in assignments {
-        compiler.emit_program(program)?;
-        compiler.emit_assignment_store(*var_index)?;
+    let has_indexed_assignment = assignments
+        .iter()
+        .any(|assignment| matches!(assignment, NativeAssignment::Indexed { .. }));
+    let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
+    let local_frame_bytes = if has_indexed_assignment {
+        INDEXED_ASSIGNMENT_LOCAL_FRAME_BYTES
+    } else {
+        0
+    };
+
+    let mut compiler = FunctionCompiler::new(uses_helper_calls, local_frame_bytes);
+    for assignment in assignments {
+        match assignment {
+            NativeAssignment::Direct { var_index, program } => {
+                compiler.emit_program(program)?;
+                compiler.emit_assignment_store(*var_index)?;
+            }
+            NativeAssignment::Indexed {
+                base,
+                len,
+                lower,
+                index,
+                value,
+            } => {
+                compiler.emit_indexed_assignment(*base, *len, *lower, index, value)?;
+            }
+        }
     }
     compiler.finish_assignment_pass_function()
 }
@@ -90,6 +126,8 @@ struct FunctionCompiler {
     depth: usize,
     literals: Vec<LiteralPatch>,
     uses_helper_calls: bool,
+    local_frame_bytes: i32,
+    early_return_jumps: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -99,14 +137,17 @@ struct LiteralPatch {
 }
 
 impl FunctionCompiler {
-    fn new(uses_helper_calls: bool) -> Self {
+    fn new(uses_helper_calls: bool, local_frame_bytes: i32) -> Self {
+        debug_assert_eq!(local_frame_bytes % 16, 0);
         let mut compiler = Self {
             encoder: X64Encoder::new(),
             depth: 0,
             literals: Vec::new(),
             uses_helper_calls,
+            local_frame_bytes,
+            early_return_jumps: Vec::new(),
         };
-        if compiler.uses_helper_calls {
+        if compiler.uses_helper_calls || compiler.local_frame_bytes > 0 {
             compiler.emit_prologue();
         }
         compiler
@@ -229,17 +270,20 @@ impl FunctionCompiler {
     }
 
     fn finish_value_function(mut self) -> JitResult<Vec<u8>> {
+        self.patch_early_returns_to_current()?;
         self.emit_return();
         self.finish_with_literals()
     }
 
     fn finish_assignment_function(mut self, var_index: usize) -> JitResult<Vec<u8>> {
         self.emit_assignment_store(var_index)?;
+        self.patch_early_returns_to_current()?;
         self.emit_return();
         self.finish_with_literals()
     }
 
     fn finish_assignment_pass_function(mut self) -> JitResult<Vec<u8>> {
+        self.patch_early_returns_to_current()?;
         self.emit_return();
         self.finish_with_literals()
     }
@@ -251,10 +295,16 @@ impl FunctionCompiler {
             .mov_r64_r64(saved_ctx_arg_reg(), entry_ctx_arg_reg());
         self.encoder
             .mov_r64_r64(saved_vars_arg_reg(), entry_vars_arg_reg());
+        if self.local_frame_bytes > 0 {
+            self.encoder.sub_rsp_imm32(self.local_frame_bytes);
+        }
     }
 
     fn emit_return(&mut self) {
-        if self.uses_helper_calls {
+        if self.local_frame_bytes > 0 {
+            self.encoder.add_rsp_imm32(self.local_frame_bytes);
+        }
+        if self.uses_helper_calls || self.local_frame_bytes > 0 {
             self.encoder.pop_r64(Gpr::R13);
             self.encoder.pop_r64(Gpr::R12);
         }
@@ -293,6 +343,43 @@ impl FunctionCompiler {
             byte_disp(var_index)?,
             Xmm::Xmm0,
         );
+        self.depth = 0;
+        Ok(())
+    }
+
+    fn emit_indexed_assignment(
+        &mut self,
+        base: usize,
+        len: usize,
+        lower: i64,
+        index: &NativeProgram,
+        value: &NativeProgram,
+    ) -> JitResult<()> {
+        debug_assert!(self.local_frame_bytes >= INDEXED_ASSIGNMENT_LOCAL_FRAME_BYTES);
+
+        self.emit_program(index)?;
+        self.emit_dynamic_variable_slot_call(base, len, lower)?;
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let null_slot = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.early_return_jumps.push(null_slot);
+        self.encoder
+            .mov_m64_base_disp32_r64(Gpr::Rsp, INDEXED_ASSIGNMENT_SLOT_PTR_DISP, Gpr::Rax);
+
+        self.emit_program(value)?;
+        if self.depth != 1 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "indexed assignment value stack depth {}, expected 1",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rsp, INDEXED_ASSIGNMENT_SLOT_PTR_DISP);
+        self.encoder
+            .movsd_m64_base_disp32_xmm(Gpr::Rax, 0, Xmm::Xmm0);
         self.depth = 0;
         Ok(())
     }
@@ -500,6 +587,46 @@ impl FunctionCompiler {
         self.encoder
             .movsd_xmm_m64_base_disp32(target, Gpr::R11, call_result_disp());
         self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        Ok(())
+    }
+
+    fn emit_dynamic_variable_slot_call(
+        &mut self,
+        base: usize,
+        len: usize,
+        lower: i64,
+    ) -> JitResult<()> {
+        if self.depth != 1 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "dynamic variable slot helper requires stack depth 1, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+
+        debug_assert!(self.uses_helper_calls);
+        let base_disp = byte_disp(base)?;
+
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder
+            .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
+        if base_disp != 0 {
+            self.encoder
+                .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
+        }
+        self.encoder
+            .movabs_r64_imm64(dynamic_variable_len_arg_reg(), len as u64);
+        self.encoder
+            .movabs_r64_imm64(dynamic_variable_lower_arg_reg(), lower as u64);
+        let helper: DynamicVariableSlotHelper = rspice_dynamic_variable_slot_native;
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.depth = 0;
         Ok(())
     }
 
@@ -1366,6 +1493,14 @@ impl FunctionCompiler {
         self.encoder.patch_i32(displacement_offset, displacement);
         Ok(())
     }
+
+    fn patch_early_returns_to_current(&mut self) -> JitResult<()> {
+        let jumps = std::mem::take(&mut self.early_return_jumps);
+        for displacement_offset in jumps {
+            self.patch_rel32_to_current(displacement_offset)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1384,6 +1519,14 @@ type TableHelper =
 type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 type DynamicVariableHelper = unsafe extern "C" fn(f64, *const f64, usize, i64) -> f64;
+type DynamicVariableSlotHelper = unsafe extern "C" fn(f64, *mut f64, usize, i64) -> *mut f64;
+
+fn assignment_uses_helper_calls(assignment: &NativeAssignment) -> bool {
+    match assignment {
+        NativeAssignment::Direct { program, .. } => program_uses_helper_calls(program),
+        NativeAssignment::Indexed { .. } => true,
+    }
+}
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
     match op {
@@ -1593,7 +1736,10 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::{K_BOLTZMANN, Q_ELECTRON, compile_assignment_function, compile_value_function};
+    use super::{
+        K_BOLTZMANN, NativeAssignment, Q_ELECTRON, compile_assignment_function,
+        compile_assignment_pass_function, compile_value_function,
+    };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeProgram};
@@ -1753,6 +1899,95 @@ mod tests {
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars[2], 8.0);
+    }
+
+    #[test]
+    fn generated_assignment_pass_stores_indexed_value_and_preserves_slot_across_helper_call() {
+        let assignments = [
+            NativeAssignment::Indexed {
+                base: 1,
+                len: 3,
+                lower: 1,
+                index: native_program(EntryKind::Assignment, vec![Instruction::PushConst(2.49)], 0),
+                value: native_program(
+                    EntryKind::Assignment,
+                    vec![Instruction::PushConst(2.0), Instruction::Exp],
+                    0,
+                ),
+            },
+            NativeAssignment::Direct {
+                var_index: 0,
+                program: native_program(
+                    EntryKind::Assignment,
+                    vec![
+                        Instruction::PushVariable(2),
+                        Instruction::PushConst(1.0),
+                        Instruction::Add,
+                    ],
+                    0,
+                ),
+            },
+        ];
+        let bytes = compile_assignment_pass_function(&assignments)
+            .expect("compile indexed assignment pass");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate indexed assignment pass");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
+
+        let mut vars = [0.0_f64, 2.0, 4.0, 8.0];
+        let ctx = eval_context(&[], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        f(&ctx, vars.as_mut_ptr());
+
+        let expected = runtime_exp(2.0);
+        assert_eq!(vars[2].to_bits(), expected.to_bits());
+        assert_eq!(vars[0].to_bits(), (expected + 1.0).to_bits());
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn generated_assignment_pass_hard_fails_indexed_assignment_bounds_errors() {
+        let assignments = [
+            NativeAssignment::Indexed {
+                base: 1,
+                len: 3,
+                lower: 1,
+                index: native_program(EntryKind::Assignment, vec![Instruction::PushConst(4.0)], 0),
+                value: native_program(EntryKind::Assignment, vec![Instruction::PushConst(11.0)], 0),
+            },
+            NativeAssignment::Direct {
+                var_index: 0,
+                program: native_program(
+                    EntryKind::Assignment,
+                    vec![Instruction::PushConst(123.0)],
+                    0,
+                ),
+            },
+        ];
+        let bytes = compile_assignment_pass_function(&assignments)
+            .expect("compile indexed assignment pass");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate indexed assignment pass");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
+
+        let mut vars = [0.0_f64, 2.0, 4.0, 8.0];
+        let ctx = eval_context(&[], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        f(&ctx, vars.as_mut_ptr());
+
+        assert_eq!(vars, [0.0, 2.0, 4.0, 8.0]);
+        let error =
+            take_native_runtime_error().expect("out-of-range native indexed write must hard-fail");
+        assert!(
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "error must preserve array bounds diagnostic, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
     }
 
     #[test]

@@ -500,6 +500,53 @@ pub unsafe extern "C" fn rspice_dynamic_variable_load_native(
     unsafe { *base_ptr.add(offset as usize) }
 }
 
+/// External helper function for native x64 runtime-indexed variable writes.
+///
+/// Returns a pointer to the selected array slot. A null return means the helper
+/// recorded a native runtime error and the JIT caller must not store.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid pointer to the
+/// first array element and a compile-time-validated element count.
+#[unsafe(export_name = "rspice_dynamic_variable_slot_native")]
+pub unsafe extern "C" fn rspice_dynamic_variable_slot_native(
+    raw_index: f64,
+    base_ptr: *mut f64,
+    len: usize,
+    lower: i64,
+) -> *mut f64 {
+    if base_ptr.is_null() {
+        set_native_runtime_error(
+            "native indexed assignment missing variable storage; no interpreter fallback",
+        );
+        return std::ptr::null_mut();
+    }
+    if len == 0 {
+        set_native_runtime_error(
+            "native indexed assignment has zero-length storage; no interpreter fallback",
+        );
+        return std::ptr::null_mut();
+    }
+    let Ok(len_i64) = i64::try_from(len) else {
+        set_native_runtime_error(
+            "native indexed assignment length exceeds native bounds range; no interpreter fallback",
+        );
+        return std::ptr::null_mut();
+    };
+
+    let index = raw_index.round() as i64;
+    let offset = index - lower;
+    if offset < 0 || offset >= len_i64 {
+        let upper = lower.saturating_add(len_i64).saturating_sub(1);
+        set_native_runtime_error(format!(
+            "native indexed assignment: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
+        ));
+        return std::ptr::null_mut();
+    }
+
+    unsafe { base_ptr.add(offset as usize) }
+}
+
 /// External helper function for PushCurrent terminal-pair lookup.
 ///
 /// # Safety
@@ -531,7 +578,8 @@ pub unsafe extern "C" fn rspice_current_lookup(
 mod tests {
     use super::{
         EvalContext, clear_native_runtime_error, rspice_dynamic_variable_load_native,
-        rspice_laplace_step_native, rspice_zi_step_native, take_native_runtime_error,
+        rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_zi_step_native,
+        take_native_runtime_error,
     };
     use std::mem::{align_of, offset_of, size_of};
 
@@ -627,6 +675,35 @@ mod tests {
         assert_eq!(out_of_range.to_bits(), 0.0_f64.to_bits());
         let error =
             take_native_runtime_error().expect("out-of-range native array read must hard-fail");
+        assert!(
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "error must preserve array bounds diagnostic, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn dynamic_variable_slot_helper_returns_rounded_slot_and_reports_bounds_errors() {
+        let mut values = [2.0, 4.0, 8.0];
+        clear_native_runtime_error();
+
+        let slot = unsafe {
+            rspice_dynamic_variable_slot_native(2.49, values.as_mut_ptr(), values.len(), 1)
+        };
+
+        assert_eq!(slot, unsafe { values.as_mut_ptr().add(1) });
+        assert!(take_native_runtime_error().is_none());
+
+        let slot = unsafe {
+            rspice_dynamic_variable_slot_native(4.0, values.as_mut_ptr(), values.len(), 1)
+        };
+
+        assert!(slot.is_null());
+        let error =
+            take_native_runtime_error().expect("out-of-range native indexed write must hard-fail");
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve array bounds diagnostic, got: {error}"

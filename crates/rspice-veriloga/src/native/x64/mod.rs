@@ -6,6 +6,7 @@ use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, Na
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
 use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
+use crate::native::x64::codegen::NativeAssignment;
 
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     super::validate_native_coverage(model)?;
@@ -113,16 +114,51 @@ fn append_assignment_entry(model: &CompiledModel, image: &mut Vec<u8>) -> JitRes
         .assignment_steps
         .iter()
         .map(|step| {
-            let AssignmentStep::Assign(assignment) = step else {
-                unreachable!("unsupported assignment step was rejected before lowering");
-            };
-            let program = NativeProgram::from_bytecode(
-                model.name.clone(),
-                EntryKind::Assignment,
-                &assignment.program,
-                NativeLoweringLimits::for_model(model),
-            )?;
-            Ok((assignment.var_index, program))
+            let limits = NativeLoweringLimits::for_model(model);
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    let program = NativeProgram::from_bytecode(
+                        model.name.clone(),
+                        EntryKind::Assignment,
+                        &assignment.program,
+                        limits,
+                    )?;
+                    Ok(NativeAssignment::Direct {
+                        var_index: assignment.var_index,
+                        program,
+                    })
+                }
+                AssignmentStep::AssignIndexed {
+                    base,
+                    len,
+                    lower,
+                    index,
+                    value,
+                } => {
+                    let index = NativeProgram::from_bytecode(
+                        model.name.clone(),
+                        EntryKind::Assignment,
+                        index,
+                        limits,
+                    )?;
+                    let value = NativeProgram::from_bytecode(
+                        model.name.clone(),
+                        EntryKind::Assignment,
+                        value,
+                        limits,
+                    )?;
+                    Ok(NativeAssignment::Indexed {
+                        base: *base,
+                        len: *len,
+                        lower: *lower,
+                        index,
+                        value,
+                    })
+                }
+                AssignmentStep::Loop { .. } => {
+                    unreachable!("unsupported assignment loop was rejected before lowering")
+                }
+            }
         })
         .collect::<JitResult<Vec<_>>>()?;
 

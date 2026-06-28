@@ -72,13 +72,29 @@ fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
 fn validate_assignment_coverage(model: &CompiledModel, step: &AssignmentStep) -> JitResult<()> {
     match step {
         AssignmentStep::Assign(_) => Ok(()),
-        AssignmentStep::AssignIndexed { .. } => Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            "AssignIndexed",
-        )),
+        AssignmentStep::AssignIndexed { base, len, .. } => {
+            validate_assignment_range(model, *base, *len)
+        }
         AssignmentStep::Loop { .. } => Err(JitError::unsupported_native_coverage(
             model.name.clone(),
             "Loop",
         )),
     }
+}
+
+fn validate_assignment_range(model: &CompiledModel, base: usize, len: usize) -> JitResult<()> {
+    let Some(end) = base.checked_add(len) else {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "AssignIndexedRangeOverflow",
+        ));
+    };
+    if len == 0 || end > model.num_variables {
+        return Err(JitError::unsupported_native_coverage(
+            model.name.clone(),
+            "AssignIndexedRange",
+        ));
+    }
+
+    Ok(())
 }
