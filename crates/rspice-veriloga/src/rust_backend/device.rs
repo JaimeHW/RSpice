@@ -1996,9 +1996,10 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 mod compact_generated_stamp_surface_tests {
     use super::{
         compact_div_from_scalar_offset_denominator, compact_generated_stamp_surface,
-        duplicate_hoistable_derivative_rhs, generate_scratch_operation_helpers,
-        is_hoistable_generated_derivative_rhs, render_runtime_support_module,
-        reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
+        compact_limited_exp_div_scaled_inputs_expression, duplicate_hoistable_derivative_rhs,
+        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
+        render_runtime_support_module, reuse_duplicate_derivative_locals_in_helper_block,
+        should_cache_compact_condition,
     };
 
     #[test]
@@ -5122,6 +5123,69 @@ fn stamp() {
         );
         assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
         assert!(!compact.contains("s.store_exp_ad("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_limited_exp_div_scaled_inputs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_limited_exp_div_scaled_inputs(",
+            "fn store_limited_exp_div_scaled_inputs_indices",
+            "fn store_limited_exp_div_scaled_inputs_mixed_ai",
+            "fn store_limited_exp_div_scaled_inputs_mixed_ia",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(88, AdValue::limited_exp(AdValue::div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale)));
+    scratch.store_ad_value(89, AdValue::limited_exp(AdValue::div_scaled_inputs(AdValue::sub(scratch.ad_value(4), scratch.ad_value(5)), params.left_scale, scratch.ad_value(6), params.right_scale)));
+    scratch.store_ad_value(90, AdValue::limited_exp(AdValue::div_scaled_inputs(scratch.ad_value(7), params.left_scale, AdValue::sub_from_scalar(params.bias, scratch.ad_value(8)), 1.0)));
+    scratch.store_ad_value(91, AdValue::limited_exp(AdValue::div_scaled_inputs(AdValue::sqrt(scratch.ad_value(9)), params.left_scale, AdValue::neg(scratch.ad_value(10)), params.right_scale)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_limited_exp_div_scaled_inputs_indices(88, 2, p.left_scale, 3, p.right_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_limited_exp_div_scaled_inputs_mixed_ai(89, A::sub(s.ad_value(4), s.ad_value(5)), p.left_scale, 6, p.right_scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_limited_exp_div_scaled_inputs_mixed_ia(90, 7, p.left_scale, A::sub_from_scalar(p.bias, s.ad_value(8)), 1.0);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_limited_exp_div_scaled_inputs(91, A::sqrt(s.ad_value(9)), p.left_scale, A::neg(s.ad_value(10)), p.right_scale);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::limited_exp("), "{compact}");
+        assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_limited_exp_div_scaled_inputs_as_fused_expression() {
+        let support = render_runtime_support_module();
+        assert!(
+            support.contains("fn limited_exp_div_scaled_inputs("),
+            "missing fused limited-exp divided-input helper"
+        );
+
+        let compact = compact_limited_exp_div_scaled_inputs_expression(
+            "AdValue::div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale)",
+        )
+        .expect("divided input should compact");
+
+        assert_eq!(
+            compact,
+            "AdValue::limited_exp_div_scaled_inputs(scratch.ad_value(2), params.left_scale, scratch.ad_value(3), params.right_scale)"
+        );
     }
 
     #[test]
@@ -11435,6 +11499,35 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
+        "        let left_value = left_raw * left_scale;",
+        "        let right_value = right_raw * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        if quotient > 80.0 {",
+        "            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;",
+        "            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;",
+        "            self.values[index] = LIMEXP_MAX * (1.0 + quotient - 80.0);",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "        } else if quotient < -80.0 {",
+        "            self.store_scalar(index, 1.804851387e-35);",
+        "        } else {",
+        "            let output = quotient.exp();",
+        "            let left_derivative_scale = left_scale * reciprocal * output;",
+        "            let right_derivative_scale = -quotient * reciprocal * right_scale * output;",
+        "            self.values[index] = output;",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
+        "        self.store_limited_exp_div_scaled_inputs_components(index, left.value, left.node_derivatives, left.branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_offset_limited_exp_div_scaled_inputs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64, offset: f64) {",
         "        let left_value = left_raw * left_scale;",
         "        let right_value = right_raw * right_scale;",
@@ -16402,6 +16495,7 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_exp_mul_scaled_lhs_helper(&mask));
         out.push_str(&generate_index_or_mixed_exp_div_scaled_inputs_helper(&mask));
+        out.push_str(&generate_index_or_mixed_limited_exp_div_scaled_inputs_helper(&mask));
         out.push_str(&generate_index_or_mixed_offset_limited_exp_div_scaled_inputs_helper(&mask));
         if mask != "ii" {
             out.push_str(&generate_index_or_mixed_mul_div_from_scalar_lhs_helper(
@@ -17234,6 +17328,25 @@ fn generate_index_or_mixed_exp_div_scaled_inputs_helper(mask: &str) -> String {
     #[inline]
     fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64) {{
 {locals}        self.store_exp_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale);
+    }}
+"#,
+        left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_limited_exp_div_scaled_inputs_helper(mask: &str) -> String {
+    let operands = ["left", "right"];
+    let helper = index_or_mixed_helper_name("store_limited_exp_div_scaled_inputs", mask);
+    let locals = mixed_helper_component_locals(mask, &operands);
+    let left = mixed_helper_component_args(mask, 0, "left");
+    let right = mixed_helper_component_args(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, left_scale: f64, right: {right_ty}, right_scale: f64) {{
+{locals}        self.store_limited_exp_div_scaled_inputs_components(index, {left}, left_scale, {right}, right_scale);
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
@@ -18434,6 +18547,32 @@ fn generate_ad_value_struct() -> String {
         "    fn limited_exp(arg: Self) -> Self { let raw = arg.value; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value) } }",
         "    #[inline]",
         "    fn limited_exp_scaled_input(arg: Self, scale: f64) -> Self { let raw = arg.value * scale; if raw > 80.0 { Self::unary_intrinsic(arg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX * scale) } else if raw < -80.0 { Self::constant(1.804851387e-35) } else { let value = raw.exp(); Self::unary_intrinsic(arg, value, value * scale) } }",
+        "    #[inline]",
+        "    fn limited_exp_div_scaled_inputs(left: Self, left_scale: f64, right: Self, right_scale: f64) -> Self {",
+        "        let mut value = left;",
+        "        let left_value = value.value * left_scale;",
+        "        let right_value = right.value * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        if quotient > 80.0 {",
+        "            let left_derivative_scale = left_scale * reciprocal * LIMEXP_MAX;",
+        "            let right_derivative_scale = -quotient * reciprocal * right_scale * LIMEXP_MAX;",
+        "            value.value = LIMEXP_MAX * (1.0 + quotient - 80.0);",
+        "            for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale; }",
+        "            for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * left_derivative_scale + right.branch_derivatives[index] * right_derivative_scale; }",
+        "            value",
+        "        } else if quotient < -80.0 {",
+        "            Self::constant(1.804851387e-35)",
+        "        } else {",
+        "            let output = quotient.exp();",
+        "            let left_derivative_scale = left_scale * reciprocal * output;",
+        "            let right_derivative_scale = -quotient * reciprocal * right_scale * output;",
+        "            value.value = output;",
+        "            for index in 0..Instance::NODE_COUNT { value.node_derivatives[index] = value.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale; }",
+        "            for index in 0..Instance::BRANCH_COUNT { value.branch_derivatives[index] = value.branch_derivatives[index] * left_derivative_scale + right.branch_derivatives[index] * right_derivative_scale; }",
+        "            value",
+        "        }",
+        "    }",
         "    #[inline]",
         "    fn ln(arg: Self) -> Self { let raw = arg.value; Self::unary_intrinsic(arg, raw.ln(), 1.0 / raw) }",
         "    #[inline]",
@@ -22472,6 +22611,11 @@ fn compact_common_fused_expression_store_helper_call(
         }
     }
 
+    if let Some(line) = compact_limited_exp_div_scaled_inputs_store_helper_line(target_index, value)
+    {
+        return Some(line);
+    }
+
     if let Some(args) = compact_ad_call_args(value, "add_scaled_product")
         && args.len() == 5
     {
@@ -26076,6 +26220,29 @@ fn compact_offset_limited_exp_div_scaled_inputs_store_helper_line(
         &[div_args[0], div_args[2]],
         &[div_args[1], div_args[3]],
         &[offset],
+    )
+}
+
+fn compact_limited_exp_div_scaled_inputs_store_helper_line(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let limited_exp_args = compact_ad_call_args(value, "limited_exp")?;
+    if limited_exp_args.len() != 1 {
+        return None;
+    }
+
+    let div_args = compact_ad_call_args(limited_exp_args[0], "div_scaled_inputs")?;
+    if div_args.len() != 4 {
+        return None;
+    }
+
+    compact_index_or_mixed_scaled_inputs_helper_line(
+        target_index,
+        "store_limited_exp_div_scaled_inputs",
+        &[div_args[0], div_args[2]],
+        &[div_args[1], div_args[3]],
+        &[],
     )
 }
 
@@ -30408,6 +30575,17 @@ fn compact_div_from_scalar_offset_denominator(scalar: &str, denominator: &str) -
     ))
 }
 
+fn compact_limited_exp_div_scaled_inputs_expression(value: &str) -> Option<String> {
+    let args = compact_ad_call_args(value, "div_scaled_inputs")?;
+    if args.len() != 4 {
+        return None;
+    }
+    Some(format!(
+        "AdValue::limited_exp_div_scaled_inputs({}, {}, {}, {})",
+        args[0], args[1], args[2], args[3]
+    ))
+}
+
 struct CompactAffineTerm<'a> {
     value: &'a str,
     scale: String,
@@ -34328,7 +34506,11 @@ impl CompactAdEmitter<'_> {
             "sqrt" => format!("AdValue::sqrt({})", lower_arg(0)?),
             "exp" => format!("AdValue::exp({})", lower_arg(0)?),
             "limexp" => format!("AdValue::limexp({})", lower_arg(0)?),
-            "__rspice_limited_exp" => format!("AdValue::limited_exp({})", lower_arg(0)?),
+            "__rspice_limited_exp" => {
+                let value = lower_arg(0)?;
+                compact_limited_exp_div_scaled_inputs_expression(&value)
+                    .unwrap_or_else(|| format!("AdValue::limited_exp({value})"))
+            }
             "ln" | "log" => format!("AdValue::ln({})", lower_arg(0)?),
             "log10" => format!("AdValue::log10({})", lower_arg(0)?),
             "sin" => format!("AdValue::sin({})", lower_arg(0)?),
