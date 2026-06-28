@@ -93,12 +93,15 @@ pub(crate) enum UnaryMathOp {
     Asin,
     Acos,
     Atan,
+    Floor,
+    Ceil,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BinaryMathOp {
     Pow,
     Atan2,
+    Mod,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -317,7 +320,7 @@ impl NativeProgram {
                     depth -= 1;
                     ops.push(NativeOp::Div);
                 }
-                Instruction::Pow | Instruction::FnPow | Instruction::Atan2 => {
+                Instruction::Pow | Instruction::FnPow | Instruction::Atan2 | Instruction::Mod => {
                     pop_binary_stack(
                         model.clone(),
                         entry_kind,
@@ -369,7 +372,9 @@ impl NativeProgram {
                 | Instruction::Limexp
                 | Instruction::Asin
                 | Instruction::Acos
-                | Instruction::Atan => {
+                | Instruction::Atan
+                | Instruction::Floor
+                | Instruction::Ceil => {
                     require_stack(
                         model.clone(),
                         entry_kind,
@@ -759,6 +764,8 @@ fn unary_math_op(instruction: &Instruction) -> UnaryMathOp {
         Instruction::Asin => UnaryMathOp::Asin,
         Instruction::Acos => UnaryMathOp::Acos,
         Instruction::Atan => UnaryMathOp::Atan,
+        Instruction::Floor => UnaryMathOp::Floor,
+        Instruction::Ceil => UnaryMathOp::Ceil,
         _ => unreachable!("unary math lowering only accepts supported unary math instructions"),
     }
 }
@@ -767,6 +774,7 @@ fn binary_math_op(instruction: &Instruction) -> BinaryMathOp {
     match instruction {
         Instruction::Pow | Instruction::FnPow => BinaryMathOp::Pow,
         Instruction::Atan2 => BinaryMathOp::Atan2,
+        Instruction::Mod => BinaryMathOp::Mod,
         _ => unreachable!("binary math lowering only accepts supported binary math instructions"),
     }
 }
@@ -1058,6 +1066,8 @@ mod tests {
             (Instruction::Asin, UnaryMathOp::Asin),
             (Instruction::Acos, UnaryMathOp::Acos),
             (Instruction::Atan, UnaryMathOp::Atan),
+            (Instruction::Floor, UnaryMathOp::Floor),
+            (Instruction::Ceil, UnaryMathOp::Ceil),
         ];
 
         for (instruction, expected) in cases {
@@ -1083,6 +1093,7 @@ mod tests {
             (Instruction::Pow, BinaryMathOp::Pow),
             (Instruction::FnPow, BinaryMathOp::Pow),
             (Instruction::Atan2, BinaryMathOp::Atan2),
+            (Instruction::Mod, BinaryMathOp::Mod),
         ];
 
         for (instruction, expected) in cases {
