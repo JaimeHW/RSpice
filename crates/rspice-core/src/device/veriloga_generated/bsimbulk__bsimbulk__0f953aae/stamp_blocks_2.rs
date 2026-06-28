@@ -962,7 +962,7 @@ impl Instance {
         s.v[1385] = if s.b[1385] { 1.0 } else { 0.0 };
 
         if s.b[1385] {
-            s.store_div_from_scalar_ad(81, ((-0.1) * 0.1), A::mul_scaled_output(s.ad_value(106), s.ad_value(189), 16.0));
+            s.store_div_from_scalar_scaled_mul(81, ((-0.1) * 0.1), 106, 189, 16.0);
         }
 
         if (!s.b[1385]) {
@@ -3790,7 +3790,7 @@ impl Instance {
         s.v[1585] = if s.b[1585] { 1.0 } else { 0.0 };
 
         if s.b[1585] {
-            s.store_div_from_scalar_ad(83, ((-p.p694) * p.p694), A::mul_scaled_output(s.ad_value(108), s.ad_value(189), 16.0));
+            s.store_div_from_scalar_scaled_mul(83, ((-p.p694) * p.p694), 108, 189, 16.0);
         }
 
         if (!s.b[1585]) {

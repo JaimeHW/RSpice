@@ -5077,6 +5077,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_div_from_scalar_scaled_mul(&mut self, index: usize, scalar: f64, left: usize, right: usize, scale: f64) {
+        let raw = self.v[left] * scale * self.v[right];
+        let reciprocal = 1.0 / raw;
+        let quotient = scalar * reciprocal;
+        self.store_unary_mul_scaled(index, left, right, quotient, -quotient * reciprocal * scale);
+    }
+
+    #[inline]
     pub(crate) fn store_scaled_div(&mut self, index: usize, left: usize, right: usize, scale: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right];
@@ -17595,6 +17603,14 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left_value * right_value * scale;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = (left_dn[axis] * right_value + left_value * right_dn[axis]) * scale; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = (left_db[axis] * right_value + left_value * right_db[axis]) * scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_div_from_scalar_scaled_mul(&mut self, index: usize, scalar: f64, left: usize, right: usize, scale: f64) {
+        let raw = self.v[left] * scale * self.v[right];
+        let reciprocal = 1.0 / raw;
+        let quotient = scalar * reciprocal;
+        self.store_unary_mul_scaled(index, left, right, quotient, -quotient * reciprocal * scale);
     }
 
     #[inline]
