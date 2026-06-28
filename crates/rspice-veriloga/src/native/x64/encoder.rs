@@ -40,6 +40,8 @@ pub(crate) enum Xmm {
 pub(crate) enum ConditionCode {
     Above,
     AboveOrEqual,
+    Below,
+    NotParity,
 }
 
 impl Xmm {
@@ -60,6 +62,8 @@ impl ConditionCode {
         match self {
             Self::Above => 0x97,
             Self::AboveOrEqual => 0x93,
+            Self::Below => 0x92,
+            Self::NotParity => 0x9B,
         }
     }
 }
@@ -120,7 +124,7 @@ impl X64Encoder {
     }
 
     pub(crate) fn movzx_r32_r8(&mut self, dst: Gpr, src: Gpr) {
-        self.emit_rex(false, dst.code(), 0, src.code());
+        self.emit_rex_for_byte_operands(false, dst.code(), 0, src.code(), false, true);
         self.emit_all(&[0x0F, 0xB6]);
         self.emit_modrm(0b11, dst.code(), src.code());
     }
@@ -186,10 +190,26 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0x66, 0x2E, left, right);
     }
 
+    pub(crate) fn ucomisd_xmm_m64_rip_disp32(&mut self, left: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0x66, 0x2E, left, disp)
+    }
+
     pub(crate) fn setcc_r8(&mut self, condition: ConditionCode, dst: Gpr) {
-        self.emit_rex(false, 0, 0, dst.code());
+        self.emit_rex_for_byte_operands(false, 0, 0, dst.code(), false, true);
         self.emit_all(&[0x0F, condition.set_opcode()]);
         self.emit_modrm(0b11, 0, dst.code());
+    }
+
+    pub(crate) fn and_r8_r8(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex_for_byte_operands(false, src.code(), 0, dst.code(), true, true);
+        self.emit_u8(0x20);
+        self.emit_modrm(0b11, src.code(), dst.code());
+    }
+
+    pub(crate) fn or_r8_r8(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex_for_byte_operands(false, src.code(), 0, dst.code(), true, true);
+        self.emit_u8(0x08);
+        self.emit_modrm(0b11, src.code(), dst.code());
     }
 
     pub(crate) fn addsd_xmm_xmm(&mut self, dst: Xmm, src: Xmm) {
@@ -284,6 +304,31 @@ impl X64Encoder {
             self.emit_u8(rex);
         }
     }
+
+    fn emit_rex_for_byte_operands(
+        &mut self,
+        w: bool,
+        reg: u8,
+        index: u8,
+        base: u8,
+        reg_is_byte: bool,
+        base_is_byte: bool,
+    ) {
+        let rex = 0x40
+            | ((w as u8) << 3)
+            | (((reg >> 3) & 1) << 2)
+            | (((index >> 3) & 1) << 1)
+            | ((base >> 3) & 1);
+        let byte_register_requires_rex = (reg_is_byte && requires_low_byte_rex(reg))
+            || (base_is_byte && requires_low_byte_rex(base));
+        if rex != 0x40 || byte_register_requires_rex {
+            self.emit_u8(rex);
+        }
+    }
+}
+
+fn requires_low_byte_rex(reg: u8) -> bool {
+    matches!(reg & 0b111, 0b100..=0b111)
 }
 
 #[cfg(test)]
@@ -448,6 +493,46 @@ mod tests {
             [
                 0x66, 0x0F, 0x2E, 0xCA, 0x41, 0x0F, 0x97, 0xC2, 0x45, 0x0F, 0xB6, 0xD2, 0xF2, 0x41,
                 0x0F, 0x2A, 0xCA, 0x66, 0x0F, 0x2E, 0xD1, 0x41, 0x0F, 0x93, 0xC2,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_logical_truthiness_sequence_pieces() {
+        let mut encoder = X64Encoder::new();
+
+        let disp = encoder.ucomisd_xmm_m64_rip_disp32(Xmm::Xmm1, 16);
+        encoder.setcc_r8(ConditionCode::Below, Gpr::R10);
+        encoder.setcc_r8(ConditionCode::NotParity, Gpr::R11);
+        encoder.and_r8_r8(Gpr::R10, Gpr::R11);
+        encoder.or_r8_r8(Gpr::R10, Gpr::R11);
+
+        assert_eq!(disp, 4);
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x66, 0x0F, 0x2E, 0x0D, 16, 0, 0, 0, 0x41, 0x0F, 0x92, 0xC2, 0x41, 0x0F, 0x9B,
+                0xC3, 0x45, 0x20, 0xDA, 0x45, 0x08, 0xDA,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_low_byte_registers_that_require_rex_prefix() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.setcc_r8(ConditionCode::Above, Gpr::Rsi);
+        encoder.setcc_r8(ConditionCode::AboveOrEqual, Gpr::Rdi);
+        encoder.and_r8_r8(Gpr::Rsi, Gpr::Rdi);
+        encoder.or_r8_r8(Gpr::Rdi, Gpr::Rsi);
+        encoder.movzx_r32_r8(Gpr::Rsi, Gpr::Rdi);
+        encoder.movzx_r32_r8(Gpr::Rdi, Gpr::Rsi);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x40, 0x0F, 0x97, 0xC6, 0x40, 0x0F, 0x93, 0xC7, 0x40, 0x20, 0xFE, 0x40, 0x08, 0xF7,
+                0x40, 0x0F, 0xB6, 0xF7, 0x40, 0x0F, 0xB6, 0xFE,
             ]
         );
     }

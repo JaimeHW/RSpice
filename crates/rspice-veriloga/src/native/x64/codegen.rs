@@ -1,5 +1,5 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
-use crate::native::expr::{CompareOp, NativeOp, NativeProgram, VoltageNode};
+use crate::native::expr::{CompareOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
 
 const MODEL: &str = "native-x64";
@@ -152,6 +152,7 @@ impl FunctionCompiler {
                 NativeOp::Abs => self.emit_abs()?,
                 NativeOp::Sqrt => self.emit_sqrt()?,
                 NativeOp::Compare(op) => self.emit_compare(op)?,
+                NativeOp::Logical(op) => self.emit_logical(op)?,
             }
         }
 
@@ -340,6 +341,65 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_logical(&mut self, op: LogicalOp) -> JitResult<()> {
+        match op {
+            LogicalOp::And | LogicalOp::Or => self.emit_logical_binary(op),
+            LogicalOp::Not => self.emit_logical_not(),
+        }
+    }
+
+    fn emit_logical_binary(&mut self, op: LogicalOp) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("logical op requires stack depth 2, found {}", self.depth).into(),
+            });
+        }
+
+        let left = XMM_STACK[self.depth - 2];
+        let right = XMM_STACK[self.depth - 1];
+        self.emit_truthy_to_gpr(right, Gpr::R11);
+        self.emit_truthy_to_gpr(left, Gpr::R10);
+        match op {
+            LogicalOp::And => self.encoder.and_r8_r8(Gpr::R10, Gpr::R11),
+            LogicalOp::Or => self.encoder.or_r8_r8(Gpr::R10, Gpr::R11),
+            LogicalOp::Not => unreachable!("logical binary lowering only accepts and/or"),
+        }
+        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cvtsi2sd_xmm_r32(left, Gpr::R10);
+        self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_logical_not(&mut self) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "logical not requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = XMM_STACK[self.depth - 1];
+        self.emit_falsy_to_gpr(target, Gpr::R10, Gpr::R11);
+        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cvtsi2sd_xmm_r32(target, Gpr::R10);
+        Ok(())
+    }
+
+    fn emit_truthy_to_gpr(&mut self, value: Xmm, dst: Gpr) {
+        self.emit_abs_register(value);
+        self.emit_literal_compare(value, BOOLEAN_EPSILON);
+        self.encoder.setcc_r8(ConditionCode::Above, dst);
+    }
+
+    fn emit_falsy_to_gpr(&mut self, value: Xmm, dst: Gpr, scratch: Gpr) {
+        self.emit_abs_register(value);
+        self.emit_literal_compare(value, BOOLEAN_EPSILON);
+        self.encoder.setcc_r8(ConditionCode::Below, dst);
+        self.encoder.setcc_r8(ConditionCode::NotParity, scratch);
+        self.encoder.and_r8_r8(dst, scratch);
+    }
+
     fn emit_voltage_load(&mut self, pos: VoltageNode, neg: VoltageNode) -> JitResult<()> {
         let dst = self.push_register()?;
 
@@ -441,6 +501,14 @@ impl FunctionCompiler {
             BinaryOp::Mul => self.encoder.mulsd_xmm_m64_rip_disp32(dst, 0),
             BinaryOp::Div => self.encoder.divsd_xmm_m64_rip_disp32(dst, 0),
         };
+        self.literals.push(LiteralPatch {
+            displacement_offset,
+            value,
+        });
+    }
+
+    fn emit_literal_compare(&mut self, left: Xmm, value: f64) {
+        let displacement_offset = self.encoder.ucomisd_xmm_m64_rip_disp32(left, 0);
         self.literals.push(LiteralPatch {
             displacement_offset,
             value,
@@ -821,6 +889,87 @@ mod tests {
             );
             let bytes = compile_value_function(&program).expect("compile equality leaf");
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate equality leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_computes_logical_ops() {
+        let cases = [
+            ("and-true", Instruction::And, 2.0e-15, -2.0e-15, 1.0),
+            (
+                "and-left-at-epsilon",
+                Instruction::And,
+                1.0e-15,
+                2.0e-15,
+                0.0,
+            ),
+            (
+                "and-left-unordered",
+                Instruction::And,
+                f64::NAN,
+                2.0e-15,
+                0.0,
+            ),
+            (
+                "and-right-unordered",
+                Instruction::And,
+                2.0e-15,
+                f64::NAN,
+                0.0,
+            ),
+            ("or-right-true", Instruction::Or, 0.5e-15, -2.0e-15, 1.0),
+            ("or-both-false", Instruction::Or, 1.0e-15, 0.5e-15, 0.0),
+            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 0.0),
+            (
+                "or-right-unordered",
+                Instruction::Or,
+                0.5e-15,
+                f64::NAN,
+                0.0,
+            ),
+        ];
+
+        for (name, op, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    op,
+                ],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile logical leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate logical leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let ctx = eval_context(&[], &[], &[], &[]);
+
+            assert_eq!(f(&ctx, std::ptr::null()), expected, "{name}");
+        }
+
+        let not_cases = [
+            ("not-within-epsilon", 0.5e-15, 1.0),
+            ("not-at-epsilon", 1.0e-15, 0.0),
+            ("not-outside-epsilon", 2.0e-15, 0.0),
+            ("not-unordered", f64::NAN, 0.0),
+        ];
+
+        for (name, value, expected) in not_cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![Instruction::PushConst(value), Instruction::Not],
+                0,
+            );
+            let bytes = compile_value_function(&program).expect("compile logical-not leaf");
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate logical-not leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
