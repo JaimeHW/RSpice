@@ -196,6 +196,18 @@ pub extern "C" fn rspice_atan(x: f64) -> f64 {
     x.atan()
 }
 
+/// External helper function for floor.
+#[unsafe(export_name = "rspice_floor")]
+pub extern "C" fn rspice_floor(x: f64) -> f64 {
+    x.floor()
+}
+
+/// External helper function for ceiling.
+#[unsafe(export_name = "rspice_ceil")]
+pub extern "C" fn rspice_ceil(x: f64) -> f64 {
+    x.ceil()
+}
+
 /// External helper function for power.
 #[unsafe(export_name = "rspice_pow")]
 pub extern "C" fn rspice_pow(base: f64, exponent: f64) -> f64 {
@@ -206,6 +218,12 @@ pub extern "C" fn rspice_pow(base: f64, exponent: f64) -> f64 {
 #[unsafe(export_name = "rspice_atan2")]
 pub extern "C" fn rspice_atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
+}
+
+/// External helper function for Verilog-A remainder.
+#[unsafe(export_name = "rspice_mod")]
+pub extern "C" fn rspice_mod(left: f64, right: f64) -> f64 {
+    left % right
 }
 
 /// External helper function for Laplace state-space filter step.

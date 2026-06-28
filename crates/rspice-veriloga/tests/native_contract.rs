@@ -383,6 +383,27 @@ endmodule
     )
 }
 
+fn rounding_mod_assignment_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_rounding_mod_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    real x;
+    real gain;
+    analog begin
+        x = V(p, n) + 0.25;
+        gain = floor(x)
+             + ceil(x / 2.0)
+             + (x % 2.0);
+        I(p, n) <+ gain;
+    end
+endmodule
+"#,
+    )
+}
+
 fn flag_context_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1160,6 +1181,26 @@ fn native_device_executes_binary_math_assignments() {
             "{name}: currents: {currents:?}"
         );
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
+    let model = rounding_mod_assignment_model();
+    let mut device = VerilogADevice::try_new("RNDMOD1", model, &[1, 0])
+        .expect("rounding/mod assignment model uses native JIT");
+    assert!(device.is_using_native());
+    device.update_voltages(&[5.0]);
+
+    let x: f64 = 5.25;
+    let expected_gain = x.floor() + (x / 2.0).ceil() + (x % 2.0);
+    let currents = device
+        .try_evaluate()
+        .expect("native rounding/mod assignment evaluation succeeds");
+
+    assert_eq!(device.variable("x"), Some(x));
+    assert_eq!(device.variable("gain"), Some(expected_gain));
+    assert!((currents[0] - expected_gain).abs() < 1e-12);
 }
 
 #[cfg(target_arch = "x86_64")]

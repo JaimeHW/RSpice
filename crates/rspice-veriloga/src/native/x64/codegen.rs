@@ -1,8 +1,8 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
-    rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_cos, rspice_cosh, rspice_exp,
-    rspice_idtmod_wrap, rspice_limexp, rspice_log, rspice_log10, rspice_pow, rspice_sin,
-    rspice_sinh, rspice_tan, rspice_tanh,
+    rspice_acos, rspice_asin, rspice_atan, rspice_atan2, rspice_ceil, rspice_cos, rspice_cosh,
+    rspice_exp, rspice_floor, rspice_idtmod_wrap, rspice_limexp, rspice_log, rspice_log10,
+    rspice_mod, rspice_pow, rspice_sin, rspice_sinh, rspice_tan, rspice_tanh,
 };
 use crate::native::expr::{BinaryMathOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -1060,6 +1060,8 @@ fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
         UnaryMathOp::Asin => rspice_asin,
         UnaryMathOp::Acos => rspice_acos,
         UnaryMathOp::Atan => rspice_atan,
+        UnaryMathOp::Floor => rspice_floor,
+        UnaryMathOp::Ceil => rspice_ceil,
     }
 }
 
@@ -1067,6 +1069,7 @@ fn binary_math_helper(op: BinaryMathOp) -> BinaryHelper {
     match op {
         BinaryMathOp::Pow => rspice_pow,
         BinaryMathOp::Atan2 => rspice_atan2,
+        BinaryMathOp::Mod => rspice_mod,
     }
 }
 
@@ -1968,6 +1971,20 @@ mod tests {
             ("asin", Instruction::Asin, 0.25, runtime_asin(0.25)),
             ("acos", Instruction::Acos, 0.25, runtime_acos(0.25)),
             ("atan", Instruction::Atan, 0.25, runtime_atan(0.25)),
+            ("floor", Instruction::Floor, 3.75, runtime_floor(3.75)),
+            (
+                "floor-negative",
+                Instruction::Floor,
+                -3.25,
+                runtime_floor(-3.25),
+            ),
+            ("ceil", Instruction::Ceil, 3.25, runtime_ceil(3.25)),
+            (
+                "ceil-negative",
+                Instruction::Ceil,
+                -3.75,
+                runtime_ceil(-3.75),
+            ),
         ];
 
         for (name, op, input, unary_expected) in cases {
@@ -2026,6 +2043,21 @@ mod tests {
                 0.5,
                 0.25,
                 runtime_atan2(0.5, 0.25),
+            ),
+            ("mod", Instruction::Mod, 5.25, 2.0, runtime_mod(5.25, 2.0)),
+            (
+                "mod-negative-dividend",
+                Instruction::Mod,
+                -5.25,
+                2.0,
+                runtime_mod(-5.25, 2.0),
+            ),
+            (
+                "mod-negative-divisor",
+                Instruction::Mod,
+                5.25,
+                -2.0,
+                runtime_mod(5.25, -2.0),
             ),
         ];
 
@@ -2350,12 +2382,24 @@ mod tests {
         std::hint::black_box(value).atan()
     }
 
+    fn runtime_floor(value: f64) -> f64 {
+        std::hint::black_box(value).floor()
+    }
+
+    fn runtime_ceil(value: f64) -> f64 {
+        std::hint::black_box(value).ceil()
+    }
+
     fn runtime_pow(left: f64, right: f64) -> f64 {
         std::hint::black_box(left).powf(std::hint::black_box(right))
     }
 
     fn runtime_atan2(left: f64, right: f64) -> f64 {
         std::hint::black_box(left).atan2(std::hint::black_box(right))
+    }
+
+    fn runtime_mod(left: f64, right: f64) -> f64 {
+        std::hint::black_box(left) % std::hint::black_box(right)
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {
