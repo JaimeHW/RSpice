@@ -1023,6 +1023,48 @@ fn rust_backend_reuses_reactive_derivative_aliases_for_ddt_charge() {
 }
 
 #[test]
+fn rust_backend_inlines_one_use_ddt_scaled_derivative_locals() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(ddt_scaled_derivative_inline_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile ddt scaled derivative fixture");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    let scaled_derivative_locals = stamp
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line.starts_with("let ")
+                && line.contains("_d_n")
+                && line.contains(": f64 =")
+                && line.ends_with(" * ddt_scale);")
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        scaled_derivative_locals.is_empty(),
+        "one-use ddt derivative scale locals should be inlined:\n{}\n\n{stamp}",
+        scaled_derivative_locals.join("\n")
+    );
+    assert!(
+        stamp.contains("* ddt_scale))"),
+        "ddt derivative scaling should still be present in the consumer expression:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_named_branch_current_probes() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(named_branch_current_probe())
@@ -17505,6 +17547,20 @@ module conditional_ddt_reactive_alias(p0, p1, p2, p3, p4, p5);
         (V(p0, p1) > 0.0)
             ? ddt(gain * (V(p0, p1) + V(p2, p3) + V(p4, p5)))
             : ddt(gain * (V(p0, p1) + V(p2, p3) - V(p4, p5)));
+endmodule
+"#
+}
+
+fn ddt_scaled_derivative_inline_source() -> &'static str {
+    r#"
+module ddt_scaled_derivative_inline(p0, p1, p2, p3, p4);
+    inout p0, p1, p2, p3, p4;
+    electrical p0, p1, p2, p3, p4;
+    parameter real gain = 2.0;
+    analog begin
+        I(p0, p1) <+ gain * ddt(V(p0, p1) + 0.5 * V(p2, p3) + 0.25 * V(p4, p1));
+        I(p2, p3) <+ 1e-9 * ddt(V(p4, p1));
+    end
 endmodule
 "#
 }

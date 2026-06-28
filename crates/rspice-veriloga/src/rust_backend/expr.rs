@@ -2701,7 +2701,27 @@ fn is_inline_derivative_expr(derivative: &str) -> bool {
         || is_one_derivative(derivative)
         || is_negative_one_derivative(derivative)
         || is_generated_scratch_derivative_access(derivative)
+        || is_dynamic_operator_scaled_inline_derivative_expr(derivative)
         || is_rust_identifier(derivative)
+}
+
+fn is_dynamic_operator_scaled_inline_derivative_expr(derivative: &str) -> bool {
+    dynamic_operator_scaled_operand(derivative, "ddt_scale")
+        .or_else(|| dynamic_operator_scaled_operand(derivative, "idt_scale"))
+        .is_some_and(is_simple_inline_operand)
+}
+
+fn dynamic_operator_scaled_operand<'a>(derivative: &'a str, scale: &str) -> Option<&'a str> {
+    let derivative = derivative.trim();
+    let inner = derivative.strip_prefix('(')?.strip_suffix(')')?.trim();
+    inner.strip_suffix(&format!(" * {scale}")).map(str::trim)
+}
+
+fn is_simple_inline_operand(value: &str) -> bool {
+    is_generated_scratch_derivative_access(value)
+        || is_rust_identifier(value)
+        || is_simple_generated_access(value)
+        || is_simple_numeric_literal(value)
 }
 
 fn is_generated_scratch_derivative_access(value: &str) -> bool {
@@ -2715,6 +2735,31 @@ fn is_generated_scratch_derivative_access(value: &str) -> bool {
         && value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '[' | ']'))
+}
+
+fn is_simple_generated_access(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty()
+        || value.contains(' ')
+        || value.starts_with('.')
+        || value.starts_with('[')
+        || !(value.contains('.') || value.contains('['))
+    {
+        return false;
+    }
+    value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '[' | ']'))
+}
+
+fn is_simple_numeric_literal(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.bytes().any(|byte| byte.is_ascii_digit())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'e' | b'E' | b'+' | b'-'))
+        && value.parse::<f64>().is_ok()
 }
 
 fn scaled_derivative_expr(derivative: &str, scale: &str) -> String {
