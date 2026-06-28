@@ -5186,6 +5186,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_scale_offset_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], value_raw: f64, value_dn: [f64; NODE_COUNT], value_db: [f64; BRANCH_COUNT], input_scale: f64, offset: f64) {
+        let affine_value = value_raw * input_scale + offset;
+        self.v[index] = factor_value * affine_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = factor_dn[axis] * affine_value + factor_value * value_dn[axis] * input_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = factor_db[axis] * affine_value + factor_value * value_db[axis] * input_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, value: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, offset: f64) {
+        self.store_mul_scale_offset_components(index, factor.value, factor.dn, factor.db, value.value, value.dn, value.db, input_scale, offset);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_scale_offset_rhs(&mut self, index: usize, left: usize, right: usize, input_scale: f64, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right] * input_scale + offset;
@@ -12637,6 +12650,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let right_dn = self.dn[right];
         let right_db = self.db[right];
         self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset_mixed_ai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, value: usize, input_scale: f64, offset: f64) {
+        let value_value = self.v[value];
+        let value_dn = self.dn[value];
+        let value_db = self.db[value];
+        self.store_mul_scale_offset_components(index, factor.value, factor.dn, factor.db, value_value, value_dn, value_db, input_scale, offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset_mixed_ia(&mut self, index: usize, factor: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, offset: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_scale_offset_components(index, factor_value, factor_dn, factor_db, value.value, value.dn, value.db, input_scale, offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset_indices(&mut self, index: usize, factor: usize, value: usize, input_scale: f64, offset: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let value_value = self.v[value];
+        let value_dn = self.dn[value];
+        let value_db = self.db[value];
+        self.store_mul_scale_offset_components(index, factor_value, factor_dn, factor_db, value_value, value_dn, value_db, input_scale, offset);
     }
 
 
@@ -19255,6 +19298,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_mul_scale_offset_components(&mut self, index: usize, factor_value: f64, factor_dn: [f64; NODE_COUNT], factor_db: [f64; BRANCH_COUNT], value_raw: f64, value_dn: [f64; NODE_COUNT], value_db: [f64; BRANCH_COUNT], input_scale: f64, offset: f64) {
+        let affine_value = value_raw * input_scale + offset;
+        self.v[index] = factor_value * affine_value;
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = factor_dn[axis] * affine_value + factor_value * value_dn[axis] * input_scale; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = factor_db[axis] * affine_value + factor_value * value_db[axis] * input_scale; }
+    }
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, value: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, offset: f64) {
+        self.store_mul_scale_offset_components(index, factor.value, factor.dn, factor.db, value.value, value.dn, value.db, input_scale, offset);
+    }
+
+    #[inline]
     pub(crate) fn store_mul_scale_offset_rhs(&mut self, index: usize, left: usize, right: usize, input_scale: f64, offset: f64) {
         let left_value = self.v[left];
         let right_value = self.v[right] * input_scale + offset;
@@ -26706,6 +26762,36 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let right_dn = self.dn[right];
         let right_db = self.db[right];
         self.store_mul_sub_components(index, factor_value, factor_dn, factor_db, left_value, left_dn, left_db, right_value, right_dn, right_db);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset_mixed_ai(&mut self, index: usize, factor: AdValue<NODE_COUNT, BRANCH_COUNT>, value: usize, input_scale: f64, offset: f64) {
+        let value_value = self.v[value];
+        let value_dn = self.dn[value];
+        let value_db = self.db[value];
+        self.store_mul_scale_offset_components(index, factor.value, factor.dn, factor.db, value_value, value_dn, value_db, input_scale, offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset_mixed_ia(&mut self, index: usize, factor: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, input_scale: f64, offset: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        self.store_mul_scale_offset_components(index, factor_value, factor_dn, factor_db, value.value, value.dn, value.db, input_scale, offset);
+    }
+
+
+    #[inline]
+    pub(crate) fn store_mul_scale_offset_indices(&mut self, index: usize, factor: usize, value: usize, input_scale: f64, offset: f64) {
+        let factor_value = self.v[factor];
+        let factor_dn = self.dn[factor];
+        let factor_db = self.db[factor];
+        let value_value = self.v[value];
+        let value_dn = self.dn[value];
+        let value_db = self.db[value];
+        self.store_mul_scale_offset_components(index, factor_value, factor_dn, factor_db, value_value, value_dn, value_db, input_scale, offset);
     }
 
 

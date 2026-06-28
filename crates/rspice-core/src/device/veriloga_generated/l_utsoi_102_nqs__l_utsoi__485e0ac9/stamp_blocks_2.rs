@@ -1036,7 +1036,7 @@ impl Instance {
             s.store_max_with_scalar_ad(600, A::offset(A::add(s.ad_value(532), s.ad_value(574)), p.p464), 1e-9);
             s.store_div_from_scalar_powf_ad(601, 1.0, s.ad_value(599), p.p471);
             s.store_div_from_scalar_powf_ad(602, 1.0, s.ad_value(600), p.p472);
-            s.store_mul_ad(603, A::add_scaled_inputs_product(A::scale_offset(s.ad_value(601), p.p468, 1.0), 1.0, s.ad_value(602), p.p469, s.ad_value(601), s.ad_value(602), p.p470), A::scale_offset(s.ad_value(221), p.p467, (((((-1.0)) * (p.p467))) + (1.0))));
+            s.store_mul_scale_offset_mixed_ai(603, A::add_scaled_inputs_product(A::scale_offset(s.ad_value(601), p.p468, 1.0), 1.0, s.ad_value(602), p.p469, s.ad_value(601), s.ad_value(602), p.p470), 221, p.p467, (((((-1.0)) * (p.p467))) + (1.0)));
             s.store_div_scaled_inputs2_indices(604, 595, p.p465, 596, p.p465, 603, 1.0);
             s.store_div_scaled_inputs2_indices(605, 597, p.p465, 598, p.p465, 603, 1.0);
             s.store_div_from_scalar_powf_ad(601, 1.0, s.ad_value(599), p.p477);
