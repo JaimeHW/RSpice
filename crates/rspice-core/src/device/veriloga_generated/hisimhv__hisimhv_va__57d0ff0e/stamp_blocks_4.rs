@@ -906,7 +906,7 @@ impl Instance {
 
         s.store_div_from_scalar(110, p.p263, 782);
 
-        s.store_div_scaled_inputs_mixed_ia(336, 783, (-2.0), A::square(s.ad_value(782)), 1.0);
+        s.store_div_scaled_inputs_square_rhs(336, 783, (-2.0), 782, 1.0);
 
         s.b[2574] = ((s.v[110] < ((10.0 * 2.220446049250313e-16) + (10.0 * 2.220446049250313e-16))) && ((10.0 * 2.220446049250313e-16) >= 0.0));
         s.v[2574] = if s.b[2574] { 1.0 } else { 0.0 };

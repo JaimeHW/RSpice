@@ -3076,9 +3076,9 @@ impl Instance {
 
         s.store_mul(236, 236, 792);
 
-        s.store_div_scaled_inputs_mixed_ia(793, 245, 4e-18, A::square(s.ad_value(190)), 1.0);
+        s.store_div_scaled_inputs_square_rhs(793, 245, 4e-18, 190, 1.0);
 
-        s.store_div_scaled_inputs_mixed_ia(794, 246, 4e-18, A::square(s.ad_value(191)), 1.0);
+        s.store_div_scaled_inputs_square_rhs(794, 246, 4e-18, 191, 1.0);
 
         if ((1.0 + (s.v[249] * s.v[354])) > 0.0) {
             s.store_offset_scaled(785, 249, s.v[354], 1.0);

@@ -3070,7 +3070,7 @@ impl Instance {
 
         s.store_div_from_scalar(73, p.p216, 639);
 
-        s.store_div_scaled_inputs_mixed_ia(280, 640, (-2.0), A::square(s.ad_value(639)), 1.0);
+        s.store_div_scaled_inputs_square_rhs(280, 640, (-2.0), 639, 1.0);
 
         s.b[701] = (s.v[73] < 1e-12);
         s.v[701] = if s.b[701] { 1.0 } else { 0.0 };
