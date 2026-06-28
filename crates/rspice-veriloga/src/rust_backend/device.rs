@@ -31565,7 +31565,7 @@ impl CompactAdEmitter<'_> {
         if let Some(value) = self.emitted.get(&id) {
             return Ok(value.clone());
         }
-        let repeated_key = self.repeated_expensive_ad_key(id)?;
+        let repeated_key = self.repeated_materializable_ad_key(id)?;
         if let Some(key) = repeated_key.as_deref() {
             if let Some(local) = self.repeated_ad_locals.get(key) {
                 let local = local.clone();
@@ -31896,13 +31896,15 @@ impl CompactAdEmitter<'_> {
         &self,
         root: ExprId,
     ) -> Result<HashMap<String, usize>, RustBackendError> {
-        let mut counts = HashMap::new();
-        self.collect_repeated_expensive_ad_counts(root, &mut counts)?;
+        let mut root_counts = HashMap::new();
+        self.collect_expensive_ad_root_counts(root, &mut root_counts)?;
+        let mut counts = root_counts.clone();
+        self.collect_expensive_ad_operand_counts(root, &root_counts, &mut counts)?;
         counts.retain(|_, count| *count > 1);
         Ok(counts)
     }
 
-    fn collect_repeated_expensive_ad_counts(
+    fn collect_expensive_ad_root_counts(
         &self,
         id: ExprId,
         counts: &mut HashMap<String, usize>,
@@ -31914,14 +31916,13 @@ impl CompactAdEmitter<'_> {
         if let Some(key) = self.materializable_expensive_ad_key(id)? {
             *counts.entry(key).or_insert(0) += 1;
         }
-
         match kind {
             HirExprKind::Unary { operand, .. } => {
-                self.collect_repeated_expensive_ad_counts(operand, counts)?;
+                self.collect_expensive_ad_root_counts(operand, counts)?;
             }
             HirExprKind::Binary { left, right, .. } => {
-                self.collect_repeated_expensive_ad_counts(left, counts)?;
-                self.collect_repeated_expensive_ad_counts(right, counts)?;
+                self.collect_expensive_ad_root_counts(left, counts)?;
+                self.collect_expensive_ad_root_counts(right, counts)?;
             }
             HirExprKind::Conditional { .. } => {
                 // Branches are counted by their isolated branch emitters so lazy
@@ -31929,21 +31930,21 @@ impl CompactAdEmitter<'_> {
             }
             HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
                 for arg in args {
-                    self.collect_repeated_expensive_ad_counts(arg, counts)?;
+                    self.collect_expensive_ad_root_counts(arg, counts)?;
                 }
             }
             HirExprKind::ArrayAccess { index, .. } => {
-                self.collect_repeated_expensive_ad_counts(index, counts)?;
+                self.collect_expensive_ad_root_counts(index, counts)?;
             }
             HirExprKind::ArrayLiteral { elements } => {
                 for element in elements {
-                    self.collect_repeated_expensive_ad_counts(element, counts)?;
+                    self.collect_expensive_ad_root_counts(element, counts)?;
                 }
             }
             HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Limexp { expr },
             } => {
-                self.collect_repeated_expensive_ad_counts(expr, counts)?;
+                self.collect_expensive_ad_root_counts(expr, counts)?;
             }
             HirExprKind::NoiseSource { .. }
             | HirExprKind::AnalogOperator { .. }
@@ -31958,11 +31959,117 @@ impl CompactAdEmitter<'_> {
         Ok(())
     }
 
-    fn repeated_expensive_ad_key(&self, id: ExprId) -> Result<Option<String>, RustBackendError> {
-        let Some(key) = self.materializable_expensive_ad_key(id)? else {
+    fn collect_expensive_ad_operand_counts(
+        &self,
+        id: ExprId,
+        root_counts: &HashMap<String, usize>,
+        counts: &mut HashMap<String, usize>,
+    ) -> Result<(), RustBackendError> {
+        let kind = self.expression(id)?.kind.clone();
+        if compact_kind_has_side_effect(&kind) {
+            return Ok(());
+        }
+        if self
+            .materializable_expensive_ad_key(id)?
+            .and_then(|key| root_counts.get(&key).copied())
+            .unwrap_or(0)
+            <= 1
+        {
+            self.collect_expensive_ad_root_operand_counts(&kind, counts)?;
+        }
+
+        match kind {
+            HirExprKind::Unary { operand, .. } => {
+                self.collect_expensive_ad_operand_counts(operand, root_counts, counts)?;
+            }
+            HirExprKind::Binary { left, right, .. } => {
+                self.collect_expensive_ad_operand_counts(left, root_counts, counts)?;
+                self.collect_expensive_ad_operand_counts(right, root_counts, counts)?;
+            }
+            HirExprKind::Conditional { .. } => {
+                // Branches are counted by their isolated branch emitters so lazy
+                // conditionals do not gain work outside the guard that needs it.
+            }
+            HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+                for arg in args {
+                    self.collect_expensive_ad_operand_counts(arg, root_counts, counts)?;
+                }
+            }
+            HirExprKind::ArrayAccess { index, .. } => {
+                self.collect_expensive_ad_operand_counts(index, root_counts, counts)?;
+            }
+            HirExprKind::ArrayLiteral { elements } => {
+                for element in elements {
+                    self.collect_expensive_ad_operand_counts(element, root_counts, counts)?;
+                }
+            }
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Limexp { expr },
+            } => {
+                self.collect_expensive_ad_operand_counts(expr, root_counts, counts)?;
+            }
+            HirExprKind::NoiseSource { .. }
+            | HirExprKind::AnalogOperator { .. }
+            | HirExprKind::Laplace { .. }
+            | HirExprKind::Zi { .. }
+            | HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::Identifier { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn collect_expensive_ad_root_operand_counts(
+        &self,
+        kind: &HirExprKind,
+        counts: &mut HashMap<String, usize>,
+    ) -> Result<(), RustBackendError> {
+        match kind {
+            HirExprKind::Binary { op, left, right } if op.as_str() == "Pow" => {
+                self.count_expensive_ad_operand(*left, counts)?;
+                self.count_expensive_ad_operand(*right, counts)?;
+            }
+            HirExprKind::Call { name, args } if name.eq_ignore_ascii_case("pow") => {
+                for arg in args {
+                    self.count_expensive_ad_operand(*arg, counts)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn count_expensive_ad_operand(
+        &self,
+        id: ExprId,
+        counts: &mut HashMap<String, usize>,
+    ) -> Result<(), RustBackendError> {
+        if let Some(key) = self.materializable_expensive_ad_operand_key(id)? {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+        Ok(())
+    }
+
+    fn repeated_materializable_ad_key(
+        &self,
+        id: ExprId,
+    ) -> Result<Option<String>, RustBackendError> {
+        let Some(key) = self.materializable_repeated_ad_key(id)? else {
             return Ok(None);
         };
         Ok((self.repeated_ad_counts.get(&key).copied().unwrap_or(0) > 1).then_some(key))
+    }
+
+    fn materializable_repeated_ad_key(
+        &self,
+        id: ExprId,
+    ) -> Result<Option<String>, RustBackendError> {
+        if let Some(key) = self.materializable_expensive_ad_key(id)? {
+            return Ok(Some(key));
+        }
+        self.materializable_expensive_ad_operand_key(id)
     }
 
     fn materializable_expensive_ad_key(
@@ -31973,6 +32080,30 @@ impl CompactAdEmitter<'_> {
             return Ok(None);
         }
         self.compact_ad_structural_key(id)
+    }
+
+    fn materializable_expensive_ad_operand_key(
+        &self,
+        id: ExprId,
+    ) -> Result<Option<String>, RustBackendError> {
+        if !self.is_reusable_expensive_ad_operand_expr(id)?
+            || self.zero_derivative_value_expr(id)?.is_some()
+        {
+            return Ok(None);
+        }
+        self.compact_ad_structural_key(id)
+    }
+
+    fn is_reusable_expensive_ad_operand_expr(&self, id: ExprId) -> Result<bool, RustBackendError> {
+        let kind = self.expression(id)?.kind.clone();
+        if compact_kind_has_side_effect(&kind) {
+            return Ok(false);
+        }
+        Ok(match kind {
+            HirExprKind::Unary { op, .. } => matches!(op.as_str(), "Neg" | "Pos"),
+            HirExprKind::Binary { op, .. } => matches!(op.as_str(), "Add" | "Sub" | "Mul"),
+            _ => false,
+        })
     }
 
     fn is_expensive_pure_ad_expr(&self, id: ExprId) -> Result<bool, RustBackendError> {

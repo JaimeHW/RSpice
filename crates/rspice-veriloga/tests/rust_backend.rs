@@ -2669,6 +2669,76 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_subexpressions() {
 }
 
 #[test]
+fn rust_backend_materializes_repeated_expensive_compact_ad_operands() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_repeated_expensive_ad_operand_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile repeated expensive AD operand");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert_eq!(
+        stamp
+            .matches("A::scale_offset(s.ad_value(0), p.p0, p.p1)")
+            .count(),
+        1,
+        "repeated non-leaf AD operands feeding expensive calls should be materialized once:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("let assign") && stamp.contains(": A = A::scale_offset("),
+        "the repeated expensive-call operand should be emitted as an AD local:\n{stamp}"
+    );
+    assert_eq!(
+        stamp.matches("A::powf(").count(),
+        4,
+        "different exponents should keep distinct powf calls while reusing the shared base:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_avoids_pow_operand_local_when_pow_root_is_reused() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_repeated_expensive_ad_root_with_operand_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile repeated expensive AD root");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert_eq!(
+        stamp
+            .matches(": A = A::scale_offset(s.ad_value(0), p.p0, p.p1)")
+            .count(),
+        0,
+        "the pow root local should make a separate base local unnecessary:\n{stamp}"
+    );
+    assert_eq!(
+        stamp.matches("A::powf(").count(),
+        1,
+        "the repeated identical pow root should still be materialized once:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_nested_ad_operation_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_nested_ad_operation_store_source())
@@ -13469,6 +13539,46 @@ module compact_repeated_expensive_ad_subexpression(p, n);
         b = pow(a, exponent) + pow(a, exponent);
         c = b + a;
         I(p, n) <+ c;
+    end
+endmodule
+"#
+}
+
+fn compact_repeated_expensive_ad_operand_source() -> &'static str {
+    r#"
+module compact_repeated_expensive_ad_operand(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 1.0;
+    real a;
+    real y;
+    analog begin
+        a = V(p, n);
+        y = pow(a * gain + offset, 2.0)
+          + pow(a * gain + offset, 3.0)
+          + pow(a * gain + offset, 4.0)
+          + pow(a * gain + offset, 5.0);
+        I(p, n) <+ y;
+    end
+endmodule
+"#
+}
+
+fn compact_repeated_expensive_ad_root_with_operand_source() -> &'static str {
+    r#"
+module compact_repeated_expensive_ad_root_with_operand(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 1.0;
+    real a;
+    real y;
+    analog begin
+        a = V(p, n);
+        y = pow(a * gain + offset, 2.0)
+          + pow(a * gain + offset, 2.0);
+        I(p, n) <+ y;
     end
 endmodule
 "#
