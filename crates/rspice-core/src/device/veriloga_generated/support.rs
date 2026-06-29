@@ -3063,6 +3063,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
     #[inline]
+    pub(crate) fn store_sub_square_lhs(&mut self, index: usize, left: usize, right: usize) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let derivative_scale = 2.0 * left_value;
+        self.v[index] = left_value * left_value - right_value;
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * derivative_scale - right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * derivative_scale - right_db[axis]; }
+    }
+
+    #[inline]
     pub(crate) fn store_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {
         self.v[index] = self.v[left] + offset + self.v[right];
         for axis in 0..NODE_COUNT { self.dn[index][axis] = self.dn[left][axis] + self.dn[right][axis]; }
@@ -18618,6 +18632,20 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = left.value - right_value;
         for axis in 0..NODE_COUNT { self.dn[index][axis] = left.dn[axis] - self.dn[right][axis]; }
         for axis in 0..BRANCH_COUNT { self.db[index][axis] = left.db[axis] - self.db[right][axis]; }
+    }
+
+    #[inline]
+    pub(crate) fn store_sub_square_lhs(&mut self, index: usize, left: usize, right: usize) {
+        let left_value = self.v[left];
+        let right_value = self.v[right];
+        let derivative_scale = 2.0 * left_value;
+        self.v[index] = left_value * left_value - right_value;
+        let left_dn = self.dn[left];
+        let right_dn = self.dn[right];
+        let left_db = self.db[left];
+        let right_db = self.db[right];
+        for axis in 0..NODE_COUNT { self.dn[index][axis] = left_dn[axis] * derivative_scale - right_dn[axis]; }
+        for axis in 0..BRANCH_COUNT { self.db[index][axis] = left_db[axis] * derivative_scale - right_db[axis]; }
     }
 
     #[inline]
