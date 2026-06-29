@@ -3737,7 +3737,7 @@ endmodule
 }
 
 #[test]
-fn native_noise_analysis_rejects_noise_sources_without_fallback() {
+fn native_noise_analysis_evaluates_noise_sources_without_fallback() {
     let model = noise_model();
     assert!(
         model.noise_sources.len() >= 2,
@@ -3746,16 +3746,30 @@ fn native_noise_analysis_rejects_noise_sources_without_fallback() {
 
     let mut device =
         VerilogADevice::try_new("NOISE2", model, &[1, 0]).expect("noise model uses native JIT");
-    let err = device
+    assert_eq!(device.native_plan_stats().noise_source_entry_points, 3);
+    let mut sources = device
         .try_noise_sources(&[4.0])
-        .expect_err("native noise PSD evaluation must hard-fail until implemented");
-    let msg = err.to_string();
+        .expect("native noise PSD evaluation succeeds");
+    sources.sort_by(|left, right| left.name.cmp(&right.name));
 
-    assert_native_hard_fail_message(&msg);
-    assert!(
-        msg.contains("NoiseSources"),
-        "error must name unsupported native noise analysis coverage, got: {msg}"
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.name.as_str())
+            .collect::<Vec<_>>(),
+        ["flicker", "thermal"]
     );
+    assert_eq!(sources[0].node_pos, 1);
+    assert_eq!(sources[0].node_neg, 0);
+    assert_eq!(sources[0].psd.to_bits(), 2.0e-18_f64.to_bits());
+    assert_eq!(sources[0].exponent, Some(1.0));
+    assert!(sources[0].table.is_none());
+
+    assert_eq!(sources[1].node_pos, 1);
+    assert_eq!(sources[1].node_neg, 0);
+    assert_eq!(sources[1].psd.to_bits(), 1.0e-18_f64.to_bits());
+    assert_eq!(sources[1].exponent, None);
+    assert!(sources[1].table.is_none());
 }
 
 #[test]
