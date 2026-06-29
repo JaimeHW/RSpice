@@ -464,6 +464,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_exp_div_scaled_inputs_helper_calls(source);
     source = compact_add_sub_div_lhs_helper_calls(source);
     source = compact_add_product3_rhs_helper_calls(source);
+    source = compact_add_mul_sub_from_scalar_rhs_helper_calls(source);
     source = compact_sub_add_scaled_inputs4_lhs_helper_calls(source);
     source = compact_div_ln_lhs_helper_calls(source);
     source = compact_add_sub_ln_lhs_helper_calls(source);
@@ -1382,6 +1383,77 @@ fn compact_add_product3_rhs_helper_call_replacement(
     let source_index = args[1].trim().parse::<usize>().ok()?;
     let product = compact_product3_ad_expression(args[2].trim())?;
     let line = compact_add_product3_rhs_helper_line(target_index, source_index, &product)?;
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_add_mul_sub_from_scalar_rhs_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_add_ad_rhs(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_add_mul_sub_from_scalar_rhs_helper_call_replacement(
+                &source, call_start, indent,
+            )
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_add_mul_sub_from_scalar_rhs_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_add_ad_rhs(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let source_index = args[1].trim().parse::<usize>().ok()?;
+    let rhs_args = compact_ad_call_args(args[2].trim(), "mul_sub_from_scalar_rhs")?;
+    if rhs_args.len() != 3 {
+        return None;
+    }
+    let product_left = compact_scratch_ad_value_index(rhs_args[0])?;
+    let subtrahend = compact_scratch_ad_value_index(rhs_args[2])?;
+
+    let line = format!(
+        "scratch.store_add_mul_sub_from_scalar_rhs_indices({target_index}, {source_index}, {product_left}, {}, {subtrahend});",
+        rhs_args[1]
+    );
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
     let statement_end = compact_statement_end_after_call(source, close_paren)?;
@@ -5067,6 +5139,34 @@ fn stamp() {
         );
         assert!(!compact.contains("A::mul3("), "{compact}");
         assert!(!compact.contains("A::mul3_scaled_output("), "{compact}");
+        assert!(!compact.contains("s.store_add_ad_rhs("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_add_rhs_mul_sub_from_scalar_rhs_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_add_mul_sub_from_scalar_rhs_indices("),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_add_ad_rhs(173, 2, AdValue::mul_sub_from_scalar_rhs(scratch.ad_value(3), params.scalar, scratch.ad_value(4)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact
+                .contains("s.store_add_mul_sub_from_scalar_rhs_indices(173, 2, 3, p.scalar, 4);"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("A::mul_sub_from_scalar_rhs("),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_add_ad_rhs("), "{compact}");
     }
 
@@ -15916,6 +16016,23 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left_value + right.value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] + right.node_derivatives[axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] + right.branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_mul_sub_from_scalar_rhs_indices(&mut self, index: usize, source: usize, product_left: usize, scalar: f64, subtrahend: usize) {",
+        "        let source_value = self.values[source];",
+        "        let product_left_value = self.values[product_left];",
+        "        let subtrahend_value = self.values[subtrahend];",
+        "        let subtrahend_term = scalar - subtrahend_value;",
+        "        self.values[index] = source_value + product_left_value * subtrahend_term;",
+        "        let source_node_derivatives = self.node_derivatives[source];",
+        "        let product_left_node_derivatives = self.node_derivatives[product_left];",
+        "        let subtrahend_node_derivatives = self.node_derivatives[subtrahend];",
+        "        let source_branch_derivatives = self.branch_derivatives[source];",
+        "        let product_left_branch_derivatives = self.branch_derivatives[product_left];",
+        "        let subtrahend_branch_derivatives = self.branch_derivatives[subtrahend];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] + product_left_node_derivatives[axis] * subtrahend_term - product_left_value * subtrahend_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] + product_left_branch_derivatives[axis] * subtrahend_term - product_left_value * subtrahend_branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
