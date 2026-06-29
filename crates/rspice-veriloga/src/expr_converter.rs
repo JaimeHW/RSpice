@@ -71,7 +71,13 @@ fn validate_arg_range(
 fn validate_analysis_name(name: &str) -> CompileResult<String> {
     let normalized = name.to_ascii_lowercase();
     match normalized.as_str() {
-        "dc" | "ac" | "tran" | "transient" | "noise" | "ic" | "static" => Ok(normalized),
+        "dc" | "op" => Ok("dc".to_string()),
+        "ac" => Ok("ac".to_string()),
+        "tran" | "transient" => Ok("tran".to_string()),
+        "noise" => Ok("noise".to_string()),
+        "ic" => Ok("ic".to_string()),
+        "static" => Ok("static".to_string()),
+        "smallsig" | "smallsignal" | "small_signal" => Ok("smallsig".to_string()),
         _ => Err(
             CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                 "analysis() unknown analysis name '{name}'"

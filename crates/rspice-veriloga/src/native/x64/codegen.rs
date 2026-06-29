@@ -2189,22 +2189,32 @@ impl FunctionCompiler {
 
     fn emit_analysis_check(&mut self, analysis_id: u8) -> JitResult<()> {
         let dst = self.push_register()?;
-        if analysis_id > 5 {
+        if analysis_id > 6 {
             self.encoder.xorpd_xmm_xmm(dst, dst);
             return Ok(());
         }
 
         self.encoder
             .movzx_r32_m8_base_disp32(Gpr::R10, self.ctx_arg_reg(), ANALYSIS_TYPE_OFFSET);
-        if analysis_id == 5 {
-            self.encoder.cmp_r32_imm8(Gpr::R10, 0);
-            self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R11);
-            self.encoder.cmp_r32_imm8(Gpr::R10, 4);
-            self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
-            self.encoder.or_r8_r8(Gpr::R10, Gpr::R11);
-        } else {
-            self.encoder.cmp_r32_imm8(Gpr::R10, analysis_id);
-            self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+        match analysis_id {
+            5 => {
+                self.encoder.cmp_r32_imm8(Gpr::R10, 0);
+                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R11);
+                self.encoder.cmp_r32_imm8(Gpr::R10, 4);
+                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+                self.encoder.or_r8_r8(Gpr::R10, Gpr::R11);
+            }
+            6 => {
+                self.encoder.cmp_r32_imm8(Gpr::R10, 1);
+                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R11);
+                self.encoder.cmp_r32_imm8(Gpr::R10, 3);
+                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+                self.encoder.or_r8_r8(Gpr::R10, Gpr::R11);
+            }
+            _ => {
+                self.encoder.cmp_r32_imm8(Gpr::R10, analysis_id);
+                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+            }
         }
         self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
         self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
@@ -5555,6 +5565,33 @@ mod tests {
             ctx.analysis_type = analysis_type;
             assert_eq!(
                 static_check(&ctx, std::ptr::null()).to_bits(),
+                0.0_f64.to_bits(),
+                "analysis_type: {analysis_type}"
+            );
+        }
+
+        let smallsig_program =
+            native_program(EntryKind::StampValue, vec![Instruction::Analysis(6)], 0);
+        let smallsig_bytes =
+            compile_value_function(&smallsig_program).expect("compile smallsig analysis leaf");
+        let smallsig_memory =
+            ExecutableMemory::allocate(&smallsig_bytes).expect("allocate smallsig analysis leaf");
+        let smallsig_entry = smallsig_memory.ptr_at(0).expect("entry point inside image");
+        let smallsig_check: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(smallsig_entry) };
+
+        for analysis_type in [1, 3] {
+            ctx.analysis_type = analysis_type;
+            assert_eq!(
+                smallsig_check(&ctx, std::ptr::null()).to_bits(),
+                1.0_f64.to_bits(),
+                "analysis_type: {analysis_type}"
+            );
+        }
+        for analysis_type in [0, 2, 4, 5] {
+            ctx.analysis_type = analysis_type;
+            assert_eq!(
+                smallsig_check(&ctx, std::ptr::null()).to_bits(),
                 0.0_f64.to_bits(),
                 "analysis_type: {analysis_type}"
             );

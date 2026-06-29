@@ -2861,12 +2861,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.require_intrinsic_arity(name, args, 1)?;
         let analysis_name = self.string_literal_argument(name, args[0])?;
         let analysis_id = match analysis_name.to_ascii_lowercase().as_str() {
-            "dc" => 0,
+            "dc" | "op" => 0,
             "ac" => 1,
             "tran" | "transient" => 2,
             "noise" => 3,
             "ic" => 4,
             "static" => 5,
+            "smallsig" | "smallsignal" | "small_signal" => 6,
             _ => {
                 return Err(self.unsupported(format!(
                     "intrinsic function '{name}' analysis name '{analysis_name}'"

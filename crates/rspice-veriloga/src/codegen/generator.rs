@@ -964,13 +964,15 @@ impl CodeGenerator {
             IrExpr::Analysis(name) => {
                 // analysis(name) - check current analysis type
                 let analysis_id = match name.to_lowercase().as_str() {
-                    "dc" => 0,
+                    "dc" | "op" => 0,
                     "ac" => 1,
                     "tran" | "transient" => 2,
                     "noise" => 3,
                     "ic" => 4,
                     // "static" matches any equilibrium (DC or IC) analysis
                     "static" => 5,
+                    // "smallsig" matches small-signal frequency-domain analyses.
+                    "smallsig" | "smallsignal" | "small_signal" => 6,
                     _ => {
                         return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                             format!("analysis() unknown analysis name '{name}'"),
