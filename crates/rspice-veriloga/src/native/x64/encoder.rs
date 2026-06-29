@@ -181,17 +181,11 @@ impl X64Encoder {
     }
 
     pub(crate) fn add_r64_imm32(&mut self, reg: Gpr, value: i32) {
-        self.emit_rex(true, 0, 0, reg.code());
-        self.emit_u8(0x81);
-        self.emit_modrm(0b11, 0b000, reg.code());
-        self.emit_i32(value);
+        self.emit_r64_imm32(0b000, reg, value);
     }
 
     pub(crate) fn sub_r64_imm32(&mut self, reg: Gpr, value: i32) {
-        self.emit_rex(true, 0, 0, reg.code());
-        self.emit_u8(0x81);
-        self.emit_modrm(0b11, 0b101, reg.code());
-        self.emit_i32(value);
+        self.emit_r64_imm32(0b101, reg, value);
     }
 
     pub(crate) fn add_r64_r64(&mut self, dst: Gpr, src: Gpr) {
@@ -318,10 +312,7 @@ impl X64Encoder {
     }
 
     pub(crate) fn cmp_r64_imm32(&mut self, reg: Gpr, value: i32) {
-        self.emit_rex(true, 0, 0, reg.code());
-        self.emit_u8(0x81);
-        self.emit_modrm(0b11, 0b111, reg.code());
-        self.emit_i32(value);
+        self.emit_r64_imm32(0b111, reg, value);
     }
 
     pub(crate) fn cmp_r64_r64(&mut self, left: Gpr, right: Gpr) {
@@ -586,14 +577,18 @@ impl X64Encoder {
     }
 
     fn emit_rsp_adjust_imm32(&mut self, extension: u8, value: i32) {
-        self.emit_rex(true, 0, 0, Gpr::Rsp.code());
+        self.emit_r64_imm32(extension, Gpr::Rsp, value);
+    }
+
+    fn emit_r64_imm32(&mut self, extension: u8, reg: Gpr, value: i32) {
+        self.emit_rex(true, 0, 0, reg.code());
         if i8::try_from(value).is_ok() {
             self.emit_u8(0x83);
-            self.emit_modrm(0b11, extension, Gpr::Rsp.code());
+            self.emit_modrm(0b11, extension, reg.code());
             self.emit_u8(value as i8 as u8);
         } else {
             self.emit_u8(0x81);
-            self.emit_modrm(0b11, extension, Gpr::Rsp.code());
+            self.emit_modrm(0b11, extension, reg.code());
             self.emit_i32(value);
         }
     }
@@ -731,18 +726,21 @@ mod tests {
     }
 
     #[test]
-    fn encodes_r64_imm32_adds() {
+    fn encodes_r64_immediates_with_short_and_wide_forms() {
         let mut encoder = X64Encoder::new();
 
         encoder.add_r64_imm32(Gpr::Rdx, 24);
         encoder.add_r64_imm32(Gpr::R13, -8);
         encoder.sub_r64_imm32(Gpr::R10, 1);
+        encoder.cmp_r64_imm32(Gpr::R11, 1);
+        encoder.add_r64_imm32(Gpr::Rdx, 128);
+        encoder.cmp_r64_imm32(Gpr::R10, 128);
 
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x48, 0x81, 0xC2, 24, 0, 0, 0, 0x49, 0x81, 0xC5, 0xF8, 0xFF, 0xFF, 0xFF, 0x49,
-                0x81, 0xEA, 1, 0, 0, 0,
+                0x48, 0x83, 0xC2, 24, 0x49, 0x83, 0xC5, 0xF8, 0x49, 0x83, 0xEA, 1, 0x49, 0x83,
+                0xFB, 1, 0x48, 0x81, 0xC2, 128, 0, 0, 0, 0x49, 0x81, 0xFA, 128, 0, 0, 0,
             ]
         );
     }
@@ -1080,9 +1078,9 @@ mod tests {
         assert_eq!(
             encoder.into_bytes(),
             [
-                0x41, 0xC6, 0x42, 16, 1, 0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x81, 0xFB, 1, 0, 0, 0,
-                0x0F, 0x86, 0, 0, 0, 0, 0xF2, 0x0F, 0x5C, 0x48, 24, 0xF2, 0x0F, 0x5D, 0x0C, 0x24,
-                0xF2, 0x0F, 0x58, 0x48, 24,
+                0x41, 0xC6, 0x42, 16, 1, 0x49, 0x0F, 0xBA, 0xFB, 63, 0x49, 0x83, 0xFB, 1, 0x0F,
+                0x86, 0, 0, 0, 0, 0xF2, 0x0F, 0x5C, 0x48, 24, 0xF2, 0x0F, 0x5D, 0x0C, 0x24, 0xF2,
+                0x0F, 0x58, 0x48, 24,
             ]
         );
     }
