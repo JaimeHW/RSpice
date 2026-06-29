@@ -22,6 +22,7 @@ pub use error::{JitError, JitResult};
 pub use model::{NativeModel, PlanStats};
 pub use target::{Architecture, TargetSpec};
 
+use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::{AssignmentStep, CompiledModel};
 
 pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
@@ -33,6 +34,25 @@ pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
     })?;
     match target.arch {
         Architecture::X64 => x64::compile_model(model),
+        Architecture::AArch64 => Err(JitError::UnsupportedTarget {
+            target: target.display_name().into(),
+            reason: "AArch64 backend boundary exists but is not enabled".into(),
+        }),
+    }
+}
+
+pub fn compile_native_with_canonical_ir(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeModel> {
+    validate_native_coverage(model)?;
+
+    let target = TargetSpec::host().ok_or_else(|| JitError::UnsupportedTarget {
+        target: "unknown".into(),
+        reason: "host architecture is not supported".into(),
+    })?;
+    match target.arch {
+        Architecture::X64 => x64::compile_model_with_canonical_ir(model, artifact),
         Architecture::AArch64 => Err(JitError::UnsupportedTarget {
             target: target.display_name().into(),
             reason: "AArch64 backend boundary exists but is not enabled".into(),
