@@ -220,6 +220,21 @@ impl X64Encoder {
         self.emit_u8(value);
     }
 
+    pub(crate) fn lea_r64_base_index_scale8_disp32(
+        &mut self,
+        dst: Gpr,
+        base: Gpr,
+        index: Gpr,
+        disp: i32,
+    ) {
+        debug_assert_ne!(index, Gpr::Rsp);
+        self.emit_rex(true, dst.code(), index.code(), base.code());
+        self.emit_u8(0x8D);
+        self.emit_modrm(0b10, dst.code(), 0b100);
+        self.emit_sib(0b11, index.code(), base.code());
+        self.emit_i32(disp);
+    }
+
     pub(crate) fn shl_r64_cl(&mut self, reg: Gpr) {
         self.emit_rex(true, 0, 0, reg.code());
         self.emit_u8(0xD3);
@@ -676,6 +691,21 @@ mod tests {
             encoder.into_bytes(),
             [
                 0x48, 0x81, 0xC2, 24, 0, 0, 0, 0x49, 0x81, 0xC5, 0xF8, 0xFF, 0xFF, 0xFF,
+            ]
+        );
+    }
+
+    #[test]
+    fn encodes_scale8_indexed_lea() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::Rdx, Gpr::R10, 8);
+        encoder.lea_r64_base_index_scale8_disp32(Gpr::Rax, Gpr::R13, Gpr::R10, 16);
+
+        assert_eq!(
+            encoder.into_bytes(),
+            [
+                0x4A, 0x8D, 0x84, 0xD2, 8, 0, 0, 0, 0x4B, 0x8D, 0x84, 0xD5, 16, 0, 0, 0,
             ]
         );
     }
