@@ -215,7 +215,7 @@ coverage; it is not a substitute for importing the extension in pytest.
 
 ### Verilog-A
 
-`rspice-veriloga` compiles behavioral modules through parser, semantic analysis, canonical IR, and bytecode VM paths, with a native JIT feature under replacement by the RSpice-owned x64-first backend. When native JIT mode is requested, model construction is full native JIT or a typed error; it does not fall back to the interpreter. It also owns the Rust backend used by `rspice-core`'s feature-gated generated built-ins, so packages under [models/veriloga/cmc/](models/veriloga/cmc/) can be qualified as generated native Rust devices instead of hand-written ports. External models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
+`rspice-veriloga` compiles behavioral modules through parser, semantic analysis, canonical IR, bytecode VM paths, and the RSpice-owned x64-first native JIT backend. When native JIT mode is requested, model construction is full native JIT or a typed error; it does not fall back to the interpreter. It also owns the Rust backend used by `rspice-core`'s feature-gated generated built-ins, so packages under [models/veriloga/cmc/](models/veriloga/cmc/) can be qualified as generated native Rust devices instead of hand-written ports. External models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
 
 ## Validation
 
@@ -235,7 +235,7 @@ The harness design — oracle-replay methodology, comparison gating, debug envir
 | `rspice-core` | Simulation engine: device models, analyses, netlist parser, validation harnesses |
 | `rspice-cli` | Command-line interface for simulation, validation, conversion, and reporting |
 | `rspice-ui` | Desktop application for schematic editing and waveform inspection |
-| `rspice-veriloga` | Verilog-A parser, semantic pipeline, VM/JIT runtime, generated-Rust backend |
+| `rspice-veriloga` | Verilog-A parser, semantic pipeline, bytecode VM/native JIT runtime, generated-Rust backend |
 | `rspice-python` | Python bindings built with PyO3 |
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |

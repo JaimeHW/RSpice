@@ -129,7 +129,7 @@ compiled models on top.
 ```bash
 cargo build -p rspice-veriloga
 cargo test  -p rspice-veriloga                      # interpreter paths
-cargo test  -p rspice-veriloga --features native    # + bytecode/JIT equivalence
+cargo test  -p rspice-veriloga --features native    # + native JIT contract
 cargo test  -p rspice-veriloga --test rust_backend   # generated-Rust backend
 ```
 
@@ -137,8 +137,8 @@ The integration test files under `tests/` cover end-to-end compilation
 (`compile_models.rs`), runtime evaluation and Jacobians
 (`device_eval.rs`), array variables, `aliasparam`, indirect contributions,
 `zi_*` filters, timestep control, `$mfactor` scaling, multi-module
-selection, bytecode-vs-native equivalence (`native_equivalence.rs`), canonical
-IR validation, the Rust backend (`rust_backend.rs`), and real production
+selection, native no-fallback contract coverage (`native_contract.rs`),
+canonical IR validation, the Rust backend (`rust_backend.rs`), and real production
 models: EKV 2.6 physics, PSP 103, and CMC model frontier tests, plus optional
 BSIM4 coverage when `RSPICE_BSIM4_VA` points at an externally supplied clean
 source file. The broad shipped-CMC compile-frontier tests are ignored by
