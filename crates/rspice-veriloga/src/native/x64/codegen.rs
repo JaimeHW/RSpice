@@ -5,10 +5,11 @@ use crate::native::abi::{
     rspice_cross_state_native, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
     rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_log, rspice_log10,
-    rspice_mod, rspice_native_integer_shift_count_error, rspice_native_loop_limit_error,
-    rspice_pow, rspice_sin, rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_step_native,
+    rspice_mod, rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
+    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_error,
+    rspice_native_loop_limit_error, rspice_pow, rspice_sin, rspice_sinh, rspice_slew_state_native,
+    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
+    rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -1366,11 +1367,28 @@ impl FunctionCompiler {
         let done_after_initialized_store = self.encoder.jmp_rel32_placeholder();
 
         self.patch_rel32_to_current(no_initialized_flags)?;
+        self.emit_limit_state_error_return(rspice_native_limit_state_initialized_error);
+
         self.patch_rel32_to_current(initialized_flags_out_of_range)?;
+        self.emit_limit_state_error_return(rspice_native_limit_state_bounds_error);
+
         self.patch_rel32_to_current(no_state)?;
+        self.emit_limit_state_error_return(rspice_native_limit_state_values_error);
+
         self.patch_rel32_to_current(done_after_initialized_store)?;
         self.depth -= 1;
         Ok(())
+    }
+
+    fn emit_limit_state_error_return(&mut self, helper: VoidHelper) {
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
     }
 
     fn emit_white_noise(&mut self) -> JitResult<()> {
@@ -4573,10 +4591,21 @@ mod tests {
         state_initialized[1] = 1;
         assert_eq!(state_initialized[1], 1);
         let vars = [20.0_f64];
+        clear_native_runtime_error();
         assert_eq!(
             f(&ctx, vars.as_ptr()).to_bits(),
-            20.0_f64.to_bits(),
-            "native limit must not index past state_initialized_len"
+            0.0_f64.to_bits(),
+            "native limit must return through the hard-fail path"
+        );
+        let error =
+            take_native_runtime_error().expect("out-of-range limit metadata must hard-fail");
+        assert!(
+            error.contains("state index outside initialization flag storage"),
+            "error must identify invalid limit metadata, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
         );
         assert_eq!(
             state_values[1].to_bits(),
@@ -4585,6 +4614,35 @@ mod tests {
         );
 
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_values = std::ptr::null_mut();
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing limit state must hard-fail");
+        assert!(
+            error.contains("missing state storage"),
+            "error must identify missing limit state storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_initialized = std::ptr::null_mut();
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
+        let error =
+            take_native_runtime_error().expect("missing limit initialization flags must hard-fail");
+        assert!(
+            error.contains("missing initialization flag storage"),
+            "error must identify missing limit initialization storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+
+        ctx.state_initialized = state_initialized.as_mut_ptr();
         state_values[1] = 1.0;
         state_initialized[1] = 1;
         assert_eq!(state_initialized[1], 1);
