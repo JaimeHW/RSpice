@@ -1406,6 +1406,11 @@ endmodule
                 Some("vbic13_4t"),
             ),
             (
+                "bsimbulk",
+                shipped_cmc_model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]),
+                Some("bsimbulk"),
+            ),
+            (
                 "bsimimg",
                 shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
                 Some("bsimimg"),
@@ -1475,6 +1480,11 @@ endmodule
                 "vbic13_4t",
                 shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
                 Some("vbic13_4t"),
+            ),
+            (
+                "bsimbulk",
+                shipped_cmc_model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]),
+                Some("bsimbulk"),
             ),
             (
                 "bsimimg",
@@ -1878,6 +1888,10 @@ endmodule
         match name {
             "juncap200" => [0.2, 0.0].get(terminal).copied().unwrap_or(0.0),
             "bsimcmg" => [0.05, 0.7, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "bsimbulk" => [0.05, 0.7, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
