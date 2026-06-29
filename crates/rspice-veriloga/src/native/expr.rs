@@ -1946,6 +1946,9 @@ impl NativeProgram {
                         3,
                     )?;
                     depth -= 2;
+                    if lower_constant_ifelse(&mut ops) {
+                        continue;
+                    }
                     ops.push(NativeOp::IfElse);
                 }
                 Instruction::Min | Instruction::Max => {
@@ -2139,7 +2142,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower(*condition)?;
                 self.lower(*then_expr)?;
                 self.lower(*else_expr)?;
-                self.append_ternary(NativeOp::IfElse)
+                self.append_ifelse()
             }
             HirExprKind::SystemFunction { name, args } => {
                 self.lower_system_function_call(expression.id, name.as_str(), args.as_slice())
@@ -3441,6 +3444,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn append_ifelse(&mut self) -> JitResult<()> {
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical ifelse",
+            self.depth,
+            3,
+        )?;
+        self.depth -= 2;
+        if lower_constant_ifelse(&mut self.ops) {
+            return Ok(());
+        }
+        self.ops.push(NativeOp::IfElse);
+        Ok(())
+    }
+
     fn pop_binary(&mut self, op_name: &'static str) -> JitResult<()> {
         pop_binary_stack(self.model.clone(), self.entry_kind, op_name, self.depth)?;
         self.depth -= 1;
@@ -4166,6 +4185,26 @@ fn lower_constant_logical_not(ops: &mut Vec<NativeOp>) -> bool {
     true
 }
 
+fn lower_constant_ifelse(ops: &mut Vec<NativeOp>) -> bool {
+    let (condition, then_value, else_value) = match ops.as_slice() {
+        [
+            ..,
+            NativeOp::Const(condition),
+            NativeOp::Const(then_value),
+            NativeOp::Const(else_value),
+        ] => (*condition, *then_value, *else_value),
+        _ => return false,
+    };
+    let selected = if constant_truthy(condition) {
+        then_value
+    } else {
+        else_value
+    };
+    ops.truncate(ops.len() - 3);
+    ops.push(NativeOp::Const(selected));
+    true
+}
+
 fn constant_truthy(value: f64) -> bool {
     value.abs() > LOGICAL_EPSILON
 }
@@ -4863,6 +4902,37 @@ endmodule
         .expect("lower canonical constant sqrt to native program");
 
         assert_eq!(program.ops(), &[NativeOp::Const(7.0)]);
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_constant_ifelse_to_selected_literal() {
+        let source = r#"
+module mir_constant_ifelse(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ (1.0e-15 ? 7.0 : -0.0);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_constant_ifelse",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical constant ifelse to native program");
+
+        match program.ops() {
+            [NativeOp::Const(value)] => assert_eq!(value.to_bits(), (-0.0_f64).to_bits()),
+            ops => panic!("expected folded ifelse literal, got {ops:?}"),
+        }
         assert_eq!(program.max_stack_depth(), 1);
     }
 
@@ -6468,6 +6538,82 @@ endmodule
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 3);
+    }
+
+    #[test]
+    fn folds_constant_ifelse_to_selected_literal() {
+        let then_nan_bits = 0x7ff8_0000_0000_0001_u64;
+        let else_neg_zero_bits = (-0.0_f64).to_bits();
+        let condition_nan_bits = 0x7ff8_0000_0000_0002_u64;
+        let cases = [
+            (
+                "true",
+                2.0e-15_f64.to_bits(),
+                7.0_f64.to_bits(),
+                3.0_f64.to_bits(),
+                7.0_f64.to_bits(),
+            ),
+            (
+                "within-epsilon",
+                0.5e-15_f64.to_bits(),
+                7.0_f64.to_bits(),
+                3.0_f64.to_bits(),
+                3.0_f64.to_bits(),
+            ),
+            (
+                "at-epsilon",
+                1.0e-15_f64.to_bits(),
+                7.0_f64.to_bits(),
+                3.0_f64.to_bits(),
+                3.0_f64.to_bits(),
+            ),
+            (
+                "unordered-condition",
+                condition_nan_bits,
+                7.0_f64.to_bits(),
+                3.0_f64.to_bits(),
+                3.0_f64.to_bits(),
+            ),
+            (
+                "selected-then-bits",
+                2.0e-15_f64.to_bits(),
+                then_nan_bits,
+                3.0_f64.to_bits(),
+                then_nan_bits,
+            ),
+            (
+                "selected-else-bits",
+                0.0_f64.to_bits(),
+                7.0_f64.to_bits(),
+                else_neg_zero_bits,
+                else_neg_zero_bits,
+            ),
+        ];
+
+        for (case, condition_bits, then_bits, else_bits, expected_bits) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(f64::from_bits(condition_bits)),
+                    Instruction::PushConst(f64::from_bits(then_bits)),
+                    Instruction::PushConst(f64::from_bits(else_bits)),
+                    Instruction::IfElse,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "ifelse",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant ifelse should fold to selected literal");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
+            match lowered.ops() {
+                [NativeOp::Const(value)] => assert_eq!(value.to_bits(), expected_bits, "{case}"),
+                ops => panic!("{case}: expected folded ifelse literal, got {ops:?}"),
+            }
+        }
     }
 
     #[test]
