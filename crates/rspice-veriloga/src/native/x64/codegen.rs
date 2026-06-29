@@ -39,6 +39,8 @@ const Q_ELECTRON: f64 = 1.602176634e-19;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
 const TIMESTEP_DC_EPSILON: f64 = 1.0e-20;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
+const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
+const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
 const CALL_SPILL_SLOT_COUNT: usize = 7;
 #[cfg(test)]
@@ -751,14 +753,98 @@ impl FunctionCompiler {
             });
         }
 
+        if !dynamic_variable_inline_supported(len, lower) {
+            let target = XMM_STACK[self.depth - 1];
+            return self.emit_dynamic_variable_helper_call(
+                target,
+                base,
+                len,
+                lower,
+                rspice_dynamic_variable_load_native,
+            );
+        }
+
         let target = XMM_STACK[self.depth - 1];
-        self.emit_dynamic_variable_helper_call(
-            target,
-            base,
-            len,
-            lower,
-            rspice_dynamic_variable_load_native,
-        )
+        let base_disp = byte_disp(base)?;
+        let mut slow_jumps = Vec::new();
+
+        self.encoder.sub_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
+        self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, target);
+
+        self.encoder.movq_r64_xmm(Gpr::Rax, target);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rax);
+        self.encoder.btr_r64_imm8(Gpr::R11, 63);
+        self.encoder
+            .movabs_r64_imm64(Gpr::R10, F64_EXACT_INTEGER_LIMIT_ABS_BITS);
+        self.encoder.cmp_r64_r64(Gpr::R11, Gpr::R10);
+        slow_jumps.push(
+            self.encoder
+                .jcc_rel32_placeholder(ConditionCode::AboveOrEqual),
+        );
+
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let non_negative = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::NotNegative);
+        self.emit_literal_binary_op(target, 0.5, BinaryOp::Sub);
+        let rounded = self.encoder.jmp_rel32_placeholder();
+        self.patch_rel32_to_current(non_negative)?;
+        self.emit_literal_binary_op(target, 0.5, BinaryOp::Add);
+        self.patch_rel32_to_current(rounded)?;
+
+        self.encoder.cvttsd2si_r64_xmm(Gpr::R10, target);
+        self.encoder.movabs_r64_imm64(Gpr::R11, lower as u64);
+        self.encoder.sub_r64_r64(Gpr::R10, Gpr::R11);
+        self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
+        slow_jumps.push(self.encoder.jcc_rel32_placeholder(ConditionCode::Negative));
+        self.encoder.movabs_r64_imm64(Gpr::R11, len as u64);
+        self.encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        slow_jumps.push(
+            self.encoder
+                .jcc_rel32_placeholder(ConditionCode::AboveOrEqual),
+        );
+
+        self.encoder.mov_r64_r64(Gpr::Rax, Gpr::R10);
+        self.encoder.shl_r64_imm8(Gpr::Rax, 3);
+        self.encoder.mov_r64_r64(Gpr::R11, self.vars_arg_reg());
+        if base_disp != 0 {
+            self.encoder.add_r64_imm32(Gpr::R11, base_disp);
+        }
+        self.encoder.add_r64_r64(Gpr::R11, Gpr::Rax);
+        self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::R11, 0);
+        self.encoder.add_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
+        let fast_done = self.encoder.jmp_rel32_placeholder();
+
+        for slow_jump in slow_jumps {
+            self.patch_rel32_to_current(slow_jump)?;
+        }
+        self.emit_dynamic_variable_load_slow_return(base_disp, len, lower);
+        self.patch_rel32_to_current(fast_done)?;
+        Ok(())
+    }
+
+    fn emit_dynamic_variable_load_slow_return(&mut self, base_disp: i32, len: usize, lower: i64) {
+        self.encoder
+            .movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rsp, 0);
+        self.encoder.sub_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder
+            .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
+        if base_disp != 0 {
+            self.encoder
+                .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
+        }
+        self.encoder
+            .movabs_r64_imm64(dynamic_variable_len_arg_reg(), len as u64);
+        self.encoder
+            .movabs_r64_imm64(dynamic_variable_lower_arg_reg(), lower as u64);
+        let helper: DynamicVariableHelper = rspice_dynamic_variable_load_native;
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(CALL_FRAME_BYTES);
+        self.encoder.add_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
     }
 
     fn emit_dynamic_variable_helper_call(
@@ -2109,7 +2195,6 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::IntegerBinary(_)
                 | NativeOp::TableLookup(_)
                 | NativeOp::TableDerivative(_)
-                | NativeOp::LoadVariableDyn { .. }
                 | NativeOp::LaplaceState(_)
                 | NativeOp::ZiState(_)
                 | NativeOp::TimerState(_)
@@ -2119,11 +2204,30 @@ fn program_uses_helper_calls(program: &NativeProgram) -> bool {
                 | NativeOp::CrossState(_)
                 | NativeOp::IdtModState(_)
         ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
+            || matches!(
+                op,
+                NativeOp::LoadVariableDyn { len, lower, .. }
+                    if !dynamic_variable_inline_supported(*len, *lower)
+            )
     })
 }
 
 fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
     !matches!(op, UnaryMathOp::Floor | UnaryMathOp::Ceil)
+}
+
+fn dynamic_variable_inline_supported(len: usize, lower: i64) -> bool {
+    let Ok(len_i64) = i64::try_from(len) else {
+        return false;
+    };
+    let Some(upper) = lower
+        .checked_add(len_i64)
+        .and_then(|exclusive| exclusive.checked_sub(1))
+    else {
+        return false;
+    };
+    let supported = -INLINE_DYNAMIC_LOWER_ABS_LIMIT..=INLINE_DYNAMIC_LOWER_ABS_LIMIT;
+    supported.contains(&lower) && supported.contains(&upper)
 }
 
 fn xmm_stack_slot(register: Xmm) -> usize {
@@ -2842,6 +2946,10 @@ mod tests {
             0,
         );
         let bytes = compile_value_function(&program).expect("compile dynamic variable leaf");
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "dynamic read fast path should not pay helper-call prologue cost"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -2855,6 +2963,75 @@ mod tests {
 
         assert_eq!(loaded.to_bits(), 5.0_f64.to_bits());
         assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn generated_value_leaf_helper_free_dynamic_variable_read_hard_fails_bounds() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushParam(0),
+                Instruction::PushVariableDyn {
+                    base: 1,
+                    len: 3,
+                    lower: 1,
+                },
+            ],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile dynamic variable leaf");
+        assert!(
+            !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "dynamic read slow path should not require the helper-call prologue"
+        );
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let vars = [99.0_f64, 2.0, 4.0, 8.0];
+        let ctx = eval_context(&[4.0], &[], &[], &[]);
+        clear_native_runtime_error();
+
+        let loaded = f(&ctx, vars.as_ptr());
+
+        assert_eq!(loaded.to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("out-of-range dynamic read must hard-fail");
+        assert!(
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "error must preserve array bounds diagnostic, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_keeps_huge_dynamic_variable_ranges_on_helper_path() {
+        let huge_len = (1_usize << 52) + 1;
+        let program = NativeProgram::from_bytecode(
+            "x64-codegen-test",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushVariableDyn {
+                        base: 0,
+                        len: huge_len,
+                        lower: 0,
+                    },
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 1, huge_len, 0),
+        )
+        .expect("huge dynamic range is valid IR before x64 lowering");
+        let bytes = compile_value_function(&program).expect("compile huge dynamic range leaf");
+
+        assert!(
+            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "huge dynamic ranges must keep helper-backed continuation semantics"
+        );
     }
 
     #[test]

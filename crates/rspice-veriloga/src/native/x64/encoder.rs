@@ -53,6 +53,8 @@ pub(crate) enum ConditionCode {
     Below,
     BelowOrEqual,
     Equal,
+    Negative,
+    NotNegative,
     NotParity,
     Parity,
 }
@@ -78,6 +80,8 @@ impl ConditionCode {
             Self::Below => 0x92,
             Self::BelowOrEqual => 0x96,
             Self::Equal => 0x94,
+            Self::Negative => 0x98,
+            Self::NotNegative => 0x99,
             Self::NotParity => 0x9B,
             Self::Parity => 0x9A,
         }
@@ -90,6 +94,8 @@ impl ConditionCode {
             Self::Below => 0x82,
             Self::BelowOrEqual => 0x86,
             Self::Equal => 0x84,
+            Self::Negative => 0x88,
+            Self::NotNegative => 0x89,
             Self::NotParity => 0x8B,
             Self::Parity => 0x8A,
         }
@@ -175,6 +181,25 @@ impl X64Encoder {
         self.emit_u8(0x81);
         self.emit_modrm(0b11, 0b000, reg.code());
         self.emit_i32(value);
+    }
+
+    pub(crate) fn add_r64_r64(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex(true, src.code(), 0, dst.code());
+        self.emit_u8(0x01);
+        self.emit_modrm(0b11, src.code(), dst.code());
+    }
+
+    pub(crate) fn sub_r64_r64(&mut self, dst: Gpr, src: Gpr) {
+        self.emit_rex(true, src.code(), 0, dst.code());
+        self.emit_u8(0x29);
+        self.emit_modrm(0b11, src.code(), dst.code());
+    }
+
+    pub(crate) fn shl_r64_imm8(&mut self, reg: Gpr, value: u8) {
+        self.emit_rex(true, 0, 0, reg.code());
+        self.emit_all(&[0xC1]);
+        self.emit_modrm(0b11, 0b100, reg.code());
+        self.emit_u8(value);
     }
 
     pub(crate) fn mov_r64_m64_base_disp32(&mut self, dst: Gpr, base: Gpr, disp: i32) {
