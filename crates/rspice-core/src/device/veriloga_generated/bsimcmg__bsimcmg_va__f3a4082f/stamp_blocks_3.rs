@@ -11,7 +11,7 @@ impl Instance {
     ) {
         if s.b[1431] {
             s.store_pow_ad(170, A::scaled_offset(A::div(s.ad_value(394), s.ad_value(406)), 1.0, 0.5), s.ad_value(317));
-            s.store_pow_ad(171, s.ad_value(421), s.ad_value(822));
+            s.store_pow_indices(171, 421, 822);
         }
 
         s.b[1436] = (p.p61 != 0.0);
@@ -519,7 +519,7 @@ impl Instance {
             s.store_pow_ad(170, A::scaled_offset(A::div(s.ad_value(169), s.ad_value(406)), 1.0, 0.5), s.ad_value(317));
         }
 
-        s.store_pow_ad(168, s.ad_value(409), s.ad_value(822));
+        s.store_pow_indices(168, 409, 822);
 
         s.b[1454] = (p.p61 != 0.0);
         s.v[1454] = if s.b[1454] { 1.0 } else { 0.0 };
@@ -1554,7 +1554,7 @@ impl Instance {
 
         if (s.b[1508] && (!s.b[1509])) {
             s.store_div_scaled_value_offset_denominator(170, s.ad_value(252), 1.0, s.ad_value(169), 0.001, 1.0);
-            s.store_pow_ad(171, s.ad_value(169), s.ad_value(751));
+            s.store_pow_indices(171, 169, 751);
         }
 
         s.b[1510] = (p.p61 != 0.0);
@@ -1704,7 +1704,7 @@ impl Instance {
 
         if ((s.b[1508] && s.b[1513]) && (!s.b[1514])) {
             s.store_div_scaled_value_offset_denominator(170, s.ad_value(255), 1.0, s.ad_value(169), 0.001, 1.0);
-            s.store_pow_ad(171, s.ad_value(169), s.ad_value(760));
+            s.store_pow_indices(171, 169, 760);
             s.store_mul3_affine_lhs(172, 522, 522, -1.0, 0.0, 522);
             s.store_offset_add_ad(173, s.ad_value(758), A::abs(s.ad_value(172)), 1e-5);
         }
@@ -1760,7 +1760,7 @@ impl Instance {
 
         if (s.b[1508] && (!s.b[1516])) {
             s.store_div_scaled_value_offset_denominator(170, s.ad_value(250), 1.0, s.ad_value(169), 0.001, 1.0);
-            s.store_pow_ad(171, s.ad_value(169), s.ad_value(765));
+            s.store_pow_indices(171, 169, 765);
         }
 
         s.b[1517] = (p.p61 != 0.0);
@@ -1910,7 +1910,7 @@ impl Instance {
 
         if ((s.b[1508] && s.b[1520]) && (!s.b[1521])) {
             s.store_div_scaled_value_offset_denominator(170, s.ad_value(251), 1.0, s.ad_value(169), 0.001, 1.0);
-            s.store_pow_ad(171, s.ad_value(169), s.ad_value(774));
+            s.store_pow_indices(171, 169, 774);
             s.store_mul3_affine_lhs(172, 521, 521, -1.0, 0.0, 521);
             s.store_offset_add_ad(173, s.ad_value(772), A::abs(s.ad_value(172)), 1e-5);
         }

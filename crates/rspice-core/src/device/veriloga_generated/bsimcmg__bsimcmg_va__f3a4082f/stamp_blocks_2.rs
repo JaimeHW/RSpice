@@ -6021,7 +6021,7 @@ impl Instance {
 
         s.store_pow_ad(170, A::scaled_offset(A::div(s.ad_value(392), s.ad_value(406)), 1.0, 0.5), s.ad_value(317));
 
-        s.store_pow_ad(171, s.ad_value(419), s.ad_value(822));
+        s.store_pow_indices(171, 419, 822);
 
         s.b[1423] = (p.p61 != 0.0);
         s.v[1423] = if s.b[1423] { 1.0 } else { 0.0 };

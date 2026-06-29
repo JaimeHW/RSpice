@@ -2143,7 +2143,7 @@ impl Instance {
             s.store_mul_pow_ad_rhs(650, 756, s.ad_value(639), s.ad_value(800));
         }
 
-        s.store_pow_ad(652, s.ad_value(639), s.ad_value(801));
+        s.store_pow_indices(652, 639, 801);
 
         s.store_mul_pow_ad_rhs(653, 741, s.ad_value(639), A::neg(s.ad_value(802)));
 
@@ -4610,7 +4610,7 @@ impl Instance {
             s.store_limited_exp(603, 167);
             s.store_sub_from_scalar(169, 1.0, 603);
             s.store_scale(167, 601, ((1.0 / s.v[184]) + (1.0 / p.p595)));
-            s.store_pow_ad(599, s.ad_value(167), s.ad_value(600));
+            s.store_pow_indices(599, 167, 600);
             s.store_mul3_lhs(604, 602, 578, 599);
             s.store_mul(168, 167, 604);
             s.store_mul3_lhs(604, 602, 577, 599);

@@ -277,7 +277,7 @@ impl Instance {
 
         if (s.b[2232] && s.b[2233]) {
             s.store_mul(1990, 718, 1989);
-            s.store_pow_ad(1991, s.ad_value(1990), s.ad_value(1983));
+            s.store_pow_indices(1991, 1990, 1983);
             s.store_add_scaled_square_product_mixed_iai(1992, 1982, 1.0, A::add_scaled_inputs3(s.ad_value(1988), 2.0, s.ad_value(1982), 2.0, s.ad_value(1991), -1.0), 1991, 1.0);
             s.store_mul_offset_ad_rhs(1993, 1982, A::div_scaled_inputs2(A::sqrt(s.ad_value(1992)), 1.0, s.ad_value(1982), (-1.0), s.ad_value(1991), 1.0), (-1.0));
             s.store_sub(1975, 1988, 1993);
@@ -358,7 +358,7 @@ impl Instance {
         p: &Parameters,
     ) {
         if ((s.b[2232] && (!s.b[2236])) && s.b[2238]) {
-            s.store_pow_ad(1991, s.ad_value(1990), s.ad_value(1983));
+            s.store_pow_indices(1991, 1990, 1983);
             s.store_add_scaled_square_product_mixed_iai(1992, 1982, 1.0, A::add_scaled_inputs3(s.ad_value(1988), 2.0, s.ad_value(1982), 2.0, s.ad_value(1991), -1.0), 1991, 1.0);
             s.store_mul_offset_ad_rhs(1993, 1982, A::div_scaled_inputs2(A::sqrt(s.ad_value(1992)), 1.0, s.ad_value(1982), (-1.0), s.ad_value(1991), 1.0), (-1.0));
             s.store_sub(1977, 1988, 1993);

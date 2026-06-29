@@ -3746,7 +3746,7 @@ impl Instance {
             s.store_mul_pow_ad_rhs(406, 512, s.ad_value(395), s.ad_value(571));
         }
 
-        s.store_pow_ad(408, s.ad_value(395), s.ad_value(572));
+        s.store_pow_indices(408, 395, 572);
 
         s.store_mul_pow_ad_rhs(409, 500, s.ad_value(395), A::neg(s.ad_value(573)));
 

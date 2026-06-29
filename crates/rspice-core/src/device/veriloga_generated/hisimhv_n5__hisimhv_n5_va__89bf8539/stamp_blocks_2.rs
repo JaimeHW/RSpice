@@ -6131,7 +6131,7 @@ impl Instance {
             if (s.v[335] == 0.0) {
                 s.store_scalar(336, 0.0);
             } else {
-                s.store_pow_ad(336, s.ad_value(335), s.ad_value(658));
+                s.store_pow_indices(336, 335, 658);
             }
         }
 

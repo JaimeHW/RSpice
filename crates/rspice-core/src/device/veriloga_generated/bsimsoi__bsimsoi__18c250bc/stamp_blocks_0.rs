@@ -1819,7 +1819,7 @@ impl Instance {
 
         s.store_mul_offset_ad_rhs(467, 319, A::div_from_scalar(1.0, s.ad_value(36)), (1.0 / s.v[327]));
 
-        s.store_pow_ad(352, s.ad_value(467), s.ad_value(318));
+        s.store_pow_indices(352, 467, 318);
 
         s.store_offset_scaled_ad(353, A::pow(s.ad_value(467), s.ad_value(253)), p.p343, 1.0);
 

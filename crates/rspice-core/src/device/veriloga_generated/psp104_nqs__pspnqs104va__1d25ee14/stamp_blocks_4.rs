@@ -3644,7 +3644,7 @@ impl Instance {
 
         if (s.b[2340] && s.b[2341]) {
             s.store_mul(2098, 724, 2097);
-            s.store_pow_ad(2099, s.ad_value(2098), s.ad_value(2091));
+            s.store_pow_indices(2099, 2098, 2091);
             s.store_add_scaled_square_product_mixed_iai(2100, 2090, 1.0, A::add_scaled_inputs3(s.ad_value(2096), 2.0, s.ad_value(2090), 2.0, s.ad_value(2099), -1.0), 2099, 1.0);
             s.store_mul_offset_ad_rhs(2101, 2090, A::div_scaled_inputs2(A::sqrt(s.ad_value(2100)), 1.0, s.ad_value(2090), (-1.0), s.ad_value(2099), 1.0), (-1.0));
             s.store_sub(2083, 2096, 2101);
@@ -3716,7 +3716,7 @@ impl Instance {
 
         if ((s.b[2340] && (!s.b[2344])) && s.b[2346]) {
             s.store_mul(2098, 724, 2097);
-            s.store_pow_ad(2099, s.ad_value(2098), s.ad_value(2091));
+            s.store_pow_indices(2099, 2098, 2091);
             s.store_add_scaled_square_product_mixed_iai(2100, 2090, 1.0, A::add_scaled_inputs3(s.ad_value(2096), 2.0, s.ad_value(2090), 2.0, s.ad_value(2099), -1.0), 2099, 1.0);
             s.store_mul_offset_ad_rhs(2101, 2090, A::div_scaled_inputs2(A::sqrt(s.ad_value(2100)), 1.0, s.ad_value(2090), (-1.0), s.ad_value(2099), 1.0), (-1.0));
             s.store_sub(2085, 2096, 2101);
