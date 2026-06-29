@@ -2,7 +2,8 @@ pub(crate) mod codegen;
 pub mod encoder;
 
 use super::expr::{
-    EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, constant_dynamic_variable_slot,
+    EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, canonical_ddt_slots_for_equation,
+    constant_dynamic_variable_slot,
 };
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
@@ -217,12 +218,18 @@ fn lower_stamp_value_program(
                 detail: format!("stamp index {stamp_index} exceeds canonical equation id range")
                     .into(),
             })?;
+        let ddt_slots = canonical_ddt_slots_for_equation(
+            model.name.clone(),
+            mir,
+            equation_id,
+            bytecode_program,
+        )?;
         return NativeProgram::from_mir_equation(
             model.name.clone(),
             EntryKind::StampValue,
             mir,
             equation_id,
-            limits,
+            limits.with_canonical_ddt_slots(&ddt_slots),
         );
     }
 
