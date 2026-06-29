@@ -1381,6 +1381,11 @@ endmodule
 
         let cases = [
             (
+                "juncap200",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "juncap200.va"]),
+                None,
+            ),
+            (
                 "bsimcmg",
                 shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
                 Some("bsimcmg_va"),
@@ -1389,6 +1394,11 @@ endmodule
                 "r3_cmc",
                 shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
                 None,
+            ),
+            (
+                "diode_cmc",
+                shipped_cmc_model_path(&["diode_cmc_3.0_20250714", "vacode", "diode_cmc.va"]),
+                Some("DIODE_CMC"),
             ),
             (
                 "bsimimg",
@@ -1437,6 +1447,11 @@ endmodule
 
         let cases = [
             (
+                "juncap200",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "juncap200.va"]),
+                None,
+            ),
+            (
                 "bsimcmg",
                 shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
                 Some("bsimcmg_va"),
@@ -1445,6 +1460,11 @@ endmodule
                 "r3_cmc",
                 shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
                 None,
+            ),
+            (
+                "diode_cmc",
+                shipped_cmc_model_path(&["diode_cmc_3.0_20250714", "vacode", "diode_cmc.va"]),
+                Some("DIODE_CMC"),
             ),
             (
                 "bsimimg",
@@ -1846,11 +1866,13 @@ endmodule
 
     fn shipped_device_terminal_bias(name: &str, terminal: usize) -> f64 {
         match name {
+            "juncap200" => [0.2, 0.0].get(terminal).copied().unwrap_or(0.0),
             "bsimcmg" => [0.05, 0.7, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
             "r3_cmc" => [0.1, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
+            "diode_cmc" => [0.7, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
