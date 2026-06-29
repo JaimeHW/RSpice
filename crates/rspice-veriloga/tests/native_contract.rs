@@ -2003,6 +2003,48 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_cross_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_cross_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ cross(V(p, n), 1);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CROSSCANON1", model, &artifact, &[1, 0])
+            .expect("canonical cross current uses native JIT path");
+    assert!(device.is_using_native());
+
+    device.set_analysis_type(0);
+    device.update_voltages(&[7.0]);
+    let dc_currents = device
+        .try_evaluate()
+        .expect("canonical cross DC evaluation succeeds");
+    assert_eq!(dc_currents[0], 0.0);
+
+    device.set_analysis_type(2);
+    for (time, voltage, expected) in [(0.0, -1.0, 0.0), (0.5, 1.0, 1.0), (1.0, 2.0, 0.0)] {
+        device.set_time(time);
+        device.update_voltages(&[voltage]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical cross transient evaluation succeeds");
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
