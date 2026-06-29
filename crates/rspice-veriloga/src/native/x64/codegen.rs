@@ -3295,13 +3295,27 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
 fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
     matches!(
         op,
-        NativeOp::LoadParam(_)
+        NativeOp::Const(_)
+            | NativeOp::LoadParam(_)
             | NativeOp::LoadParamGiven(_)
             | NativeOp::LoadPortConnected(_)
             | NativeOp::LoadCurrent(_)
             | NativeOp::LoadPriorCurrent(_)
             | NativeOp::LoadInternalVoltage(_)
             | NativeOp::LoadBranchUnknown(_)
+            | NativeOp::LoadVariable(_)
+            | NativeOp::Add
+            | NativeOp::Sub
+            | NativeOp::Mul
+            | NativeOp::Div
+            | NativeOp::AddConst(_)
+            | NativeOp::SubConst(_)
+            | NativeOp::MulConst(_)
+            | NativeOp::DivConst(_)
+            | NativeOp::SubFromConst(_)
+            | NativeOp::DivFromConst(_)
+            | NativeOp::Square
+            | NativeOp::Sqrt
     )
 }
 
@@ -3667,6 +3681,40 @@ mod tests {
         let ctx = eval_context(&params, &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 4.75_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_pure_arithmetic() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushParam(0),
+                Instruction::PushVariable(0),
+                Instruction::Mul,
+                Instruction::PushParam(1),
+                Instruction::PushVariable(1),
+                Instruction::Mul,
+                Instruction::Add,
+            ],
+            0,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile fused param product leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across direct variable loads and pure arithmetic"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate fused param product leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [1.25_f64, 3.5_f64];
+        let vars = [7.0_f64, 10.0_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 43.75_f64.to_bits());
     }
 
     #[test]
@@ -8907,8 +8955,8 @@ mod tests {
         let samples = native_microbench_samples();
         eprintln!("native-x64-microbench iterations={iterations} samples={samples}");
 
-        let params = [1.25_f64, 3.5, 13.75, 6.25];
-        let vars = [7.0_f64, 10.0, 20.0, 30.0, 40.0];
+        let params = [1.25_f64, 3.5, 13.75, 6.25, 0.5, 1.5, 2.5, 3.5];
+        let vars = [7.0_f64, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0];
         let dyn_vars = [2.0_f64, 10.0, 20.0, 30.0, 40.0];
         let voltages = [9.0_f64, 4.0, 12.0, 2.0];
         let branch_currents = [f64::NAN, 4.0_f64, 6.5_f64];
@@ -8950,6 +8998,51 @@ mod tests {
             iterations,
             samples,
             19.375,
+        );
+        run_native_value_microbench(
+            "param_variable_dot8",
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushVariable(0),
+                    Instruction::Mul,
+                    Instruction::PushParam(1),
+                    Instruction::PushVariable(1),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(2),
+                    Instruction::PushVariable(2),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(3),
+                    Instruction::PushVariable(3),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(4),
+                    Instruction::PushVariable(4),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(5),
+                    Instruction::PushVariable(5),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(6),
+                    Instruction::PushVariable(6),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(7),
+                    Instruction::PushVariable(7),
+                    Instruction::Mul,
+                    Instruction::Add,
+                ],
+                0,
+            ),
+            &ctx,
+            vars.as_ptr(),
+            iterations,
+            samples,
+            996.25,
         );
         run_native_value_microbench(
             "same_storage_voltage_pair",
