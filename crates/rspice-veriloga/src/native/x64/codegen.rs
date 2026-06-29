@@ -8,6 +8,7 @@ use crate::native::abi::{
     rspice_mod, rspice_native_current_probe_error, rspice_native_integer_shift_count_error,
     rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
     rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
+    rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_native_state_values_error, rspice_pow, rspice_sin,
     rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
@@ -26,6 +27,7 @@ const BRANCH_CURRENTS_LEN_OFFSET: i32 = 32;
 const CURRENTS_OFFSET: i32 = 40;
 const CURRENTS_LEN_OFFSET: i32 = 48;
 const PORT_CONNECTED_OFFSET: i32 = 64;
+const PORT_CONNECTED_LEN_OFFSET: i32 = 72;
 const TEMPERATURE_OFFSET: i32 = 80;
 const TIME_OFFSET: i32 = 88;
 const TIMESTEP_OFFSET: i32 = 96;
@@ -36,9 +38,10 @@ const STATE_INITIALIZED_LEN_OFFSET: i32 = 128;
 const LOOKUP_TABLES_OFFSET: i32 = 136;
 const LOOKUP_TABLES_LEN_OFFSET: i32 = 144;
 const PARAM_GIVEN_OFFSET: i32 = 168;
-const BRANCH_UNKNOWNS_OFFSET: i32 = 176;
-const ANALYSIS_TYPE_OFFSET: i32 = 184;
-const MFACTOR_OFFSET: i32 = 192;
+const PARAM_GIVEN_LEN_OFFSET: i32 = 176;
+const BRANCH_UNKNOWNS_OFFSET: i32 = 184;
+const ANALYSIS_TYPE_OFFSET: i32 = 192;
+const MFACTOR_OFFSET: i32 = 200;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
@@ -199,10 +202,10 @@ impl FunctionCompiler {
                         .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 }
                 NativeOp::LoadParamGiven(index) => {
-                    self.emit_context_u8_flag_load(PARAM_GIVEN_OFFSET, index)?;
+                    self.emit_param_given_load(index)?;
                 }
                 NativeOp::LoadPortConnected(index) => {
-                    self.emit_context_u8_flag_load(PORT_CONNECTED_OFFSET, index)?;
+                    self.emit_port_connected_load(index)?;
                 }
                 NativeOp::LoadVoltage { pos, neg } => {
                     self.emit_voltage_load(pos, neg)?;
@@ -2298,17 +2301,56 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_context_u8_flag_load(
+    fn emit_param_given_load(&mut self, index: usize) -> JitResult<()> {
+        self.emit_guarded_context_u8_slice_load(
+            PARAM_GIVEN_OFFSET,
+            PARAM_GIVEN_LEN_OFFSET,
+            index,
+            rspice_native_param_given_error,
+        )
+    }
+
+    fn emit_port_connected_load(&mut self, index: usize) -> JitResult<()> {
+        self.emit_guarded_context_u8_slice_load(
+            PORT_CONNECTED_OFFSET,
+            PORT_CONNECTED_LEN_OFFSET,
+            index,
+            rspice_native_port_connected_error,
+        )
+    }
+
+    fn emit_guarded_context_u8_slice_load(
         &mut self,
-        ctx_pointer_field_offset: i32,
+        pointer_field_offset: i32,
+        len_field_offset: i32,
         index: usize,
+        helper: VoidHelper,
     ) -> JitResult<()> {
         let dst = self.push_register()?;
-        self.emit_context_pointer_load(ctx_pointer_field_offset);
+        let value_disp = byte_disp_u8(index)?;
+
+        self.emit_context_pointer_load(pointer_field_offset);
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let missing_storage = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
         self.encoder
-            .movzx_r32_m8_base_disp32(Gpr::R10, Gpr::Rax, byte_disp_u8(index)?);
+            .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), len_field_offset);
+        self.encoder.movabs_r64_imm64(Gpr::R11, index as u64);
+        self.encoder.cmp_r64_r64(Gpr::R10, Gpr::R11);
+        let index_out_of_range = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
+
+        self.encoder
+            .movzx_r32_m8_base_disp32(Gpr::R10, Gpr::Rax, value_disp);
         self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
-        Ok(())
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(missing_storage)?;
+        self.patch_rel32_to_current(index_out_of_range)?;
+        self.emit_void_error_return(helper);
+
+        self.patch_rel32_to_current(done)
     }
 
     fn emit_analysis_check(&mut self, analysis_id: u8) -> JitResult<()> {
@@ -4381,6 +4423,74 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("short prior current must hard-fail");
         assert_prior_current_error(&error);
+    }
+
+    #[test]
+    fn generated_value_leaf_loads_param_given_flag() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushParamGiven(1)],
+            0,
+        );
+        let bytes = compile_value_function(&program).expect("compile param_given leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate param_given leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let param_given = [0_u8, 1_u8];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.param_given = param_given.as_ptr();
+        ctx.param_given_len = param_given.len();
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 1.0_f64.to_bits());
+
+        ctx.param_given = std::ptr::null();
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing param_given must hard-fail");
+        assert_param_given_error(&error);
+
+        ctx.param_given = param_given.as_ptr();
+        ctx.param_given_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short param_given must hard-fail");
+        assert_param_given_error(&error);
+    }
+
+    #[test]
+    fn generated_value_leaf_loads_port_connected_flag() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![Instruction::PushPortConnected(1)],
+            2,
+        );
+        let bytes = compile_value_function(&program).expect("compile port_connected leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate port_connected leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let port_connected = [0_u8, 1_u8];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.port_connected = port_connected.as_ptr();
+        ctx.port_connected_len = port_connected.len();
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 1.0_f64.to_bits());
+
+        ctx.port_connected = std::ptr::null();
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("missing port_connected must hard-fail");
+        assert_port_connected_error(&error);
+
+        ctx.port_connected = port_connected.as_ptr();
+        ctx.port_connected_len = 1;
+        clear_native_runtime_error();
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
+        let error = take_native_runtime_error().expect("short port_connected must hard-fail");
+        assert_port_connected_error(&error);
     }
 
     #[test]
@@ -6904,6 +7014,7 @@ mod tests {
             laplace_filters: std::ptr::null_mut(),
             laplace_filters_len: 0,
             param_given: std::ptr::null(),
+            param_given_len: 0,
             branch_unknowns: branch_unknowns.as_ptr(),
             analysis_type: 0,
             multiplicity: 1.0,
@@ -6963,6 +7074,28 @@ mod tests {
         assert!(
             error.contains("missing contribution current storage"),
             "error must identify missing native prior-current storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    fn assert_param_given_error(error: &str) {
+        assert!(
+            error.contains("missing parameter-given storage"),
+            "error must identify missing native param_given storage, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    fn assert_port_connected_error(error: &str) {
+        assert!(
+            error.contains("missing connection-flag storage"),
+            "error must identify missing native port_connected storage, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),

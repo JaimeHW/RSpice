@@ -565,6 +565,7 @@ mod tests {
             laplace_filters: std::ptr::null_mut(),
             laplace_filters_len: 0,
             param_given: std::ptr::null(),
+            param_given_len: 0,
             branch_unknowns: std::ptr::null(),
             analysis_type: 0,
             multiplicity: 1.0,

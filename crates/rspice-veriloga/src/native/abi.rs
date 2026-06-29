@@ -52,6 +52,8 @@ pub struct EvalContext {
     /// Whether each parameter was explicitly given (one byte per
     /// parameter, same length as `params`)
     pub param_given: *const u8,
+    /// Length of `param_given`.
+    pub param_given_len: usize,
     /// Branch-current unknown values of potential contributions (sized to
     /// the model's branch unknown count)
     pub branch_unknowns: *const f64,
@@ -156,6 +158,20 @@ pub extern "C" fn rspice_native_current_probe_error() {
 pub extern "C" fn rspice_native_prior_current_error() {
     set_native_runtime_error(
         "native prior current load missing contribution current storage; no interpreter fallback",
+    );
+}
+
+#[unsafe(export_name = "rspice_native_param_given_error")]
+pub extern "C" fn rspice_native_param_given_error() {
+    set_native_runtime_error(
+        "native param_given load missing parameter-given storage; no interpreter fallback",
+    );
+}
+
+#[unsafe(export_name = "rspice_native_port_connected_error")]
+pub extern "C" fn rspice_native_port_connected_error() {
+    set_native_runtime_error(
+        "native port_connected load missing connection-flag storage; no interpreter fallback",
     );
 }
 
@@ -1068,20 +1084,21 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, laplace_filters), 152);
         assert_eq!(offset_of!(EvalContext, laplace_filters_len), 160);
         assert_eq!(offset_of!(EvalContext, param_given), 168);
-        assert_eq!(offset_of!(EvalContext, branch_unknowns), 176);
-        assert_eq!(offset_of!(EvalContext, analysis_type), 184);
-        assert_eq!(offset_of!(EvalContext, multiplicity), 192);
-        assert_eq!(offset_of!(EvalContext, zi_filters), 200);
-        assert_eq!(offset_of!(EvalContext, zi_filters_len), 208);
-        assert_eq!(offset_of!(EvalContext, transition_filters), 216);
-        assert_eq!(offset_of!(EvalContext, transition_filters_len), 224);
-        assert_eq!(offset_of!(EvalContext, slew_filters), 232);
-        assert_eq!(offset_of!(EvalContext, slew_filters_len), 240);
-        assert_eq!(offset_of!(EvalContext, delay_buffers), 248);
-        assert_eq!(offset_of!(EvalContext, delay_buffers_len), 256);
-        assert_eq!(offset_of!(EvalContext, cross_detectors), 264);
-        assert_eq!(offset_of!(EvalContext, cross_detectors_len), 272);
-        assert_eq!(size_of::<EvalContext>(), 280);
+        assert_eq!(offset_of!(EvalContext, param_given_len), 176);
+        assert_eq!(offset_of!(EvalContext, branch_unknowns), 184);
+        assert_eq!(offset_of!(EvalContext, analysis_type), 192);
+        assert_eq!(offset_of!(EvalContext, multiplicity), 200);
+        assert_eq!(offset_of!(EvalContext, zi_filters), 208);
+        assert_eq!(offset_of!(EvalContext, zi_filters_len), 216);
+        assert_eq!(offset_of!(EvalContext, transition_filters), 224);
+        assert_eq!(offset_of!(EvalContext, transition_filters_len), 232);
+        assert_eq!(offset_of!(EvalContext, slew_filters), 240);
+        assert_eq!(offset_of!(EvalContext, slew_filters_len), 248);
+        assert_eq!(offset_of!(EvalContext, delay_buffers), 256);
+        assert_eq!(offset_of!(EvalContext, delay_buffers_len), 264);
+        assert_eq!(offset_of!(EvalContext, cross_detectors), 272);
+        assert_eq!(offset_of!(EvalContext, cross_detectors_len), 280);
+        assert_eq!(size_of::<EvalContext>(), 288);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -1211,6 +1228,7 @@ mod tests {
             laplace_filters: std::ptr::null_mut(),
             laplace_filters_len: 0,
             param_given: std::ptr::null(),
+            param_given_len: 0,
             branch_unknowns: std::ptr::null(),
             analysis_type: 2,
             multiplicity: 1.0,
@@ -1807,6 +1825,7 @@ mod tests {
             laplace_filters: std::ptr::null_mut(),
             laplace_filters_len: 0,
             param_given: std::ptr::null(),
+            param_given_len: 0,
             branch_unknowns: std::ptr::null(),
             analysis_type: 0,
             multiplicity: 1.0,
