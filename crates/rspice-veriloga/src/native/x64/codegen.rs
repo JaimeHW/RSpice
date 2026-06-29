@@ -1485,21 +1485,22 @@ impl FunctionCompiler {
         self.encoder.test_r8_r8(Gpr::R11, Gpr::R11);
         let first_evaluation = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
 
-        self.encoder.sub_rsp_imm32(WORD_BYTES as i32);
-        self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, step);
-        self.encoder
-            .subsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
-        self.encoder.ucomisd_xmm_xmm(value, value);
-        let unordered_delta = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
-        self.encoder.movq_r64_xmm(Gpr::R11, step);
-        self.encoder.btc_r64_imm8(Gpr::R11, 63);
-        self.encoder.movq_xmm_r64(step, Gpr::R11);
-        self.encoder.maxsd_xmm_xmm(value, step);
-        self.encoder.minsd_xmm_m64_base_disp32(value, Gpr::Rsp, 0);
-        self.encoder
-            .addsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
-        self.patch_rel32_to_current(unordered_delta)?;
-        self.encoder.add_rsp_imm32(WORD_BYTES as i32);
+        if self.depth < XMM_STACK.len() {
+            let positive_step = self.scratch_register()?;
+            self.encoder.movsd_xmm_xmm(positive_step, step);
+            self.emit_limit_state_clamp_delta(value, step, state_disp, |compiler, value| {
+                compiler.encoder.minsd_xmm_xmm(value, positive_step);
+            })?;
+        } else {
+            self.encoder.sub_rsp_imm32(WORD_BYTES as i32);
+            self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, step);
+            self.emit_limit_state_clamp_delta(value, step, state_disp, |compiler, value| {
+                compiler
+                    .encoder
+                    .minsd_xmm_m64_base_disp32(value, Gpr::Rsp, 0);
+            })?;
+            self.encoder.add_rsp_imm32(WORD_BYTES as i32);
+        }
 
         self.patch_rel32_to_current(first_evaluation)?;
         self.encoder
@@ -1522,6 +1523,28 @@ impl FunctionCompiler {
 
         self.patch_rel32_to_current(done_after_initialized_store)?;
         self.depth -= 1;
+        Ok(())
+    }
+
+    fn emit_limit_state_clamp_delta(
+        &mut self,
+        value: Xmm,
+        step: Xmm,
+        state_disp: i32,
+        emit_upper_clamp: impl FnOnce(&mut Self, Xmm),
+    ) -> JitResult<()> {
+        self.encoder
+            .subsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
+        self.encoder.ucomisd_xmm_xmm(value, value);
+        let unordered_delta = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
+        self.encoder.movq_r64_xmm(Gpr::R11, step);
+        self.encoder.btc_r64_imm8(Gpr::R11, 63);
+        self.encoder.movq_xmm_r64(step, Gpr::R11);
+        self.encoder.maxsd_xmm_xmm(value, step);
+        emit_upper_clamp(self, value);
+        self.encoder
+            .addsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
+        self.patch_rel32_to_current(unordered_delta)?;
         Ok(())
     }
 
@@ -2971,7 +2994,7 @@ mod tests {
     use super::{
         DYNAMIC_READ_FRAME_BYTES, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64,
         INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN, NativeAssignment, Q_ELECTRON,
-        ROUND_TEMP_FRAME_BYTES, VOLTAGES_OFFSET, X64Encoder, XMM_STACK, Xmm,
+        ROUND_TEMP_FRAME_BYTES, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
         assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
         compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg, rspice_exp,
     };
@@ -5090,6 +5113,14 @@ mod tests {
             0,
         );
         let bytes = compile_value_function(&program).expect("compile limit state leaf");
+        assert!(
+            !contains_bytes(&bytes, &sub_rsp_bytes(WORD_BYTES as i32)),
+            "limit state with a spare XMM register should not spill the positive step"
+        );
+        assert!(
+            !contains_bytes(&bytes, &add_rsp_bytes(WORD_BYTES as i32)),
+            "limit state with a spare XMM register should not restore a positive-step spill frame"
+        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate limit state leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -5202,6 +5233,55 @@ mod tests {
             state_values[1].is_nan(),
             "native state should record propagated NaN"
         );
+    }
+
+    #[test]
+    fn generated_value_leaf_keeps_full_stack_limit_state_on_spill_path() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(4.0),
+                Instruction::PushVariable(0),
+                Instruction::PushConst(0.5),
+                Instruction::LimitState(1),
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+                Instruction::Add,
+            ],
+            0,
+        );
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+        let bytes = compile_value_function(&program).expect("compile full-stack limit state leaf");
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(WORD_BYTES as i32)),
+            "full-stack limit state must keep the positive-step spill fallback"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(WORD_BYTES as i32)),
+            "full-stack limit state must restore the positive-step spill fallback"
+        );
+
+        let memory =
+            ExecutableMemory::allocate(&bytes).expect("allocate full-stack limit state leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut state_values = [0.0_f64, 10.0_f64];
+        let mut state_initialized = [0_u8, 1_u8];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_values_len = state_values.len();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
+
+        let vars = [11.0_f64];
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 20.5_f64.to_bits());
+        assert_eq!(state_values[1].to_bits(), 10.5_f64.to_bits());
     }
 
     #[test]
