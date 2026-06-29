@@ -5333,6 +5333,37 @@ fn stamp() {
             "{mul_div_from_scalar}"
         );
 
+        assert!(
+            !support.contains("fn store_div_scaled_inputs_square_rhs_components"),
+            "{support}"
+        );
+        for signature in [
+            "fn store_div_scaled_inputs_square_rhs(",
+            "fn store_div_scaled_inputs_square_ad_rhs(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("store_div_scaled_inputs_square_rhs_components"),
+                "{body}"
+            );
+        }
+
+        let square_rhs_division = helper_body(&support, "fn store_div_scaled_inputs_square_rhs(");
+        assert!(
+            square_rhs_division.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale;"
+            ),
+            "{square_rhs_division}"
+        );
+
         for component in [
             "fn store_offset_lhs_mixed_components",
             "fn store_offset_lhs_ad_rhs_components",
@@ -13269,35 +13300,30 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.store_div_scaled_inputs_components(index, left.value, left.node_derivatives, left.branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
         "    }",
         "",
-        "    #[inline]",
-        "    fn store_div_scaled_inputs_square_rhs_components(&mut self, index: usize, left_raw: f64, left_node_derivatives: [f64; Instance::NODE_COUNT], left_branch_derivatives: [f64; Instance::BRANCH_COUNT], left_scale: f64, right_raw: f64, right_node_derivatives: [f64; Instance::NODE_COUNT], right_branch_derivatives: [f64; Instance::BRANCH_COUNT], right_scale: f64) {",
+        "    fn store_div_scaled_inputs_square_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64) {",
+        "        let left_raw = self.values[left];",
+        "        let right_raw = self.values[right];",
         "        let denominator = right_raw * right_raw * right_scale;",
         "        let reciprocal = 1.0 / denominator;",
         "        let quotient = left_raw * left_scale * reciprocal;",
         "        let left_derivative_scale = left_scale * reciprocal;",
         "        let right_derivative_scale = -quotient * reciprocal * right_scale * 2.0 * right_raw;",
         "        self.values[index] = quotient;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_derivative_scale + right_node_derivatives[axis] * right_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_derivative_scale + right_branch_derivatives[axis] * right_derivative_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_div_scaled_inputs_square_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: usize, right_scale: f64) {",
-        "        let left_raw = self.values[left];",
-        "        let right_raw = self.values[right];",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
-        "        self.store_div_scaled_inputs_square_rhs_components(index, left_raw, left_node_derivatives, left_branch_derivatives, left_scale, right_raw, right_node_derivatives, right_branch_derivatives, right_scale);",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * left_derivative_scale + self.branch_derivatives[right][axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
         "    fn store_div_scaled_inputs_square_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue, right_scale: f64) {",
         "        let left_raw = self.values[left];",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        self.store_div_scaled_inputs_square_rhs_components(index, left_raw, left_node_derivatives, left_branch_derivatives, left_scale, right.value, right.node_derivatives, right.branch_derivatives, right_scale);",
+        "        let denominator = right.value * right.value * right_scale;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = left_raw * left_scale * reciprocal;",
+        "        let left_derivative_scale = left_scale * reciprocal;",
+        "        let right_derivative_scale = -quotient * reciprocal * right_scale * 2.0 * right.value;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
