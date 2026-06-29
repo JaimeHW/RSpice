@@ -4,7 +4,7 @@ pub mod encoder;
 use super::expr::{
     EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, canonical_ddt_slots_for_equation,
     canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
-    constant_dynamic_variable_slot,
+    canonical_transition_slots_for_equation, constant_dynamic_variable_slot,
 };
 use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::runtime::ExecutableMemory;
@@ -237,6 +237,12 @@ fn lower_stamp_value_program(
             equation_id,
             bytecode_program,
         )?;
+        let transition_slots = canonical_transition_slots_for_equation(
+            model.name.clone(),
+            mir,
+            equation_id,
+            bytecode_program,
+        )?;
         return NativeProgram::from_mir_equation(
             model.name.clone(),
             EntryKind::StampValue,
@@ -245,7 +251,8 @@ fn lower_stamp_value_program(
             limits
                 .with_canonical_ddt_slots(&ddt_slots)
                 .with_canonical_idt_slots(&idt_slots)
-                .with_canonical_idtmod_slots(&idtmod_slots),
+                .with_canonical_idtmod_slots(&idtmod_slots)
+                .with_canonical_transition_slots(&transition_slots),
         );
     }
 
@@ -466,7 +473,7 @@ endmodule
 module native_canonical_unsupported(p, n);
   inout p, n;
   electrical p, n;
-  analog I(p, n) <+ transition(V(p, n) > 0.5, 0.2, 0.4, 0.4);
+  analog I(p, n) <+ hypot(V(p, n), 2.0);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -479,9 +486,7 @@ endmodule
             .expect_err("unsupported canonical stamp must not fall back to bytecode");
 
         assert!(
-            error
-                .to_string()
-                .contains("intrinsic function 'transition'"),
+            error.to_string().contains("intrinsic function 'hypot'"),
             "{error}"
         );
     }

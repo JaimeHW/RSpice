@@ -1774,13 +1774,48 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_executes_transition_current_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_transition_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ transition(V(p, n) > 0.5, 0.2, 0.4, 0.4);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CTRNACANON1", model, &artifact, &[1, 0])
+            .expect("canonical transition current uses native JIT path");
+    assert!(device.is_using_native());
+    device.set_analysis_type(2);
+
+    for (time, expected) in [(1.0, 0.0), (1.4, 0.5), (1.6, 1.0)] {
+        device.set_time(time);
+        device.update_voltages(&[1.0]);
+        let currents = device
+            .try_evaluate()
+            .expect("canonical transition evaluation succeeds");
+        assert!(
+            (currents[0] - expected).abs() < 1e-12,
+            "time: {time}, currents: {currents:?}"
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
     let source = r#"
 `include "disciplines.vams"
 module native_canonical_cache_guard(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ transition(V(p, n) > 0.5, 0.2, 0.4, 0.4);
+    analog I(p, n) <+ hypot(V(p, n), 2.0);
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -1803,9 +1838,7 @@ endmodule
     .expect_err("canonical-native path must not reuse cached bytecode-native image");
 
     assert!(
-        error
-            .to_string()
-            .contains("intrinsic function 'transition'"),
+        error.to_string().contains("intrinsic function 'hypot'"),
         "{error}"
     );
 }
