@@ -1972,6 +1972,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_binary_compare(&mut ops, CompareOp::Gt) {
+                        continue;
+                    }
                     if lower_constant_rhs_compare(&mut ops, CompareOp::Gt) {
                         continue;
                     }
@@ -2721,7 +2724,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.push(NativeOp::Const(0.0))?;
         }
         self.pop_binary("canonical above")?;
-        if lower_constant_rhs_compare(&mut self.ops, CompareOp::Gt) {
+        if lower_constant_binary_compare(&mut self.ops, CompareOp::Gt)
+            || lower_constant_rhs_compare(&mut self.ops, CompareOp::Gt)
+        {
             Ok(())
         } else {
             self.ops.push(NativeOp::Compare(CompareOp::Gt));
@@ -4933,6 +4938,47 @@ endmodule
             [NativeOp::Const(value)] => assert_eq!(value.to_bits(), (-0.0_f64).to_bits()),
             ops => panic!("expected folded ifelse literal, got {ops:?}"),
         }
+        assert_eq!(program.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_canonical_constant_above_to_ordered_literal() {
+        let source = r#"
+module mir_constant_above(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ above(2.0, 1.0);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let equation_id = crate::canonical_ir::EquationId::new(0);
+        let bytecode_program = &model.stamp_programs[0].value_program;
+        let above_slots = canonical_above_slots_for_equation(
+            "mir_constant_above".into(),
+            &artifact.mir,
+            equation_id,
+            bytecode_program,
+        )
+        .expect("map canonical above to bytecode detector slot");
+
+        assert_eq!(above_slots.len(), 1);
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_constant_above",
+            EntryKind::StampValue,
+            &artifact.mir,
+            equation_id,
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_above_slots(&above_slots),
+        )
+        .expect("lower canonical constant above to native program");
+
+        assert_eq!(program.ops(), &[NativeOp::Const(1.0)]);
         assert_eq!(program.max_stack_depth(), 1);
     }
 
@@ -7192,6 +7238,62 @@ endmodule
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn folds_constant_above_state_to_ordered_literal() {
+        let left_nan_bits = 0x7ff8_0000_0000_0001_u64;
+        let right_nan_bits = 0x7ff8_0000_0000_0002_u64;
+        let cases = [
+            (
+                "true",
+                2.0_f64.to_bits(),
+                1.0_f64.to_bits(),
+                1.0_f64.to_bits(),
+            ),
+            (
+                "false",
+                1.0_f64.to_bits(),
+                2.0_f64.to_bits(),
+                0.0_f64.to_bits(),
+            ),
+            (
+                "left-nan",
+                left_nan_bits,
+                1.0_f64.to_bits(),
+                0.0_f64.to_bits(),
+            ),
+            (
+                "right-nan",
+                1.0_f64.to_bits(),
+                right_nan_bits,
+                0.0_f64.to_bits(),
+            ),
+        ];
+
+        for (case, left_bits, right_bits, expected_bits) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(f64::from_bits(left_bits)),
+                    Instruction::PushConst(f64::from_bits(right_bits)),
+                    Instruction::AboveState(7),
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "above-literal",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant above state should fold to ordered literal");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
+            match lowered.ops() {
+                [NativeOp::Const(value)] => assert_eq!(value.to_bits(), expected_bits, "{case}"),
+                ops => panic!("{case}: expected folded above literal, got {ops:?}"),
+            }
+        }
     }
 
     #[test]
