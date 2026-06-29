@@ -465,6 +465,7 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     source = compact_add_sub_div_lhs_helper_calls(source);
     source = compact_add_product3_rhs_helper_calls(source);
     source = compact_add_mul_sub_from_scalar_rhs_helper_calls(source);
+    source = compact_add_div_from_scalar_rhs_helper_calls(source);
     source = compact_sub_add_scaled_inputs4_lhs_helper_calls(source);
     source = compact_sub_square_lhs_helper_calls(source);
     source = compact_div_ln_lhs_helper_calls(source);
@@ -1454,6 +1455,74 @@ fn compact_add_mul_sub_from_scalar_rhs_helper_call_replacement(
     let line = format!(
         "scratch.store_add_mul_sub_from_scalar_rhs_indices({target_index}, {source_index}, {product_left}, {}, {subtrahend});",
         rhs_args[1]
+    );
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_add_div_from_scalar_rhs_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_add_ad_rhs(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_add_div_from_scalar_rhs_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_add_div_from_scalar_rhs_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_add_ad_rhs(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let source_index = args[1].trim().parse::<usize>().ok()?;
+    let div_args = compact_ad_call_args(args[2].trim(), "div_from_scalar")?;
+    if div_args.len() != 2 {
+        return None;
+    }
+    let denominator = compact_scratch_ad_value_index(div_args[1])?;
+
+    let line = format!(
+        "scratch.store_add_div_from_scalar_rhs({target_index}, {source_index}, {}, {denominator});",
+        div_args[0]
     );
     let mut replacement = String::new();
     push_indented_compact_line(&mut replacement, indent, &line);
@@ -5234,6 +5303,30 @@ fn stamp() {
             !compact.contains("A::mul_sub_from_scalar_rhs("),
             "{compact}"
         );
+        assert!(!compact.contains("s.store_add_ad_rhs("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_add_rhs_div_from_scalar_as_direct_store() {
+        let support = generate_scratch_operation_helpers();
+        assert!(
+            support.contains("fn store_add_div_from_scalar_rhs("),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_add_ad_rhs(174, 2, AdValue::div_from_scalar(params.scalar, scratch.ad_value(3)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_add_div_from_scalar_rhs(174, 2, p.scalar, 3);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::div_from_scalar("), "{compact}");
         assert!(!compact.contains("s.store_add_ad_rhs("), "{compact}");
     }
 
@@ -16172,6 +16265,22 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left_value + right.value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] + right.node_derivatives[axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] + right.branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_div_from_scalar_rhs(&mut self, index: usize, left: usize, scalar: f64, denominator: usize) {",
+        "        let left_value = self.values[left];",
+        "        let denominator_value = self.values[denominator];",
+        "        let reciprocal = 1.0 / denominator_value;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_scale = -quotient * reciprocal;",
+        "        self.values[index] = left_value + quotient;",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + denominator_node_derivatives[axis] * denominator_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + denominator_branch_derivatives[axis] * denominator_scale; }",
         "    }",
         "",
         "    #[inline]",
