@@ -4131,6 +4131,14 @@ fn stamp() {
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_add_scaled_inputs3_sqrt_third_components"),
+            "{support}"
+        );
+        assert!(
+            !support.contains("fn store_add_scaled_inputs3_sqrt_first_components"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -5801,6 +5809,48 @@ fn stamp() {
                 "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale;"
             ),
             "{exp_mul_scaled_lhs_indices}"
+        );
+
+        let sqrt_third_indices =
+            helper_body(&support, "fn store_add_scaled_inputs3_sqrt_third_indices(");
+        assert!(
+            !sqrt_third_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{sqrt_third_indices}"
+        );
+        assert!(
+            !sqrt_third_indices.contains("_branch_derivatives = self.branch_derivatives"),
+            "{sqrt_third_indices}"
+        );
+        assert!(
+            !sqrt_third_indices.contains("store_add_scaled_inputs3_sqrt_third_components"),
+            "{sqrt_third_indices}"
+        );
+        assert!(
+            sqrt_third_indices.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale) + self.node_derivatives[sqrt_value][axis] * sqrt_derivative_scale;"
+            ),
+            "{sqrt_third_indices}"
+        );
+
+        let sqrt_first_indices =
+            helper_body(&support, "fn store_add_scaled_inputs3_sqrt_first_indices(");
+        assert!(
+            !sqrt_first_indices.contains("_node_derivatives = self.node_derivatives"),
+            "{sqrt_first_indices}"
+        );
+        assert!(
+            !sqrt_first_indices.contains("_branch_derivatives = self.branch_derivatives"),
+            "{sqrt_first_indices}"
+        );
+        assert!(
+            !sqrt_first_indices.contains("store_add_scaled_inputs3_sqrt_first_components"),
+            "{sqrt_first_indices}"
+        );
+        assert!(
+            sqrt_first_indices.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[sqrt_value][axis] * sqrt_derivative_scale + self.node_derivatives[second][axis] * second_scale) + self.node_derivatives[third][axis] * third_scale;"
+            ),
+            "{sqrt_first_indices}"
         );
 
         let scaled_add = helper_body(&support, "fn store_scaled_add(");
@@ -12825,17 +12875,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_add_scaled_inputs3_sqrt_third_components(&mut self, index: usize, first_raw: f64, first_node_derivatives: [f64; Instance::NODE_COUNT], first_branch_derivatives: [f64; Instance::BRANCH_COUNT], first_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, sqrt_raw: f64, sqrt_node_derivatives: [f64; Instance::NODE_COUNT], sqrt_branch_derivatives: [f64; Instance::BRANCH_COUNT], sqrt_scale: f64) {",
-        "        let root = sqrt_raw.sqrt();",
-        "        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);",
-        "        self.values[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first_node_derivatives[axis] * first_scale + second_node_derivatives[axis] * second_scale) + sqrt_node_derivatives[axis] * sqrt_derivative_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first_branch_derivatives[axis] * first_scale + second_branch_derivatives[axis] * second_scale) + sqrt_branch_derivatives[axis] * sqrt_derivative_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_add_scaled_inputs3_sqrt_third_ad(&mut self, index: usize, first: AdValue, first_scale: f64, second: AdValue, second_scale: f64, sqrt_value: AdValue, sqrt_scale: f64) {",
-        "        self.store_add_scaled_inputs3_sqrt_third_components(index, first.value, first.node_derivatives, first.branch_derivatives, first_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, sqrt_value.value, sqrt_value.node_derivatives, sqrt_value.branch_derivatives, sqrt_scale);",
+        "        let root = sqrt_value.value.sqrt();",
+        "        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);",
+        "        self.values[index] = (first.value * first_scale + second.value * second_scale) + root * sqrt_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (first.node_derivatives[axis] * first_scale + second.node_derivatives[axis] * second_scale) + sqrt_value.node_derivatives[axis] * sqrt_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (first.branch_derivatives[axis] * first_scale + second.branch_derivatives[axis] * second_scale) + sqrt_value.branch_derivatives[axis] * sqrt_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -12853,17 +12898,12 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_add_scaled_inputs3_sqrt_first_components(&mut self, index: usize, sqrt_raw: f64, sqrt_node_derivatives: [f64; Instance::NODE_COUNT], sqrt_branch_derivatives: [f64; Instance::BRANCH_COUNT], sqrt_scale: f64, second_raw: f64, second_node_derivatives: [f64; Instance::NODE_COUNT], second_branch_derivatives: [f64; Instance::BRANCH_COUNT], second_scale: f64, third_raw: f64, third_node_derivatives: [f64; Instance::NODE_COUNT], third_branch_derivatives: [f64; Instance::BRANCH_COUNT], third_scale: f64) {",
-        "        let root = sqrt_raw.sqrt();",
-        "        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);",
-        "        self.values[index] = (root * sqrt_scale + second_raw * second_scale) + third_raw * third_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (sqrt_node_derivatives[axis] * sqrt_derivative_scale + second_node_derivatives[axis] * second_scale) + third_node_derivatives[axis] * third_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (sqrt_branch_derivatives[axis] * sqrt_derivative_scale + second_branch_derivatives[axis] * second_scale) + third_branch_derivatives[axis] * third_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_add_scaled_inputs3_sqrt_first_ad(&mut self, index: usize, sqrt_value: AdValue, sqrt_scale: f64, second: AdValue, second_scale: f64, third: AdValue, third_scale: f64) {",
-        "        self.store_add_scaled_inputs3_sqrt_first_components(index, sqrt_value.value, sqrt_value.node_derivatives, sqrt_value.branch_derivatives, sqrt_scale, second.value, second.node_derivatives, second.branch_derivatives, second_scale, third.value, third.node_derivatives, third.branch_derivatives, third_scale);",
+        "        let root = sqrt_value.value.sqrt();",
+        "        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);",
+        "        self.values[index] = (root * sqrt_scale + second.value * second_scale) + third.value * third_scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (sqrt_value.node_derivatives[axis] * sqrt_derivative_scale + second.node_derivatives[axis] * second_scale) + third.node_derivatives[axis] * third_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (sqrt_value.branch_derivatives[axis] * sqrt_derivative_scale + second.branch_derivatives[axis] * second_scale) + third.branch_derivatives[axis] * third_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -19748,18 +19788,28 @@ fn generate_index_or_mixed_add_scaled_value_products3_helper(mask: &str) -> Stri
 }
 
 fn generate_index_or_mixed_add_scaled_inputs3_sqrt_third_helper(mask: &str) -> String {
-    let operands = ["first", "second", "sqrt_value"];
     let helper = index_or_mixed_helper_name("store_add_scaled_inputs3_sqrt_third", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let first = mixed_helper_component_args(mask, 0, "first");
-    let second = mixed_helper_component_args(mask, 1, "second");
-    let sqrt_value = mixed_helper_component_args(mask, 2, "sqrt_value");
+    let first_raw = mixed_helper_value_expr(mask, 0, "first");
+    let second_raw = mixed_helper_value_expr(mask, 1, "second");
+    let sqrt_raw = mixed_helper_value_expr(mask, 2, "sqrt_value");
+    let first_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "first");
+    let second_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "second");
+    let sqrt_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "sqrt_value");
+    let first_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "first");
+    let second_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "second");
+    let sqrt_branch_derivative = mixed_helper_branch_derivative_expr(mask, 2, "sqrt_value");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, sqrt_value: {sqrt_value_ty}, sqrt_scale: f64) {{
-{locals}        self.store_add_scaled_inputs3_sqrt_third_components(index, {first}, first_scale, {second}, second_scale, {sqrt_value}, sqrt_scale);
+        let first_raw = {first_raw};
+        let second_raw = {second_raw};
+        let root = {sqrt_raw}.sqrt();
+        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);
+        self.values[index] = (first_raw * first_scale + second_raw * second_scale) + root * sqrt_scale;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = ({first_node_derivative} * first_scale + {second_node_derivative} * second_scale) + {sqrt_node_derivative} * sqrt_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = ({first_branch_derivative} * first_scale + {second_branch_derivative} * second_scale) + {sqrt_branch_derivative} * sqrt_derivative_scale; }}
     }}
 "#,
         first_ty = mixed_helper_type(mask, 0),
@@ -19769,18 +19819,28 @@ fn generate_index_or_mixed_add_scaled_inputs3_sqrt_third_helper(mask: &str) -> S
 }
 
 fn generate_index_or_mixed_add_scaled_inputs3_sqrt_first_helper(mask: &str) -> String {
-    let operands = ["sqrt_value", "second", "third"];
     let helper = index_or_mixed_helper_name("store_add_scaled_inputs3_sqrt_first", mask);
-    let locals = mixed_helper_component_locals(mask, &operands);
-    let sqrt_value = mixed_helper_component_args(mask, 0, "sqrt_value");
-    let second = mixed_helper_component_args(mask, 1, "second");
-    let third = mixed_helper_component_args(mask, 2, "third");
+    let sqrt_raw = mixed_helper_value_expr(mask, 0, "sqrt_value");
+    let second_raw = mixed_helper_value_expr(mask, 1, "second");
+    let third_raw = mixed_helper_value_expr(mask, 2, "third");
+    let sqrt_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "sqrt_value");
+    let second_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "second");
+    let third_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "third");
+    let sqrt_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "sqrt_value");
+    let second_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "second");
+    let third_branch_derivative = mixed_helper_branch_derivative_expr(mask, 2, "third");
     format!(
         r#"
 
     #[inline]
     fn {helper}(&mut self, index: usize, sqrt_value: {sqrt_value_ty}, sqrt_scale: f64, second: {second_ty}, second_scale: f64, third: {third_ty}, third_scale: f64) {{
-{locals}        self.store_add_scaled_inputs3_sqrt_first_components(index, {sqrt_value}, sqrt_scale, {second}, second_scale, {third}, third_scale);
+        let root = {sqrt_raw}.sqrt();
+        let second_raw = {second_raw};
+        let third_raw = {third_raw};
+        let sqrt_derivative_scale = sqrt_scale / (2.0 * root);
+        self.values[index] = (root * sqrt_scale + second_raw * second_scale) + third_raw * third_scale;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = ({sqrt_node_derivative} * sqrt_derivative_scale + {second_node_derivative} * second_scale) + {third_node_derivative} * third_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = ({sqrt_branch_derivative} * sqrt_derivative_scale + {second_branch_derivative} * second_scale) + {third_branch_derivative} * third_scale; }}
     }}
 "#,
         sqrt_value_ty = mixed_helper_type(mask, 0),
