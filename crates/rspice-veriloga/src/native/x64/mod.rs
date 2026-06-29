@@ -1441,6 +1441,11 @@ endmodule
                 Some("bsimsoi"),
             ),
             (
+                "bsimsoi100",
+                shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
                 "hisimsoi",
                 shipped_cmc_model_path(&[
                     "HiSIM_SOI_1.5.0_Release_20211008",
@@ -1529,6 +1534,11 @@ endmodule
             (
                 "bsimsoi47",
                 shipped_cmc_model_path(&["BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
+                Some("bsimsoi"),
+            ),
+            (
+                "bsimsoi100",
+                shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
                 Some("bsimsoi"),
             ),
             (
@@ -1934,6 +1944,10 @@ endmodule
                 .copied()
                 .unwrap_or(0.0),
             "bsimsoi47" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "bsimsoi100" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
