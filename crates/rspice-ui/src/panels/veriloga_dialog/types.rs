@@ -203,6 +203,7 @@ pub enum CompileTaskResult {
     Success {
         module_info: CompiledModuleInfo,
         compiled_model: Box<rspice_veriloga::CompiledModel>,
+        canonical_ir: Option<Box<rspice_veriloga::canonical_ir::CanonicalIrArtifact>>,
         dependencies: Vec<PathBuf>,
     },
     /// Compilation failed with errors.

@@ -16,6 +16,12 @@ enum CompileInput {
     Source(String),
 }
 
+struct CompileArtifacts {
+    model: rspice_veriloga::CompiledModel,
+    canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    dependencies: Vec<PathBuf>,
+}
+
 /// Start async compilation using rspice-veriloga.
 pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -83,7 +89,16 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
             #[cfg(not(target_arch = "wasm32"))]
             CompileInput::File(path) => {
                 log::info!("Starting Verilog-A compilation: {}", path.display());
-                (compiler.compile_file_with_metadata(&path), path)
+                (
+                    compiler
+                        .compile_file_runtime_with_metadata(&path, None)
+                        .map(|compiled| CompileArtifacts {
+                            model: compiled.model,
+                            canonical_ir: Some(compiled.canonical_ir),
+                            dependencies: compiled.dependencies,
+                        }),
+                    path,
+                )
             }
             #[cfg(target_arch = "wasm32")]
             CompileInput::Source(text) => {
@@ -94,12 +109,11 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
                 // Compiling from memory has no on-disk dependencies; the
                 // synthetic va:// path is minted from the module name once
                 // it is known.
-                let result = compiler
-                    .compile(&text)
-                    .map(|model| rspice_veriloga::CompiledFile {
-                        model,
-                        dependencies: Vec::new(),
-                    });
+                let result = compiler.compile(&text).map(|model| CompileArtifacts {
+                    model,
+                    canonical_ir: None,
+                    dependencies: Vec::new(),
+                });
                 (result, PathBuf::new())
             }
         };
@@ -107,6 +121,7 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
         let task_result = match result {
             Ok(compiled) => {
                 let model = compiled.model;
+                let canonical_ir = compiled.canonical_ir;
                 log::info!("Verilog-A compilation succeeded: module '{}'", model.name);
                 let source_path = if source_path.as_os_str().is_empty() {
                     PathBuf::from(format!("va://{}.va", model.name))
@@ -133,6 +148,7 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
                         num_variables: model.num_variables,
                     },
                     compiled_model: Box::new(model),
+                    canonical_ir: canonical_ir.map(Box::new),
                     dependencies: compiled.dependencies,
                 }
             }
@@ -150,6 +166,7 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
     state.errors.clear();
     state.compiled_module = None;
     state.compiled_artifact = None;
+    state.compiled_canonical_ir = None;
     state.compiled_dependencies = None;
 }
 
@@ -181,16 +198,19 @@ pub(super) fn poll_compile(state: &mut VerilogALoadDialogState) {
             CompileTaskResult::Success {
                 module_info,
                 compiled_model,
+                canonical_ir,
                 dependencies,
             } => {
                 state.compiled_module = Some(module_info);
                 state.compiled_artifact = Some(*compiled_model);
+                state.compiled_canonical_ir = canonical_ir.map(|artifact| *artifact);
                 state.compiled_dependencies = Some(dependencies);
                 state.compilation_state = CompilationState::Success;
             }
             CompileTaskResult::Failure(errors) => {
                 state.errors = errors;
                 state.compiled_artifact = None;
+                state.compiled_canonical_ir = None;
                 state.compiled_dependencies = None;
                 state.compilation_state = CompilationState::Failed;
             }

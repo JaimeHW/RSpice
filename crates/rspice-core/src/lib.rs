@@ -59,7 +59,8 @@ pub use engine::{
 pub use engine::{
     VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
     prune_veriloga_cache, register_precompiled_veriloga_model,
-    register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
+    register_precompiled_veriloga_model_with_dependencies,
+    register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_entries,
     veriloga_cache_stats,
 };
 pub use netlist::Netlist;

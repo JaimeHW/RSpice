@@ -7,6 +7,7 @@ use super::{ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME, save_global_verilo
 struct CompiledVerilogaPayload {
     module: crate::panels::CompiledModuleInfo,
     artifact: Option<rspice_veriloga::CompiledModel>,
+    canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
     dependencies: Vec<PathBuf>,
 }
 
@@ -15,10 +16,12 @@ fn take_compiled_veriloga_payload(
 ) -> Option<CompiledVerilogaPayload> {
     let module = dialog.compiled_module.take()?;
     let artifact = dialog.compiled_artifact.take();
+    let canonical_ir = dialog.compiled_canonical_ir.take();
     let dependencies = dialog.compiled_dependencies.take().unwrap_or_default();
     Some(CompiledVerilogaPayload {
         module,
         artifact,
+        canonical_ir,
         dependencies,
     })
 }
@@ -109,6 +112,7 @@ impl RSpiceApp {
         };
         let module = payload.module;
         let compiled_artifact = payload.artifact;
+        let compiled_canonical_ir = payload.canonical_ir;
         let compiled_dependencies = payload.dependencies;
 
         let source_path_text = module.source_path.to_string_lossy().to_string();
@@ -147,11 +151,22 @@ impl RSpiceApp {
         }
 
         if let Some(compiled_model) = compiled_artifact {
-            match rspice_core::register_precompiled_veriloga_model_with_dependencies(
-                &module.source_path,
-                &compiled_dependencies,
-                compiled_model,
-            ) {
+            let register_result = if let Some(canonical_ir) = compiled_canonical_ir {
+                rspice_core::register_precompiled_veriloga_runtime_with_dependencies(
+                    &module.source_path,
+                    &compiled_dependencies,
+                    compiled_model,
+                    canonical_ir,
+                )
+            } else {
+                rspice_core::register_precompiled_veriloga_model_with_dependencies(
+                    &module.source_path,
+                    &compiled_dependencies,
+                    compiled_model,
+                )
+            };
+
+            match register_result {
                 Ok(()) => {
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Registered Verilog-A compile cache for '{}' ({} dependency file(s))",

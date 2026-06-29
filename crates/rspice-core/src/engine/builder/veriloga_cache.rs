@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(feature = "veriloga")]
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 10;
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 11;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -79,13 +79,16 @@ pub(super) struct VerilogADiskCacheRecord {
     pub(super) source_path: PathBuf,
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
+    pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
 }
 
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone)]
 pub(super) struct CachedVerilogAModel {
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
-    pub(super) model: rspice_veriloga::CompiledModel,
+    pub(super) model: std::sync::Arc<rspice_veriloga::CompiledModel>,
+    pub(super) canonical_ir:
+        Option<std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -448,7 +451,8 @@ pub(super) fn persist_model_to_disk_locked(
         version: VERILOGA_CACHE_RECORD_VERSION,
         source_path: canonicalize_for_cache(source_path),
         dependencies: entry.dependencies.clone(),
-        model: entry.model.clone(),
+        model: entry.model.as_ref().clone(),
+        canonical_ir: entry.canonical_ir.as_ref().map(|ir| ir.as_ref().clone()),
     };
     let encoded = bincode::serialize(&record)
         .map_err(|e| format!("failed to serialize Verilog-A cache record: {}", e))?;
@@ -614,7 +618,8 @@ pub(super) fn load_model_from_disk_locked(
 
     Ok(Some(CachedVerilogAModel {
         dependencies: record.dependencies,
-        model: record.model,
+        model: std::sync::Arc::new(record.model),
+        canonical_ir: record.canonical_ir.map(std::sync::Arc::new),
     }))
 }
 
@@ -726,7 +731,7 @@ pub fn clear_veriloga_cache() -> Result<VerilogACachePruneReport, String> {
 #[cfg(feature = "veriloga")]
 pub(super) fn resolve_cached_or_compile_veriloga(
     path: &Path,
-) -> Result<rspice_veriloga::CompiledModel, SimulationError> {
+) -> Result<CachedVerilogAModel, SimulationError> {
     let canonical = canonicalize_for_cache(path);
     let mut stale_in_memory = false;
 
@@ -735,7 +740,7 @@ pub(super) fn resolve_cached_or_compile_veriloga(
     {
         if dependencies_are_fresh(&entry.dependencies) {
             log::debug!("Verilog-A cache hit (memory): '{}'", canonical.display());
-            return Ok(entry.model.clone());
+            return Ok(entry.clone());
         }
         stale_in_memory = true;
     }
@@ -745,28 +750,30 @@ pub(super) fn resolve_cached_or_compile_veriloga(
     }
 
     if let Some(entry) = load_model_from_disk(&canonical) {
-        let model = entry.model.clone();
         if let Ok(mut cache) = veriloga_model_cache().write() {
-            cache.insert(canonical.clone(), entry);
+            cache.insert(canonical.clone(), entry.clone());
         }
         log::debug!("Verilog-A cache hit (disk): '{}'", canonical.display());
-        return Ok(model);
+        return Ok(entry);
     }
 
     log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
     let compiler = rspice_veriloga::VerilogACompiler::default();
-    let compiled = compiler.compile_file_with_metadata(path).map_err(|e| {
-        SimulationError::Netlist(format!(
-            "Failed to compile Verilog-A '{}': {}",
-            path.display(),
-            e
-        ))
-    })?;
+    let compiled = compiler
+        .compile_file_runtime_with_metadata(path, None)
+        .map_err(|e| {
+            SimulationError::Netlist(format!(
+                "Failed to compile Verilog-A '{}': {}",
+                path.display(),
+                e
+            ))
+        })?;
 
     let dependencies = fingerprint_paths(&compiled.dependencies)?;
     let entry = CachedVerilogAModel {
         dependencies,
-        model: compiled.model.clone(),
+        model: std::sync::Arc::new(compiled.model),
+        canonical_ir: Some(std::sync::Arc::new(compiled.canonical_ir)),
     };
 
     if let Ok(mut cache) = veriloga_model_cache().write() {
@@ -781,19 +788,24 @@ pub(super) fn resolve_cached_or_compile_veriloga(
         );
     }
 
-    Ok(compiled.model)
+    Ok(entry)
 }
 
-/// Register a precompiled Verilog-A model in the global engine cache.
-///
-/// This allows UI workflows to compile once on import and reuse the compiled
-/// artifact during simulation without recompilation.
 #[cfg(feature = "veriloga")]
-pub fn register_precompiled_veriloga_model_with_dependencies(
+fn register_precompiled_veriloga_entry_with_dependencies(
     source_path: impl AsRef<Path>,
     dependencies: &[PathBuf],
     model: rspice_veriloga::CompiledModel,
+    canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
 ) -> Result<(), String> {
+    #[cfg(feature = "veriloga-native")]
+    if canonical_ir.is_none() {
+        return Err(
+            "native Verilog-A registration requires canonical IR; use register_precompiled_veriloga_runtime_with_dependencies"
+                .to_string(),
+        );
+    }
+
     let canonical_source = canonicalize_for_cache(source_path.as_ref());
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -816,7 +828,8 @@ pub fn register_precompiled_veriloga_model_with_dependencies(
 
     let entry = CachedVerilogAModel {
         dependencies: dependency_fingerprints,
-        model,
+        model: std::sync::Arc::new(model),
+        canonical_ir: canonical_ir.map(std::sync::Arc::new),
     };
 
     let mut cache = veriloga_model_cache()
@@ -834,6 +847,40 @@ pub fn register_precompiled_veriloga_model_with_dependencies(
     }
 
     Ok(())
+}
+
+/// Register a precompiled Verilog-A runtime artifact in the global engine cache.
+///
+/// Native builds require this paired model/canonical-IR artifact so the runtime
+/// cannot silently fall back to bytecode-only construction.
+#[cfg(feature = "veriloga")]
+pub fn register_precompiled_veriloga_runtime_with_dependencies(
+    source_path: impl AsRef<Path>,
+    dependencies: &[PathBuf],
+    model: rspice_veriloga::CompiledModel,
+    canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+) -> Result<(), String> {
+    register_precompiled_veriloga_entry_with_dependencies(
+        source_path,
+        dependencies,
+        model,
+        Some(canonical_ir),
+    )
+}
+
+/// Register a precompiled Verilog-A model in the global engine cache.
+///
+/// This allows UI workflows to compile once on import and reuse the compiled
+/// artifact during simulation without recompilation. Native JIT builds should
+/// use [`register_precompiled_veriloga_runtime_with_dependencies`] so the cache
+/// carries canonical IR as well as the compiled model.
+#[cfg(feature = "veriloga")]
+pub fn register_precompiled_veriloga_model_with_dependencies(
+    source_path: impl AsRef<Path>,
+    dependencies: &[PathBuf],
+    model: rspice_veriloga::CompiledModel,
+) -> Result<(), String> {
+    register_precompiled_veriloga_entry_with_dependencies(source_path, dependencies, model, None)
 }
 
 /// Register a precompiled Verilog-A model in the global engine cache.
