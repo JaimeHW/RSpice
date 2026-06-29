@@ -220,6 +220,18 @@ impl X64Encoder {
         self.emit_u8(value);
     }
 
+    pub(crate) fn shl_r64_cl(&mut self, reg: Gpr) {
+        self.emit_rex(true, 0, 0, reg.code());
+        self.emit_u8(0xD3);
+        self.emit_modrm(0b11, 0b100, reg.code());
+    }
+
+    pub(crate) fn sar_r64_cl(&mut self, reg: Gpr) {
+        self.emit_rex(true, 0, 0, reg.code());
+        self.emit_u8(0xD3);
+        self.emit_modrm(0b11, 0b111, reg.code());
+    }
+
     pub(crate) fn mov_r64_m64_base_disp32(&mut self, dst: Gpr, base: Gpr, disp: i32) {
         self.emit_rex(true, dst.code(), 0, base.code());
         self.emit_u8(0x8B);

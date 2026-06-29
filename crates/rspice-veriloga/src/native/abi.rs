@@ -110,6 +110,13 @@ pub extern "C" fn rspice_native_loop_limit_error() {
     );
 }
 
+#[unsafe(export_name = "rspice_native_integer_shift_count_error")]
+pub extern "C" fn rspice_native_integer_shift_count_error() {
+    set_native_runtime_error(
+        "native integer shift count outside valid range [0:63]; no interpreter fallback",
+    );
+}
+
 /// External helper function for table lookup interpolation.
 ///
 /// # Safety
