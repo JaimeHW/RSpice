@@ -1078,6 +1078,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "param_given" => self.lower_param_given_intrinsic(name, args),
             "port_connected" => self.lower_port_connected_intrinsic(name, args),
             "analysis" => self.lower_analysis_intrinsic(name, args),
+            "white_noise" => self.lower_white_noise_intrinsic(name, args),
+            "flicker_noise" => self.lower_flicker_noise_intrinsic(name, args),
             _ => Err(self.unsupported(format!("intrinsic function '{name}'"))),
         }
     }
@@ -1140,6 +1142,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
         };
         self.push(NativeOp::Analysis(analysis_id))
+    }
+
+    fn lower_white_noise_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity_range(name, args, 1, 2)?;
+        self.lower(args[0])?;
+        self.ops.push(NativeOp::WhiteNoise);
+        Ok(())
+    }
+
+    fn lower_flicker_noise_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+        self.require_intrinsic_arity_range(name, args, 2, 3)?;
+        self.lower(args[0])?;
+        self.lower(args[1])?;
+        self.pop_binary("canonical flicker noise")?;
+        self.ops.push(NativeOp::FlickerNoise);
+        Ok(())
     }
 
     fn lower_unary_math_intrinsic(
@@ -2859,6 +2877,44 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_large_signal_noise_sources_to_native_zero_ops() {
+        let source = r#"
+module mir_noise_sources(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ white_noise($temperature, "thermal") + flicker_noise(2.0, 1.0, "flicker");
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_noise_sources",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical noise sources to native large-signal zero ops");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::WhiteNoise,
+                NativeOp::Const(2.0),
+                NativeOp::Const(1.0),
+                NativeOp::FlickerNoise,
+                NativeOp::Add,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 3);
     }
 
     #[test]

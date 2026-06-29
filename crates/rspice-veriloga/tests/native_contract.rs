@@ -2881,6 +2881,47 @@ fn native_device_executes_large_signal_noise_terms_as_zero_without_fallback() {
     );
 }
 
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_with_canonical_ir_executes_large_signal_noise_terms_as_zero_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_noisy(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) * 1.0e-3
+                 + white_noise(1.0e-18, "thermal")
+                 + flicker_noise(2.0e-18, 1.0, "flicker");
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    assert!(
+        model.noise_sources.len() >= 2,
+        "fixture must contain compiled white and flicker noise sources"
+    );
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("NOCANON1", model, &artifact, &[1, 0])
+            .expect("noise model uses canonical native JIT path");
+    assert!(device.is_using_native());
+    device.update_voltages(&[4.0]);
+
+    let currents = device
+        .try_evaluate()
+        .expect("canonical native large-signal noise evaluation succeeds");
+    assert_eq!(currents.len(), 1);
+    assert!(
+        (currents[0] - 4.0e-3).abs() < 1e-15,
+        "currents: {currents:?}"
+    );
+}
+
 #[test]
 fn native_noise_analysis_rejects_noise_sources_without_fallback() {
     let model = noise_model();
