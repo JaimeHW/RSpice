@@ -40,17 +40,21 @@ fn compile_model_inner(
 
     let mut image = Vec::new();
     let assignment = CodeOffset::new(image.len());
-    append_assignment_entry(model, &mut image)?;
+    append_assignment_entry(model, &mut image)
+        .map_err(|error| context_jit_error(error, "assignments"))?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
-    for parameter in &model.parameters {
+    for (parameter_index, parameter) in model.parameters.iter().enumerate() {
         let default_entry = if let Some(program) = &parameter.default_program {
             let program = NativeProgram::from_bytecode(
                 model.name.clone(),
                 EntryKind::ParameterDefault,
                 program,
                 base_limits,
-            )?;
+            )
+            .map_err(|error| {
+                context_jit_error(error, format!("parameter default {parameter_index}"))
+            })?;
             Some(append_value_entry(&mut image, &program)?)
         } else {
             None
@@ -79,7 +83,8 @@ fn compile_model_inner(
                 EntryKind::StaticCondition,
                 condition,
                 base_limits,
-            )?;
+            )
+            .map_err(|error| context_jit_error(error, format!("static condition {stamp_index}")))?;
             Some(append_value_entry(&mut image, &program)?)
         } else {
             None
@@ -93,7 +98,8 @@ fn compile_model_inner(
             stamp_index,
             &stamp.value_program,
             value_limits,
-        )?;
+        )
+        .map_err(|error| context_jit_error(error, format!("stamp value {stamp_index}")))?;
         stamp_value_current_dependencies.push(program.current_pair_dependencies().to_vec());
         stamp_value_prior_current_dependencies.push(program.prior_current_dependencies().to_vec());
         stamp_values.push(append_value_entry(&mut image, &program)?);
@@ -119,7 +125,13 @@ fn compile_model_inner(
                 EntryKind::Jacobian,
                 &jacobian.program,
                 jacobian_limits,
-            )?;
+            )
+            .map_err(|error| {
+                context_jit_error(
+                    error,
+                    format!("jacobian {stamp_index}.{}", stamp_jacobians.len()),
+                )
+            })?;
             stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
             stamp_jacobians.push(append_value_entry(&mut image, &program)?);
         }
@@ -135,7 +147,16 @@ fn compile_model_inner(
                 EntryKind::ReactiveJacobian,
                 &reactive_jacobian.program,
                 base_limits,
-            )?;
+            )
+            .map_err(|error| {
+                context_jit_error(
+                    error,
+                    format!(
+                        "reactive jacobian {stamp_index}.{}",
+                        stamp_reactive_jacobians.len()
+                    ),
+                )
+            })?;
             stamp_reactive_jacobian_current_dependencies
                 .push(program.current_pair_dependencies().to_vec());
             stamp_reactive_jacobians.push(append_value_entry(&mut image, &program)?);
@@ -161,7 +182,8 @@ fn compile_model_inner(
             EntryKind::StampValue,
             &source.psd_program,
             noise_limits,
-        )?;
+        )
+        .map_err(|error| context_jit_error(error, format!("noise psd {}", noise_psd.len())))?;
         noise_psd_current_dependencies.push(psd_program.current_pair_dependencies().to_vec());
         noise_psd.push(append_value_entry(&mut image, &psd_program)?);
 
@@ -171,7 +193,10 @@ fn compile_model_inner(
                 EntryKind::StampValue,
                 program,
                 noise_limits,
-            )?;
+            )
+            .map_err(|error| {
+                context_jit_error(error, format!("noise exponent {}", noise_exponents.len()))
+            })?;
             noise_exponent_current_dependencies
                 .push(exponent_program.current_pair_dependencies().to_vec());
             Some(append_value_entry(&mut image, &exponent_program)?)
@@ -206,6 +231,59 @@ fn compile_model_inner(
             noise_exponents: noise_exponent_current_dependencies,
         },
     )
+}
+
+fn context_jit_error(error: JitError, context: impl std::fmt::Display) -> JitError {
+    let prefix = context.to_string();
+    match error {
+        JitError::UnsupportedCanonicalOp { model, op } => JitError::UnsupportedCanonicalOp {
+            model,
+            op: format!("{prefix}: {op}").into(),
+        },
+        JitError::UnsupportedNativeCoverage { model, feature } => {
+            JitError::UnsupportedNativeCoverage {
+                model,
+                feature: format!("{prefix}: {feature}").into(),
+            }
+        }
+        JitError::InvalidCanonicalIr { model, detail } => JitError::InvalidCanonicalIr {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        JitError::Lowering { model, detail } => JitError::Lowering {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        JitError::Verifier { model, detail } => JitError::Verifier {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        JitError::RegisterAllocation { model, detail } => JitError::RegisterAllocation {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        JitError::Encoding { model, detail } => JitError::Encoding {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        JitError::Relocation { model, detail } => JitError::Relocation {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        JitError::AbiMismatch { model, detail } => JitError::AbiMismatch {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        JitError::MissingEntryPoint { model, entry } => JitError::MissingEntryPoint {
+            model,
+            entry: format!("{prefix}: {entry}").into(),
+        },
+        JitError::InternalCompilerError { model, detail } => JitError::InternalCompilerError {
+            model,
+            detail: format!("{prefix}: {detail}").into(),
+        },
+        other => other,
+    }
 }
 
 fn validate_canonical_artifact_for_model(
@@ -734,6 +812,16 @@ endmodule
                 shipped_cmc_model_path(&["r3_cmc_release1.1.2_2023Jun16", "r3_cmc.va"]),
                 None,
             ),
+            (
+                "diode_cmc",
+                shipped_cmc_model_path(&["diode_cmc_3.0_20250714", "vacode", "diode_cmc.va"]),
+                Some("DIODE_CMC"),
+            ),
+            (
+                "vbic13_4t",
+                shipped_veriloga_model_path(&["vbic_1.3", "vacode", "vbic_1p3.va"]),
+                Some("vbic13_4t"),
+            ),
         ];
         let iterations = shipped_model_microbench_iterations();
         let samples = shipped_model_microbench_samples();
@@ -1250,18 +1338,30 @@ endmodule
     }
 
     fn shipped_cmc_model_path(parts: &[&str]) -> PathBuf {
-        let mut path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("models")
-            .join("veriloga")
-            .join("cmc");
+        let mut path = shipped_veriloga_model_path(&["cmc"]);
         for part in parts {
             path = path.join(part);
         }
         assert!(
             path.exists(),
             "required shipped CMC model fixture missing: {}",
+            path.display()
+        );
+        path
+    }
+
+    fn shipped_veriloga_model_path(parts: &[&str]) -> PathBuf {
+        let mut path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("models")
+            .join("veriloga");
+        for part in parts {
+            path = path.join(part);
+        }
+        assert!(
+            path.exists(),
+            "required shipped Verilog-A model fixture missing: {}",
             path.display()
         );
         path
