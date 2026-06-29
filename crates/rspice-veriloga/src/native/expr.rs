@@ -1765,6 +1765,9 @@ impl NativeProgram {
                     if lower_constant_neg(&mut ops) {
                         continue;
                     }
+                    if lower_unary_composition(&mut ops, NativeOp::Neg) {
+                        continue;
+                    }
                     ops.push(NativeOp::Neg);
                 }
                 Instruction::Abs => {
@@ -1776,6 +1779,9 @@ impl NativeProgram {
                         1,
                     )?;
                     if lower_constant_abs(&mut ops) {
+                        continue;
+                    }
+                    if lower_unary_composition(&mut ops, NativeOp::Abs) {
                         continue;
                     }
                     ops.push(NativeOp::Abs);
@@ -3399,6 +3405,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.depth,
             1,
         )?;
+        if lower_unary_composition(&mut self.ops, op) {
+            return Ok(());
+        }
         self.ops.push(op);
         Ok(())
     }
@@ -3895,6 +3904,28 @@ fn lower_constant_abs(ops: &mut Vec<NativeOp>) -> bool {
     };
     *value = f64::from_bits(value.to_bits() & 0x7fff_ffff_ffff_ffff);
     true
+}
+
+fn lower_unary_composition(ops: &mut Vec<NativeOp>, op: NativeOp) -> bool {
+    match op {
+        NativeOp::Neg => {
+            if matches!(ops.last(), Some(NativeOp::Neg)) {
+                ops.pop();
+                true
+            } else {
+                false
+            }
+        }
+        NativeOp::Abs => match ops.last_mut() {
+            Some(last @ NativeOp::Neg) => {
+                *last = NativeOp::Abs;
+                true
+            }
+            Some(NativeOp::Abs) => true,
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn lower_constant_rhs_arithmetic(ops: &mut Vec<NativeOp>, instruction: &Instruction) -> bool {
@@ -4729,6 +4760,43 @@ endmodule
             ]
         );
         assert_eq!(program.max_stack_depth(), 2);
+    }
+
+    #[test]
+    fn lowers_canonical_unary_compositions_without_redundant_ops() {
+        let source = r#"
+module mir_unary_composition(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ abs(-V(p, n));
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+
+        let program = NativeProgram::from_mir_equation(
+            "mir_unary_composition",
+            EntryKind::StampValue,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower canonical unary composition to native program");
+
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::LoadVoltage {
+                    pos: VoltageNode::Terminal(0),
+                    neg: VoltageNode::Terminal(1),
+                },
+                NativeOp::Abs,
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 1);
     }
 
     #[test]
@@ -5675,6 +5743,50 @@ endmodule
 
         assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, NativeOp::Abs]);
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn drops_exact_unary_composition_runtime_ops() {
+        let cases = [
+            (
+                "double-neg",
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::Neg,
+                    Instruction::Neg,
+                ],
+                vec![NativeOp::LoadTemperature],
+            ),
+            (
+                "double-abs",
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::Abs,
+                    Instruction::Abs,
+                ],
+                vec![NativeOp::LoadTemperature, NativeOp::Abs],
+            ),
+            (
+                "abs-after-neg",
+                vec![
+                    Instruction::PushTemperature,
+                    Instruction::Neg,
+                    Instruction::Abs,
+                ],
+                vec![NativeOp::LoadTemperature, NativeOp::Abs],
+            ),
+        ];
+
+        for (name, instructions, expected_ops) in cases {
+            let program = BytecodeProgram { instructions };
+
+            let lowered =
+                NativeProgram::from_bytecode(name, EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("exact unary compositions should lower without redundant runtime ops");
+
+            assert_eq!(lowered.max_stack_depth(), 1, "{name}");
+            assert_eq!(lowered.ops(), expected_ops.as_slice(), "{name}");
+        }
     }
 
     #[test]
