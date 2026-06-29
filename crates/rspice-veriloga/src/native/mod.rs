@@ -12,10 +12,9 @@ mod target;
 pub mod x64;
 
 pub use abi::{
-    EvalContext, rspice_absdelay_state_native, rspice_current_lookup,
-    rspice_dynamic_variable_load_native, rspice_laplace_step, rspice_laplace_step_native,
-    rspice_limexp, rspice_limit, rspice_slew_state_native, rspice_table_lookup,
-    rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
+    EvalContext, rspice_absdelay_state_native, rspice_dynamic_variable_load_native,
+    rspice_laplace_step_native, rspice_limexp, rspice_slew_state_native, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_step_native,
 };
 pub(crate) use abi::{clear_native_runtime_error, take_native_runtime_error};
 pub use error::{JitError, JitResult};

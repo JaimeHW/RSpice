@@ -211,7 +211,16 @@ pub unsafe extern "C" fn rspice_table_lookup(
     table_id: usize,
     input: f64,
 ) -> f64 {
-    if tables_ptr.is_null() || table_id >= tables_len {
+    if tables_ptr.is_null() {
+        set_native_runtime_error(format!(
+            "native legacy table lookup helper missing table storage for table {table_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if table_id >= tables_len {
+        set_native_runtime_error(format!(
+            "native legacy table lookup helper table {table_id} outside table length {tables_len}; no interpreter fallback"
+        ));
         return 0.0;
     }
 
@@ -291,8 +300,23 @@ pub unsafe extern "C" fn rspice_limit(
     new_value: f64,
     step_limit: f64,
 ) -> f64 {
-    if state_values.is_null() || state_initialized.is_null() || state_idx >= state_initialized_len {
-        return new_value;
+    if state_values.is_null() {
+        set_native_runtime_error(
+            "native legacy limit helper missing state storage; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    if state_initialized.is_null() {
+        set_native_runtime_error(
+            "native legacy limit helper missing initialization flag storage; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    if state_idx >= state_initialized_len {
+        set_native_runtime_error(
+            "native legacy limit helper state index outside initialization flag storage; no interpreter fallback",
+        );
+        return 0.0;
     }
 
     let initialized = unsafe { *state_initialized.add(state_idx) != 0 };
@@ -505,8 +529,17 @@ pub unsafe extern "C" fn rspice_laplace_step(
     input: f64,
     timestep: f64,
 ) -> f64 {
-    if filters_ptr.is_null() || filter_id >= filters_len {
-        return input;
+    if filters_ptr.is_null() {
+        set_native_runtime_error(format!(
+            "native legacy Laplace helper missing filter storage for filter {filter_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if filter_id >= filters_len {
+        set_native_runtime_error(format!(
+            "native legacy Laplace helper filter {filter_id} outside filter table length {filters_len}; no interpreter fallback"
+        ));
+        return 0.0;
     }
 
     let filters = unsafe { std::slice::from_raw_parts_mut(filters_ptr, filters_len) };
@@ -1057,28 +1090,45 @@ pub unsafe extern "C" fn rspice_current_lookup(
     pos: usize,
     neg: usize,
 ) -> f64 {
-    if !branch_currents_ptr.is_null() {
-        let Some(idx) = terminal_pair_current_index(pos, neg, num_terminals) else {
-            return f64::NAN;
-        };
-        if idx < branch_currents_len {
-            let value = unsafe { *branch_currents_ptr.add(idx) };
-            if value.is_finite() {
-                return value;
-            }
-        }
+    if branch_currents_ptr.is_null() {
+        set_native_runtime_error(
+            "native legacy current helper missing terminal-pair current storage; no interpreter fallback",
+        );
+        return 0.0;
     }
 
-    f64::NAN
+    let Some(idx) = terminal_pair_current_index(pos, neg, num_terminals) else {
+        set_native_runtime_error(format!(
+            "native legacy current helper terminal pair {pos},{neg} outside terminal count {num_terminals}; no interpreter fallback"
+        ));
+        return 0.0;
+    };
+    if idx >= branch_currents_len {
+        set_native_runtime_error(format!(
+            "native legacy current helper terminal pair index {idx} outside current storage length {branch_currents_len}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+
+    let value = unsafe { *branch_currents_ptr.add(idx) };
+    if value.is_finite() {
+        return value;
+    }
+
+    set_native_runtime_error(
+        "native legacy current helper read non-finite terminal-pair current; no interpreter fallback",
+    );
+    0.0
 }
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
         EvalContext, clear_native_runtime_error, rspice_absdelay_state_native,
-        rspice_cross_state_native, rspice_dynamic_variable_load_native,
-        rspice_dynamic_variable_slot_native, rspice_laplace_step_native, rspice_slew_state_native,
-        rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
+        rspice_cross_state_native, rspice_current_lookup, rspice_dynamic_variable_load_native,
+        rspice_dynamic_variable_slot_native, rspice_laplace_step, rspice_laplace_step_native,
+        rspice_limit, rspice_slew_state_native, rspice_table_derivative_native,
+        rspice_table_lookup, rspice_table_lookup_native, rspice_timer_state_native,
         rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
     };
     use crate::codegen::LookupTable;
@@ -1148,6 +1198,40 @@ mod tests {
             assert!(error.contains("table storage"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
         }
+    }
+
+    #[test]
+    fn legacy_helpers_record_runtime_error_for_invalid_metadata() {
+        clear_native_runtime_error();
+        let value = unsafe { rspice_table_lookup(std::ptr::null(), 0, 0, 1.0) };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert_runtime_error_contains("legacy table");
+
+        let mut initialized = [0_u8];
+        clear_native_runtime_error();
+        let value = unsafe {
+            rspice_limit(
+                std::ptr::null_mut(),
+                initialized.as_mut_ptr(),
+                initialized.len(),
+                0,
+                2.0,
+                0.5,
+            )
+        };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert_runtime_error_contains("legacy limit");
+
+        clear_native_runtime_error();
+        let value = unsafe { rspice_laplace_step(std::ptr::null_mut(), 0, 0, 1.0, 1.0e-9) };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert_runtime_error_contains("legacy Laplace");
+
+        clear_native_runtime_error();
+        let value =
+            unsafe { rspice_current_lookup(std::ptr::null(), 0, std::ptr::null(), 0, 2, 0, 1) };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert_runtime_error_contains("legacy current");
     }
 
     #[test]
@@ -1828,6 +1912,19 @@ mod tests {
                 "{name}: error must preserve the native hard-fail contract, got: {error}"
             );
         }
+    }
+
+    fn assert_runtime_error_contains(feature: &str) {
+        let error =
+            take_native_runtime_error().unwrap_or_else(|| panic!("{feature} must hard-fail"));
+        assert!(
+            error.contains(feature),
+            "error must identify {feature}, got: {error}"
+        );
+        assert!(
+            error.contains("no interpreter fallback"),
+            "error must preserve the native hard-fail contract, got: {error}"
+        );
     }
 
     fn empty_eval_context() -> EvalContext {
