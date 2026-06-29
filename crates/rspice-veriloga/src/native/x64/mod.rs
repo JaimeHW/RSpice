@@ -1391,6 +1391,16 @@ endmodule
                 Some("bsimimg"),
             ),
             (
+                "psp104_nqs",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104_nqs.va"]),
+                Some("PSPNQS104VA"),
+            ),
+            (
+                "hicuml0",
+                shipped_cmc_model_path(&["hicumL0_v2p1p0_files", "hicumL0_v2p1p0.va"]),
+                Some("hicumL0va"),
+            ),
+            (
                 "hisimsoi",
                 shipped_cmc_model_path(&[
                     "HiSIM_SOI_1.5.0_Release_20211008",
@@ -1430,6 +1440,16 @@ endmodule
                 "bsimimg",
                 shipped_cmc_model_path(&["BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
                 Some("bsimimg"),
+            ),
+            (
+                "psp104_nqs",
+                shipped_cmc_model_path(&["PSP104.1.0_vacode", "vacode", "psp104_nqs.va"]),
+                Some("PSPNQS104VA"),
+            ),
+            (
+                "hicuml0",
+                shipped_cmc_model_path(&["hicumL0_v2p1p0_files", "hicumL0_v2p1p0.va"]),
+                Some("hicumL0va"),
             ),
             (
                 "hisimsoi",
@@ -1824,6 +1844,11 @@ endmodule
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
+            "psp104_nqs" => [0.05, 0.7, 0.0, 0.0, 0.0]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "hicuml0" => [0.2, 0.8, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "asmhemt" => [0.1, 0.3, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
