@@ -399,6 +399,9 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
+                    if lower_constant_binary_math(&mut ops, BinaryMathOp::Pow) {
+                        continue;
+                    }
                     if lower_constant_square_power(&mut ops) {
                         continue;
                     }
@@ -412,7 +415,11 @@ impl NativeProgram {
                         depth,
                     )?;
                     depth -= 1;
-                    ops.push(NativeOp::BinaryMath(binary_math_op(instruction)));
+                    let op = binary_math_op(instruction);
+                    if lower_constant_binary_math(&mut ops, op) {
+                        continue;
+                    }
+                    ops.push(NativeOp::BinaryMath(op));
                 }
                 Instruction::Shl
                 | Instruction::Shr
@@ -1046,6 +1053,21 @@ fn lower_constant_square_power(ops: &mut Vec<NativeOp>) -> bool {
     }
 }
 
+fn lower_constant_binary_math(ops: &mut Vec<NativeOp>, op: BinaryMathOp) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let rhs_index = ops.len() - 1;
+    let (NativeOp::Const(left), NativeOp::Const(right)) = (ops[lhs_index], ops[rhs_index]) else {
+        return false;
+    };
+    ops.truncate(lhs_index);
+    ops.push(NativeOp::Const(constant_binary_math(op, left, right)));
+    true
+}
+
 fn lower_constant_neg(ops: &mut Vec<NativeOp>) -> bool {
     let Some(NativeOp::Const(value)) = ops.last_mut() else {
         return false;
@@ -1249,6 +1271,14 @@ fn constant_logical(op: LogicalOp, left: f64, right: f64) -> bool {
         LogicalOp::And => constant_truthy(left) && constant_truthy(right),
         LogicalOp::Or => constant_truthy(left) || constant_truthy(right),
         LogicalOp::Not => unreachable!("binary logical lowering only accepts and/or"),
+    }
+}
+
+fn constant_binary_math(op: BinaryMathOp, left: f64, right: f64) -> f64 {
+    match op {
+        BinaryMathOp::Pow => left.powf(right),
+        BinaryMathOp::Atan2 => left.atan2(right),
+        BinaryMathOp::Mod => left % right,
     }
 }
 
@@ -2480,6 +2510,82 @@ mod tests {
                 ]
             );
             assert_eq!(lowered.max_stack_depth(), 2);
+        }
+    }
+
+    #[test]
+    fn folds_constant_binary_math_to_exact_literals() {
+        let cases = [
+            (
+                "pow-operator",
+                Instruction::Pow,
+                2.0,
+                3.0,
+                2.0_f64.powf(3.0),
+            ),
+            ("fn-pow", Instruction::FnPow, 4.0, 0.5, 4.0_f64.powf(0.5)),
+            (
+                "pow-domain-nan",
+                Instruction::Pow,
+                -4.0,
+                0.5,
+                (-4.0_f64).powf(0.5),
+            ),
+            ("atan2", Instruction::Atan2, 0.5, 0.25, 0.5_f64.atan2(0.25)),
+            (
+                "atan2-signed-zero",
+                Instruction::Atan2,
+                -0.0,
+                -0.0,
+                (-0.0_f64).atan2(-0.0),
+            ),
+            ("mod", Instruction::Mod, 5.25, 2.0, 5.25_f64 % 2.0),
+            (
+                "mod-negative-dividend",
+                Instruction::Mod,
+                -5.25,
+                2.0,
+                -5.25_f64 % 2.0,
+            ),
+            (
+                "mod-zero-divisor",
+                Instruction::Mod,
+                5.25,
+                0.0,
+                5.25_f64 % 0.0,
+            ),
+        ];
+
+        for (case, instruction, left, right, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushConst(right),
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-binary-math",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant binary math folds to a literal");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should only need the folded literal"
+            );
+            match lowered.ops() {
+                [NativeOp::Const(value)] => assert_eq!(
+                    value.to_bits(),
+                    expected.to_bits(),
+                    "{case} should fold to the exact helper-equivalent bit pattern"
+                ),
+                other => panic!("{case} should fold to one literal op, got {other:?}"),
+            }
         }
     }
 
