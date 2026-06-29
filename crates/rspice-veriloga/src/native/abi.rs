@@ -119,6 +119,25 @@ pub extern "C" fn rspice_native_integer_shift_count_error() {
     );
 }
 
+#[unsafe(export_name = "rspice_native_limit_state_values_error")]
+pub extern "C" fn rspice_native_limit_state_values_error() {
+    set_native_runtime_error("native limit state missing state storage; no interpreter fallback");
+}
+
+#[unsafe(export_name = "rspice_native_limit_state_initialized_error")]
+pub extern "C" fn rspice_native_limit_state_initialized_error() {
+    set_native_runtime_error(
+        "native limit state missing initialization flag storage; no interpreter fallback",
+    );
+}
+
+#[unsafe(export_name = "rspice_native_limit_state_bounds_error")]
+pub extern "C" fn rspice_native_limit_state_bounds_error() {
+    set_native_runtime_error(
+        "native limit state index outside initialization flag storage; no interpreter fallback",
+    );
+}
+
 /// External helper function for table lookup interpolation.
 ///
 /// # Safety
