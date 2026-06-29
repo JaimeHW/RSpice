@@ -648,7 +648,11 @@ impl NativeProgram {
                         depth,
                         1,
                     )?;
-                    ops.push(NativeOp::UnaryMath(unary_math_op(instruction)));
+                    let op = unary_math_op(instruction);
+                    if lower_constant_unary_math(&mut ops, op) {
+                        continue;
+                    }
+                    ops.push(NativeOp::UnaryMath(op));
                 }
                 Instruction::DdtState(index) => {
                     require_stack(
@@ -1090,6 +1094,14 @@ fn lower_constant_integer_binary(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp) -
     true
 }
 
+fn lower_constant_unary_math(ops: &mut Vec<NativeOp>, op: UnaryMathOp) -> bool {
+    let Some(NativeOp::Const(value)) = ops.last_mut() else {
+        return false;
+    };
+    *value = constant_unary_math(op, *value);
+    true
+}
+
 fn lower_constant_neg(ops: &mut Vec<NativeOp>) -> bool {
     let Some(NativeOp::Const(value)) = ops.last_mut() else {
         return false;
@@ -1315,6 +1327,38 @@ fn constant_integer_binary(op: IntegerBinaryOp, left: f64, right: f64) -> Option
         IntegerBinaryOp::BitXor => left ^ right,
     };
     Some(value as f64)
+}
+
+fn constant_unary_math(op: UnaryMathOp, value: f64) -> f64 {
+    match op {
+        UnaryMathOp::Exp => value.exp(),
+        UnaryMathOp::Log => value.ln(),
+        UnaryMathOp::Log10 => value.log10(),
+        UnaryMathOp::Sin => value.sin(),
+        UnaryMathOp::Cos => value.cos(),
+        UnaryMathOp::Tan => value.tan(),
+        UnaryMathOp::Sinh => value.sinh(),
+        UnaryMathOp::Cosh => value.cosh(),
+        UnaryMathOp::Tanh => value.tanh(),
+        UnaryMathOp::Limexp => constant_limexp(value),
+        UnaryMathOp::Asin => value.asin(),
+        UnaryMathOp::Acos => value.acos(),
+        UnaryMathOp::Atan => value.atan(),
+        UnaryMathOp::Floor => value.floor(),
+        UnaryMathOp::Ceil => value.ceil(),
+    }
+}
+
+fn constant_limexp(value: f64) -> f64 {
+    const LIMIT: f64 = 40.0;
+    if value > LIMIT {
+        let exp_limit = LIMIT.exp();
+        exp_limit * (1.0 + value - LIMIT)
+    } else if value < -LIMIT {
+        (-LIMIT).exp()
+    } else {
+        value.exp()
+    }
 }
 
 fn is_independent_value_push(op: &NativeOp) -> bool {
@@ -2511,6 +2555,79 @@ mod tests {
                 &[NativeOp::LoadTemperature, NativeOp::UnaryMath(expected)]
             );
             assert_eq!(lowered.max_stack_depth(), 1);
+        }
+    }
+
+    #[test]
+    fn folds_constant_unary_math_to_exact_literals() {
+        let cases = [
+            ("exp", Instruction::Exp, 0.5, 0.5_f64.exp()),
+            ("log", Instruction::Log, 2.5, 2.5_f64.ln()),
+            ("log10", Instruction::Log10, 100.0, 100.0_f64.log10()),
+            ("sin", Instruction::Sin, 0.5, 0.5_f64.sin()),
+            ("cos", Instruction::Cos, 0.5, 0.5_f64.cos()),
+            ("tan", Instruction::Tan, 0.25, 0.25_f64.tan()),
+            ("sinh", Instruction::Sinh, 0.25, 0.25_f64.sinh()),
+            ("cosh", Instruction::Cosh, 0.25, 0.25_f64.cosh()),
+            ("tanh", Instruction::Tanh, 0.25, 0.25_f64.tanh()),
+            (
+                "limexp-linear",
+                Instruction::Limexp,
+                45.0,
+                constant_limexp(45.0),
+            ),
+            (
+                "limexp-negative",
+                Instruction::Limexp,
+                -50.0,
+                constant_limexp(-50.0),
+            ),
+            ("asin", Instruction::Asin, 0.25, 0.25_f64.asin()),
+            ("asin-domain-nan", Instruction::Asin, 2.0, 2.0_f64.asin()),
+            ("acos", Instruction::Acos, 0.25, 0.25_f64.acos()),
+            ("atan", Instruction::Atan, 0.25, 0.25_f64.atan()),
+            ("floor", Instruction::Floor, 3.75, 3.75_f64.floor()),
+            (
+                "floor-negative",
+                Instruction::Floor,
+                -3.25,
+                (-3.25_f64).floor(),
+            ),
+            ("ceil", Instruction::Ceil, 3.25, 3.25_f64.ceil()),
+            (
+                "ceil-negative",
+                Instruction::Ceil,
+                -3.75,
+                (-3.75_f64).ceil(),
+            ),
+        ];
+
+        for (case, instruction, input, expected) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushConst(input), instruction],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-unary-math",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant unary math folds to a literal");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should only need the folded literal"
+            );
+            match lowered.ops() {
+                [NativeOp::Const(value)] => assert_eq!(
+                    value.to_bits(),
+                    expected.to_bits(),
+                    "{case} should fold to the exact helper-equivalent bit pattern"
+                ),
+                other => panic!("{case} should fold to one literal op, got {other:?}"),
+            }
         }
     }
 
